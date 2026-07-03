@@ -14,257 +14,260 @@ import (
 	"github.com/perber/wiki/internal/core/treemigration"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - New section creates index.md
+// Plantrace evidence: TestTreeService_CreateNode_Section_CreatesIndexWithFrontmatter.
 
 // --- helpers ---
 
-func newLoadedService(t treeTestT) (*TreeService, string) {
-	t.Helper()
-	tmpDir := t.TempDir()
+func newLoadedService() (*TreeService, string) {
+	ginkgo.GinkgoHelper()
+	tmpDir := tempTreeDir()
 
 	// Ensure schema is current so LoadTree doesn't try to migrate unless a test wants it.
-	if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-		t.Fatalf("saveSchema failed: %v", err)
-	}
+	Expect(saveSchema(tmpDir, CurrentSchemaVersion)).To(Succeed())
 
 	svc := NewTreeService(tmpDir)
-	if err := svc.LoadTree(); err != nil {
-		t.Fatalf("LoadTree failed: %v", err)
-	}
+	Expect(svc.LoadTree()).To(Succeed())
 	return svc, tmpDir
 }
 
-func newLoadedServiceWithDirs(t treeTestT) (*TreeService, string, string) {
-	t.Helper()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
+func newLoadedServiceWithDirs() (*TreeService, string, string) {
+	ginkgo.GinkgoHelper()
+	dataDir := filepath.Join(tempTreeDir(), "data")
+	rootDir := filepath.Join(tempTreeDir(), "content")
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("mkdir data dir: %v", err)
-	}
-	if err := saveSchema(dataDir, CurrentSchemaVersion); err != nil {
-		t.Fatalf("saveSchema failed: %v", err)
-	}
+	Expect(os.MkdirAll(dataDir, 0o755)).To(Succeed())
+	Expect(saveSchema(dataDir, CurrentSchemaVersion)).To(Succeed())
 
 	svc := NewTreeServiceWithOptions(TreeOptions{
 		DataDir: dataDir,
 		RootDir: rootDir,
 	})
-	if err := svc.LoadTree(); err != nil {
-		t.Fatalf("LoadTree failed: %v", err)
-	}
+	Expect(svc.LoadTree()).To(Succeed())
 	return svc, dataDir, rootDir
 }
 
-func mustStat(t treeTestT, path string) os.FileInfo {
-	t.Helper()
+func statTreePath(path string) os.FileInfo {
+	ginkgo.GinkgoHelper()
 	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("expected %q to exist, stat error: %v", path, err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return info
 }
 
-func mustNotExist(t treeTestT, path string) {
-	t.Helper()
-	_, err := os.Stat(path)
-	if err == nil {
-		t.Fatalf("expected %q to not exist, but it exists", path)
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected os.ErrNotExist for %q, got: %v", path, err)
-	}
+func beMissingTreePath() types.GomegaMatcher {
+	return WithTransform(func(path string) error {
+		_, err := os.Stat(path)
+		return err
+	}, MatchError(os.ErrNotExist))
 }
 
-func writeTestFile(t treeTestT, filePath string, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(filePath), err)
-	}
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", filePath, err)
-	}
+func writeTreeTestFile(filePath string, content string) {
+	ginkgo.GinkgoHelper()
+	Expect(os.MkdirAll(filepath.Dir(filePath), 0o755)).To(Succeed())
+	Expect(os.WriteFile(filePath, []byte(content), 0o644)).To(Succeed())
 }
 
 func testPageIDs(ids ...PageID) []PageID {
 	return ids
 }
 
-func persistLegacyTreeSnapshot(t treeTestT, storageDir string, tree *PageNode) {
-	t.Helper()
+func persistLegacyTreeSnapshot(storageDir string, tree *PageNode) {
+	ginkgo.GinkgoHelper()
 	raw, err := json.Marshal(tree)
-	if err != nil {
-		t.Fatalf("marshal legacy tree snapshot failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(storageDir, legacyTreeFilename), raw, 0o644); err != nil {
-		t.Fatalf("write legacy tree snapshot failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(os.WriteFile(filepath.Join(storageDir, legacyTreeFilename), raw, 0o644)).To(Succeed())
 }
 
-func readOrderIDs(t treeTestT, dir string) []string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(dir, ".order.json"))
-	if err != nil {
-		t.Fatalf("read order file: %v", err)
-	}
+func readOrderIDs(directory string) []string {
+	ginkgo.GinkgoHelper()
+	raw, err := os.ReadFile(filepath.Join(directory, ".order.json"))
+	Expect(err).NotTo(HaveOccurred())
 	var persisted struct {
 		OrderedIDs []string `json:"ordered_ids"`
 	}
-	if err := json.Unmarshal(raw, &persisted); err != nil {
-		t.Fatalf("unmarshal order file: %v", err)
-	}
+	Expect(json.Unmarshal(raw, &persisted)).To(Succeed())
 	return persisted.OrderedIDs
 }
 
-func assertOrderIDs(t treeTestT, got []string, want ...PageID) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("unexpected persisted order length: got %v want %v", got, want)
-	}
-	for i, rawID := range got {
-		if id := newFixturePageID(rawID); id != want[i] {
-			t.Fatalf("unexpected persisted order: got %v want %v", got, want)
+func matchPersistedPageIDOrder(want ...PageID) types.GomegaMatcher {
+	return WithTransform(func(got []string) []PageID {
+		typed := make([]PageID, 0, len(got))
+		for _, rawID := range got {
+			typed = append(typed, newFixturePageID(rawID))
 		}
-	}
+		return typed
+	}, Equal(want))
 }
 
-func assertPageIDOrder(t treeTestT, got []PageID, want ...PageID) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("unexpected page ID order length: got %v want %v", got, want)
-	}
-	for i, id := range got {
-		if id != want[i] {
-			t.Fatalf("unexpected page ID order: got %v want %v", got, want)
-		}
-	}
+func matchPageIDOrder(want ...PageID) types.GomegaMatcher {
+	return Equal(want)
 }
 
 // --- A) Load/Save basics ---
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_DefaultRootWhenMissing", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree default root when missing", func() {
+		tmpDir := tempTreeDir()
+		{
 
-		// schema current to prevent migration from failing due to missing schema file
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			// schema current to prevent migration from failing due to missing schema file
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		tree := svc.GetTree()
-		if tree == nil || tree.ID != "root" {
-			t.Fatalf("expected default root, got: %+v", tree)
-		}
-		if tree.Kind != NodeKindSection {
-			t.Fatalf("expected root to be section, got %q", tree.Kind)
-		}
+		Expect(tree == nil ||
+			tree.ID !=
+				"root",
+		).To(BeFalse(), "expected default root, got: %+v",
+
+			tree,
+		)
+		Expect(tree.Kind).To(Equal(NodeKindSection),
+			"expected root to be section, got %q",
+
+			tree.Kind,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNewTreeServiceWithOptions_UsesSeparateRootDirForContentAndDataDirForSchema", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, dataDir, rootDir := newLoadedServiceWithDirs(t)
+var _ = ginkgo.Describe("tree service construction with explicit roots", func() {
+	ginkgo.It("uses separate root directory for content and data directory for schema", func() {
+		svc, dataDir, rootDir := newLoadedServiceWithDirs()
 
 		pageID, err := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode page failed: %v",
+
+			err)
+
 		sectionID, err := svc.CreateNode("system", nil, "Section", "section", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
-		if _, err := svc.CreateNode("system", sectionID, "Nested", "nested", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode nested failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode section failed: %v",
+
+			err,
+		)
+		{
+
+			_, err := svc.CreateNode("system", sectionID, "Nested", "nested", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode nested failed: %v",
+
+				err)
 		}
 
-		mustStat(t, filepath.Join(rootDir, "page.md"))
-		mustStat(t, filepath.Join(rootDir, "section", "index.md"))
-		mustStat(t, filepath.Join(rootDir, "section", "nested.md"))
-		mustStat(t, filepath.Join(rootDir, ".order.json"))
-		mustStat(t, filepath.Join(dataDir, "schema.json"))
-		mustNotExist(t, filepath.Join(rootDir, "root"))
-		mustNotExist(t, filepath.Join(dataDir, "root", "page.md"))
+		statTreePath(filepath.Join(rootDir, "page.md"))
+		statTreePath(filepath.Join(rootDir, "section", "index.md"))
+		statTreePath(filepath.Join(rootDir, "section", "nested.md"))
+		statTreePath(filepath.Join(rootDir, ".order.json"))
+		statTreePath(filepath.Join(dataDir, "schema.json"))
+		Expect(filepath.Join(rootDir, "root")).To(beMissingTreePath())
+		Expect(filepath.Join(dataDir, "root", "page.md")).To(beMissingTreePath())
 
 		loaded := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree with explicit root failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree with explicit root failed: %v",
+
+				err)
 		}
-		if _, err := loaded.GetPage(*pageID); err != nil {
-			t.Fatalf("loaded page from explicit root: %v", err)
+		{
+
+			_, err := loaded.GetPage(*pageID)
+			Expect(err).To(Succeed(), "loaded page from explicit root: %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_MigratesLegacyTreeFromDataDirIntoRootDir", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("migrates legacy tree from data directory into root directory", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(rootDir, "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(rootDir, "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		persistLegacyTreeSnapshot(t, dataDir, &PageNode{
+		persistLegacyTreeSnapshot(dataDir, &PageNode{
 			ID:       "root",
 			Slug:     "root",
 			Title:    "root",
 			Kind:     NodeKindSection,
 			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
 		})
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
-		mustStat(t, filepath.Join(rootDir, ".order.json"))
-		mustStat(t, filepath.Join(dataDir, "schema.json"))
-		mustNotExist(t, filepath.Join(dataDir, legacyTreeFilename))
-		if _, err := svc.GetPage("id-legacy"); err != nil {
-			t.Fatalf("expected migrated page from root dir: %v", err)
+		statTreePath(filepath.Join(rootDir, ".order.json"))
+		statTreePath(filepath.Join(dataDir, "schema.json"))
+		Expect(filepath.Join(dataDir, legacyTreeFilename)).To(beMissingTreePath())
+		{
+			_, err := svc.GetPage("id-legacy")
+			Expect(err).To(Succeed(), "expected migrated page from root directory: %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_AllowsLegacySectionWithoutIndexWhenPageContentMoved", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("allows legacy section without index when page content moved", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "docs", "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "docs", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		mustWriteFile(t, filepath.Join(rootDir, "docs", "legacy.md"), `---
+		writeTreeFile(filepath.Join(rootDir, "docs", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		persistLegacyTreeSnapshot(t, dataDir, &PageNode{
+		persistLegacyTreeSnapshot(dataDir, &PageNode{
 			ID:    "root",
 			Slug:  "root",
 			Title: "root",
@@ -282,325 +285,370 @@ leafwiki_title: Legacy
 				}},
 			}},
 		})
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
-		if _, err := svc.GetPage("id-legacy"); err != nil {
-			t.Fatalf("expected migrated page from moved section content: %v", err)
+		{
+
+			_, err := svc.GetPage("id-legacy")
+			Expect(err).To(Succeed(), "expected migrated page from moved section content: %v",
+
+				err,
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_FailsSafelyWhenCurrentSchemaContentStillInDefaultRoot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("fails safely when current schema content still in default root", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "current.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "current.md"), `---
 leafwiki_id: id-current
 leafwiki_title: Current
 ---
 # Current`, 0o644)
-		if err := saveSchema(dataDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		if err == nil {
-			t.Fatalf("expected LoadTree to fail safely when current-schema content remains in default root")
-		}
-		if !errors.Is(err, ErrLegacyContentRemains) {
-			t.Fatalf("expected legacy content remains error, got: %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, "schema.json"))
-		mustStat(t, filepath.Join(dataDir, "root", "current.md"))
-		mustNotExist(t, filepath.Join(rootDir, "current.md"))
+		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when current-schema content remains in default root")
+		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, "schema.json"))
+		statTreePath(filepath.Join(dataDir, "root", "current.md"))
+		Expect(filepath.Join(rootDir, "current.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_FailsSafelyWhenLegacyContentStillInDefaultRoot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("fails safely when legacy content still in default root", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		persistLegacyTreeSnapshot(t, dataDir, &PageNode{
+		persistLegacyTreeSnapshot(dataDir, &PageNode{
 			ID:       "root",
 			Slug:     "root",
 			Title:    "root",
 			Kind:     NodeKindSection,
 			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
 		})
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		if err == nil {
-			t.Fatalf("expected LoadTree to fail safely when legacy content remains in the default root")
-		}
-		if !errors.Is(err, ErrLegacyContentRemains) {
-			t.Fatalf("expected legacy content remains error, got: %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
-		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
-		mustNotExist(t, filepath.Join(rootDir, "legacy.md"))
+		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when legacy content remains in the default root")
+		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, legacyTreeFilename))
+		statTreePath(filepath.Join(dataDir, "root", "legacy.md"))
+		Expect(filepath.Join(rootDir, "legacy.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_FailsSafelyWhenLegacyTreeSnapshotIsCorruptAndDefaultRootHasContent", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("fails safely when legacy tree snapshot is corrupt and default root has content", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		mustWriteFile(t, filepath.Join(dataDir, legacyTreeFilename), "{", 0o644)
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		writeTreeFile(filepath.Join(dataDir, legacyTreeFilename), "{", 0o644)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		if err == nil {
-			t.Fatalf("expected LoadTree to fail safely when corrupt legacy tree has default-root content")
-		}
-		if !errors.Is(err, ErrLegacyContentRemains) {
-			t.Fatalf("expected legacy content remains error, got: %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
-		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
-		mustNotExist(t, filepath.Join(rootDir, "legacy.md"))
+		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when corrupt legacy tree has default-root content")
+		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, legacyTreeFilename))
+		statTreePath(filepath.Join(dataDir, "root", "legacy.md"))
+		Expect(filepath.Join(rootDir, "legacy.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_FailsSafelyWhenConfiguredRootHasUnrelatedContent", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("fails safely when configured root has unrelated content", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		mustWriteFile(t, filepath.Join(rootDir, "unrelated.md"), "# Unrelated", 0o644)
-		persistLegacyTreeSnapshot(t, dataDir, &PageNode{
+		writeTreeFile(filepath.Join(rootDir, "unrelated.md"), "# Unrelated", 0o644)
+		persistLegacyTreeSnapshot(dataDir, &PageNode{
 			ID:       "root",
 			Slug:     "root",
 			Title:    "root",
 			Kind:     NodeKindSection,
 			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
 		})
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		if err == nil {
-			t.Fatalf("expected LoadTree to fail safely when configured root lacks legacy markdown")
-		}
-		if !errors.Is(err, ErrLegacyContentRemains) {
-			t.Fatalf("expected legacy content remains error, got: %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
-		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
-		mustStat(t, filepath.Join(rootDir, "unrelated.md"))
-		mustNotExist(t, filepath.Join(rootDir, "legacy.md"))
+		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when configured root lacks legacy markdown")
+		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, legacyTreeFilename))
+		statTreePath(filepath.Join(dataDir, "root", "legacy.md"))
+		statTreePath(filepath.Join(rootDir, "unrelated.md"))
+		Expect(filepath.Join(rootDir, "legacy.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_FailsSafelyWhenLegacyDefaultRootHasExtraFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("fails safely when legacy default root has extra file", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		mustWriteFile(t, filepath.Join(rootDir, "legacy.md"), `---
+		writeTreeFile(filepath.Join(rootDir, "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		mustWriteFile(t, filepath.Join(dataDir, "root", "orphan.md"), `---
+		writeTreeFile(filepath.Join(dataDir, "root", "orphan.md"), `---
 leafwiki_id: id-orphan
 leafwiki_title: Orphan
 ---
 # Orphan`, 0o644)
-		persistLegacyTreeSnapshot(t, dataDir, &PageNode{
+		persistLegacyTreeSnapshot(dataDir, &PageNode{
 			ID:       "root",
 			Slug:     "root",
 			Title:    "root",
 			Kind:     NodeKindSection,
 			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
 		})
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		if err == nil {
-			t.Fatalf("expected LoadTree to fail safely when legacy default root has extra content")
-		}
-		if !errors.Is(err, ErrLegacyContentRemains) {
-			t.Fatalf("expected legacy content remains error, got: %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
-		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
-		mustStat(t, filepath.Join(dataDir, "root", "orphan.md"))
-		mustStat(t, filepath.Join(rootDir, "legacy.md"))
-		mustNotExist(t, filepath.Join(rootDir, "orphan.md"))
+		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when legacy default root has extra content")
+		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, legacyTreeFilename))
+		statTreePath(filepath.Join(dataDir, "root", "legacy.md"))
+		statTreePath(filepath.Join(dataDir, "root", "orphan.md"))
+		statTreePath(filepath.Join(rootDir, "legacy.md"))
+		Expect(filepath.Join(rootDir, "orphan.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_FailsSafelyWhenConfiguredRootHasSamePathDifferentLegacyIdentity", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("fails safely when configured root has same path different legacy identity", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
-		mustWriteFile(t, filepath.Join(rootDir, "legacy.md"), `---
+		writeTreeFile(filepath.Join(rootDir, "legacy.md"), `---
 leafwiki_id: id-other
 leafwiki_title: Other
 ---
 # Other`, 0o644)
-		persistLegacyTreeSnapshot(t, dataDir, &PageNode{
+		persistLegacyTreeSnapshot(dataDir, &PageNode{
 			ID:       "root",
 			Slug:     "root",
 			Title:    "root",
 			Kind:     NodeKindSection,
 			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
 		})
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		if err == nil {
-			t.Fatalf("expected LoadTree to fail safely when configured root has mismatched legacy markdown")
-		}
-		if !errors.Is(err, ErrLegacyContentRemains) {
-			t.Fatalf("expected legacy content remains error, got: %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
-		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
-		mustStat(t, filepath.Join(rootDir, "legacy.md"))
+		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when configured root has mismatched legacy markdown")
+		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, legacyTreeFilename))
+		statTreePath(filepath.Join(dataDir, "root", "legacy.md"))
+		statTreePath(filepath.Join(rootDir, "legacy.md"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeServiceWithOptions_FailsSafelyWhenConfiguredRootHasSameIdentityButDifferentContent", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "content")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			t.Fatalf("mkdir data dir: %v", err)
+var _ = ginkgo.Describe("tree service configured root loading", func() {
+	ginkgo.It("fails safely when configured root has same identity but different content", func() {
+		dataDir := filepath.Join(tempTreeDir(), "data")
+		rootDir := filepath.Join(tempTreeDir(), "content")
+		{
+			err := os.MkdirAll(dataDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir data directory: %v",
+
+				err)
 		}
-		mustWriteFile(t, filepath.Join(dataDir, "root", "legacy.md"), `---
+
+		writeTreeFile(filepath.Join(dataDir, "root", "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy
 
 new content`, 0o644)
-		mustWriteFile(t, filepath.Join(rootDir, "legacy.md"), `---
+		writeTreeFile(filepath.Join(rootDir, "legacy.md"), `---
 leafwiki_id: id-legacy
 leafwiki_title: Legacy
 ---
 # Legacy
 
 old content`, 0o644)
-		persistLegacyTreeSnapshot(t, dataDir, &PageNode{
+		persistLegacyTreeSnapshot(dataDir, &PageNode{
 			ID:       "root",
 			Slug:     "root",
 			Title:    "root",
 			Kind:     NodeKindSection,
 			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
 		})
-		if err := saveSchema(dataDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+			err := saveSchema(dataDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		if err == nil {
-			t.Fatalf("expected LoadTree to fail safely when configured root has stale legacy markdown")
-		}
-		if !errors.Is(err, ErrLegacyContentRemains) {
-			t.Fatalf("expected legacy content remains error, got: %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, legacyTreeFilename))
-		mustStat(t, filepath.Join(dataDir, "root", "legacy.md"))
-		mustStat(t, filepath.Join(rootDir, "legacy.md"))
+		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when configured root has stale legacy markdown")
+		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, legacyTreeFilename))
+		statTreePath(filepath.Join(dataDir, "root", "legacy.md"))
+		statTreePath(filepath.Join(rootDir, "legacy.md"))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesLegacyTreeOrderIntoOrderFiles", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates legacy tree order into order files", func() {
+		tmpDir := tempTreeDir()
 
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "a.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "a.md"), `---
 leafwiki_id: id-a
 leafwiki_title: A
 ---
 # A`, 0o644)
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "b.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "b.md"), `---
 leafwiki_id: id-b
 leafwiki_title: B
 ---
 # B`, 0o644)
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "c.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "c.md"), `---
 leafwiki_id: id-c
 leafwiki_title: C
 ---
@@ -613,39 +661,60 @@ leafwiki_title: C
 			Kind:     NodeKindSection,
 			Children: []*PageNode{{ID: "id-c", Slug: "c", Title: "C", Kind: NodeKindPage, Position: 0}, {ID: "id-a", Slug: "a", Title: "A", Kind: NodeKindPage, Position: 1}, {ID: "id-b", Slug: "b", Title: "B", Kind: NodeKindPage, Position: 2}},
 		}
-		persistLegacyTreeSnapshot(t, tmpDir, legacyTree)
-		if err := saveSchema(tmpDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		persistLegacyTreeSnapshot(tmpDir, legacyTree)
+		{
+			err := saveSchema(tmpDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		root := svc.GetTree()
-		if got, want := slugs(root.Children), []string{"c", "a", "b"}; strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Fatalf("unexpected child order after legacy migration: got %v want %v", got, want)
+		{
+			got, want := slugs(root.Children), []string{"c", "a", "b"}
+			Expect(strings.Join(
+				got, ",")).
+				To(Equal(strings.
+					Join(want, ",")), "unexpected child order after legacy migration: got %v want %v",
+
+					got, want,
+				)
 		}
-		if got, want := readOrderIDs(t, filepath.Join(tmpDir, "root")), []string{"id-c", "id-a", "id-b"}; strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Fatalf("unexpected persisted order after legacy migration: got %v want %v", got, want)
+		{
+
+			got, want := readOrderIDs(filepath.Join(tmpDir, "root")), []string{"id-c", "id-a", "id-b"}
+			Expect(strings.Join(
+				got, ",")).
+				To(Equal(strings.
+					Join(want, ",")), "unexpected persisted order after legacy migration: got %v want %v",
+
+					got,
+					want)
 		}
-		mustNotExist(t, filepath.Join(tmpDir, legacyTreeFilename))
+
+		Expect(filepath.Join(tmpDir, legacyTreeFilename)).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_RemovesLegacyTreeSnapshotAfterSuccessfulMigration", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree removes legacy tree snapshot after successful migration", func() {
+		tmpDir := tempTreeDir()
 
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "a.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "a.md"), `---
 leafwiki_id: id-a
 leafwiki_title: A
 ---
 # A`, 0o644)
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "b.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "b.md"), `---
 leafwiki_id: id-b
 leafwiki_title: B
 ---
@@ -661,827 +730,929 @@ leafwiki_title: B
 				{ID: "id-a", Slug: "a", Title: "A", Kind: NodeKindPage, Position: 1},
 			},
 		}
-		persistLegacyTreeSnapshot(t, tmpDir, legacyTree)
-		if err := saveSchema(tmpDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		persistLegacyTreeSnapshot(tmpDir, legacyTree)
+		{
+			err := saveSchema(tmpDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
-		mustNotExist(t, filepath.Join(tmpDir, legacyTreeFilename))
+		Expect(filepath.Join(tmpDir, legacyTreeFilename)).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_SaveAndLoad_RoundtripParents", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("save and load roundtrip parents", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Create a small tree through public API (exercises disk + tree)
 		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode A failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode A failed: %v",
+
+			err)
+
 		_, err = svc.CreateNode("system", idA, "B", "b", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode B failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode B failed: %v",
+
+			err)
+		{
+
+			// Reload in a new service instance
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
-		// Reload in a new service instance
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
-		}
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		root := loaded.GetTree()
-		if len(root.Children) != 1 {
-			t.Fatalf("expected 1 child at root, got %d", len(root.Children))
-		}
+		Expect(root.Children).To(HaveLen(1),
+			"expected 1 child at root, got %d",
+
+			len(root.
+				Children,
+			),
+		)
+
 		a := root.Children[0]
-		if a.Parent == nil || a.Parent.ID != "root" {
-			t.Fatalf("expected parent pointer on A")
-		}
-		if len(a.Children) != 1 {
-			t.Fatalf("expected A to have 1 child, got %d", len(a.Children))
-		}
+		Expect(a.Parent == nil ||
+			a.Parent.
+				ID !=
+				"root",
+		).To(BeFalse(), "expected parent pointer on A")
+		Expect(a.Children).To(HaveLen(
+			1), "expected A to have 1 child, got %d",
+
+			len(a.Children))
+
 		b := a.Children[0]
-		if b.Parent == nil || b.Parent.ID != a.ID {
-			t.Fatalf("expected parent pointer on B")
-		}
+		Expect(b.Parent == nil ||
+			b.Parent.
+				ID !=
+				a.
+					ID).To(BeFalse(),
+			"expected parent pointer on B",
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_TreeHash_IsStableAcrossRepeatedCalls", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("tree hash is stable across repeated calls", func() {
+		svc, _ := newLoadedService()
 
 		h1 := svc.TreeHash()
 		h2 := svc.TreeHash()
-		if h1 == "" {
-			t.Fatalf("expected non-empty hash")
-		}
-		if h1 != h2 {
-			t.Fatalf("expected stable hash across repeated calls, got %q and %q", h1, h2)
-		}
-		if want := svc.GetTree().Hash(); h1 != want {
-			t.Fatalf("expected TreeHash to match underlying tree hash, got %q want %q", h1, want)
+		Expect(h1).NotTo(BeEmpty(),
+
+			"expected non-empty hash")
+		Expect(h1).To(Equal(
+			h2), "expected stable hash across repeated calls, got %q and %q",
+
+			h1,
+			h2,
+		)
+		{
+
+			want := svc.GetTree().Hash()
+			Expect(h1).To(Equal(
+				want), "expected TreeHash to match underlying tree hash, got %q want %q",
+
+				h1, want)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_TreeHash_ChangesWhenTreeChanges", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("tree hash changes when tree changes", func() {
+		svc, _ := newLoadedService()
 
 		before := svc.TreeHash()
 		pageID, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
+
 		afterCreate := svc.TreeHash()
-		if before == afterCreate {
-			t.Fatalf("expected hash to change after create")
+		Expect(before).NotTo(Equal(afterCreate), "expected hash to change after create")
+		{
+
+			err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Welcome 2", Slug("welcome"), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "UpdateNode failed: %v",
+
+				err)
 		}
 
-		if err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Welcome 2", Slug("welcome"), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
-		}
 		afterUpdate := svc.TreeHash()
-		if afterCreate == afterUpdate {
-			t.Fatalf("expected hash to change after update")
-		}
+		Expect(afterCreate).
+			NotTo(Equal(afterUpdate), "expected hash to change after update")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_TreeHash_ChangesWhenOrderChanges", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("tree hash changes when order changes", func() {
+		svc, _ := newLoadedService()
 
 		firstID, err := svc.CreateNode("system", nil, "One", "one", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode first failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode first failed: %v",
+
+			err)
+
 		secondID, err := svc.CreateNode("system", nil, "Two", "two", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode second failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode second failed: %v",
+
+			err)
 
 		before := svc.TreeHash()
-		if err := svc.SortPages("", testPageIDs(*secondID, *firstID)); err != nil {
-			t.Fatalf("SortPages failed: %v", err)
+		{
+			err := svc.SortPages("", testPageIDs(*secondID, *firstID))
+			Expect(err).To(Succeed(), "SortPages failed: %v",
+
+				err)
 		}
+
 		after := svc.TreeHash()
-		if before == after {
-			t.Fatalf("expected hash to change after sort")
-		}
+		Expect(before).NotTo(Equal(after), "expected hash to change after sort")
 
 	})
 })
 
 // --- B) Create/Update/Delete disk sync ---
 
-var _ = ginkgo.Describe("TestTreeService_CreateNode_ReloadsFromFilesystem", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node reloads from filesystem", func() {
+		svc, tmpDir := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		reloaded := NewTreeService(tmpDir)
-		if err := reloaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := reloaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		root := reloaded.GetTree()
-		if len(root.Children) != 1 {
-			t.Fatalf("expected 1 child after reload, got %d", len(root.Children))
-		}
-		if root.Children[0].ID != *id {
-			t.Fatalf("expected persisted child ID %q, got %q", id.String(), root.Children[0].ID)
-		}
+		Expect(root.Children).To(ConsistOf(HaveField("ID", Equal(*id))))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateChild_RollsBackParentAutoConvertWhenTreeSaveFails", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create child rolls back parent auto convert when tree save fails", func() {
+		svc, tmpDir := newLoadedService()
 
 		parentID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode parent failed: %v", err)
-		}
-		mustStat(t, filepath.Join(tmpDir, "root", "docs.md"))
+		Expect(err).To(Succeed(), "CreateNode parent failed: %v",
 
-		mustMkdir(t, filepath.Join(tmpDir, "root", "docs", ".order.json"))
+			err)
+
+		statTreePath(filepath.Join(tmpDir, "root", "docs.md"))
+
+		createTreeDirectory(filepath.Join(tmpDir, "root", "docs", ".order.json"))
 
 		childID, err := svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
-		if err == nil {
-			t.Fatalf("expected CreateNode child to fail when child order save fails")
-		}
-		if !errors.Is(err, ErrPersistChildOrder) {
-			t.Fatalf("expected child order persistence error, got: %v", err)
-		}
-		if childID != nil {
-			t.Fatalf("expected returned child id to be nil on failure, got %q", childID.String())
-		}
+		Expect(err).To(HaveOccurred(), "expected CreateNode child to fail when child order save fails")
+		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
+
+			err)
+
+		Expect(childID).To(BeNil())
 
 		root := svc.GetTree()
-		if len(root.Children) != 1 {
-			t.Fatalf("expected only original parent after rollback, got %d root children", len(root.Children))
-		}
+		Expect(root.Children).To(HaveLen(1),
+			"expected only original parent after rollback, got %d root children",
+
+			len(root.Children))
+
 		parent := root.Children[0]
-		if parent.Kind != NodeKindPage {
-			t.Fatalf("expected parent kind rolled back to page, got %q", parent.Kind)
-		}
-		if len(parent.Children) != 0 {
-			t.Fatalf("expected parent children rolled back, got %d", len(parent.Children))
-		}
-		mustStat(t, filepath.Join(tmpDir, "root", "docs.md"))
-		mustNotExist(t, filepath.Join(tmpDir, "root", "docs"))
-		mustNotExist(t, filepath.Join(tmpDir, "root", "docs", "index.md"))
-		mustNotExist(t, filepath.Join(tmpDir, "root", "docs", "child.md"))
+		Expect(parent).To(SatisfyAll(
+			HaveField("Kind", Equal(NodeKindPage)),
+			HaveField("Children", BeEmpty()),
+		), "expected parent to roll back to a childless page, got %#v", parent)
+
+		statTreePath(filepath.Join(tmpDir, "root", "docs.md"))
+		Expect(filepath.Join(tmpDir, "root", "docs")).To(beMissingTreePath())
+		Expect(filepath.Join(tmpDir, "root", "docs", "index.md")).To(beMissingTreePath())
+		Expect(filepath.Join(tmpDir, "root", "docs", "child.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateNode_RollsBackWhenTreeSaveFails", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node rolls back when tree save fails", func() {
+		svc, tmpDir := newLoadedService()
 
-		mustMkdir(t, filepath.Join(tmpDir, "root", ".order.json"))
+		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
 		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
-		if err == nil {
-			t.Fatalf("expected CreateNode to fail when order file write fails")
-		}
-		if !errors.Is(err, ErrPersistChildOrder) {
-			t.Fatalf("expected child order persistence error, got: %v", err)
-		}
-		if id != nil {
-			t.Fatalf("expected returned id to be nil on failure, got %q", id.String())
-		}
-		if len(svc.GetTree().Children) != 0 {
-			t.Fatalf("expected in-memory tree rollback, got %d root children", len(svc.GetTree().Children))
-		}
-		mustNotExist(t, filepath.Join(tmpDir, "root", "welcome.md"))
-		if info, err := os.Stat(filepath.Join(tmpDir, "root", ".order.json")); err != nil {
-			t.Fatalf("stat root order path: %v", err)
-		} else if !info.IsDir() {
-			t.Fatalf("expected failure trigger to remain a directory")
-		}
+		Expect(err).To(HaveOccurred(), "expected CreateNode to fail when order file write fails")
+		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
+
+			err)
+
+		Expect(id).To(BeNil())
+		Expect(svc.GetTree().
+			Children).
+			To(HaveLen(0), "expected in-memory tree rollback, got %d root children",
+
+				len(svc.GetTree().Children))
+
+		Expect(filepath.Join(tmpDir, "root", "welcome.md")).To(beMissingTreePath())
+		info, err := os.Stat(filepath.Join(tmpDir, "root", ".order.json"))
+		Expect(err).To(Succeed())
+		Expect(info.IsDir()).To(BeTrue())
 		reloaded := NewTreeService(tmpDir)
-		if err := reloaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := reloaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
-		if len(reloaded.GetTree().Children) != 0 {
-			t.Fatalf("expected no persisted children after rollback, got %d", len(reloaded.GetTree().Children))
-		}
+		Expect(reloaded.GetTree().Children).To(HaveLen(0), "expected no persisted children after rollback, got %d",
+
+			len(reloaded.GetTree().Children),
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateNode_RollsBackWhenOrderWriteFails", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node rolls back when order write fails", func() {
+		svc, tmpDir := newLoadedService()
 
-		mustMkdir(t, filepath.Join(tmpDir, "root", ".order.json"))
+		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
 		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
-		if err == nil {
-			t.Fatalf("expected CreateNode to fail when order file write fails")
-		}
-		if !errors.Is(err, ErrPersistChildOrder) {
-			t.Fatalf("expected child order persistence error, got: %v", err)
-		}
-		if id != nil {
-			t.Fatalf("expected returned id to be nil on failure, got %q", id.String())
-		}
+		Expect(err).To(HaveOccurred(), "expected CreateNode to fail when order file write fails")
+		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
-		if len(svc.GetTree().Children) != 0 {
-			t.Fatalf("expected in-memory tree rollback, got %d root children", len(svc.GetTree().Children))
-		}
-		mustNotExist(t, filepath.Join(tmpDir, "root", "welcome.md"))
+			err)
+
+		Expect(id).To(BeNil())
+		Expect(svc.GetTree().
+			Children).
+			To(HaveLen(0), "expected in-memory tree rollback, got %d root children",
+
+				len(svc.GetTree().Children))
+
+		Expect(filepath.Join(tmpDir, "root", "welcome.md")).To(beMissingTreePath())
 
 		reloaded := NewTreeService(tmpDir)
-		if err := reloaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := reloaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
-		if len(reloaded.GetTree().Children) != 0 {
-			t.Fatalf("expected no persisted children after rollback, got %d", len(reloaded.GetTree().Children))
-		}
+		Expect(reloaded.GetTree().Children).To(HaveLen(0), "expected no persisted children after rollback, got %d",
+
+			len(reloaded.GetTree().Children),
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateNode_Page_Root_CreatesFileAndFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node page root creates file and frontmatter", func() {
+		svc, tmpDir := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		// file path: <tmp>/root/welcome.md (based on your existing tests + GeneratePath convention)
 		p := filepath.Join(tmpDir, "root", "welcome.md")
-		mustStat(t, p)
+		statTreePath(p)
 
 		raw, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatalf("read file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read file: %v",
 
-		fm, _, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
+			err,
+		)
+
+		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter to exist")
+
+		Expect(newFixturePageID(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
+		Expect(frontmatter.LeafWikiCreatedAt ==
+			"" ||
+			frontmatter.LeafWikiUpdatedAt ==
+				"").
+			To(BeFalse(), "expected leafwiki timestamps to be set, got %#v",
+				frontmatter)
+		Expect(frontmatter.LeafWikiCreatorID !=
+			"system" ||
+			frontmatter.
+				LeafWikiLastAuthorID !=
+				"system",
+		).To(BeFalse(), "expected creator metadata to be set, got %#v",
+			frontmatter)
+
+	})
+})
+
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node rejects case insensitive slug conflict", func() {
+		svc, _ := newLoadedService()
+		{
+
+			_, err := svc.CreateNode("system", nil, "Alpha", "Alpha", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode alpha failed: %v",
+
+				err)
 		}
-		if !has {
-			t.Fatalf("expected frontmatter to exist")
-		}
-		if newFixturePageID(strings.TrimSpace(fm.LeafWikiID)) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if fm.LeafWikiCreatedAt == "" || fm.LeafWikiUpdatedAt == "" {
-			t.Fatalf("expected leafwiki timestamps to be set, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "system" || fm.LeafWikiLastAuthorID != "system" {
-			t.Fatalf("expected creator metadata to be set, got %#v", fm)
+		{
+
+			_, err := svc.CreateNode("system", nil, "Alpha Lower", "alpha", ptrKind(NodeKindPage))
+			Expect(err).To(MatchError(ErrPageAlreadyExists), "expected ErrPageAlreadyExists for case-insensitive conflict, got %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateNode_RejectsCaseInsensitiveSlugConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
-
-		if _, err := svc.CreateNode("system", nil, "Alpha", "Alpha", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode alpha failed: %v", err)
-		}
-
-		if _, err := svc.CreateNode("system", nil, "Alpha Lower", "alpha", ptrKind(NodeKindPage)); !errors.Is(err, ErrPageAlreadyExists) {
-			t.Fatalf("expected ErrPageAlreadyExists for case-insensitive conflict, got %v", err)
-		}
-
-	})
-})
-
-var _ = ginkgo.Describe("TestTreeService_CreateNode_AllowsSameBasenamePageAndSectionTwins", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, dataDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node allows same basename page and section twins", func() {
+		svc, dataDir := newLoadedService()
 
 		pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
-		}
-		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section twin failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode page failed: %v",
 
-		mustStat(t, filepath.Join(dataDir, "root", "sync.md"))
-		mustStat(t, filepath.Join(dataDir, "root", "sync", "index.md"))
+			err)
+
+		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+		Expect(err).To(Succeed(), "CreateNode section twin failed: %v",
+
+			err)
+
+		statTreePath(filepath.Join(dataDir, "root", "sync.md"))
+		statTreePath(filepath.Join(dataDir, "root", "sync", "index.md"))
 
 		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
-		}
-		if page.ID != *pageID {
-			t.Fatalf("page ID = %q, want %q", page.ID, pageID.String())
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
+
+			err,
+		)
+
+		Expect(page.ID).To(Equal(*pageID))
 
 		section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
-		}
-		if section.ID != *sectionID {
-			t.Fatalf("section ID = %q, want %q", section.ID, sectionID.String())
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind section failed: %v",
 
-		if _, err := svc.CreateNode("system", nil, "Duplicate Page", "SYNC", ptrKind(NodeKindPage)); !errors.Is(err, ErrPageAlreadyExists) {
-			t.Fatalf("expected ErrPageAlreadyExists for same-kind duplicate, got %v", err)
+			err)
+
+		Expect(section.ID).To(Equal(*sectionID))
+		{
+
+			_, err := svc.CreateNode("system", nil, "Duplicate Page", "SYNC", ptrKind(NodeKindPage))
+			Expect(err).To(MatchError(ErrPageAlreadyExists), "expected ErrPageAlreadyExists for same-kind duplicate, got %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ContentPathForNodeUsesCoreReadRules", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, dataDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("content path for node uses core read rules", func() {
+		svc, dataDir := newLoadedService()
 
 		sectionID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode section failed: %v",
+
+			err,
+		)
+
 		pageID, err := svc.CreateNode("system", nil, "Guide", "guide", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode page failed: %v",
+
+			err)
+		{
+
+			err := os.Rename(filepath.Join(dataDir, "root", "docs", "index.md"), filepath.Join(dataDir, "root", "docs", "INDEX.MD"))
+			Expect(err).To(Succeed(), "rename section index: %v",
+
+				err)
 		}
-		if err := os.Rename(filepath.Join(dataDir, "root", "docs", "index.md"), filepath.Join(dataDir, "root", "docs", "INDEX.MD")); err != nil {
-			t.Fatalf("rename section index: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dataDir, "root", "docs", "README.md"), []byte("# README\n"), 0o644); err != nil {
-			t.Fatalf("write README: %v", err)
+		{
+
+			err := os.WriteFile(filepath.Join(dataDir, "root", "docs", "README.md"), []byte("# README\n"), 0o644)
+			Expect(err).To(Succeed(), "write README: %v",
+
+				err)
 		}
 
 		section, err := svc.GetPage(*sectionID)
-		if err != nil {
-			t.Fatalf("GetPage section failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "GetPage section failed: %v",
+
+			err)
+
 		sectionPath, err := svc.ContentPathForNode(section.PageNode)
-		if err != nil {
-			t.Fatalf("ContentPathForNode section failed: %v", err)
-		}
-		if sectionPath != "docs/INDEX.MD" {
-			t.Fatalf("section content path = %q, want docs/INDEX.MD", sectionPath)
-		}
+		Expect(err).To(Succeed(), "ContentPathForNode section failed: %v",
+
+			err)
+		Expect(sectionPath).
+			To(Equal("docs/INDEX.MD"), "section content path = %q, want docs/INDEX.MD",
+
+				sectionPath)
 
 		page, err := svc.GetPage(*pageID)
-		if err != nil {
-			t.Fatalf("GetPage page failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "GetPage page failed: %v",
+
+			err)
+
 		pagePath, err := svc.ContentPathForNode(page.PageNode)
-		if err != nil {
-			t.Fatalf("ContentPathForNode page failed: %v", err)
-		}
-		if pagePath != "guide.md" {
-			t.Fatalf("page content path = %q, want guide.md", pagePath)
-		}
+		Expect(err).To(Succeed(), "ContentPathForNode page failed: %v",
+
+			err)
+		Expect(pagePath).To(
+			Equal("guide.md"),
+			"page content path = %q, want guide.md",
+
+			pagePath,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateNode_RejectsTraversalSlug", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, dataDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node rejects traversal slug", func() {
+		svc, dataDir := newLoadedService()
 
 		_, err := svc.CreateNode("system", nil, "Outside", "../outside", ptrKind(NodeKindPage))
-		if err == nil {
-			t.Fatalf("expected CreateNode to reject traversal slug")
-		}
-		if !errors.Is(err, ErrInvalidOperation) {
-			t.Fatalf("expected ErrInvalidOperation, got %v", err)
-		}
-		mustNotExist(t, filepath.Join(dataDir, "outside.md"))
+		Expect(err).To(HaveOccurred(), "expected CreateNode to reject traversal slug")
+		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
+
+			err,
+		)
+
+		Expect(filepath.Join(dataDir, "outside.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateNode_PersistsRootOrderFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node persists root order file", func() {
+		svc, tmpDir := newLoadedService()
 
 		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode A failed: %v", err)
-		}
-		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode B failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode A failed: %v",
 
-		assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *idA, *idB)
+			err)
+
+		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
+		Expect(err).To(Succeed(), "CreateNode B failed: %v",
+
+			err)
+
+		Expect(readOrderIDs(filepath.Join(tmpDir, "root"))).To(matchPersistedPageIDOrder(*idA, *idB))
 
 	})
 })
 
 // - New section creates index.md
-var _ = ginkgo.Describe("TestTreeService_CreateNode_Section_CreatesIndexWithFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create node section creates index with frontmatter", func() {
+		svc, tmpDir := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		index := filepath.Join(tmpDir, "root", "docs", "index.md")
 		raw, err := os.ReadFile(index)
-		if err != nil {
-			t.Fatalf("read file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read file: %v",
 
-		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter to exist")
-		}
-		if newFixturePageID(strings.TrimSpace(fm.LeafWikiID)) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "Docs" {
-			t.Fatalf("expected leafwiki_title Docs, got %q", fm.LeafWikiTitle)
-		}
-		if fm.LeafWikiCreatedAt == "" || fm.LeafWikiUpdatedAt == "" {
-			t.Fatalf("expected leafwiki timestamps to be set, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "system" || fm.LeafWikiLastAuthorID != "system" {
-			t.Fatalf("expected creator metadata to be set, got %#v", fm)
-		}
-		if strings.TrimSpace(body) != "" {
-			t.Fatalf("expected empty section body, got %q", body)
-		}
+			err,
+		)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter to exist")
+
+		Expect(newFixturePageID(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
+		Expect(frontmatter.LeafWikiTitle).To(
+			Equal(
+				"Docs"), "expected leafwiki_title Docs, got %q",
+
+			frontmatter.LeafWikiTitle)
+		Expect(frontmatter.LeafWikiCreatedAt ==
+			"" ||
+			frontmatter.LeafWikiUpdatedAt ==
+				"").
+			To(BeFalse(), "expected leafwiki timestamps to be set, got %#v",
+				frontmatter)
+		Expect(frontmatter.LeafWikiCreatorID !=
+			"system" ||
+			frontmatter.
+				LeafWikiLastAuthorID !=
+				"system",
+		).To(BeFalse(), "expected creator metadata to be set, got %#v",
+			frontmatter)
+		Expect(strings.TrimSpace(body)).To(BeEmpty(),
+
+			"expected empty section body, got %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_CreateChild_UnderPage_AutoConvertsParentToSection", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("create child under page auto converts parent to section", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Create parent as page
 		parentID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("Create parent failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "Create parent failed: %v",
+
+			err)
 
 		// Should exist as file initially
 		parentFile := filepath.Join(tmpDir, "root", "docs.md")
-		mustStat(t, parentFile)
+		statTreePath(parentFile)
 
 		// Create child under parent: must convert parent to section
 		_, err = svc.CreateNode("system", parentID, "Getting Started", "getting-started", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("Create child failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "Create child failed: %v",
+
+			err)
 
 		// Parent should now be a folder with index.md (converted from docs.md)
 		parentDir := filepath.Join(tmpDir, "root", "docs")
-		mustStat(t, parentDir)
+		statTreePath(parentDir)
 		index := filepath.Join(parentDir, "index.md")
-		mustStat(t, index)
+		statTreePath(index)
 
 		// Old file should be gone
-		mustNotExist(t, parentFile)
+		Expect(parentFile).To(beMissingTreePath())
 
 		// Child file should be inside folder
 		childFile := filepath.Join(parentDir, "getting-started.md")
-		mustStat(t, childFile)
+		statTreePath(childFile)
 
 		// Tree kind updated
 		parentNode, err := svc.FindPageByID(*parentID)
-		if err != nil {
-			t.Fatalf("FindPageByID: %v", err)
-		}
-		if parentNode.Kind != NodeKindSection {
-			t.Fatalf("expected parent kind section, got %q", parentNode.Kind)
-		}
+		Expect(err).To(Succeed(), "FindPageByID: %v",
+
+			err)
+		Expect(parentNode.Kind).To(Equal(NodeKindSection), "expected parent kind section, got %q",
+
+			parentNode.Kind)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_TitleOnly_SyncsFrontmatterIfFileExists", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node title only syncs frontmatter if file exists", func() {
+		svc, tmpDir := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		p := filepath.Join(tmpDir, "root", "docs.md")
-		mustStat(t, p)
+		statTreePath(p)
+		{
 
-		// Update title only: content=nil, slug unchanged
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", Slug("docs"), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
+			// Update title only: content=nil, slug unchanged
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", Slug("docs"), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "UpdateNode failed: %v",
+
+				err)
 		}
 
 		raw, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatalf("read: %v", err)
-		}
-		fm, _, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter")
-		}
-		if fm.LeafWikiTitle != "Documentation" {
-			t.Fatalf("expected leafwiki_title to be updated, got %q", fm.LeafWikiTitle)
-		}
+		Expect(err).To(Succeed(), "read: %v",
+			err,
+		)
+
+		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter")
+		Expect(frontmatter.LeafWikiTitle).To(
+			Equal(
+				"Documentation"),
+			"expected leafwiki_title to be updated, got %q",
+
+			frontmatter.LeafWikiTitle)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_SlugRename_RenamesOnDisk", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node slug rename renames on disk", func() {
+		svc, tmpDir := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		oldPath := filepath.Join(tmpDir, "root", "docs.md")
-		mustStat(t, oldPath)
+		statTreePath(oldPath)
 
 		newSlug := "documentation"
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", newFixtureSlug(newSlug), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
+		{
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", newFixtureSlug(newSlug), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "UpdateNode failed: %v",
+
+				err)
 		}
 
 		newPath := filepath.Join(tmpDir, "root", newSlug+".md")
-		mustStat(t, newPath)
-		mustNotExist(t, oldPath)
+		statTreePath(newPath)
+		Expect(oldPath).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_AllowsRenameToSameBasenamePageSectionTwin", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node allows rename to same basename page section twin", func() {
+		svc, tmpDir := newLoadedService()
+		{
 
-		if _, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection)); err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
+			_, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+			Expect(err).To(Succeed(), "CreateNode section failed: %v",
+
+				err,
+			)
 		}
+
 		pageID, err := svc.CreateNode("system", nil, "Draft Page", "draft", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode page failed: %v",
+
+			err)
+		{
+
+			err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Sync Page", Slug("sync"), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "UpdateNode page rename to section basename failed: %v",
+
+				err,
+			)
 		}
 
-		if err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Sync Page", Slug("sync"), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("UpdateNode page rename to section basename failed: %v", err)
-		}
-
-		mustStat(t, filepath.Join(tmpDir, "root", "sync.md"))
-		mustStat(t, filepath.Join(tmpDir, "root", "sync", "index.md"))
+		statTreePath(filepath.Join(tmpDir, "root", "sync.md"))
+		statTreePath(filepath.Join(tmpDir, "root", "sync", "index.md"))
 
 		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
-		}
-		if page.ID != *pageID {
-			t.Fatalf("page ID = %q, want %q", page.ID, pageID.String())
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
+
+			err,
+		)
+
+		Expect(page.ID).To(Equal(*pageID))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_RejectsCaseInsensitiveSlugConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node rejects case insensitive slug conflict", func() {
+		svc, _ := newLoadedService()
 
 		firstID, err := svc.CreateNode("system", nil, "Alpha", "Alpha", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode first failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode first failed: %v",
+
+			err)
+
 		secondID, err := svc.CreateNode("system", nil, "Beta", "Beta", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode second failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode second failed: %v",
+
+			err)
 
 		err = svc.UpdateNode(newFixtureUserID("system"), *secondID, "Beta", Slug("alpha"), nil, pageVersionUnchecked, false)
-		if !errors.Is(err, ErrPageAlreadyExists) {
-			t.Fatalf("expected ErrPageAlreadyExists, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrPageAlreadyExists), "expected ErrPageAlreadyExists, got %v",
+
+			err,
+		)
 
 		page, err := svc.GetPage(*firstID)
-		if err != nil {
-			t.Fatalf("GetPage first failed: %v", err)
-		}
-		if page.Slug != "Alpha" {
-			t.Fatalf("expected original slug to remain unchanged, got %q", page.Slug)
-		}
+		Expect(err).To(Succeed(), "GetPage first failed: %v",
+
+			err)
+		Expect(page.Slug).To(Equal(newFixtureSlug("Alpha")),
+			"expected original slug to remain unchanged, got %q",
+
+			page.Slug)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_RejectsTraversalSlug", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, dataDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node rejects traversal slug", func() {
+		svc, dataDir := newLoadedService()
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		err = svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", Slug("../outside"), nil, pageVersionUnchecked, false)
-		if err == nil {
-			t.Fatalf("expected UpdateNode to reject traversal slug")
-		}
-		if !errors.Is(err, ErrInvalidOperation) {
-			t.Fatalf("expected ErrInvalidOperation, got %v", err)
-		}
-		mustStat(t, filepath.Join(dataDir, "root", "docs.md"))
-		mustNotExist(t, filepath.Join(dataDir, "outside.md"))
+		Expect(err).To(HaveOccurred(), "expected UpdateNode to reject traversal slug")
+		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
+
+			err,
+		)
+
+		statTreePath(filepath.Join(dataDir, "root", "docs.md"))
+		Expect(filepath.Join(dataDir, "outside.md")).To(beMissingTreePath())
 
 	})
 })
 
 /*
 Disable this test for now as we are not enforcing to pass the kinds yet.
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_SectionToPage_DisallowedWithChildren", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-	svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node section to page disallowed with children", func() {
+	svc, _ := newLoadedService()
 
 	// Create parent page, then child to force parent to section
 	parentID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-	if err != nil {
-		t.Fatalf("Create parent failed: %v", err)
-	}
-	_, err = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
-	if err != nil {
-		t.Fatalf("Create child failed: %v", err)
-	}
+		Expect(err).To(Succeed())
+		_, err = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
+		Expect(err).To(Succeed())
 
 	// Now parent is section with children, attempt to convert back to page
 	err = svc.UpdateNode(newFixtureUserID("system"), *parentID, "Docs", Slug("docs"), nil, pageVersionUnchecked, false)
-	if err == nil {
-		t.Fatalf("expected error converting section->page with children")
-	}
-	if !errors.Is(err, ErrPageHasChildren) {
-		t.Fatalf("expected ErrPageHasChildren, got: %v", err)
-	}
+		Expect(err).To(MatchError(ErrPageHasChildren))
 
 	})
 })
 */
 
-var _ = ginkgo.Describe("TestTreeService_DeleteNode_NonRecursiveErrorsWhenHasChildren", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete node non recursive errors when has children", func() {
+		svc, _ := newLoadedService()
 
 		parentID, _ := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
 		_, _ = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
 
 		err := svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
-		if err == nil {
-			t.Fatalf("expected error")
-		}
-		if !errors.Is(err, ErrPageHasChildren) {
-			t.Fatalf("expected ErrPageHasChildren, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected error")
+		Expect(err).To(MatchError(ErrPageHasChildren), "expected ErrPageHasChildren, got: %v",
+
+			err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeleteNode_RecursiveDeletesDiskAndTree", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete node recursive deletes disk and tree", func() {
+		svc, tmpDir := newLoadedService()
 
 		parentID, _ := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
 		_, _ = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
 
 		// Parent should now be a folder
 		parentDir := filepath.Join(tmpDir, "root", "parent")
-		mustStat(t, parentDir)
+		statTreePath(parentDir)
 
 		err := svc.DeleteNode("system", *parentID, true, pageVersionUnchecked)
-		if err != nil {
-			t.Fatalf("DeleteNode recursive failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "DeleteNode recursive failed: %v",
+
+			err,
+		)
 
 		// Folder should be gone
-		mustNotExist(t, parentDir)
+		Expect(parentDir).To(beMissingTreePath())
+		Expect(svc.GetTree().
+			Children).
+			To(HaveLen(0), "expected root to have no children")
 
 		// Tree should have no children at root
-		if len(svc.GetTree().Children) != 0 {
-			t.Fatalf("expected root to have no children")
-		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeletePage_Leaf_Success_RemovesFileAndTreeAndReindexes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete page LeafWiki success removes file and tree and reindexes", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Create 3 leaf pages
 		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode A: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode A: %v",
+
+			err)
+
 		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode B: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode B: %v",
+
+			err)
+
 		idC, err := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode C: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode C: %v",
+
+			err)
 
 		// Verify files exist
 		pathA := filepath.Join(tmpDir, "root", "a.md")
 		pathB := filepath.Join(tmpDir, "root", "b.md")
 		pathC := filepath.Join(tmpDir, "root", "c.md")
-		if _, err := os.Stat(pathB); err != nil {
-			t.Fatalf("expected %s exists: %v", pathB, err)
-		}
+		{
+			_, err := os.Stat(pathB)
+			Expect(err).To(Succeed(), "expected %s exists: %v",
 
-		// Delete middle page (B)
-		if err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked); err != nil {
-			t.Fatalf("DeleteNode failed: %v", err)
+				pathB, err,
+			)
 		}
+		{
 
-		// Disk: B gone; A/C still there
-		if _, err := os.Stat(pathB); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("expected %s to be deleted, got err=%v", pathB, err)
+			// Delete middle page (B)
+			err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "DeleteNode failed: %v",
+
+				err)
 		}
-		if _, err := os.Stat(pathA); err != nil {
-			t.Fatalf("expected %s exists: %v", pathA, err)
+		{
+
+			// Disk: B gone; A/C still there
+			_, err := os.Stat(pathB)
+			Expect(err).To(MatchError(os.ErrNotExist),
+				"expected %s to be deleted, got err=%v",
+
+				pathB,
+
+				err)
 		}
-		if _, err := os.Stat(pathC); err != nil {
-			t.Fatalf("expected %s exists: %v", pathC, err)
+		{
+
+			_, err := os.Stat(pathA)
+			Expect(err).To(Succeed(), "expected %s exists: %v",
+
+				pathA, err,
+			)
+		}
+		{
+
+			_, err := os.Stat(pathC)
+			Expect(err).To(Succeed(), "expected %s exists: %v",
+
+				pathC, err,
+			)
 		}
 
 		// Tree: only 2 children remain
 		root := svc.GetTree()
-		if len(root.Children) != 2 {
-			t.Fatalf("expected 2 children after delete, got %d", len(root.Children))
-		}
+		Expect(root.Children).To(HaveLen(2),
+			"expected 2 children after delete, got %d",
+
+			len(root.
+				Children,
+			))
 
 		// Ensure deleted ID not present
 		for _, ch := range root.Children {
-			if ch.ID == *idB {
-				t.Fatalf("deleted node still present in tree")
-			}
+			Expect(ch.ID).NotTo(
+				Equal(*idB), "deleted node still present in tree",
+			)
+
 		}
+		Expect(root.Children[0].Position !=
+			0 ||
+			root.
+				Children[1].Position !=
+				1,
+		).To(BeFalse(), "expected positions reindexed to 0..1, got %d,%d",
+
+			root.
+				Children[0].Position, root.Children[1].Position)
 
 		// Reindex: positions must be 0..1 (order depends on previous positions; we just assert contiguous)
-		if root.Children[0].Position != 0 || root.Children[1].Position != 1 {
-			t.Fatalf("expected positions reindexed to 0..1, got %d,%d",
-				root.Children[0].Position, root.Children[1].Position)
-		}
 
 		// Optional: ensure remaining IDs are the ones we expect
 		_ = idA
@@ -1490,357 +1661,425 @@ var _ = ginkgo.Describe("TestTreeService_DeletePage_Leaf_Success_RemovesFileAndT
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeleteNode_UpdatesRootOrderFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete node updates root order file", func() {
+		svc, tmpDir := newLoadedService()
 
 		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode A: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode A: %v",
+
+			err)
+
 		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode B: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode B: %v",
+
+			err)
+
 		idC, err := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode C: %v", err)
+		Expect(err).To(Succeed(), "CreateNode C: %v",
+
+			err)
+		{
+
+			err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "DeleteNode failed: %v",
+
+				err)
 		}
 
-		if err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked); err != nil {
-			t.Fatalf("DeleteNode failed: %v", err)
-		}
-
-		assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *idA, *idC)
+		Expect(readOrderIDs(filepath.Join(tmpDir, "root"))).To(matchPersistedPageIDOrder(*idA, *idC))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeletePage_WithChildren_NonRecursive_ReturnsErrPageHasChildren", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete page with children non recursive returns err page has children", func() {
+		svc, _ := newLoadedService()
 
 		parentID, err := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode parent: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode parent: %v",
+
+			err)
 
 		_, err = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode child: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode child: %v",
+
+			err)
 
 		err = svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
-		if err == nil {
-			t.Fatalf("expected error deleting page with children without recursive")
-		}
-		if !errors.Is(err, ErrPageHasChildren) {
-			t.Fatalf("expected ErrPageHasChildren, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected error deleting page with children without recursive")
+		Expect(err).To(MatchError(ErrPageHasChildren), "expected ErrPageHasChildren, got: %v",
+
+			err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeletePage_WithChildren_Recursive_DeletesFolder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete page with children recursive deletes folder", func() {
+		svc, tmpDir := newLoadedService()
 
 		parentID, err := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode parent: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode parent: %v",
+
+			err)
+
 		_, err = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode child: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode child: %v",
+
+			err)
 
 		// Parent was auto-converted to section -> folder should exist
 		parentDir := filepath.Join(tmpDir, "root", "parent")
-		if _, err := os.Stat(parentDir); err != nil {
-			t.Fatalf("expected parent dir exists (after auto-convert): %v", err)
-		}
+		{
+			_, err := os.Stat(parentDir)
+			Expect(err).To(Succeed(), "expected parent directory exists (after auto-convert): %v",
 
-		// Recursive delete should remove the folder
-		if err := svc.DeleteNode("system", *parentID, true, pageVersionUnchecked); err != nil {
-			t.Fatalf("DeleteNode recursive failed: %v", err)
+				err)
 		}
+		{
 
-		if _, err := os.Stat(parentDir); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("expected parent folder deleted, got err=%v", err)
+			// Recursive delete should remove the folder
+			err := svc.DeleteNode("system", *parentID, true, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "DeleteNode recursive failed: %v",
+
+				err,
+			)
 		}
+		{
+
+			_, err := os.Stat(parentDir)
+			Expect(err).To(MatchError(os.ErrNotExist),
+				"expected parent folder deleted, got err=%v",
+
+				err,
+			)
+		}
+		Expect(svc.GetTree().
+			Children).
+			To(HaveLen(0), "expected root to have no children after delete, got %d",
+
+				len(svc.GetTree().Children))
 
 		// Tree should no longer contain parent
-		if len(svc.GetTree().Children) != 0 {
-			t.Fatalf("expected root to have no children after delete, got %d", len(svc.GetTree().Children))
-		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeletePage_InvalidID_ReturnsErrPageNotFound", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete page invalid ID returns err page not found", func() {
+		svc, _ := newLoadedService()
 
 		err := svc.DeleteNode("system", "does-not-exist", false, pageVersionUnchecked)
-		if err == nil {
-			t.Fatalf("expected error")
-		}
-		if !errors.Is(err, ErrPageNotFound) {
-			t.Fatalf("expected ErrPageNotFound, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected error")
+		Expect(err).To(MatchError(ErrPageNotFound),
+			"expected ErrPageNotFound, got: %v",
+
+			err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeletePage_Drift_FileMissing_ReturnsError", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete page drift file missing returns an error", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Create a leaf page normally (creates file)
 		id, err := svc.CreateNode("system", nil, "Ghost", "ghost", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode: %v",
+
+			err,
+		)
 
 		// Delete the file manually to simulate drift
 		p := filepath.Join(tmpDir, "root", "ghost.md")
-		if err := os.Remove(p); err != nil {
-			t.Fatalf("failed to remove file to simulate drift: %v", err)
+		{
+			err := os.Remove(p)
+			Expect(err).To(Succeed(), "failed to remove file to simulate drift: %v",
+
+				err)
 		}
 
 		// Now delete node - should error (drift)
 		err = svc.DeleteNode("system", *id, false, pageVersionUnchecked)
-		if err == nil {
-			t.Fatalf("expected drift error")
-		}
+		Expect(err).To(HaveOccurred(), "expected drift error")
+
 		// If you have a concrete DriftError type, you can assert with errors.As.
 		var dErr *DriftError
-		if !errors.As(err, &dErr) {
-			t.Fatalf("expected DriftError, got: %T (%v)", err, err)
-		}
+		Expect(err).To(matchErrorAs(&dErr), "expected DriftError, got: %T (%v)",
+
+			err, err)
 
 	})
 })
 
 // --- C) Move semantics ---
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_TargetPageAutoConvertsToSection", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node target page auto converts to section", func() {
+		svc, tmpDir := newLoadedService()
 
 		aID, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 		bID, _ := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
+		{
 
-		// Move A under B (B is a page => should auto-convert to section)
-		if err := svc.MoveNode("system", *aID, *bID, pageVersionUnchecked); err != nil {
-			t.Fatalf("MoveNode failed: %v", err)
+			// Move A under B (B is a page => should auto-convert to section)
+			err := svc.MoveNode("system", *aID, *bID, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "MoveNode failed: %v",
+
+				err)
 		}
 
 		// B should now be folder with index.md
 		bDir := filepath.Join(tmpDir, "root", "b")
-		mustStat(t, bDir)
-		mustStat(t, filepath.Join(bDir, "index.md"))
+		statTreePath(bDir)
+		statTreePath(filepath.Join(bDir, "index.md"))
 
 		// A should now be inside B folder
 		aPath := filepath.Join(bDir, "a.md")
-		mustStat(t, aPath)
+		statTreePath(aPath)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_UpdatesSourceAndDestinationOrderFiles", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node updates source and destination order files", func() {
+		svc, tmpDir := newLoadedService()
 
 		destID, err := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode dest: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode dest: %v",
+
+			err)
+
 		moveID, err := svc.CreateNode("system", nil, "Move", "move", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode move: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode move: %v",
+
+			err)
+
 		stayID, err := svc.CreateNode("system", nil, "Stay", "stay", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode stay: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode stay: %v",
+
+			err)
+
 		nestedID, err := svc.CreateNode("system", destID, "Nested", "nested", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode nested: %v", err)
+		Expect(err).To(Succeed(), "CreateNode nested: %v",
+
+			err)
+		{
+
+			err := svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "MoveNode failed: %v",
+
+				err)
 		}
 
-		if err := svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked); err != nil {
-			t.Fatalf("MoveNode failed: %v", err)
-		}
+		Expect(readOrderIDs(filepath.Join(tmpDir, "root"))).To(matchPersistedPageIDOrder(*destID, *stayID))
 
-		assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *destID, *stayID)
-
-		assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root", "dest")), *nestedID, *moveID)
+		Expect(readOrderIDs(filepath.Join(tmpDir, "root", "dest"))).To(matchPersistedPageIDOrder(*nestedID, *moveID))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_AllowsMoveToSameBasenamePageSectionTwin", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node allows move to same basename page section twin", func() {
+		svc, tmpDir := newLoadedService()
 
 		destID, err := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode dest failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode dest failed: %v",
+
+			err)
+		{
+
+			_, err := svc.CreateNode("system", destID, "Sync Section", "sync", ptrKind(NodeKindSection))
+			Expect(err).To(Succeed(), "CreateNode destination section failed: %v",
+
+				err,
+			)
 		}
-		if _, err := svc.CreateNode("system", destID, "Sync Section", "sync", ptrKind(NodeKindSection)); err != nil {
-			t.Fatalf("CreateNode destination section failed: %v", err)
-		}
+
 		moveID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode page failed: %v",
+
+			err)
+		{
+
+			err := svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "MoveNode page next to section basename failed: %v",
+
+				err)
 		}
 
-		if err := svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked); err != nil {
-			t.Fatalf("MoveNode page next to section basename failed: %v", err)
-		}
-
-		mustStat(t, filepath.Join(tmpDir, "root", "dest", "sync.md"))
-		mustStat(t, filepath.Join(tmpDir, "root", "dest", "sync", "index.md"))
+		statTreePath(filepath.Join(tmpDir, "root", "dest", "sync.md"))
+		statTreePath(filepath.Join(tmpDir, "root", "dest", "sync", "index.md"))
 
 		page, err := svc.FindPageByRoutePathAndKind("dest/sync", NodeKindPage)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind moved page failed: %v", err)
-		}
-		if page.ID != *moveID {
-			t.Fatalf("moved page ID = %q, want %q", page.ID, moveID.String())
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind moved page failed: %v",
+
+			err)
+
+		Expect(page.ID).To(Equal(*moveID))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_PersistsMovedNodeMetadataToFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node persists moved node metadata to frontmatter", func() {
+		svc, tmpDir := newLoadedService()
 
 		destID, err := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode dest: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode dest: %v",
+
+			err)
+
 		moveID, err := svc.CreateNode("system", nil, "Move", "move", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode move: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode move: %v",
+
+			err)
 
 		node, err := svc.FindPageByID(*moveID)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
-		beforeUpdatedAt := node.Metadata.UpdatedAt
+		Expect(err).To(Succeed(), "FindPageByID failed: %v",
 
-		if err := svc.MoveNode("alice", *moveID, *destID, pageVersionUnchecked); err != nil {
-			t.Fatalf("MoveNode failed: %v", err)
+			err)
+
+		beforeUpdatedAt := node.Metadata.UpdatedAt
+		{
+
+			err := svc.MoveNode("alice", *moveID, *destID, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "MoveNode failed: %v",
+
+				err)
 		}
 
 		raw, err := os.ReadFile(filepath.Join(tmpDir, "root", "dest", "move.md"))
-		if err != nil {
-			t.Fatalf("read moved page: %v", err)
-		}
-		fm, _, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatal("expected frontmatter on moved page")
-		}
-		if fm.LeafWikiLastAuthorID != "alice" {
-			t.Fatalf("expected moved page last author to persist, got %#v", fm)
-		}
-		if fm.LeafWikiUpdatedAt == "" {
-			t.Fatalf("expected moved page updated timestamp to persist, got %#v", fm)
-		}
+		Expect(err).To(Succeed(), "read moved page: %v",
+
+			err)
+
+		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter on moved page")
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiLastAuthorID", Equal("alice")),
+			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
+		), "expected moved page metadata to persist, got %#v", frontmatter)
 
 		reloaded := NewTreeService(tmpDir)
-		if err := reloaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree after move failed: %v", err)
+		{
+			err := reloaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree after move failed: %v",
+
+				err,
+			)
 		}
+
 		reloadedNode, err := reloaded.FindPageByID(*moveID)
-		if err != nil {
-			t.Fatalf("FindPageByID after reload failed: %v", err)
-		}
-		if reloadedNode.Metadata.LastAuthorID != "alice" {
-			t.Fatalf("expected persisted last author after reload, got %#v", reloadedNode.Metadata)
-		}
-		persistedUpdatedAt, err := time.Parse(time.RFC3339, fm.LeafWikiUpdatedAt)
-		if err != nil {
-			t.Fatalf("parse persisted updated_at failed: %v", err)
-		}
-		if !reloadedNode.Metadata.UpdatedAt.Equal(persistedUpdatedAt) {
-			t.Fatalf("expected reloaded metadata to match persisted frontmatter, fm=%s reloaded=%s (before=%s)", persistedUpdatedAt, reloadedNode.Metadata.UpdatedAt, beforeUpdatedAt)
-		}
+		Expect(err).To(Succeed(), "FindPageByID after reload failed: %v",
+
+			err)
+		Expect(reloadedNode.
+			Metadata.LastAuthorID,
+		).
+			To(Equal(newFixtureUserID("alice")),
+				"expected persisted last author after reload, got %#v",
+
+				reloadedNode.Metadata)
+
+		persistedUpdatedAt, err := time.Parse(time.RFC3339, frontmatter.LeafWikiUpdatedAt)
+		Expect(err).To(Succeed(), "parse persisted updated_at failed: %v",
+
+			err)
+		Expect(reloadedNode.
+			Metadata.UpdatedAt.
+			Equal(persistedUpdatedAt)).To(BeTrue(), "expected reloaded metadata to match persisted frontmatter, frontmatter=%s reloaded=%s (before=%s)",
+
+			persistedUpdatedAt,
+
+			reloadedNode.Metadata.UpdatedAt,
+			beforeUpdatedAt)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_ReturnsErrorAndRollsBackWhenOrderPersistenceFails", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node returns an error and rolls back when order persistence fails", func() {
+		svc, tmpDir := newLoadedService()
 
 		destID, err := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode dest: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode dest: %v",
+
+			err)
+
 		moveID, err := svc.CreateNode("system", nil, "Move", "move", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode move: %v", err)
+		Expect(err).To(Succeed(), "CreateNode move: %v",
+
+			err)
+		{
+
+			err := os.Remove(filepath.Join(tmpDir, "root", ".order.json"))
+			Expect(err).To(Succeed(), "remove root order file: %v",
+
+				err)
 		}
 
-		if err := os.Remove(filepath.Join(tmpDir, "root", ".order.json")); err != nil {
-			t.Fatalf("remove root order file: %v", err)
+		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
+		{
+			err := os.Remove(filepath.Join(tmpDir, "root", "dest", ".order.json"))
+			Expect(err != nil &&
+				!errors.Is(err,
+					os.ErrNotExist,
+				)).To(BeFalse(), "remove dest order file: %v",
+
+				err)
 		}
-		mustMkdir(t, filepath.Join(tmpDir, "root", ".order.json"))
-		if err := os.Remove(filepath.Join(tmpDir, "root", "dest", ".order.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("remove dest order file: %v", err)
-		}
-		mustMkdir(t, filepath.Join(tmpDir, "root", "dest", ".order.json"))
+
+		createTreeDirectory(filepath.Join(tmpDir, "root", "dest", ".order.json"))
 
 		err = svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked)
-		if err == nil {
-			t.Fatal("expected MoveNode to fail when child order persistence fails")
-		}
-		if !errors.Is(err, ErrPersistSourceChildOrder) {
-			t.Fatalf("expected source child order persistence error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected MoveNode to fail when child order persistence fails")
+		Expect(err).To(MatchError(ErrPersistSourceChildOrder), "expected source child order persistence error, got: %v",
 
-		mustStat(t, filepath.Join(tmpDir, "root", "move.md"))
-		if _, statErr := os.Stat(filepath.Join(tmpDir, "root", "dest", "move.md")); !errors.Is(statErr, os.ErrNotExist) {
-			t.Fatalf("expected moved file to be rolled back from destination, stat err = %v", statErr)
+			err)
+
+		statTreePath(filepath.Join(tmpDir, "root", "move.md"))
+		{
+			_, statErr := os.Stat(filepath.Join(tmpDir, "root", "dest", "move.md"))
+			Expect(statErr).To(MatchError(
+				os.ErrNotExist,
+			), "expected moved file to be rolled back from destination, stat err = %v",
+
+				statErr)
 		}
 
 		root := svc.GetTree()
-		if len(root.Children) != 2 {
-			t.Fatalf("expected rollback to restore root children, got %#v", root.Children)
-		}
-		if root.Children[0].ID != *destID || root.Children[1].ID != *moveID {
-			t.Fatalf("unexpected root children after rollback: got [%s %s]", root.Children[0].ID, root.Children[1].ID)
-		}
-		dest := findChildBySlug(t, root, "dest")
-		if len(dest.Children) != 0 {
-			t.Fatalf("expected destination children to be rolled back, got %#v", dest.Children)
-		}
+		Expect(root.Children).To(HaveLen(2),
+			"expected rollback to restore root children, got %#v",
+
+			root.Children)
+		Expect(root.Children[0].ID !=
+			*destID ||
+			root.
+				Children[1].ID !=
+				*moveID,
+		).To(BeFalse(), "unexpected root children after rollback: got [%s %s]",
+
+			root.Children[0].ID, root.Children[1].ID)
+
+		dest := findChildBySlug(root, "dest")
+		Expect(dest.Children).To(HaveLen(0),
+			"expected destination children to be rolled back, got %#v",
+
+			dest.Children)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_PreventsCircularReference", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node prevents circular reference", func() {
+		svc, _ := newLoadedService()
 
 		aID, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 		// create child under A so A becomes section and has child
@@ -1848,307 +2087,334 @@ var _ = ginkgo.Describe("TestTreeService_MoveNode_PreventsCircularReference", fu
 
 		// Try move A under B (A -> ... -> B). Should error with circular reference.
 		err := svc.MoveNode("system", *aID, *bID, pageVersionUnchecked)
-		if err == nil {
-			t.Fatalf("expected error moving node under its descendant")
-		}
-		if !errors.Is(err, ErrMovePageCircularReference) {
-			t.Fatalf("expected ErrMovePageCircularReference, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected error moving node under its descendant")
+		Expect(err).To(MatchError(ErrMovePageCircularReference), "expected ErrMovePageCircularReference, got: %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_PreventsSelfParent", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node prevents self parent", func() {
+		svc, _ := newLoadedService()
 
 		aID, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 
 		err := svc.MoveNode("system", *aID, *aID, pageVersionUnchecked)
-		if err == nil {
-			t.Fatalf("expected error moving node into itself")
-		}
-		if !errors.Is(err, ErrPageCannotBeMovedToItself) {
-			t.Fatalf("expected ErrPageCannotBeMovedToItself, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected error moving node into itself")
+		Expect(err).To(MatchError(ErrPageCannotBeMovedToItself), "expected ErrPageCannotBeMovedToItself, got: %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_RejectsCaseInsensitiveSlugConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node rejects case insensitive slug conflict", func() {
+		svc, _ := newLoadedService()
 
 		parentID, err := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode parent failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode parent failed: %v",
+
+			err)
+
 		moveID, err := svc.CreateNode("system", nil, "Move", "Alpha", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode move failed: %v", err)
-		}
-		if _, err := svc.CreateNode("system", parentID, "Existing", "alpha", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode existing failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode move failed: %v",
+
+			err)
+		{
+
+			_, err := svc.CreateNode("system", parentID, "Existing", "alpha", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode existing failed: %v",
+
+				err,
+			)
 		}
 
 		err = svc.MoveNode("system", *moveID, *parentID, pageVersionUnchecked)
-		if !errors.Is(err, ErrPageAlreadyExists) {
-			t.Fatalf("expected ErrPageAlreadyExists, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrPageAlreadyExists), "expected ErrPageAlreadyExists, got %v",
+
+			err,
+		)
 
 	})
 })
 
 // --- D) SortPages ---
 
-var _ = ginkgo.Describe("TestTreeService_SortPages_ValidOrder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("sort pages valid order", func() {
+		svc, _ := newLoadedService()
 
 		idA, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 		idB, _ := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 		idC, _ := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
 
 		err := svc.SortPages("root", testPageIDs(*idC, *idA, *idB))
-		if err != nil {
-			t.Fatalf("SortPages failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "SortPages failed: %v",
+
+			err)
 
 		root := svc.GetTree()
-		if root.Children[0].ID != *idC || root.Children[1].ID != *idA || root.Children[2].ID != *idB {
-			t.Fatalf("unexpected order after sort")
-		}
-		if root.Children[0].Position != 0 || root.Children[1].Position != 1 || root.Children[2].Position != 2 {
-			t.Fatalf("expected positions to be reindexed")
-		}
+		Expect(root.Children[0].ID !=
+			*idC ||
+			root.
+				Children[1].ID !=
+				*idA || root.
+			Children[2].ID !=
+
+			*idB).To(BeFalse(), "unexpected order after sort")
+		Expect(root.Children[0].Position !=
+			0 ||
+			root.
+				Children[1].Position !=
+				1 ||
+			root.Children[2].
+				Position != 2).To(BeFalse(), "expected positions to be reindexed")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_SortPages_PersistsOrderFileWithoutChangingMetadata", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("sort pages persists order file without changing metadata", func() {
+		svc, tmpDir := newLoadedService()
 
 		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode A: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode A: %v",
+
+			err)
+
 		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode B: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode B: %v",
+
+			err)
+
 		idC, err := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode C: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode C: %v",
+
+			err)
 
 		root := svc.GetTree()
 		before := map[PageID]PageMetadata{}
 		for _, child := range root.Children {
 			before[child.ID] = child.Metadata
 		}
+		{
 
-		if err := svc.SortPages("root", testPageIDs(*idC, *idA, *idB)); err != nil {
-			t.Fatalf("SortPages failed: %v", err)
+			err := svc.SortPages("root", testPageIDs(*idC, *idA, *idB))
+			Expect(err).To(Succeed(), "SortPages failed: %v",
+
+				err)
 		}
 
 		orderPath := filepath.Join(tmpDir, "root", ".order.json")
 		raw, err := os.ReadFile(orderPath)
-		if err != nil {
-			t.Fatalf("read order file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read order file: %v",
+
+			err)
+
 		var persisted struct {
 			OrderedIDs []string `json:"ordered_ids"`
 		}
-		if err := json.Unmarshal(raw, &persisted); err != nil {
-			t.Fatalf("unmarshal order file: %v", err)
+		{
+			err := json.Unmarshal(raw, &persisted)
+			Expect(err).To(Succeed(), "unmarshal order file: %v",
+
+				err)
 		}
-		assertOrderIDs(t, persisted.OrderedIDs, *idC, *idA, *idB)
+
+		Expect(persisted.OrderedIDs).To(matchPersistedPageIDOrder(*idC, *idA, *idB))
 
 		for _, child := range svc.GetTree().Children {
-			if got := child.Metadata; got != before[child.ID] {
-				t.Fatalf("metadata changed during reorder for %q: before=%+v after=%+v", child.ID, before[child.ID], got)
+			{
+				got := child.Metadata
+				Expect(got).To(Equal(before[child.
+					ID],
+				), "metadata changed during reorder for %q: before=%+v after=%+v",
+
+					child.ID, before[child.ID], got)
 			}
+
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_SortPages_RollsBackWhenOrderPersistenceFails", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("sort pages rolls back when order persistence fails", func() {
+		svc, tmpDir := newLoadedService()
 
 		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode A: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode A: %v",
+
+			err)
+
 		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode B: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode B: %v",
+
+			err)
+
 		idC, err := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode C: %v", err)
+		Expect(err).To(Succeed(), "CreateNode C: %v",
+
+			err)
+		{
+
+			err := os.Remove(filepath.Join(tmpDir, "root", ".order.json"))
+			Expect(err).To(Succeed(), "remove root order file: %v",
+
+				err)
 		}
 
-		if err := os.Remove(filepath.Join(tmpDir, "root", ".order.json")); err != nil {
-			t.Fatalf("remove root order file: %v", err)
-		}
-		mustMkdir(t, filepath.Join(tmpDir, "root", ".order.json"))
+		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
 		err = svc.SortPages("root", testPageIDs(*idC, *idA, *idB))
-		if err == nil {
-			t.Fatalf("expected SortPages to fail when order persistence fails")
-		}
-		if !errors.Is(err, ErrPersistChildOrder) {
-			t.Fatalf("expected child order persistence error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected SortPages to fail when order persistence fails")
+		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
+
+			err)
 
 		root := svc.GetTree()
 		got := []PageID{root.Children[0].ID, root.Children[1].ID, root.Children[2].ID}
-		assertPageIDOrder(t, got, *idA, *idB, *idC)
+		Expect(got).To(matchPageIDOrder(*idA, *idB, *idC))
 		for i, child := range root.Children {
-			if child.Position != i {
-				t.Fatalf("expected child %q position rollback to %d, got %d", child.ID, i, child.Position)
-			}
+			Expect(child.Position).To(Equal(i), "expected child %q position rollback to %d, got %d",
+
+				child.
+					ID, i, child.Position)
+
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_SortPages_InvalidLength", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("sort pages invalid length", func() {
+		svc, _ := newLoadedService()
 
 		_, _ = svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 		_, _ = svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 
 		err := svc.SortPages("root", testPageIDs(PageID("only-one")))
-		if err == nil {
-			t.Fatalf("expected error for invalid length")
-		}
-		if !errors.Is(err, ErrInvalidSortOrder) {
-			t.Fatalf("expected ErrInvalidSortOrder, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected error for invalid length")
+		Expect(err).To(MatchError(ErrInvalidSortOrder), "expected ErrInvalidSortOrder, got: %v",
+
+			err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_SortPages_DuplicateID", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("sort pages duplicate ID", func() {
+		svc, _ := newLoadedService()
 
 		idA, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 		idB, _ := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 
 		err := svc.SortPages("root", testPageIDs(*idA, *idA, *idB))
-		if err == nil {
-			t.Fatalf("expected error for duplicate IDs")
-		}
+		Expect(err).To(HaveOccurred(), "expected error for duplicate IDs")
 
 	})
 })
 
 // --- E) Routing, Lookup, Ensure ---
 
-var _ = ginkgo.Describe("TestTreeService_GetPage_SectionWithoutIndex_DoesNotMaterializeIndex", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("get page section without index does not materialize index", func() {
+		svc, tmpDir := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		indexPath := filepath.Join(tmpDir, "root", "docs", "index.md")
-		if err := os.Remove(indexPath); err != nil {
-			t.Fatalf("remove index.md: %v", err)
+		{
+			err := os.Remove(indexPath)
+			Expect(err).To(Succeed(), "remove index.md: %v",
+
+				err)
 		}
 
 		page, err := svc.GetPage(*id)
-		if err != nil {
-			t.Fatalf("GetPage failed: %v", err)
-		}
-		if page.ID != *id {
-			t.Fatalf("expected page ID %q, got %q", id.String(), page.ID)
-		}
-		if page.Content != "" {
-			t.Fatalf("expected empty content for section without index, got %q", page.Content)
-		}
-		if _, err := os.Stat(indexPath); err == nil {
-			t.Fatalf("expected GetPage to avoid materializing index.md")
+		Expect(err).To(Succeed(), "GetPage failed: %v",
+
+			err)
+
+		Expect(page).To(SatisfyAll(
+			HaveField("ID", Equal(*id)),
+			HaveField("Content", BeEmpty()),
+		), "expected empty content for section without index, got %#v", page)
+		{
+
+			_, err := os.Stat(indexPath)
+			Expect(err).To(HaveOccurred(), "expected GetPage to avoid materializing index.md")
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ConvertNode_PageToSection_MaterializesIndexWithNodeMetadata", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("convert node page to section materializes index with node metadata", func() {
+		svc, tmpDir := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "FindPageByID failed: %v",
+
+			err)
+
 		node.Metadata.CreatedAt = time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC)
 		node.Metadata.UpdatedAt = time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC)
 		node.Metadata.CreatorID = "alice"
 		node.Metadata.LastAuthorID = "bob"
+		{
 
-		if err := svc.ConvertNode("carol", *id, NodeKindSection, pageVersionUnchecked); err != nil {
-			t.Fatalf("ConvertNode failed: %v", err)
+			err := svc.ConvertNode("carol", *id, NodeKindSection, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "ConvertNode failed: %v",
+
+				err)
 		}
 
 		indexPath := filepath.Join(tmpDir, "root", "docs", "index.md")
 		raw, err := os.ReadFile(indexPath)
-		if err != nil {
-			t.Fatalf("read converted index: %v", err)
-		}
+		Expect(err).To(Succeed(), "read converted index: %v",
 
-		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after conversion")
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
-			t.Fatalf("unexpected converted frontmatter: %#v", fm)
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" {
-			t.Fatalf("expected created_at to be preserved after conversion, got %#v", fm)
-		}
-		if fm.LeafWikiUpdatedAt == "" {
-			t.Fatalf("expected updated_at after conversion, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "carol" {
-			t.Fatalf("expected metadata to be carried over and updated for actor, got %#v", fm)
-		}
-		if !strings.Contains(body, "# Docs") {
-			t.Fatalf("expected converted body to be preserved, got %q", body)
-		}
+			err)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after conversion")
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", WithTransform(func(raw string) PageID {
+				return newFixturePageID(raw)
+			}, Equal(*id))),
+			HaveField("LeafWikiTitle", Equal("Docs")),
+			HaveField("LeafWikiCreatedAt", Equal("2026-03-22T10:15:30Z")),
+			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
+			HaveField("LeafWikiCreatorID", Equal("alice")),
+			HaveField("LeafWikiLastAuthorID", Equal("carol")),
+		), "expected metadata to be carried over and updated for actor, got %#v", frontmatter)
+		Expect(body).To(ContainSubstring("# Docs"),
+
+			"expected converted body to be preserved, got %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_FindPageByRoutePath_ReturnsContent", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("find page by route path returns content", func() {
+		svc, _ := newLoadedService()
 
 		archID, _ := svc.CreateNode("system", nil, "Architecture", "architecture", ptrKind(NodeKindPage))
 		// create child -> converts arch to section
@@ -2158,659 +2424,695 @@ var _ = ginkgo.Describe("TestTreeService_FindPageByRoutePath_ReturnsContent", fu
 		// Update specs content
 		specsNode := svc.GetTree().Children[0].Children[0].Children[0]
 		body := "# Specs\nHello"
-		if err := svc.UpdateNode(newFixtureUserID("system"), specsNode.ID, "Specs", Slug("specs"), &body, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("UpdateNode content failed: %v", err)
+		{
+			err := svc.UpdateNode(newFixtureUserID("system"), specsNode.ID, "Specs", Slug("specs"), &body, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "UpdateNode content failed: %v",
+
+				err,
+			)
 		}
 
 		page, err := svc.FindPageByRoutePath("architecture/project-a/specs")
-		if err != nil {
-			t.Fatalf("FindPageByRoutePath failed: %v", err)
-		}
-		if page.Slug != "specs" {
-			t.Fatalf("expected slug specs, got %q", page.Slug)
-		}
-		if !strings.Contains(page.Content, "Hello") {
-			t.Fatalf("expected content to include Hello, got: %q", page.Content)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePath failed: %v",
+
+			err,
+		)
+		Expect(page).To(SatisfyAll(
+			HaveField("Slug", Equal(newFixtureSlug("specs"))),
+			HaveField("Content", ContainSubstring("Hello")),
+		), "expected routed page to include specs content, got %#v", page)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_FindPageByRoutePath_ReturnsNotFoundForMissingPath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("find page by route path returns not found for missing path", func() {
+		svc, _ := newLoadedService()
 
 		homeID, err := svc.CreateNode("system", nil, "Home", "home", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode home failed: %v", err)
-		}
-		if _, err := svc.CreateNode("system", homeID, "About", "about", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode about failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode home failed: %v",
+
+			err)
+		{
+
+			_, err := svc.CreateNode("system", homeID, "About", "about", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode about failed: %v",
+
+				err)
 		}
 
 		_, err = svc.FindPageByRoutePath("home/team")
-		if !errors.Is(err, ErrPageNotFound) {
-			t.Fatalf("expected ErrPageNotFound, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrPageNotFound),
+			"expected ErrPageNotFound, got %v",
+
+			err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_FindPageByRoutePath_IsCaseSensitive", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("find page by route path is case sensitive", func() {
+		svc, _ := newLoadedService()
 
 		homeID, err := svc.CreateNode("system", nil, "Home", "Home", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode home failed: %v", err)
-		}
-		if _, err := svc.CreateNode("system", homeID, "About", "About", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode about failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode home failed: %v",
+
+			err)
+		{
+
+			_, err := svc.CreateNode("system", homeID, "About", "About", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode about failed: %v",
+
+				err)
 		}
 
 		_, err = svc.FindPageByRoutePath("home/About")
-		if !errors.Is(err, ErrPageNotFound) {
-			t.Fatalf("expected ErrPageNotFound for case-mismatched route, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrPageNotFound),
+			"expected ErrPageNotFound for case-mismatched route, got %v",
+
+			err)
 
 		page, err := svc.FindPageByRoutePath("Home/About")
-		if err != nil {
-			t.Fatalf("FindPageByRoutePath exact case failed: %v", err)
-		}
-		if page.Slug != "About" {
-			t.Fatalf("expected exact-case route to resolve About, got %q", page.Slug)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePath exact case failed: %v",
+
+			err,
+		)
+		Expect(page.Slug).To(Equal(newFixtureSlug("About")),
+			"expected exact-case route to resolve About, got %q",
+
+			page.Slug)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_FindPageByRoutePathAndKind_DistinguishesSameBasenamePageAndSection", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _, rootDir := newLoadedServiceWithDirs(t)
-		writeTestFile(t, filepath.Join(rootDir, "docs", "index.md"), `---
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("find page by route path and kind distinguishes same basename page and section", func() {
+		svc, _, rootDir := newLoadedServiceWithDirs()
+		writeTreeTestFile(filepath.Join(rootDir, "docs", "index.md"), `---
 leafwiki_id: docs-section
 leafwiki_title: Docs
 ---
 # Docs
 `)
-		writeTestFile(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+		writeTreeTestFile(filepath.Join(rootDir, "docs", "sync.md"), `---
 leafwiki_id: sync-page
 leafwiki_title: Sync Page
 ---
 # Sync Page
 `)
-		writeTestFile(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+		writeTreeTestFile(filepath.Join(rootDir, "docs", "sync", "index.md"), `---
 leafwiki_id: sync-section
 leafwiki_title: Sync Section
 ---
 # Sync Section
 `)
-		writeTestFile(t, filepath.Join(rootDir, "docs", "sync", "child.md"), `---
+		writeTreeTestFile(filepath.Join(rootDir, "docs", "sync", "child.md"), `---
 leafwiki_id: sync-child
 leafwiki_title: Sync Child
 ---
 # Sync Child
 `)
-		if err := svc.ReconstructTreeFromFS(); err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
+		{
+			err := svc.ReconstructTreeFromFS()
+			Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+				err)
 		}
 
 		page, err := svc.FindPageByRoutePathAndKind("docs/sync", NodeKindPage)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind page: %v", err)
-		}
-		if page.ID != "sync-page" {
-			t.Fatalf("page ID = %q, want sync-page", page.ID)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page: %v",
+
+			err)
+		Expect(page.ID).To(Equal(newFixturePageID("sync-page")),
+			"page ID = %q, want sync-page",
+
+			page.ID)
+
 		section, err := svc.FindPageByRoutePathAndKind("docs/sync", NodeKindSection)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind section: %v", err)
-		}
-		if section.ID != "sync-section" {
-			t.Fatalf("section ID = %q, want sync-section", section.ID)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind section: %v",
+
+			err)
+		Expect(section.ID).To(Equal(newFixturePageID("sync-section")),
+			"section ID = %q, want sync-section",
+
+			section.
+				ID)
+
 		child, err := svc.FindPageByRoutePath("docs/sync/child")
-		if err != nil {
-			t.Fatalf("FindPageByRoutePath child: %v", err)
-		}
-		if child.ID != "sync-child" {
-			t.Fatalf("child ID = %q, want sync-child via section path", child.ID)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePath child: %v",
+
+			err,
+		)
+		Expect(child.ID).To(
+			Equal(newFixturePageID("sync-child")), "child ID = %q, want sync-child via section path",
+
+			child.ID)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_FindPageByRoutePath_PrefersSectionForSameBasenameTwin", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("find page by route path prefers section for same basename twin", func() {
+		svc, _ := newLoadedService()
 
-		pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
-		}
+		_, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+		Expect(err).To(Succeed(), "CreateNode page failed: %v",
+
+			err)
+
 		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section twin failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode section twin failed: %v",
+
+			err)
 
 		page, err := svc.FindPageByRoutePath("sync")
-		if err != nil {
-			t.Fatalf("FindPageByRoutePath sync: %v", err)
-		}
-		if page.ID == *pageID {
-			t.Fatalf("FindPageByRoutePath sync resolved page twin %q, want section %q", pageID.String(), sectionID.String())
-		}
-		if page.ID != *sectionID {
-			t.Fatalf("FindPageByRoutePath sync resolved %q, want section %q", page.ID, sectionID.String())
-		}
-		if page.Kind != NodeKindSection {
-			t.Fatalf("FindPageByRoutePath sync kind = %q, want section", page.Kind)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePath sync: %v",
+
+			err)
+
+		Expect(page).To(SatisfyAll(
+			HaveField("ID", Equal(*sectionID)),
+			HaveField("Kind", Equal(NodeKindSection)),
+		), "expected ambiguous route lookup to prefer the section twin, got %#v", page)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LookupPagePath_Segments", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("lookup page path segments", func() {
+		svc, _ := newLoadedService()
 
 		homeID, _ := svc.CreateNode("system", nil, "Home", "home", ptrKind(NodeKindPage))
-		_, _ = svc.CreateNode("system", homeID, "About", "about", ptrKind(NodeKindPage))
+		aboutID, _ := svc.CreateNode("system", homeID, "About", "about", ptrKind(NodeKindPage))
 
 		lookup, err := svc.LookupPagePath("home/about/team")
-		if err != nil {
-			t.Fatalf("LookupPagePath failed: %v", err)
-		}
-		if lookup.Exists {
-			t.Fatalf("expected full path to not exist")
-		}
-		if len(lookup.Segments) != 3 {
-			t.Fatalf("expected 3 segments, got %d", len(lookup.Segments))
-		}
-		if !lookup.Segments[0].Exists || lookup.Segments[0].ID == nil {
-			t.Fatalf("expected home segment to exist with ID")
-		}
-		if !lookup.Segments[1].Exists || lookup.Segments[1].ID == nil {
-			t.Fatalf("expected about segment to exist with ID")
-		}
-		if lookup.Segments[2].Exists || lookup.Segments[2].ID != nil {
-			t.Fatalf("expected team to not exist")
-		}
+		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
+
+			err)
+		Expect(lookup).To(SatisfyAll(
+			HaveField("Exists", BeFalse()),
+			HaveField("Segments", HaveExactElements(
+				matchExistingPathSegment(*homeID),
+				matchExistingPathSegment(*aboutID),
+				matchMissingPathSegment(),
+			)),
+		), "expected lookup to resolve existing ancestors and report the missing leaf, got %#v", lookup)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LookupPagePath_IsCaseInsensitive", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("lookup page path is case insensitive", func() {
+		svc, _ := newLoadedService()
 
 		homeID, err := svc.CreateNode("system", nil, "Home", "Home", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode home failed: %v", err)
-		}
-		if _, err := svc.CreateNode("system", homeID, "About", "About", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode about failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode home failed: %v",
+
+			err)
+		{
+
+			_, err := svc.CreateNode("system", homeID, "About", "About", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode about failed: %v",
+
+				err)
 		}
 
 		lookup, err := svc.LookupPagePath("home/about")
-		if err != nil {
-			t.Fatalf("LookupPagePath failed: %v", err)
-		}
-		if !lookup.Exists {
-			t.Fatalf("expected case-insensitive path lookup to resolve existing path")
-		}
+		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
+
+			err)
+		Expect(lookup.Exists).To(BeTrue(), "expected case-insensitive path lookup to resolve existing path")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LookupPagePath_PrefersSectionForSameBasenameTwin", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("lookup page path prefers section for same basename twin", func() {
+		svc, _ := newLoadedService()
 
 		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
-		if _, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode page twin failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode section failed: %v",
+
+			err,
+		)
+		{
+
+			_, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode page twin failed: %v",
+
+				err,
+			)
 		}
 
 		lookup, err := svc.LookupPagePath("sync")
-		if err != nil {
-			t.Fatalf("LookupPagePath failed: %v", err)
-		}
-		if !lookup.Exists || len(lookup.Segments) != 1 || lookup.Segments[0].ID == nil {
-			t.Fatalf("lookup = %#v, want existing section segment", lookup)
-		}
-		if *lookup.Segments[0].ID != *sectionID {
-			t.Fatalf("LookupPagePath sync resolved ID %q, want section %q", *lookup.Segments[0].ID, sectionID.String())
-		}
-		if lookup.Segments[0].Kind == nil || *lookup.Segments[0].Kind != NodeKindSection {
-			t.Fatalf("LookupPagePath sync kind = %v, want section", lookup.Segments[0].Kind)
-		}
+		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
+
+			err)
+		Expect(!lookup.Exists ||
+			len(lookup.
+				Segments,
+			) != 1 || lookup.
+			Segments[0].ID == nil,
+		).To(BeFalse(), "lookup = %#v, want existing section segment",
+			lookup)
+
+		Expect(*lookup.Segments[0].ID).To(Equal(*sectionID))
+		Expect(lookup.Segments[0].Kind ==
+			nil ||
+			*lookup.
+				Segments[0].
+				Kind != NodeKindSection,
+		).To(BeFalse(), "LookupPagePath sync kind = %v, want section",
+			lookup.Segments[0].Kind)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LookupPagePath_ReflectsSlugRename", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("lookup page path reflects slug rename", func() {
+		svc, _ := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode docs failed: %v", err)
-		}
-		if _, err := svc.CreateNode("system", id, "Guide", "guide", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode guide failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", Slug("documentation"), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
+			err)
+		{
+
+			_, err := svc.CreateNode("system", id, "Guide", "guide", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode guide failed: %v",
+
+				err)
+		}
+		{
+
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", Slug("documentation"), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "UpdateNode failed: %v",
+
+				err)
 		}
 
 		oldLookup, err := svc.LookupPagePath("docs/guide")
-		if err != nil {
-			t.Fatalf("LookupPagePath old path failed: %v", err)
-		}
-		if oldLookup.Exists {
-			t.Fatalf("expected old path to stop resolving after slug rename")
-		}
+		Expect(err).To(Succeed(), "LookupPagePath old path failed: %v",
+
+			err)
+		Expect(oldLookup.Exists).To(BeFalse(),
+			"expected old path to stop resolving after slug rename",
+		)
 
 		newLookup, err := svc.LookupPagePath("documentation/guide")
-		if err != nil {
-			t.Fatalf("LookupPagePath new path failed: %v", err)
-		}
-		if !newLookup.Exists {
-			t.Fatalf("expected renamed path to resolve")
-		}
+		Expect(err).To(Succeed(), "LookupPagePath new path failed: %v",
+
+			err)
+		Expect(newLookup.Exists).To(BeTrue(),
+			"expected renamed path to resolve",
+		)
 
 		page, err := svc.FindPageByRoutePath("documentation/guide")
-		if err != nil {
-			t.Fatalf("FindPageByRoutePath renamed path failed: %v", err)
-		}
-		if page.Slug != "guide" {
-			t.Fatalf("expected guide page, got %q", page.Slug)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePath renamed path failed: %v",
+
+			err)
+		Expect(page.Slug).To(Equal(newFixtureSlug("guide")),
+			"expected guide page, got %q",
+
+			page.
+				Slug)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LookupPagePath_CanCreateForMissingValidPath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("lookup page path can create for missing valid path", func() {
+		svc, _ := newLoadedService()
 
 		lookup, err := svc.LookupPagePath("docs/guide")
-		if err != nil {
-			t.Fatalf("LookupPagePath failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
-		if !lookup.CanCreate {
-			t.Fatal("expected missing valid path to be creatable")
-		}
+			err)
+		Expect(lookup.CanCreate).To(BeTrue(),
+			"expected missing valid path to be creatable",
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LookupPagePath_CannotCreateReservedMissingPath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("lookup page path cannot create reserved missing path", func() {
+		svc, _ := newLoadedService()
 
 		lookup, err := svc.LookupPagePath("history/guide")
-		if err != nil {
-			t.Fatalf("LookupPagePath failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
-		if lookup.CanCreate {
-			t.Fatal("expected reserved slug path to be non-creatable")
-		}
+			err)
+		Expect(lookup.CanCreate).To(BeFalse(),
+			"expected reserved slug path to be non-creatable",
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ResolvePermalinkTarget_ReflectsRenameAndMove", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("resolve permalink target reflects rename and move", func() {
+		svc, _ := newLoadedService()
 
 		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode docs failed: %v", err)
-		}
-		guideID, err := svc.CreateNode("system", docsID, "Guide", "guide", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode guide failed: %v", err)
-		}
-		archiveID, err := svc.CreateNode("system", nil, "Archive", "archive", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode archive failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
-		if err := svc.UpdateNode(newFixtureUserID("system"), *guideID, "User Guide", Slug("user-guide"), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("UpdateNode guide failed: %v", err)
+			err)
+
+		guideID, err := svc.CreateNode("system", docsID, "Guide", "guide", ptrKind(NodeKindPage))
+		Expect(err).To(Succeed(), "CreateNode guide failed: %v",
+
+			err)
+
+		archiveID, err := svc.CreateNode("system", nil, "Archive", "archive", ptrKind(NodeKindPage))
+		Expect(err).To(Succeed(), "CreateNode archive failed: %v",
+
+			err,
+		)
+		{
+
+			err := svc.UpdateNode(newFixtureUserID("system"), *guideID, "User Guide", Slug("user-guide"), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "UpdateNode guide failed: %v",
+
+				err)
 		}
-		if err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked); err != nil {
-			t.Fatalf("MoveNode guide failed: %v", err)
+		{
+
+			err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "MoveNode guide failed: %v",
+
+				err)
 		}
 
 		target, err := svc.ResolvePermalinkTarget(*guideID)
-		if err != nil {
-			t.Fatalf("ResolvePermalinkTarget failed: %v", err)
-		}
-		if target.ID != *guideID {
-			t.Fatalf("expected permalink target ID %q, got %q", guideID.String(), target.ID)
-		}
-		if target.Slug != "user-guide" {
-			t.Fatalf("expected permalink target slug user-guide, got %q", target.Slug)
-		}
-		if target.Path != "archive/user-guide" {
-			t.Fatalf("expected permalink target path archive/user-guide, got %q", target.Path)
-		}
+		Expect(err).To(Succeed(), "ResolvePermalinkTarget failed: %v",
+
+			err)
+
+		Expect(target).To(SatisfyAll(
+			HaveField("ID", Equal(*guideID)),
+			HaveField("Slug", Equal(newFixtureSlug("user-guide"))),
+			HaveField("Path", Equal("archive/user-guide")),
+		), "expected permalink to resolve the archived guide, got %#v", target)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ResolvePermalinkTarget_ReturnsNotFoundForMissingPage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("resolve permalink target returns not found for missing page", func() {
+		svc, _ := newLoadedService()
 
 		_, err := svc.ResolvePermalinkTarget("missing-page")
-		if !errors.Is(err, ErrPageNotFound) {
-			t.Fatalf("expected ErrPageNotFound, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrPageNotFound),
+			"expected ErrPageNotFound, got %v",
+
+			err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_EnsurePagePath_PersistsOrderFilesForCreatedPath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("ensure page path persists order files for created path", func() {
+		svc, tmpDir := newLoadedService()
 
 		res, err := svc.EnsurePagePath("system", "home/about/team/members", "Members", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("EnsurePagePath failed: %v", err)
-		}
-		if res.Page == nil || res.Page.Slug != "members" {
-			t.Fatalf("expected final page 'members'")
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath failed: %v",
 
-		rootOrder := readOrderIDs(t, filepath.Join(tmpDir, "root"))
-		if len(rootOrder) != 1 || newFixturePageID(rootOrder[0]) != res.Created[0].ID {
-			t.Fatalf("unexpected root order after EnsurePagePath: %v", rootOrder)
-		}
+			err)
+		Expect(res.Page == nil ||
+			res.
+				Page.Slug !=
+				"members").To(BeFalse(), "expected final page 'members'")
 
-		homeOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "home"))
-		if len(homeOrder) != 1 || newFixturePageID(homeOrder[0]) != res.Created[1].ID {
-			t.Fatalf("unexpected home order after EnsurePagePath: %v", homeOrder)
-		}
+		rootOrder := readOrderIDs(filepath.Join(tmpDir, "root"))
+		Expect(len(rootOrder) != 1 ||
+			newFixturePageID(rootOrder[0]) !=
+				res.Created[0].ID).
+			To(BeFalse(), "unexpected root order after EnsurePagePath: %v",
+				rootOrder)
 
-		aboutOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "home", "about"))
-		if len(aboutOrder) != 1 || newFixturePageID(aboutOrder[0]) != res.Created[2].ID {
-			t.Fatalf("unexpected about order after EnsurePagePath: %v", aboutOrder)
-		}
+		homeOrder := readOrderIDs(filepath.Join(tmpDir, "root", "home"))
+		Expect(len(homeOrder) != 1 ||
+			newFixturePageID(homeOrder[0]) !=
+				res.Created[1].ID).
+			To(BeFalse(), "unexpected home order after EnsurePagePath: %v",
+				homeOrder)
 
-		teamOrder := readOrderIDs(t, filepath.Join(tmpDir, "root", "home", "about", "team"))
-		if len(teamOrder) != 1 || newFixturePageID(teamOrder[0]) != res.Created[3].ID {
-			t.Fatalf("unexpected team order after EnsurePagePath: %v", teamOrder)
-		}
+		aboutOrder := readOrderIDs(filepath.Join(tmpDir, "root", "home", "about"))
+		Expect(len(aboutOrder) != 1 ||
+			newFixturePageID(aboutOrder[0]) != res.Created[2].ID,
+		).To(BeFalse(), "unexpected about order after EnsurePagePath: %v",
+			aboutOrder)
+
+		teamOrder := readOrderIDs(filepath.Join(tmpDir, "root", "home", "about", "team"))
+		Expect(len(teamOrder) != 1 ||
+			newFixturePageID(teamOrder[0]) !=
+				res.Created[3].ID).
+			To(BeFalse(), "unexpected team order after EnsurePagePath: %v",
+				teamOrder)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_EnsurePagePath_CreatesIntermediateSectionsAndFinalPage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("ensure page path creates intermediate sections and final page", func() {
+		svc, _ := newLoadedService()
 
 		// Ensure a deep path; intermediate nodes should become sections
 		res, err := svc.EnsurePagePath("system", "home/about/team/members", "Members", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("EnsurePagePath failed: %v", err)
-		}
-		if res.Page == nil || res.Page.Slug != "members" {
-			t.Fatalf("expected final page 'members'")
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath failed: %v",
+
+			err)
+		Expect(res.Page == nil ||
+			res.
+				Page.Slug !=
+				"members").To(BeFalse(), "expected final page 'members'")
 
 		// home/about/team should exist as path now
 		lookup, err := svc.LookupPagePath("home/about/team/members")
-		if err != nil {
-			t.Fatalf("LookupPagePath failed: %v", err)
-		}
-		if !lookup.Exists {
-			t.Fatalf("expected path to exist after EnsurePagePath")
-		}
+		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
+
+			err)
+		Expect(lookup.Exists).To(BeTrue(), "expected path to exist after EnsurePagePath")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_EnsurePagePath_ReturnsExistingPageWithoutCreatingNodes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("ensure page path returns existing page without creating nodes", func() {
+		svc, _ := newLoadedService()
 
 		res, err := svc.EnsurePagePath("system", "home/about/team/members", "Members", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("EnsurePagePath initial create failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath initial create failed: %v",
+
+			err,
+		)
 
 		existing, err := svc.EnsurePagePath("system", "home/about/team/members", "Ignored", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("EnsurePagePath existing failed: %v", err)
-		}
-		if !existing.Exists {
-			t.Fatalf("expected existing path lookup to report Exists")
-		}
-		if existing.Page == nil || existing.Page.ID != res.Page.ID {
-			t.Fatalf("expected EnsurePagePath to return the existing page")
-		}
-		if len(existing.Created) != 0 {
-			t.Fatalf("expected no nodes to be created for an existing path, got %d", len(existing.Created))
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath existing failed: %v",
+
+			err)
+		Expect(existing).To(SatisfyAll(
+			HaveField("Exists", BeTrue()),
+			HaveField("Page", matchTreeNodePointer(NodeKindPage, Equal(res.Page.ID))),
+			HaveField("Created", BeEmpty()),
+		), "expected EnsurePagePath to return the existing page without creating nodes, got %#v", existing)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_EnsurePagePath_CreatesPageTwinWhenSectionRouteExists", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("ensure page path creates page twin when section route exists", func() {
+		svc, _ := newLoadedService()
 
 		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode section failed: %v",
+
+			err,
+		)
 
 		res, err := svc.EnsurePagePath("system", "sync", "Sync Page", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("EnsurePagePath page twin failed: %v", err)
-		}
-		if res.Page == nil {
-			t.Fatal("EnsurePagePath returned nil page")
-		}
-		if res.Page.ID == *sectionID {
-			t.Fatalf("EnsurePagePath returned existing section %q instead of creating page twin", sectionID.String())
-		}
-		if res.Page.Kind != NodeKindPage {
-			t.Fatalf("ensured node kind = %q, want page", res.Page.Kind)
-		}
-		if len(res.Created) != 1 || res.Created[0].Kind != NodeKindPage {
-			t.Fatalf("created nodes = %#v, want one page twin", res.Created)
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath page twin failed: %v",
+
+			err)
+		Expect(res).To(SatisfyAll(
+			HaveField("Page", matchTreeNodePointer(NodeKindPage, Not(Equal(*sectionID)))),
+			HaveField("Created", HaveExactElements(
+				matchTreeNodePointer(NodeKindPage, Not(Equal(*sectionID))),
+			)),
+		), "expected EnsurePagePath to create one page twin, got %#v", res)
 
 		section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
-		}
-		if section.ID != *sectionID {
-			t.Fatalf("section route ID = %q, want %q", section.ID, sectionID.String())
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind section failed: %v",
+
+			err)
+
+		Expect(section.ID).To(Equal(*sectionID))
 		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
-		}
-		if page.ID != res.Page.ID {
-			t.Fatalf("page route ID = %q, want %q", page.ID, res.Page.ID)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
+
+			err,
+		)
+		Expect(page.ID).To(Equal(res.Page.
+			ID),
+			"page route ID = %q, want %q",
+
+			page.
+				ID, res.
+				Page.ID,
+		)
 
 		second, err := svc.EnsurePagePath("system", "sync", "Ignored", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("EnsurePagePath existing page twin failed: %v", err)
-		}
-		if !second.Exists {
-			t.Fatalf("expected second ensure to report existing page twin")
-		}
-		if second.Page == nil || second.Page.ID != res.Page.ID {
-			t.Fatalf("second ensure page = %#v, want existing page %q", second.Page, res.Page.ID)
-		}
-		if len(second.Created) != 0 {
-			t.Fatalf("second ensure created %d nodes, want none", len(second.Created))
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath existing page twin failed: %v",
+
+			err)
+		Expect(second).To(SatisfyAll(
+			HaveField("Exists", BeTrue()),
+			HaveField("Page", matchTreeNodePointer(NodeKindPage, Equal(res.Page.ID))),
+			HaveField("Created", BeEmpty()),
+		), "expected second ensure to return the existing page twin, got %#v", second)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_EnsurePagePath_CreatesSectionTwinWhenPageRouteExists", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("ensure page path creates section twin when page route exists", func() {
+		svc, _ := newLoadedService()
 
 		pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode page failed: %v",
+
+			err)
 
 		res, err := svc.EnsurePagePath("system", "sync", "Sync Section", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("EnsurePagePath section twin failed: %v", err)
-		}
-		if res.Page == nil {
-			t.Fatal("EnsurePagePath returned nil page")
-		}
-		if res.Page.ID == *pageID {
-			t.Fatalf("EnsurePagePath returned existing page %q instead of creating section twin", pageID.String())
-		}
-		if res.Page.Kind != NodeKindSection {
-			t.Fatalf("ensured node kind = %q, want section", res.Page.Kind)
-		}
-		if len(res.Created) != 1 || res.Created[0].Kind != NodeKindSection {
-			t.Fatalf("created nodes = %#v, want one section twin", res.Created)
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath section twin failed: %v",
+
+			err)
+		Expect(res).To(SatisfyAll(
+			HaveField("Page", matchTreeNodePointer(NodeKindSection, Not(Equal(*pageID)))),
+			HaveField("Created", HaveExactElements(
+				matchTreeNodePointer(NodeKindSection, Not(Equal(*pageID))),
+			)),
+		), "expected EnsurePagePath to create one section twin, got %#v", res)
 
 		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind page failed: %v", err)
-		}
-		if page.ID != *pageID {
-			t.Fatalf("page route ID = %q, want %q", page.ID, pageID.String())
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
+
+			err,
+		)
+
+		Expect(page.ID).To(Equal(*pageID))
 		section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
-		if err != nil {
-			t.Fatalf("FindPageByRoutePathAndKind section failed: %v", err)
-		}
-		if section.ID != res.Page.ID {
-			t.Fatalf("section route ID = %q, want %q", section.ID, res.Page.ID)
-		}
+		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind section failed: %v",
+
+			err)
+		Expect(section.ID).To(Equal(res.
+			Page.
+			ID), "section route ID = %q, want %q",
+
+			section.
+				ID, res.
+				Page.ID)
 
 		second, err := svc.EnsurePagePath("system", "sync", "Ignored", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("EnsurePagePath existing section twin failed: %v", err)
-		}
-		if !second.Exists {
-			t.Fatalf("expected second ensure to report existing section twin")
-		}
-		if second.Page == nil || second.Page.ID != res.Page.ID {
-			t.Fatalf("second ensure section = %#v, want existing section %q", second.Page, res.Page.ID)
-		}
-		if len(second.Created) != 0 {
-			t.Fatalf("second ensure created %d nodes, want none", len(second.Created))
-		}
+		Expect(err).To(Succeed(), "EnsurePagePath existing section twin failed: %v",
+
+			err)
+		Expect(second).To(SatisfyAll(
+			HaveField("Exists", BeTrue()),
+			HaveField("Page", matchTreeNodePointer(NodeKindSection, Equal(res.Page.ID))),
+			HaveField("Created", BeEmpty()),
+		), "expected second ensure to return the existing section twin, got %#v", second)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_UpdatesPathLookup", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node updates path lookup", func() {
+		svc, _ := newLoadedService()
 
 		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode docs failed: %v", err)
-		}
-		archiveID, err := svc.CreateNode("system", nil, "Archive", "archive", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode archive failed: %v", err)
-		}
-		guideID, err := svc.CreateNode("system", docsID, "Guide", "guide", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode guide failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
-		if err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked); err != nil {
-			t.Fatalf("MoveNode failed: %v", err)
+			err)
+
+		archiveID, err := svc.CreateNode("system", nil, "Archive", "archive", ptrKind(NodeKindSection))
+		Expect(err).To(Succeed(), "CreateNode archive failed: %v",
+
+			err,
+		)
+
+		guideID, err := svc.CreateNode("system", docsID, "Guide", "guide", ptrKind(NodeKindPage))
+		Expect(err).To(Succeed(), "CreateNode guide failed: %v",
+
+			err)
+		{
+
+			err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked)
+			Expect(err).To(Succeed(), "MoveNode failed: %v",
+
+				err)
 		}
 
 		oldLookup, err := svc.LookupPagePath("docs/guide")
-		if err != nil {
-			t.Fatalf("LookupPagePath old path failed: %v", err)
-		}
-		if oldLookup.Exists {
-			t.Fatalf("expected old path to stop resolving after move")
-		}
+		Expect(err).To(Succeed(), "LookupPagePath old path failed: %v",
+
+			err)
+		Expect(oldLookup.Exists).To(BeFalse(),
+			"expected old path to stop resolving after move",
+		)
 
 		newLookup, err := svc.LookupPagePath("archive/guide")
-		if err != nil {
-			t.Fatalf("LookupPagePath new path failed: %v", err)
-		}
-		if !newLookup.Exists {
-			t.Fatalf("expected moved path to resolve at destination")
-		}
+		Expect(err).To(Succeed(), "LookupPagePath new path failed: %v",
+
+			err)
+		Expect(newLookup.Exists).To(BeTrue(),
+			"expected moved path to resolve at destination",
+		)
 
 	})
 })
 
 // --- F) Migration V3 (metadata frontmatter backfill) ---
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV5_BackfillsChildOrderFiles", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V5 backfills child order files", func() {
 		if CurrentSchemaVersion < 5 {
-			t.Skip("requires schema v5+")
+			ginkgo.Skip("requires schema v5+")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode docs failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
+
+			err)
+
 		alphaID, err := svc.CreateNode("system", nil, "Alpha", "alpha", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode alpha failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode alpha failed: %v",
+
+			err)
+
 		betaID, err := svc.CreateNode("system", docsID, "Beta", "beta", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode beta failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode beta failed: %v",
+
+			err)
 
 		root := svc.GetTree()
 		root.Children = []*PageNode{root.Children[1], root.Children[0]}
@@ -2819,65 +3121,95 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV5_BackfillsChildOrd
 		}
 
 		docsNode, err := svc.FindPageByID(*docsID)
-		if err != nil {
-			t.Fatalf("FindPageByID docs failed: %v", err)
+		Expect(err).To(Succeed(), "FindPageByID docs failed: %v",
+
+			err)
+		Expect(len(docsNode.
+			Children) !=
+			1 ||
+			docsNode.
+				Children[0].ID !=
+				*betaID,
+		).To(BeFalse(), "expected docs child beta before migration")
+		{
+
+			err := os.Remove(filepath.Join(tmpDir, "root", ".order.json"))
+			Expect(err != nil &&
+				!errors.Is(err,
+					os.ErrNotExist,
+				)).To(BeFalse(), "remove root order file: %v",
+
+				err)
 		}
-		if len(docsNode.Children) != 1 || docsNode.Children[0].ID != *betaID {
-			t.Fatalf("expected docs child beta before migration")
+		{
+
+			err := os.Remove(filepath.Join(tmpDir, "root", "docs", ".order.json"))
+			Expect(err != nil &&
+				!errors.Is(err,
+					os.ErrNotExist,
+				)).To(BeFalse(), "remove docs order file: %v",
+
+				err)
 		}
 
-		if err := os.Remove(filepath.Join(tmpDir, "root", ".order.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("remove root order file: %v", err)
-		}
-		if err := os.Remove(filepath.Join(tmpDir, "root", "docs", ".order.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("remove docs order file: %v", err)
-		}
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
+		{
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+			err := saveSchema(tmpDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
 
-		if err := saveSchema(tmpDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree (migrating) failed: %v",
+
+				err,
+			)
 		}
 
-		assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root")), *alphaID, *docsID)
+		Expect(readOrderIDs(filepath.Join(tmpDir, "root"))).To(matchPersistedPageIDOrder(*alphaID, *docsID))
 
-		assertOrderIDs(t, readOrderIDs(t, filepath.Join(tmpDir, "root", "docs")), *betaID)
+		Expect(readOrderIDs(filepath.Join(tmpDir, "root", "docs"))).To(matchPersistedPageIDOrder(*betaID))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV4_MaterializesMissingSectionIndex", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V4 materializes missing section index", func() {
 		if CurrentSchemaVersion < 4 {
-			t.Skip("requires schema v4+")
+			ginkgo.Skip("requires schema v4+")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, 3); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, 3)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "FindPageByID failed: %v",
+
+			err)
+
 		node.Metadata = PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
@@ -2885,75 +3217,106 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV4_MaterializesMissi
 			LastAuthorID: "bob",
 		}
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		indexPath := filepath.Join(tmpDir, "root", "docs", "index.md")
-		if err := os.Remove(indexPath); err != nil {
-			t.Fatalf("remove section index failed: %v", err)
-		}
+		{
+			err := os.Remove(indexPath)
+			Expect(err).To(Succeed(), "remove section index failed: %v",
 
-		if err := saveSchema(tmpDir, 3); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err,
+			)
+		}
+		{
+
+			err := saveSchema(tmpDir, 3)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree (migrating) failed: %v",
+
+				err,
+			)
 		}
 
 		raw, err := os.ReadFile(indexPath)
-		if err != nil {
-			t.Fatalf("read migrated section index: %v", err)
-		}
-		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration")
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id || fm.LeafWikiTitle != "Docs" {
-			t.Fatalf("expected section frontmatter to be materialized, got %#v", fm)
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-22T11:16:31Z" {
-			t.Fatalf("expected timestamps to be materialized, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "bob" {
-			t.Fatalf("expected author metadata to be materialized, got %#v", fm)
-		}
-		if strings.TrimSpace(body) != "" {
-			t.Fatalf("expected empty section body after migration, got %q", body)
-		}
+		Expect(err).To(Succeed(), "read migrated section index: %v",
+
+			err,
+		)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+		Expect(newFixturePageID(frontmatter.
+			LeafWikiID,
+		) != *id || frontmatter.
+			LeafWikiTitle !=
+			"Docs",
+		).To(BeFalse(), "expected section frontmatter to be materialized, got %#v",
+			frontmatter)
+		Expect(frontmatter.LeafWikiCreatedAt !=
+			"2026-03-22T10:15:30Z" ||
+			frontmatter.
+				LeafWikiUpdatedAt !=
+				"2026-03-22T11:16:31Z").To(BeFalse(), "expected timestamps to be materialized, got %#v",
+			frontmatter,
+		)
+		Expect(frontmatter.LeafWikiCreatorID !=
+			"alice" ||
+			frontmatter.
+				LeafWikiLastAuthorID !=
+				"bob",
+		).To(BeFalse(), "expected author metadata to be materialized, got %#v",
+			frontmatter)
+		Expect(strings.TrimSpace(body)).To(BeEmpty(),
+
+			"expected empty section body after migration, got %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_ResumesInterruptedMigrationWithPersistedLegacySnapshot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree resumes interrupted migration with persisted legacy snapshot", func() {
 		if CurrentSchemaVersion < 3 {
-			t.Skip("requires schema v3+")
+			ginkgo.Skip("requires schema v3+")
 		}
 
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "FindPageByID failed: %v",
+
+			err)
+
 		root := svc.GetTree()
 		// Build a legacy snapshot with metadata stripped, without mutating the live tree.
 		legacySnapshot := &PageNode{
@@ -2969,26 +3332,39 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_ResumesInterruptedMigrationWit
 				Position: node.Position,
 			}},
 		}
-		persistLegacyTreeSnapshot(t, tmpDir, legacySnapshot)
+		persistLegacyTreeSnapshot(tmpDir, legacySnapshot)
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		legacyBody := "# Page 1 Content\nHello World\n"
-		if err := os.WriteFile(pagePath, []byte(legacyBody), 0o644); err != nil {
-			t.Fatalf("write legacy content failed: %v", err)
+		{
+			err := os.WriteFile(pagePath, []byte(legacyBody), 0o644)
+			Expect(err).To(Succeed(), "write legacy content failed: %v",
+
+				err,
+			)
 		}
+
 		originalModTime := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
-		if err := os.Chtimes(pagePath, originalModTime, originalModTime); err != nil {
-			t.Fatalf("Chtimes failed: %v", err)
+		{
+			err := os.Chtimes(pagePath, originalModTime, originalModTime)
+			Expect(err).To(Succeed(), "Chtimes failed: %v",
+
+				err)
 		}
-		if err := saveSchema(tmpDir, 0); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+		{
+
+			err := saveSchema(tmpDir, 0)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		interrupted := NewTreeService(tmpDir)
 		legacyTree, err := interrupted.store.LoadTree(legacyTreeFilename)
-		if err != nil {
-			t.Fatalf("LoadTree legacy snapshot failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "LoadTree legacy snapshot failed: %v",
+
+			err)
+
 		interrupted.tree = legacyTree
 
 		deps := interrupted.migrationDependencies()
@@ -3004,60 +3380,74 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_ResumesInterruptedMigrationWit
 		}
 
 		err = treemigration.Run(0, deps)
-		if !errors.Is(err, stopErr) {
-			t.Fatalf("expected interrupted migration error, got %v", err)
-		}
+		Expect(err).To(MatchError(stopErr), "expected interrupted migration error, got %v",
+
+			err)
 
 		reloaded := NewTreeService(tmpDir)
-		if err := reloaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree after interrupted migration failed: %v", err)
+		{
+			err := reloaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree after interrupted migration failed: %v",
+
+				err)
 		}
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read resumed migration file: %v", err)
-		}
-		fm, _, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after resumed migration")
-		}
-		if fm.LeafWikiCreatedAt != originalModTime.Format(time.RFC3339) || fm.LeafWikiUpdatedAt != originalModTime.Format(time.RFC3339) {
-			t.Fatalf("expected resumed migration to preserve v1 metadata via persisted legacy snapshot, got %#v", fm)
-		}
+		Expect(err).To(Succeed(), "read resumed migration file: %v",
+
+			err,
+		)
+
+		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after resumed migration")
+		Expect(frontmatter.LeafWikiCreatedAt !=
+			originalModTime.
+				Format(time.RFC3339) || frontmatter.
+			LeafWikiUpdatedAt != originalModTime.Format(time.
+			RFC3339)).To(BeFalse(), "expected resumed migration to preserve v1 metadata via persisted legacy snapshot, got %#v",
+
+			frontmatter,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV3_BackfillsMetadataFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V3 backfills metadata frontmatter", func() {
 		if CurrentSchemaVersion < 3 {
-			t.Skip("requires schema v3+")
+			ginkgo.Skip("requires schema v3+")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, 2); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, 2)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "FindPageByID failed: %v",
+
+			err)
+
 		node.Metadata = PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 21, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 21, 11, 16, 31, 0, time.UTC),
@@ -3065,143 +3455,189 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV3_BackfillsMetadata
 			LastAuthorID: "bob",
 		}
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		legacyContent := fmt.Sprintf("---\nleafwiki_id: %s\nleafwiki_title: Page1\n---\n# Page 1 Content\nHello World\n", *id)
-		if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
-			t.Fatalf("write legacy content failed: %v", err)
-		}
+		{
+			err := os.WriteFile(pagePath, []byte(legacyContent), 0o644)
+			Expect(err).To(Succeed(), "write legacy content failed: %v",
 
-		if err := saveSchema(tmpDir, 2); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err,
+			)
+		}
+		{
+
+			err := saveSchema(tmpDir, 2)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree (migrating) failed: %v",
+
+				err,
+			)
 		}
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read migrated file: %v",
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration")
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-21T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-21T11:16:31Z" {
-			t.Fatalf("expected metadata timestamps to be backfilled, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "bob" {
-			t.Fatalf("expected metadata authors to be backfilled, got %#v", fm)
-		}
+			err)
+
+		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+		Expect(frontmatter.LeafWikiCreatedAt !=
+			"2026-03-21T10:15:30Z" ||
+			frontmatter.
+				LeafWikiUpdatedAt !=
+				"2026-03-21T11:16:31Z").To(BeFalse(), "expected metadata timestamps to be backfilled, got %#v",
+
+			frontmatter)
+		Expect(frontmatter.LeafWikiCreatorID !=
+			"alice" ||
+			frontmatter.
+				LeafWikiLastAuthorID !=
+				"bob",
+		).To(BeFalse(), "expected metadata authors to be backfilled, got %#v",
+			frontmatter)
+
 		wantBody := "# Page 1 Content\nHello World\n"
-		if migratedBody != wantBody {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, wantBody)
-		}
+		Expect(migratedBody).
+			To(Equal(
+				wantBody,
+			), "expected body preserved exactly.\nGot:\n%q\nWant:\n%q",
+
+				migratedBody, wantBody)
 
 	})
 })
 
 // --- F) Migration V2 (frontmatter backfill) ---
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV2_AddsFrontmatterAndPreservesBody", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V2 adds frontmatter and preserves body", func() {
 		if CurrentSchemaVersion < 2 {
-			t.Skip("requires schema v2+")
+			ginkgo.Skip("requires schema v2+")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		// start on v1 (or generally: current-1)
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			// start on v1 (or generally: current-1)
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		// IMPORTANT: persist tree so the next service instance sees the node
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		// overwrite file without FM
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		body := "# Page 1 Content\nHello World\n"
-		if err := os.WriteFile(pagePath, []byte(body), 0o644); err != nil {
-			t.Fatalf("write old content failed: %v", err)
-		}
+		{
+			err := os.WriteFile(pagePath, []byte(body), 0o644)
+			Expect(err).To(Succeed(), "write old content failed: %v",
 
-		// force schema old again
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err)
+		}
+		{
+
+			// force schema old again
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree (migrating) failed: %v",
+
+				err,
+			)
 		}
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read migrated file: %v",
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration, got:\n%s", string(raw))
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if strings.TrimSpace(fm.LeafWikiTitle) == "" {
-			t.Fatalf("expected leafwiki_title to be set")
-		}
-		if migratedBody != body {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, body)
-		}
+			err)
+
+		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after migration, got:\n%s",
+
+			string(
+				raw))
+
+		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(strings.TrimSpace(frontmatter.
+			LeafWikiTitle,
+		)).NotTo(BeEmpty(),
+
+			"expected leafwiki_title to be set")
+		Expect(migratedBody).
+			To(Equal(
+				body),
+				"expected body preserved exactly.\nGot:\n%q\nWant:\n%q",
+
+				migratedBody, body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV2_PreservesExistingCustomFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V2 preserves existing custom frontmatter", func() {
 		if CurrentSchemaVersion < 2 {
-			t.Skip("requires schema v2+")
+			ginkgo.Skip("requires schema v2+")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+			err)
+
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		legacyContent := `---
@@ -3212,82 +3648,108 @@ tags:
 # Page 1 Content
 Hello World
 `
-		if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
-			t.Fatalf("write legacy content failed: %v", err)
-		}
+		{
+			err := os.WriteFile(pagePath, []byte(legacyContent), 0o644)
+			Expect(err).To(Succeed(), "write legacy content failed: %v",
 
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err,
+			)
+		}
+		{
+
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree (migrating) failed: %v",
+
+				err,
+			)
 		}
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read migrated file: %v",
+
+			err)
 
 		migrated := string(raw)
-		if !strings.Contains(migrated, "custom_key: keep-me") {
-			t.Fatalf(`expected custom frontmatter to be preserved, got:
-%s`, migrated)
-		}
-		if !strings.Contains(migrated, "- alpha") {
-			t.Fatalf(`expected list frontmatter to be preserved, got:
-%s`, migrated)
-		}
+		Expect(migrated).To(ContainSubstring("custom_key: keep-me"),
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf(`expected frontmatter after migration, got:
-%s`, migrated)
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if strings.TrimSpace(fm.LeafWikiTitle) == "" {
-			t.Fatalf("expected leafwiki_title to be set")
-		}
+			`expected custom frontmatter to be preserved, got:
+%s`,
+
+			migrated)
+		Expect(migrated).To(ContainSubstring("- alpha"),
+
+			`expected list frontmatter to be preserved, got:
+%s`,
+
+			migrated)
+
+		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), `expected frontmatter after migration, got:
+%s`,
+
+			migrated,
+		)
+
+		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(strings.TrimSpace(frontmatter.
+			LeafWikiTitle,
+		)).NotTo(BeEmpty(),
+
+			"expected leafwiki_title to be set")
+
 		wantBody := `# Page 1 Content
 Hello World
 `
-		if migratedBody != wantBody {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, wantBody)
-		}
+		Expect(migratedBody).
+			To(Equal(
+				wantBody,
+			), "expected body preserved exactly.\nGot:\n%q\nWant:\n%q",
+
+				migratedBody, wantBody)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV2_PreservesExistingLeafWikiTitle", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V2 preserves existing LeafWiki title", func() {
 		if CurrentSchemaVersion < 2 {
-			t.Skip("requires schema v2+")
+			ginkgo.Skip("requires schema v2+")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Tree Title", "page1", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+			err)
+
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		legacyContent := `---
@@ -3296,71 +3758,92 @@ leafwiki_title: Existing Title
 # Page 1 Content
 Hello World
 `
-		if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
-			t.Fatalf("write legacy content failed: %v", err)
-		}
+		{
+			err := os.WriteFile(pagePath, []byte(legacyContent), 0o644)
+			Expect(err).To(Succeed(), "write legacy content failed: %v",
 
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err,
+			)
+		}
+		{
+
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree (migrating) failed: %v",
+
+				err,
+			)
 		}
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read migrated file: %v",
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration")
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "Existing Title" {
-			t.Fatalf("expected existing leafwiki_title to be preserved, got %q", fm.LeafWikiTitle)
-		}
+			err)
+
+		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+
+		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(frontmatter.LeafWikiTitle).To(
+			Equal(
+				"Existing Title"),
+			"expected existing leafwiki_title to be preserved, got %q",
+
+			frontmatter.LeafWikiTitle,
+		)
+
 		wantBody := `# Page 1 Content
 Hello World
 `
-		if migratedBody != wantBody {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, wantBody)
-		}
+		Expect(migratedBody).
+			To(Equal(
+				wantBody,
+			), "expected body preserved exactly.\nGot:\n%q\nWant:\n%q",
+
+				migratedBody, wantBody)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV2_PreservesTitleAlias", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V2 preserves title alias", func() {
 		if CurrentSchemaVersion < 2 {
-			t.Skip("requires schema v2+")
+			ginkgo.Skip("requires schema v2+")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Tree Title", "page1", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+			err)
+
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		pagePath := filepath.Join(tmpDir, "root", "page1.md")
 		legacyContent := `---
@@ -3370,114 +3853,133 @@ custom_key: keep-me
 # Page 1 Content
 Hello World
 `
-		if err := os.WriteFile(pagePath, []byte(legacyContent), 0o644); err != nil {
-			t.Fatalf("write legacy content failed: %v", err)
-		}
+		{
+			err := os.WriteFile(pagePath, []byte(legacyContent), 0o644)
+			Expect(err).To(Succeed(), "write legacy content failed: %v",
 
-		if err := saveSchema(tmpDir, 1); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err,
+			)
+		}
+		{
+
+			err := saveSchema(tmpDir, 1)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
-		if err := loaded.LoadTree(); err != nil {
-			t.Fatalf("LoadTree (migrating) failed: %v", err)
+		{
+			err := loaded.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree (migrating) failed: %v",
+
+				err,
+			)
 		}
 
 		raw, err := os.ReadFile(pagePath)
-		if err != nil {
-			t.Fatalf("read migrated file: %v", err)
-		}
+		Expect(err).To(Succeed(), "read migrated file: %v",
+
+			err)
 
 		migrated := string(raw)
-		if !strings.Contains(migrated, "title: Alias Title") {
-			t.Fatalf(`expected title alias to be preserved, got:
-%s`, migrated)
-		}
-		if !strings.Contains(migrated, "custom_key: keep-me") {
-			t.Fatalf(`expected custom frontmatter to be preserved, got:
-%s`, migrated)
-		}
+		Expect(migrated).To(ContainSubstring("title: Alias Title"),
 
-		fm, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after migration")
-		}
-		if newFixturePageID(fm.LeafWikiID) != *id {
-			t.Fatalf("expected leafwiki_id=%q, got %q", id.String(), fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "Alias Title" {
-			t.Fatalf("expected title alias to remain effective, got %q", fm.LeafWikiTitle)
-		}
+			`expected title alias to be preserved, got:
+%s`,
+
+			migrated)
+		Expect(migrated).To(ContainSubstring("custom_key: keep-me"),
+
+			`expected custom frontmatter to be preserved, got:
+%s`,
+
+			migrated)
+
+		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+
+		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(frontmatter.LeafWikiTitle).To(
+			Equal(
+				"Alias Title"), "expected title alias to remain effective, got %q",
+
+			frontmatter.LeafWikiTitle)
+
 		wantBody := `# Page 1 Content
 Hello World
 `
-		if migratedBody != wantBody {
-			t.Fatalf("expected body preserved exactly.\nGot:\n%q\nWant:\n%q", migratedBody, wantBody)
-		}
+		Expect(migratedBody).
+			To(Equal(
+				wantBody,
+			), "expected body preserved exactly.\nGot:\n%q\nWant:\n%q",
+
+				migratedBody, wantBody)
 
 	})
 })
 
 // TestTreeService_ReconstructTreeFromFS_UpdatesSchemaVersion verifies that
 // ReconstructTreeFromFS writes the current schema version to prevent unnecessary migrations
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_UpdatesSchemaVersion", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem updates schema version", func() {
+		tmpDir := tempTreeDir()
 
 		// Create a minimal file structure for reconstruction
-		mustMkdir(t, filepath.Join(tmpDir, "root"))
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "test.md"), "# Test Page", 0o644)
+		createTreeDirectory(filepath.Join(tmpDir, "root"))
+		writeTreeFile(filepath.Join(tmpDir, "root", "test.md"), "# Test Page", 0o644)
 
 		// Create service WITHOUT schema.json (simulating an old/missing schema)
 		svc := NewTreeService(tmpDir)
+		{
 
-		// Reconstruct the tree (no prior tree loaded)
-		if err := svc.ReconstructTreeFromFS(); err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
+			// Reconstruct the tree (no prior tree loaded)
+			err := svc.ReconstructTreeFromFS()
+			Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+				err)
 		}
 
 		// Verify schema.json was created with current version
 		schema, err := loadSchema(tmpDir)
-		if err != nil {
-			t.Fatalf("loadSchema failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "loadSchema failed: %v",
 
-		if schema.Version != CurrentSchemaVersion {
-			t.Errorf("expected schema version %d after reconstruction, got %d", CurrentSchemaVersion, schema.Version)
-		}
+			err)
+		Expect(schema.Version).To(Equal(CurrentSchemaVersion), "expected schema version %d after reconstruction, got %d",
+
+			CurrentSchemaVersion, schema.
+				Version)
 
 		// Startup reconstruction should no longer create a tree.json snapshot.
-		mustNotExist(t, filepath.Join(tmpDir, "tree.json"))
+		Expect(filepath.Join(tmpDir, "tree.json")).To(beMissingTreePath())
 
 	})
 })
 
 // --- G) ReconstructTreeFromFS ---
 
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_BackfillsMetadata", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem backfills metadata", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Create some files on disk manually (simulating external changes)
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "page1.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "page1.md"), `---
 leafwiki_id: page-1
 leafwiki_title: Page One
 ---
 # Page One`, 0o644)
 
-		mustMkdir(t, filepath.Join(tmpDir, "root", "section1"))
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "section1", "index.md"), `---
+		createTreeDirectory(filepath.Join(tmpDir, "root", "section1"))
+		writeTreeFile(filepath.Join(tmpDir, "root", "section1", "index.md"), `---
 leafwiki_id: sec-1
 leafwiki_title: Section One
 ---
 # Section One`, 0o644)
 
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "section1", "page2.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "section1", "page2.md"), `---
 leafwiki_id: page-2
 leafwiki_title: Page Two
 ---
@@ -3485,58 +3987,59 @@ leafwiki_title: Page Two
 
 		// Reconstruct the tree from filesystem
 		err := svc.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+			err)
 
 		// Verify metadata was backfilled for all nodes
 		tree := svc.GetTree()
+		Expect(tree.Metadata.
+			CreatedAt.
+			IsZero()).To(BeFalse(), "expected root metadata CreatedAt to be backfilled, got zero")
+		Expect(tree.Metadata.
+			UpdatedAt.
+			IsZero()).To(BeFalse(), "expected root metadata UpdatedAt to be backfilled, got zero")
 
 		// Check root metadata
-		if tree.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected root metadata CreatedAt to be backfilled, got zero")
-		}
-		if tree.Metadata.UpdatedAt.IsZero() {
-			t.Fatalf("expected root metadata UpdatedAt to be backfilled, got zero")
-		}
 
 		// Find and verify page1
-		page1 := findChildBySlug(t, tree, "page1")
-		if page1.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected page1 metadata CreatedAt to be backfilled, got zero")
-		}
-		if page1.Metadata.UpdatedAt.IsZero() {
-			t.Fatalf("expected page1 metadata UpdatedAt to be backfilled, got zero")
-		}
+		page1 := findChildBySlug(tree, "page1")
+		Expect(page1.Metadata.
+			CreatedAt.
+			IsZero()).To(BeFalse(), "expected page1 metadata CreatedAt to be backfilled, got zero")
+		Expect(page1.Metadata.
+			UpdatedAt.
+			IsZero()).To(BeFalse(), "expected page1 metadata UpdatedAt to be backfilled, got zero")
 
 		// Find and verify section1
-		section1 := findChildBySlug(t, tree, "section1")
-		if section1.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected section1 metadata CreatedAt to be backfilled, got zero")
-		}
-		if section1.Metadata.UpdatedAt.IsZero() {
-			t.Fatalf("expected section1 metadata UpdatedAt to be backfilled, got zero")
-		}
+		section1 := findChildBySlug(tree, "section1")
+		Expect(section1.Metadata.
+			CreatedAt.
+			IsZero(),
+		).To(BeFalse(), "expected section1 metadata CreatedAt to be backfilled, got zero")
+		Expect(section1.Metadata.
+			UpdatedAt.
+			IsZero(),
+		).To(BeFalse(), "expected section1 metadata UpdatedAt to be backfilled, got zero")
 
 		// Find and verify page2 (child of section1)
-		page2 := findChildBySlug(t, section1, "page2")
-		if page2.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected page2 metadata CreatedAt to be backfilled, got zero")
-		}
-		if page2.Metadata.UpdatedAt.IsZero() {
-			t.Fatalf("expected page2 metadata UpdatedAt to be backfilled, got zero")
-		}
+		page2 := findChildBySlug(section1, "page2")
+		Expect(page2.Metadata.
+			CreatedAt.
+			IsZero()).To(BeFalse(), "expected page2 metadata CreatedAt to be backfilled, got zero")
+		Expect(page2.Metadata.
+			UpdatedAt.
+			IsZero()).To(BeFalse(), "expected page2 metadata UpdatedAt to be backfilled, got zero")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_ReloadsFromFilesystem", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem reloads from filesystem", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Create some files on disk manually
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "readme.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "readme.md"), `---
 leafwiki_id: readme-page
 leafwiki_title: README
 ---
@@ -3544,48 +4047,54 @@ leafwiki_title: README
 
 		// Reconstruct the tree from filesystem
 		err := svc.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+			err)
 
 		// Verify we can reload the tree directly from the filesystem.
 		newSvc := NewTreeService(tmpDir)
-		if err := newSvc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree after reconstruction failed: %v", err)
+		{
+			err := newSvc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree after reconstruction failed: %v",
+
+				err,
+			)
 		}
 
 		// Verify the tree structure matches
 		tree := newSvc.GetTree()
-		if tree == nil || tree.ID != "root" {
-			t.Fatalf("expected root node after reload, got: %+v", tree)
-		}
+		Expect(tree == nil ||
+			tree.ID !=
+				"root",
+		).To(BeFalse(), "expected root node after reload, got: %+v",
+
+			tree)
 
 		// Verify the readme page exists
-		readme := findChildBySlug(t, tree, "readme")
-		if readme.ID != "readme-page" {
-			t.Fatalf("expected readme ID to be 'readme-page', got %q", readme.ID)
-		}
-		if readme.Title != "README" {
-			t.Fatalf("expected readme title to be 'README', got %q", readme.Title)
-		}
+		readme := findChildBySlug(tree, "readme")
+		Expect(readme).To(SatisfyAll(
+			HaveField("ID", Equal(newFixturePageID("readme-page"))),
+			HaveField("Title", Equal("README")),
+		), "expected readme page metadata after reload, got %#v", readme)
+		Expect(readme.Metadata.
+			CreatedAt.
+			IsZero()).
+			To(BeFalse(), "expected persisted metadata CreatedAt to not be zero")
+		Expect(readme.Metadata.
+			UpdatedAt.
+			IsZero()).
+			To(BeFalse(), "expected persisted metadata UpdatedAt to not be zero")
 
 		// Verify metadata was persisted
-		if readme.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected persisted metadata CreatedAt to not be zero")
-		}
-		if readme.Metadata.UpdatedAt.IsZero() {
-			t.Fatalf("expected persisted metadata UpdatedAt to not be zero")
-		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_ReloadsMetadataFromFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem reloads metadata from frontmatter", func() {
+		svc, tmpDir := newLoadedService()
 
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "readme.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "readme.md"), `---
 leafwiki_id: readme-page
 leafwiki_title: README
 leafwiki_created_at: 2026-03-21T10:15:30Z
@@ -3594,102 +4103,150 @@ leafwiki_creator_id: alice
 leafwiki_last_author_id: bob
 ---
 # README`, 0o644)
+		{
 
-		if err := svc.ReconstructTreeFromFS(); err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
+			err := svc.ReconstructTreeFromFS()
+			Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+				err)
 		}
 
 		newSvc := NewTreeService(tmpDir)
-		if err := newSvc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree after reconstruction failed: %v", err)
+		{
+			err := newSvc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree after reconstruction failed: %v",
+
+				err,
+			)
 		}
 
-		readme := findChildBySlug(t, newSvc.GetTree(), "readme")
-		if got := readme.Metadata.CreatedAt.UTC().Format(time.RFC3339); got != "2026-03-21T10:15:30Z" {
-			t.Fatalf("expected persisted created_at from frontmatter, got %q", got)
+		readme := findChildBySlug(newSvc.GetTree(), "readme")
+		{
+			got := readme.Metadata.CreatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal("2026-03-21T10:15:30Z"), "expected persisted created_at from frontmatter, got %q",
+
+				got)
 		}
-		if got := readme.Metadata.UpdatedAt.UTC().Format(time.RFC3339); got != "2026-03-21T11:16:31Z" {
-			t.Fatalf("expected persisted updated_at from frontmatter, got %q", got)
+		{
+
+			got := readme.Metadata.UpdatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal("2026-03-21T11:16:31Z"), "expected persisted updated_at from frontmatter, got %q",
+
+				got)
 		}
-		if readme.Metadata.CreatorID != "alice" || readme.Metadata.LastAuthorID != "bob" {
-			t.Fatalf("expected persisted author metadata from frontmatter, got %#v", readme.Metadata)
-		}
+		Expect(readme.Metadata.
+			CreatorID !=
+			"alice" ||
+			readme.Metadata.
+				LastAuthorID !=
+				"bob",
+		).To(BeFalse(), "expected persisted author metadata from frontmatter, got %#v",
+			readme.Metadata)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_ReloadsMetadataFallbacksWhenMissing", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem reloads metadata fallbacks when missing", func() {
+		svc, tmpDir := newLoadedService()
 
 		readmePath := filepath.Join(tmpDir, "root", "readme.md")
-		mustWriteFile(t, readmePath, `# README`, 0o644)
+		writeTreeFile(readmePath, `# README`, 0o644)
 
 		wantTime := time.Date(2026, time.March, 21, 12, 34, 56, 0, time.UTC)
-		if err := os.Chtimes(readmePath, wantTime, wantTime); err != nil {
-			t.Fatalf("Chtimes: %v", err)
-		}
+		{
+			err := os.Chtimes(readmePath, wantTime, wantTime)
+			Expect(err).To(Succeed(), "Chtimes: %v",
 
-		if err := svc.ReconstructTreeFromFS(); err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
+				err)
+		}
+		{
+
+			err := svc.ReconstructTreeFromFS()
+			Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+				err)
 		}
 
 		newSvc := NewTreeService(tmpDir)
-		if err := newSvc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree after reconstruction failed: %v", err)
+		{
+			err := newSvc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree after reconstruction failed: %v",
+
+				err,
+			)
 		}
 
-		readme := findChildBySlug(t, newSvc.GetTree(), "readme")
-		if strings.TrimSpace(readme.ID.String()) == "" {
-			t.Fatalf("expected generated ID to persist")
+		readme := findChildBySlug(newSvc.GetTree(), "readme")
+		Expect(strings.TrimSpace(readme.
+			ID.String(),
+		)).NotTo(BeEmpty(),
+
+			"expected generated ID to persist")
+		{
+
+			got := readme.Metadata.CreatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal(wantTime.
+				Format(
+					time.RFC3339,
+				)), "expected persisted created_at fallback from mtime, got %q",
+
+				got)
 		}
-		if got := readme.Metadata.CreatedAt.UTC().Format(time.RFC3339); got != wantTime.Format(time.RFC3339) {
-			t.Fatalf("expected persisted created_at fallback from mtime, got %q", got)
+		{
+
+			got := readme.Metadata.UpdatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal(wantTime.
+				Format(
+					time.RFC3339,
+				)), "expected persisted updated_at fallback from mtime, got %q",
+
+				got)
 		}
-		if got := readme.Metadata.UpdatedAt.UTC().Format(time.RFC3339); got != wantTime.Format(time.RFC3339) {
-			t.Fatalf("expected persisted updated_at fallback from mtime, got %q", got)
-		}
-		if readme.Metadata.CreatorID != reconstructSystemUserID || readme.Metadata.LastAuthorID != reconstructSystemUserID {
-			t.Fatalf("expected persisted system-user metadata fallback, got %#v", readme.Metadata)
-		}
+		Expect(readme.Metadata.
+			CreatorID !=
+			reconstructSystemUserID ||
+			readme.Metadata.
+				LastAuthorID !=
+				reconstructSystemUserID).To(BeFalse(), "expected persisted system-user metadata fallback, got %#v",
+
+			readme.Metadata)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_ComplexTree_PreservesStructure", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem complex tree preserves structure", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Create a complex tree structure on disk
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "intro.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "intro.md"), `---
 leafwiki_id: intro
 leafwiki_title: Introduction
 ---
 # Introduction`, 0o644)
 
-		mustMkdir(t, filepath.Join(tmpDir, "root", "docs"))
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "docs", "index.md"), `---
+		createTreeDirectory(filepath.Join(tmpDir, "root", "docs"))
+		writeTreeFile(filepath.Join(tmpDir, "root", "docs", "index.md"), `---
 leafwiki_id: docs-section
 leafwiki_title: Documentation
 ---
 # Documentation`, 0o644)
 
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "docs", "getting-started.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "docs", "getting-started.md"), `---
 leafwiki_id: getting-started
 leafwiki_title: Getting Started
 ---
 # Getting Started`, 0o644)
 
-		mustMkdir(t, filepath.Join(tmpDir, "root", "docs", "guides"))
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "docs", "guides", "index.md"), `---
+		createTreeDirectory(filepath.Join(tmpDir, "root", "docs", "guides"))
+		writeTreeFile(filepath.Join(tmpDir, "root", "docs", "guides", "index.md"), `---
 leafwiki_id: guides-section
 leafwiki_title: Guides
 ---
 # Guides`, 0o644)
 
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "docs", "guides", "basic.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "docs", "guides", "basic.md"), `---
 leafwiki_id: basic-guide
 leafwiki_title: Basic Guide
 ---
@@ -3697,128 +4254,152 @@ leafwiki_title: Basic Guide
 
 		// Reconstruct
 		err := svc.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+			err)
 
 		tree := svc.GetTree()
 
 		// Verify structure
-		intro := findChildBySlug(t, tree, "intro")
-		if intro.Kind != NodeKindPage {
-			t.Fatalf("expected intro to be a page, got %q", intro.Kind)
-		}
+		intro := findChildBySlug(tree, "intro")
+		Expect(intro.Kind).To(Equal(NodeKindPage),
+			"expected intro to be a page, got %q",
 
-		docs := findChildBySlug(t, tree, "docs")
-		if docs.Kind != NodeKindSection {
-			t.Fatalf("expected docs to be a section, got %q", docs.Kind)
-		}
-		if docs.ID != "docs-section" {
-			t.Fatalf("expected docs ID to be 'docs-section', got %q", docs.ID)
-		}
+			intro.Kind,
+		)
 
-		gettingStarted := findChildBySlug(t, docs, "getting-started")
-		if gettingStarted.Kind != NodeKindPage {
-			t.Fatalf("expected getting-started to be a page, got %q", gettingStarted.Kind)
-		}
+		docs := findChildBySlug(tree, "docs")
+		Expect(docs).To(SatisfyAll(
+			HaveField("Kind", Equal(NodeKindSection)),
+			HaveField("ID", Equal(newFixturePageID("docs-section"))),
+		), "expected docs to reload as the frontmatter-backed section, got %#v", docs)
 
-		guides := findChildBySlug(t, docs, "guides")
-		if guides.Kind != NodeKindSection {
-			t.Fatalf("expected guides to be a section, got %q", guides.Kind)
-		}
+		gettingStarted := findChildBySlug(docs, "getting-started")
+		Expect(gettingStarted.
+			Kind).To(Equal(
+			NodeKindPage,
+		), "expected getting-started to be a page, got %q",
 
-		basic := findChildBySlug(t, guides, "basic")
-		if basic.Kind != NodeKindPage {
-			t.Fatalf("expected basic to be a page, got %q", basic.Kind)
-		}
+			gettingStarted.Kind)
+
+		guides := findChildBySlug(docs, "guides")
+		Expect(guides.Kind).
+			To(Equal(NodeKindSection), "expected guides to be a section, got %q",
+
+				guides.
+					Kind)
+
+		basic := findChildBySlug(guides, "basic")
+		Expect(basic.Kind).To(Equal(NodeKindPage),
+			"expected basic to be a page, got %q",
+
+			basic.Kind,
+		)
+		Expect(intro.Metadata.
+			CreatedAt.
+			IsZero()).To(BeFalse(), "expected intro to have metadata")
+		Expect(docs.Metadata.
+			CreatedAt.
+			IsZero()).To(BeFalse(), "expected docs to have metadata")
+		Expect(guides.Metadata.
+			CreatedAt.
+			IsZero()).
+			To(BeFalse(), "expected guides to have metadata")
+		Expect(basic.Metadata.
+			CreatedAt.
+			IsZero()).To(BeFalse(), "expected basic to have metadata")
 
 		// Verify all nodes have metadata
-		if intro.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected intro to have metadata")
-		}
-		if docs.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected docs to have metadata")
-		}
-		if guides.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected guides to have metadata")
-		}
-		if basic.Metadata.CreatedAt.IsZero() {
-			t.Fatalf("expected basic to have metadata")
-		}
 
-		mustNotExist(t, filepath.Join(tmpDir, "tree.json"))
+		Expect(filepath.Join(tmpDir, "tree.json")).To(beMissingTreePath())
 
 		reloadedSvc := NewTreeService(tmpDir)
-		if err := reloadedSvc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree after reconstruction failed: %v", err)
+		{
+			err := reloadedSvc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree after reconstruction failed: %v",
+
+				err,
+			)
 		}
 
 		reloadedTree := reloadedSvc.GetTree()
-		if len(reloadedTree.Children) != len(tree.Children) {
-			t.Fatalf("expected reloaded tree to have same number of children")
-		}
+		Expect(reloadedTree.
+			Children).
+			To(HaveLen(len(tree.Children)),
+				"expected reloaded tree to have same number of children",
+			)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_EmptyDirectory_CreatesRootAndPersists", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, tmpDir := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem empty directory creates root and persists", func() {
+		svc, tmpDir := newLoadedService()
 
 		// Reconstruct from empty directory (should create just root)
 		err := svc.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+			err)
 
 		tree := svc.GetTree()
-		if tree == nil || tree.ID != "root" {
-			t.Fatalf("expected root node, got: %+v", tree)
-		}
+		Expect(tree == nil ||
+			tree.ID !=
+				"root",
+		).To(BeFalse(), "expected root node, got: %+v",
+
+			tree,
+		)
 
 		// Note: Root metadata may not be backfilled from filesystem when directory is empty
 		// because there's no corresponding file/directory to stat. This is expected behavior.
 		// The important thing is that the tree is reconstructed and persisted.
 
-		mustNotExist(t, filepath.Join(tmpDir, "tree.json"))
+		Expect(filepath.Join(tmpDir, "tree.json")).To(beMissingTreePath())
 
 		// Verify we can reload
 		reloadedSvc := NewTreeService(tmpDir)
-		if err := reloadedSvc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree after reconstruction failed: %v", err)
+		{
+			err := reloadedSvc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree after reconstruction failed: %v",
+
+				err,
+			)
 		}
 
 		reloadedTree := reloadedSvc.GetTree()
-		if reloadedTree == nil || reloadedTree.ID != "root" {
-			t.Fatalf("expected root node after reload")
-		}
+		Expect(reloadedTree ==
+			nil ||
+			reloadedTree.
+				ID != "root").To(
+			BeFalse(),
+			"expected root node after reload",
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ReconstructTreeFromFS_RevertsOnMetadataBackfillError", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("reconstruct tree from filesystem reverts on metadata backfill error", func() {
 		// This test is harder to trigger without mocking, but we can at least verify
 		// that if the tree state is preserved if we can cause a failure scenario.
 		// For now, we'll test that a successful reconstruction doesn't lose the old tree.
-		svc, tmpDir := newLoadedService(t)
+		svc, tmpDir := newLoadedService()
 
 		// Create initial tree state
 		initialID, err := svc.CreateNode("system", nil, "Initial", "initial", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		// Get initial tree
 		initialTree := svc.GetTree()
-		if len(initialTree.Children) != 1 {
-			t.Fatalf("expected 1 child in initial tree")
-		}
+		Expect(initialTree.Children).To(HaveLen(1),
+			"expected 1 child in initial tree",
+		)
 
 		// Create a new file on disk
-		mustWriteFile(t, filepath.Join(tmpDir, "root", "new-page.md"), `---
+		writeTreeFile(filepath.Join(tmpDir, "root", "new-page.md"), `---
 leafwiki_id: new-page
 leafwiki_title: New Page
 ---
@@ -3826,15 +4407,15 @@ leafwiki_title: New Page
 
 		// Reconstruct should succeed
 		err = svc.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS failed: %v",
+
+			err)
 
 		// Verify new tree has both nodes
 		newTree := svc.GetTree()
-		if len(newTree.Children) != 2 {
-			t.Fatalf("expected 2 children after reconstruction, got %d", len(newTree.Children))
-		}
+		Expect(newTree.Children).To(HaveLen(2), "expected 2 children after reconstruction, got %d",
+
+			len(newTree.Children))
 
 		// Verify initial node still exists
 		var foundInitial bool
@@ -3844,9 +4425,8 @@ leafwiki_title: New Page
 				break
 			}
 		}
-		if !foundInitial {
-			t.Fatalf("expected initial node to still exist after reconstruction")
-		}
+		Expect(foundInitial).
+			To(BeTrue(), "expected initial node to still exist after reconstruction")
 
 	})
 })
@@ -3855,87 +4435,109 @@ leafwiki_title: New Page
 
 func ptrKind(k NodeKind) *NodeKind { return &k }
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV5_ReturnsErrorWhenOrderFileCannotBeWritten", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V5 returns an error when order file cannot be written", func() {
 		if CurrentSchemaVersion < 5 {
-			t.Skip("requires schema v5+")
+			ginkgo.Skip("requires schema v5+")
 		}
 		if runtime.GOOS == "windows" {
-			t.Skip("permission-based migration failure test is not reliable on Windows")
+			ginkgo.Skip("permission-based migration failure test is not reliable on Windows")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		_, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
+
 		_, err = svc.CreateNode("system", nil, "Alpha", "alpha", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode alpha failed: %v", err)
+		Expect(err).To(Succeed(), "CreateNode alpha failed: %v",
+
+			err)
+		{
+
+			err := os.Remove(filepath.Join(tmpDir, "root", ".order.json"))
+			Expect(err != nil &&
+				!errors.Is(err,
+					os.ErrNotExist,
+				)).To(BeFalse(), "remove root order file failed: %v",
+
+				err)
 		}
 
-		if err := os.Remove(filepath.Join(tmpDir, "root", ".order.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("remove root order file failed: %v", err)
-		}
-		mustMkdir(t, filepath.Join(tmpDir, "root", ".order.json"))
+		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
+		{
 
-		if err := saveSchema(tmpDir, 4); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, 4)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		if err == nil {
-			t.Fatalf("expected migration error when order file cannot be written")
-		}
-		if !errors.Is(err, treemigration.ErrPersistChildOrder) {
-			t.Fatalf("expected migration child order persistence error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected migration error when order file cannot be written")
+		Expect(err).To(MatchError(treemigration.
+			ErrPersistChildOrder,
+		), "expected migration child order persistence error, got: %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV4_ReturnsErrorWhenSectionIndexCannotBeWritten", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("load tree migrates to V4 returns an error when section index cannot be written", func() {
 		if CurrentSchemaVersion < 4 {
-			t.Skip("requires schema v4+")
+			ginkgo.Skip("requires schema v4+")
 		}
 		if runtime.GOOS == "windows" {
-			t.Skip("permission-based migration failure test is not reliable on Windows")
+			ginkgo.Skip("permission-based migration failure test is not reliable on Windows")
 		}
 
-		tmpDir := t.TempDir()
+		tmpDir := tempTreeDir()
+		{
 
-		if err := saveSchema(tmpDir, 3); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+			err := saveSchema(tmpDir, 3)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+			err)
 
 		node, err := svc.FindPageByID(*id)
-		if err != nil {
-			t.Fatalf("FindPageByID failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "FindPageByID failed: %v",
+
+			err)
+
 		node.Metadata = PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
@@ -3943,171 +4545,215 @@ var _ = ginkgo.Describe("TestTreeService_LoadTree_MigratesToV4_ReturnsErrorWhenS
 			LastAuthorID: "bob",
 		}
 
-		persistLegacyTreeSnapshot(t, tmpDir, svc.GetTree())
+		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
 		sectionDir := filepath.Join(tmpDir, "root", "docs")
 		indexPath := filepath.Join(sectionDir, "index.md")
-		if err := os.Remove(indexPath); err != nil {
-			t.Fatalf("remove section index failed: %v", err)
-		}
-		if err := os.Chmod(sectionDir, 0o555); err != nil {
-			t.Fatalf("chmod section dir failed: %v", err)
-		}
-		ginkgo.DeferCleanup(os.Chmod, sectionDir, os.FileMode(0o755))
+		{
+			err := os.Remove(indexPath)
+			Expect(err).To(Succeed(), "remove section index failed: %v",
 
-		if err := saveSchema(tmpDir, 3); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+				err,
+			)
+		}
+		{
+
+			err := os.Chmod(sectionDir, 0o555)
+			Expect(err).To(Succeed(), "chmod section directory failed: %v",
+
+				err)
+		}
+
+		ginkgo.DeferCleanup(os.Chmod, sectionDir, os.FileMode(0o755))
+		{
+
+			err := saveSchema(tmpDir, 3)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
 		loaded := NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		if err == nil {
-			t.Fatalf("expected migration error when section index cannot be written")
-		}
-		if !errors.Is(err, treemigration.ErrMaterializeSectionIndex) {
-			t.Fatalf("expected migration section index materialization error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected migration error when section index cannot be written")
+		Expect(err).To(MatchError(treemigration.
+			ErrMaterializeSectionIndex,
+		), "expected migration section index materialization error, got: %v",
+
+			err)
 
 	})
 })
 
 // ─── IsLoaded ─────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("TestTreeService_IsLoaded_ReturnsFalseBeforeLoad", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc := NewTreeService(t.TempDir())
-		if svc.IsLoaded() {
-			t.Fatal("expected IsLoaded to return false before LoadTree is called")
-		}
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("is loaded returns false before load", func() {
+		svc := NewTreeService(tempTreeDir())
+		Expect(svc.IsLoaded()).To(BeFalse(),
+			"expected IsLoaded to return false before LoadTree is called",
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_IsLoaded_ReturnsTrueAfterLoad", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("is loaded returns true after load", func() {
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
+
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
-		if !svc.IsLoaded() {
-			t.Fatal("expected IsLoaded to return true after LoadTree")
-		}
+		Expect(svc.IsLoaded()).To(BeTrue(), "expected IsLoaded to return true after LoadTree")
 
 	})
 })
 
 // ─── HasPages ─────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("TestTreeService_HasPages_ReturnsFalseBeforeLoad", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc := NewTreeService(t.TempDir())
-		if svc.HasPages() {
-			t.Fatal("expected HasPages to return false before LoadTree is called")
-		}
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("has pages returns false before load", func() {
+		svc := NewTreeService(tempTreeDir())
+		Expect(svc.HasPages()).To(BeFalse(),
+			"expected HasPages to return false before LoadTree is called",
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_HasPages_ReturnsFalseForEmptyTree", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("has pages returns false for empty tree", func() {
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
+
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
-		if svc.HasPages() {
-			t.Fatal("expected HasPages to return false for empty tree")
-		}
+		Expect(svc.HasPages()).To(BeFalse(),
+			"expected HasPages to return false for empty tree",
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_HasPages_ReturnsTrueWhenPagesExist", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("has pages returns true when pages exist", func() {
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
+
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
-		if _, err := svc.CreateNode("user1", nil, "Test", "test", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode failed: %v", err)
+		{
+
+			_, err := svc.CreateNode("user1", nil, "Test", "test", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode failed: %v",
+
+				err)
 		}
-		if !svc.HasPages() {
-			t.Fatal("expected HasPages to return true after creating a page")
-		}
+		Expect(svc.HasPages()).To(BeTrue(), "expected HasPages to return true after creating a page")
 
 	})
 })
 
 // ─── WalkNodes ────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("TestTreeService_WalkNodes_DoesNothingWhenNotLoaded", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc := NewTreeService(t.TempDir())
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("walk nodes does nothing when not loaded", func() {
+		svc := NewTreeService(tempTreeDir())
 		called := false
 		err := svc.WalkNodes(func(_ PageID) error {
 			called = true
 			return nil
 		})
-		if err != nil {
-			t.Fatalf("expected no error, got: %v", err)
-		}
-		if called {
-			t.Fatal("expected fn not to be called when tree is not loaded")
-		}
+		Expect(err).To(Succeed(), "expected no error, got: %v",
+
+			err)
+		Expect(called).To(BeFalse(), "expected fn not to be called when tree is not loaded")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_WalkNodes_VisitsAllNonRootNodes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("walk nodes visits all non root nodes", func() {
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
+
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
-		if _, err := svc.CreateNode("u", nil, "A", "a", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode A: %v", err)
+		{
+
+			_, err := svc.CreateNode("u", nil, "A", "a", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode A: %v",
+
+				err)
 		}
-		if _, err := svc.CreateNode("u", nil, "B", "b", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode B: %v", err)
+		{
+
+			_, err := svc.CreateNode("u", nil, "B", "b", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode B: %v",
+
+				err)
 		}
 
 		var visited []string
-		if err := svc.WalkNodes(func(id PageID) error {
-			page, err := svc.GetPage(id)
-			if err != nil {
-				return err
-			}
-			visited = append(visited, page.Slug.String())
-			return nil
-		}); err != nil {
-			t.Fatalf("WalkNodes failed: %v", err)
-		}
+		{
+			err := svc.WalkNodes(func(id PageID) error {
+				page, err := svc.GetPage(id)
+				if err != nil {
+					return err
+				}
+				visited = append(visited, page.Slug.String())
+				return nil
+			})
+			Expect(err).To(Succeed(), "WalkNodes failed: %v",
 
-		if len(visited) != 2 {
-			t.Fatalf("expected 2 visited nodes, got %d: %v", len(visited), visited)
+				err)
 		}
+		Expect(visited).To(HaveLen(2),
+			"expected 2 visited nodes, got %d: %v",
+
+			len(visited), visited,
+		)
+
 		for _, s := range []string{"a", "b"} {
 			found := false
 			for _, v := range visited {
@@ -4116,53 +4762,73 @@ var _ = ginkgo.Describe("TestTreeService_WalkNodes_VisitsAllNonRootNodes", func(
 					break
 				}
 			}
-			if !found {
-				t.Fatalf("expected slug %q to be visited, got: %v", s, visited)
-			}
+			Expect(found).To(BeTrue(), "expected slug %q to be visited, got: %v",
+
+				s,
+				visited)
+
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_WalkNodes_SkipsRootNode", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
-		}
-		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("walk nodes skips root node", func() {
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
 
-		if err := svc.WalkNodes(func(id PageID) error {
-			if id == "root" {
-				return errors.New("root node must not be visited")
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
+		svc := NewTreeService(tmpDir)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
+		}
+		{
+
+			err := svc.WalkNodes(func(id PageID) error {
+				if id == "root" {
+					return errors.New("root node must not be visited")
+				}
+				return nil
+			})
+			Expect(err).To(Succeed(), err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_WalkNodes_StopsOnError", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("walk nodes stops on error", func() {
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
+
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
+
 		for _, title := range []string{"A", "B", "C"} {
-			if _, err := svc.CreateNode("u", nil, title, newFixtureSlug(strings.ToLower(title)), ptrKind(NodeKindPage)); err != nil {
-				t.Fatalf("CreateNode %s: %v", title, err)
+			{
+				_, err := svc.CreateNode("u", nil, title, newFixtureSlug(strings.ToLower(title)), ptrKind(NodeKindPage))
+				Expect(err).To(Succeed(), "CreateNode %s: %v",
+
+					title, err)
 			}
+
 		}
 
 		sentinel := errors.New("stop")
@@ -4171,104 +4837,133 @@ var _ = ginkgo.Describe("TestTreeService_WalkNodes_StopsOnError", func() {
 			calls++
 			return sentinel
 		})
-		if !errors.Is(err, sentinel) {
-			t.Fatalf("expected sentinel error, got: %v", err)
-		}
-		if calls != 1 {
-			t.Fatalf("expected fn called once before stop, got %d", calls)
-		}
+		Expect(err).To(MatchError(sentinel),
+			"expected sentinel error, got: %v",
+
+			err)
+		Expect(calls).To(Equal(1), "expected fn called once before stop, got %d",
+
+			calls)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_WalkNodes_VisitsNestedNodes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
-		if err := saveSchema(tmpDir, CurrentSchemaVersion); err != nil {
-			t.Fatalf("saveSchema failed: %v", err)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("walk nodes visits nested nodes", func() {
+		tmpDir := tempTreeDir()
+		{
+			err := saveSchema(tmpDir, CurrentSchemaVersion)
+			Expect(err).To(Succeed(), "saveSchema failed: %v",
+
+				err)
 		}
+
 		svc := NewTreeService(tmpDir)
-		if err := svc.LoadTree(); err != nil {
-			t.Fatalf("LoadTree failed: %v", err)
+		{
+			err := svc.LoadTree()
+			Expect(err).To(Succeed(), "LoadTree failed: %v",
+
+				err)
 		}
 
 		parentID, err := svc.CreateNode("u", nil, "Parent", "parent", ptrKind(NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode parent: %v", err)
-		}
-		if _, err := svc.CreateNode("u", parentID, "Child", "child", ptrKind(NodeKindPage)); err != nil {
-			t.Fatalf("CreateNode child: %v", err)
+		Expect(err).To(Succeed(), "CreateNode parent: %v",
+
+			err)
+		{
+
+			_, err := svc.CreateNode("u", parentID, "Child", "child", ptrKind(NodeKindPage))
+			Expect(err).To(Succeed(), "CreateNode child: %v",
+
+				err)
 		}
 
 		var visited []string
-		if err := svc.WalkNodes(func(id PageID) error {
-			page, err := svc.GetPage(id)
-			if err != nil {
-				return err
-			}
-			visited = append(visited, page.Slug.String())
-			return nil
-		}); err != nil {
-			t.Fatalf("WalkNodes failed: %v", err)
-		}
+		{
+			err := svc.WalkNodes(func(id PageID) error {
+				page, err := svc.GetPage(id)
+				if err != nil {
+					return err
+				}
+				visited = append(visited, page.Slug.String())
+				return nil
+			})
+			Expect(err).To(Succeed(), "WalkNodes failed: %v",
 
-		if len(visited) != 2 {
-			t.Fatalf("expected 2 visited nodes (parent + child), got %d: %v", len(visited), visited)
+				err)
 		}
+		Expect(visited).To(HaveLen(2),
+			"expected 2 visited nodes (parent + child), got %d: %v",
+
+			len(visited), visited)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_GetPages_PreservesOrderAndAlignsErrors", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("get pages preserves order and aligns errors", func() {
+		svc, _ := newLoadedService()
 
 		firstID, err := svc.CreateNode("system", nil, "First", "first", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode(first) failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode(first) failed: %v",
+
+			err)
+
 		secondID, err := svc.CreateNode("system", nil, "Second", "second", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode(second) failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode(second) failed: %v",
+
+			err,
+		)
 
 		pages, errs := svc.GetPages([]PageID{*secondID, PageID("missing-id"), *firstID})
-		if len(pages) != 3 || len(errs) != 3 {
-			t.Fatalf("unexpected result lengths: pages=%d errs=%d", len(pages), len(errs))
-		}
-		if errs[0] != nil || pages[0] == nil || pages[0].ID != *secondID {
-			t.Fatalf("expected second page at index 0, got page=%v err=%v", pages[0], errs[0])
-		}
-		if !errors.Is(errs[1], ErrPageNotFound) || pages[1] != nil {
-			t.Fatalf("expected ErrPageNotFound at index 1, got page=%v err=%v", pages[1], errs[1])
-		}
-		if errs[2] != nil || pages[2] == nil || pages[2].ID != *firstID {
-			t.Fatalf("expected first page at index 2, got page=%v err=%v", pages[2], errs[2])
-		}
+		Expect(len(pages) !=
+			3 || len(
+			errs) !=
+			3).To(BeFalse(), "unexpected result lengths: pages=%d errs=%d",
+
+			len(pages), len(errs))
+		Expect(errs[0] != nil ||
+			pages[0] ==
+				nil ||
+			pages[0].ID != *secondID).To(BeFalse(),
+			"expected second page at index 0, got page=%v err=%v",
+
+			pages[0], errs[0])
+		Expect(!errors.Is(errs[1], ErrPageNotFound) ||
+			pages[1] != nil,
+		).To(BeFalse(), "expected ErrPageNotFound at index 1, got page=%v err=%v",
+
+			pages[1], errs[1])
+		Expect(errs[2] != nil ||
+			pages[2] ==
+				nil ||
+			pages[2].ID != *firstID).To(BeFalse(),
+			"expected first page at index 2, got page=%v err=%v",
+
+			pages[2], errs[2])
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_BulkUpdateContent_TreatsFrontmatterLikeInputAsBody", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("bulk update content treats frontmatter like input as body", func() {
+		svc, _ := newLoadedService()
 
 		firstID, err := svc.CreateNode("system", nil, "First", "first", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode(first) failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode(first) failed: %v",
+
+			err)
+
 		secondID, err := svc.CreateNode("system", nil, "Second", "second", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode(second) failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode(second) failed: %v",
+
+			err,
+		)
 
 		beforeFirst, err := svc.GetPage(*firstID)
-		if err != nil {
-			t.Fatalf("GetPage(first before) failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "GetPage(first before) failed: %v",
+
+			err)
 
 		// Content that looks like invalid YAML frontmatter is now stored as plain
 		// body text — UpsertContent no longer parses frontmatter from UI content.
@@ -4277,43 +4972,55 @@ var _ = ginkgo.Describe("TestTreeService_BulkUpdateContent_TreatsFrontmatterLike
 			{ID: *secondID, Content: "---\ninvalid: [\n---\nbody"},
 			{ID: "missing-id", Content: "ignored"},
 		})
+		Expect(errs).To(HaveExactElements(
+			Succeed(),
+			Succeed(),
+			MatchError(ErrPageNotFound),
+		))
 
-		if len(errs) != 3 {
-			t.Fatalf("expected 3 errors, got %d", len(errs))
-		}
-		if errs[0] != nil {
-			t.Fatalf("expected index 0 success, got %v", errs[0])
-		}
 		// Index 1 now succeeds: frontmatter-like content is treated as plain body.
-		if errs[1] != nil {
-			t.Fatalf("expected index 1 success (plain body), got %v", errs[1])
-		}
-		if !errors.Is(errs[2], ErrPageNotFound) {
-			t.Fatalf("expected ErrPageNotFound at index 2, got %v", errs[2])
-		}
 
 		afterFirst, err := svc.GetPage(*firstID)
-		if err != nil {
-			t.Fatalf("GetPage(first after) failed: %v", err)
-		}
-		if afterFirst.Content != "updated first" {
-			t.Fatalf("expected first content update, got %q", afterFirst.Content)
-		}
-		if afterFirst.Metadata.LastAuthorID != "bulk-user" {
-			t.Fatalf("expected first LastAuthorID updated, got %q", afterFirst.Metadata.LastAuthorID)
-		}
-		if !afterFirst.Metadata.UpdatedAt.After(beforeFirst.Metadata.UpdatedAt) && !afterFirst.Metadata.UpdatedAt.Equal(beforeFirst.Metadata.UpdatedAt) {
-			t.Fatalf("expected first UpdatedAt to stay monotonic, before=%s after=%s", beforeFirst.Metadata.UpdatedAt, afterFirst.Metadata.UpdatedAt)
-		}
+		Expect(err).To(Succeed(), "GetPage(first after) failed: %v",
+
+			err,
+		)
+		Expect(afterFirst.Content).To(
+			Equal("updated first"), "expected first content update, got %q",
+
+			afterFirst.Content)
+		Expect(afterFirst.Metadata.
+			LastAuthorID,
+		).To(Equal(newFixtureUserID("bulk-user")), "expected first LastAuthorID updated, got %q",
+
+			afterFirst.Metadata.LastAuthorID,
+		)
+		Expect(!afterFirst.Metadata.
+			UpdatedAt.
+			After(beforeFirst.Metadata.
+				UpdatedAt,
+			) && !afterFirst.
+			Metadata.UpdatedAt.Equal(beforeFirst.Metadata.UpdatedAt)).To(BeFalse(), "expected first UpdatedAt to stay monotonic, before=%s after=%s",
+
+			beforeFirst.
+				Metadata.UpdatedAt,
+			afterFirst.Metadata.UpdatedAt)
 
 		afterSecond, err := svc.GetPage(*secondID)
-		if err != nil {
-			t.Fatalf("GetPage(second after) failed: %v", err)
-		}
+		Expect(err).To(Succeed(), "GetPage(second after) failed: %v",
+
+			err)
+		Expect(afterSecond.
+			Content,
+		).
+			To(ContainSubstring("invalid: ["),
+
+				"expected second content to contain plain body text, got %q",
+
+				afterSecond.
+					Content)
+
 		// The "invalid YAML" block is now stored verbatim as body content.
-		if !strings.Contains(afterSecond.Content, "invalid: [") {
-			t.Fatalf("expected second content to contain plain body text, got %q", afterSecond.Content)
-		}
 
 	})
 })
@@ -4322,165 +5029,176 @@ var _ = ginkgo.Describe("TestTreeService_BulkUpdateContent_TreatsFrontmatterLike
 // Optimistic locking: version check is enforced inside the write lock
 // ─────────────────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_StaleVersion_ReturnsErrVersionConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node stale version returns err version conflict", func() {
+		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*id)
 		currentVersion := node.Version()
+		{
 
-		// First update succeeds — advances the version.
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(currentVersion), false); err != nil {
-			t.Fatalf("first UpdateNode failed: %v", err)
+			// First update succeeds — advances the version.
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(currentVersion), false)
+			Expect(err).To(Succeed(), "first UpdateNode failed: %v",
+
+				err)
 		}
 
 		// Second update with the same (now stale) version must fail.
 		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", Slug("page"), nil, newFixturePageVersion(currentVersion), false)
-		if !errors.Is(err, ErrVersionConflict) {
-			t.Fatalf("expected ErrVersionConflict, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_UpdateNode_MissingVersion_ReturnsErrVersionRequired", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("update node missing version returns err version required", func() {
+		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
 		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersion(""), false)
-		if !errors.Is(err, ErrVersionRequired) {
-			t.Fatalf("expected ErrVersionRequired, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeleteNode_StaleVersion_ReturnsErrVersionConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete node stale version returns err version conflict", func() {
+		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*id)
 		staleVersion := node.Version()
+		{
 
-		// Advance the version via an update.
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(staleVersion), false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
+			// Advance the version via an update.
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(staleVersion), false)
+			Expect(err).To(Succeed(), "UpdateNode failed: %v",
+
+				err)
 		}
 
 		err := svc.DeleteNode("system", *id, false, newFixturePageVersion(staleVersion))
-		if !errors.Is(err, ErrVersionConflict) {
-			t.Fatalf("expected ErrVersionConflict, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_DeleteNode_MissingVersion_ReturnsErrVersionRequired", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("delete node missing version returns err version required", func() {
+		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
 		err := svc.DeleteNode("system", *id, false, "")
-		if !errors.Is(err, ErrVersionRequired) {
-			t.Fatalf("expected ErrVersionRequired, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_StaleVersion_ReturnsErrVersionConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node stale version returns err version conflict", func() {
+		svc, _ := newLoadedService()
 		destID, _ := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindPage))
 		moveID, _ := svc.CreateNode("system", nil, "Move", "move", ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*moveID)
 		staleVersion := node.Version()
+		{
 
-		// Advance the version.
-		if err := svc.UpdateNode(newFixtureUserID("system"), *moveID, "Move v2", Slug("move"), nil, newFixturePageVersion(staleVersion), false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
+			// Advance the version.
+			err := svc.UpdateNode(newFixtureUserID("system"), *moveID, "Move v2", Slug("move"), nil, newFixturePageVersion(staleVersion), false)
+			Expect(err).To(Succeed(), "UpdateNode failed: %v",
+
+				err)
 		}
 
 		err := svc.MoveNode("system", *moveID, *destID, newFixturePageVersion(staleVersion))
-		if !errors.Is(err, ErrVersionConflict) {
-			t.Fatalf("expected ErrVersionConflict, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_MoveNode_MissingVersion_ReturnsErrVersionRequired", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("move node missing version returns err version required", func() {
+		svc, _ := newLoadedService()
 		destID, _ := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindPage))
 		moveID, _ := svc.CreateNode("system", nil, "Move", "move", ptrKind(NodeKindPage))
 
 		err := svc.MoveNode("system", *moveID, *destID, "")
-		if !errors.Is(err, ErrVersionRequired) {
-			t.Fatalf("expected ErrVersionRequired, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ConvertNode_StaleVersion_ReturnsErrVersionConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("convert node stale version returns err version conflict", func() {
+		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*id)
 		staleVersion := node.Version()
+		{
 
-		// Advance the version.
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(staleVersion), false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
+			// Advance the version.
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(staleVersion), false)
+			Expect(err).To(Succeed(), "UpdateNode failed: %v",
+
+				err)
 		}
 
 		err := svc.ConvertNode("system", *id, NodeKindSection, newFixturePageVersion(staleVersion))
-		if !errors.Is(err, ErrVersionConflict) {
-			t.Fatalf("expected ErrVersionConflict, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_ConvertNode_MissingVersion_ReturnsErrVersionRequired", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("convert node missing version returns err version required", func() {
+		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
 
 		err := svc.ConvertNode("system", *id, NodeKindSection, "")
-		if !errors.Is(err, ErrVersionRequired) {
-			t.Fatalf("expected ErrVersionRequired, got %v", err)
-		}
+		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_VersionUnchecked_BypassesVersionCheck", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("version unchecked bypasses version check", func() {
+		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		{
 
-		// The tree-owned unchecked operation must always succeed regardless of actual node version.
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("expected unchecked operation to bypass check, got: %v", err)
+			// The tree-owned unchecked operation must always succeed regardless of actual node version.
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "expected unchecked operation to bypass check, got: %v",
+
+				err,
+			)
 		}
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", Slug("page"), nil, pageVersionUnchecked, false); err != nil {
-			t.Fatalf("expected unchecked operation to bypass check on second call, got: %v", err)
+		{
+
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", Slug("page"), nil, pageVersionUnchecked, false)
+			Expect(err).To(Succeed(), "expected unchecked operation to bypass check on second call, got: %v",
+
+				err)
 		}
 
 	})
@@ -4488,103 +5206,107 @@ var _ = ginkgo.Describe("TestTreeService_VersionUnchecked_BypassesVersionCheck",
 
 // ─── RawContent ───────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("TestTreeService_GetPage_RawContent_ContainsCanonicalMetadataAndBody", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("get page raw content contains canonical metadata and body", func() {
+		svc, _ := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "Raw Test", "raw-test", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode: %v",
+
+			err,
+		)
+
 		body := "Hello raw world"
 		page, err := svc.GetPage(*id)
-		if err != nil {
-			t.Fatalf("GetPage before update: %v", err)
-		}
-		if err := svc.UpdateNode(newFixtureUserID("system"), *id, "Raw Test", Slug("raw-test"), &body, newFixturePageVersion(page.Version()), false); err != nil {
-			t.Fatalf("UpdateNode: %v", err)
+		Expect(err).To(Succeed(), "GetPage before update: %v",
+
+			err)
+		{
+
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Raw Test", Slug("raw-test"), &body, newFixturePageVersion(page.Version()), false)
+			Expect(err).To(Succeed(), "UpdateNode: %v",
+
+				err,
+			)
 		}
 
 		page, err = svc.GetPage(*id)
-		if err != nil {
-			t.Fatalf("GetPage: %v", err)
-		}
+		Expect(err).To(Succeed(), "GetPage: %v",
 
-		if page.RawContent == "" {
-			t.Fatal("expected RawContent to be non-empty")
-		}
-		if !strings.Contains(page.RawContent, "<!-- leafwiki\n") {
-			t.Errorf("expected RawContent to contain canonical metadata, got: %q", page.RawContent)
-		}
-		if !strings.Contains(page.RawContent, "Hello raw world") {
-			t.Errorf("expected RawContent to contain body text, got: %q", page.RawContent)
-		}
-		if strings.HasPrefix(strings.TrimSpace(page.Content), "<!-- leafwiki") {
-			t.Errorf("Content must not start with canonical metadata, got: %q", page.Content)
-		}
-		if page.Content == page.RawContent {
-			t.Error("Content (body only) and RawContent (with storage metadata) must differ")
-		}
+			err)
+		Expect(page).To(SatisfyAll(
+			HaveField("RawContent", SatisfyAll(
+				Not(BeEmpty()),
+				ContainSubstring("<!-- leafwiki\n"),
+				ContainSubstring("Hello raw world"),
+			)),
+			HaveField("Content", SatisfyAll(
+				WithTransform(strings.TrimSpace, Not(HavePrefix("<!-- leafwiki"))),
+				Not(Equal(page.RawContent)),
+			)),
+		), "expected page to expose body content separately from raw storage, got %#v", page)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_GetPages_RawContent_PopulatedForAll", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("get pages raw content populated for all", func() {
+		svc, _ := newLoadedService()
 
 		id1, err := svc.CreateNode("system", nil, "Page One", "page-one", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode 1: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode 1: %v",
+
+			err)
+
 		id2, err := svc.CreateNode("system", nil, "Page Two", "page-two", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode 2: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode 2: %v",
+
+			err)
 
 		pages, errs := svc.GetPages([]PageID{*id1, *id2})
-		for i, e := range errs {
-			if e != nil {
-				t.Fatalf("GetPages[%d]: %v", i, e)
-			}
-		}
+		Expect(errs).To(HaveEach(Succeed()))
 		for i, p := range pages {
-			if p.RawContent == "" {
-				t.Errorf("GetPages[%d]: expected RawContent to be populated", i)
-			}
-			if !strings.Contains(p.RawContent, "<!-- leafwiki\n") {
-				t.Errorf("GetPages[%d]: expected RawContent to contain canonical metadata, got: %q", i, p.RawContent)
-			}
+			Expect(p.RawContent).
+				NotTo(BeEmpty(),
+
+					"GetPages[%d]: expected RawContent to be populated",
+
+					i)
+			Expect(p.RawContent).To(ContainSubstring("<!-- leafwiki\n"),
+
+				"GetPages[%d]: expected RawContent to contain canonical metadata, got: %q",
+
+				i, p.RawContent)
+
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestTreeService_GetPage_RawContent_NotSerializedToJSON", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		svc, _ := newLoadedService(t)
+var _ = ginkgo.Describe("tree service behavior", func() {
+	ginkgo.It("get page raw content not serialized to JSON", func() {
+		svc, _ := newLoadedService()
 
 		id, err := svc.CreateNode("system", nil, "JSON Test", "json-test", ptrKind(NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode: %v", err)
-		}
+		Expect(err).To(Succeed(), "CreateNode: %v",
+
+			err,
+		)
+
 		page, err := svc.GetPage(*id)
-		if err != nil {
-			t.Fatalf("GetPage: %v", err)
-		}
+		Expect(err).To(Succeed(), "GetPage: %v",
+
+			err)
 
 		data, err := json.Marshal(page)
-		if err != nil {
-			t.Fatalf("json.Marshal: %v", err)
-		}
+		Expect(err).To(Succeed(), "json.Marshal: %v",
+
+			err)
 
 		s := string(data)
-		if strings.Contains(s, "rawContent") || strings.Contains(s, "raw_content") {
-			t.Errorf("RawContent must not appear in JSON output, got: %s", s)
-		}
+		Expect(strings.Contains(s, "rawContent") ||
+			strings.Contains(s, "raw_content")).To(BeFalse(), "RawContent must not appear in JSON output, got: %s",
+			s)
 
 	})
 })

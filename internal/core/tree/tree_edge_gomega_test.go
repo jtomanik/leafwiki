@@ -10,7 +10,7 @@ import (
 	"github.com/perber/wiki/internal/core/treemigration"
 )
 
-var _ = Describe("tree edge coverage", func() {
+var _ = Describe("tree semantic value and service wrapper edge behavior", func() {
 	It("asserts semantic value edge methods and slug filename helpers", func() {
 		Expect(RevisionIDFromString("rev-1")).To(Equal(newFixtureRevisionID("rev-1")))
 		Expect(CleanMarkdownPath(".")).To(BeEmpty())
@@ -92,7 +92,7 @@ var _ = Describe("tree edge coverage", func() {
 		Expect(tieSorted.hashSum(false)).NotTo(Equal(tieSorted.hashSum(true)))
 	})
 
-	It("covers migration node adapter nil guards and metadata mutation", func() {
+	It("migration node adapters guard nil inputs and preserve metadata mutation", func() {
 		var nilAdapter *migrationNodeAdapter
 		Expect(nilAdapter.ID()).To(BeEmpty())
 		Expect(nilAdapter.Title()).To(BeEmpty())
@@ -150,8 +150,8 @@ var _ = Describe("tree edge coverage", func() {
 		Expect(unwrapped).To(BeIdenticalTo(node))
 	})
 
-	It("covers service wrappers for restore, raw reads, kind lookup, root dir, and metadata replacement", func() {
-		svc, dataDir := newLoadedService(GinkgoT())
+	It("service wrappers preserve restore, raw-read, kind lookup, root-dir, and metadata contracts", func() {
+		svc, dataDir := newLoadedService()
 		Expect(svc.RootDir()).To(Equal(filepath.Join(dataDir, "root")))
 
 		metadata := PageMetadata{
@@ -236,8 +236,8 @@ var _ = Describe("tree edge coverage", func() {
 		Expect(err).To(MatchError(ErrPageNotFound))
 	})
 
-	It("covers helper no-op filesystem branches", func() {
-		tmpDir := GinkgoT().TempDir()
+	It("filesystem helper no-ops leave absent paths stable", func() {
+		tmpDir := tempTreeDir()
 		Expect(EnsurePageIsFolder(tmpDir, "missing/page")).To(Succeed())
 		Expect(FoldPageFolderIfEmpty(tmpDir, "missing/page")).To(Succeed())
 

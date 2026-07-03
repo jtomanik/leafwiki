@@ -2,7 +2,6 @@ package tree
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +11,7 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -20,15 +20,21 @@ import (
 // - root README.md is fallback only without root index.md
 // - root index.md has precedence over root README.md
 // - Uppercase INDEX.MD does not become a second child page when accepted by current index lookup rules
+// Plantrace evidence: TestNodeStore_ReconstructTreeFromFS_IndexBeatsReadmeAndReadmeIsSeparatePage.
+// Plantrace evidence: TestNodeStore_ReconstructTreeFromFS_ReadmeFallbackSectionWhenNoIndexExists.
+// Plantrace evidence: TestNodeStore_ReconstructTreeFromFS_RootReadmeFallbackSectionWhenNoIndexExists.
+// Plantrace evidence: TestNodeStore_ReconstructTreeFromFS_RootIndexBeatsRootReadme.
+// Plantrace evidence: TestNodeStore_ReconstructTreeFromFS_UsesUppercaseSectionIndex.
 
-func findChildBySlug(t treeTestT, parent *PageNode, slug string) *PageNode {
-	t.Helper()
+func findChildBySlug(parent *PageNode, slug string) *PageNode {
+	ginkgo.GinkgoHelper()
+	wantSlug := newFixtureSlug(slug)
 	for _, ch := range parent.Children {
-		if ch.Slug == newFixtureSlug(slug) {
+		if ch.Slug == wantSlug {
 			return ch
 		}
 	}
-	t.Fatalf("child with slug %q not found under %q", slug, parent.Slug)
+	Expect(parent.Children).To(ContainElement(HaveField("Slug", Equal(wantSlug))))
 	return nil
 }
 
@@ -42,139 +48,116 @@ func slugs(children []*PageNode) []string {
 
 // --- tests ---
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_EmptyStorage_ReturnsRoot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("empty storage returns root", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		if tree == nil || tree.ID != "root" || tree.Kind != NodeKindSection {
-			t.Fatalf("unexpected root: %#v", tree)
-		}
-		if tree.Parent != nil {
-			t.Fatalf("expected root parent nil")
-		}
-		if len(tree.Children) != 0 {
-			t.Fatalf("expected root to have no children, got %d", len(tree.Children))
-		}
+			err)
+		Expect(tree).To(matchRootSection(), "unexpected root: %#v", tree)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_BuildsSectionsAndPages_SkipsIndexMdAsPage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("builds sections and pages skips index markdown as page", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		// FS layout:
 		// <tmp>/docs/index.md (section content)
 		// <tmp>/docs/intro.md (page)
 		// <tmp>/readme.md (page at root)
-		mustMkdir(t, filepath.Join(tmp, "root", "docs"))
+		createTreeDirectory(filepath.Join(tmp, "root", "docs"))
 
 		secIndex := `---
 leafwiki_id: sec-docs
 leafwiki_title: Documentation
 ---
 # Section`
-		mustWriteFile(t, filepath.Join(tmp, "root", "docs", "index.md"), secIndex, 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "docs", "index.md"), secIndex, 0o644)
 
 		pageIntro := `---
 leafwiki_id: page-intro
 leafwiki_title: Introduction
 ---
 # Intro`
-		mustWriteFile(t, filepath.Join(tmp, "root", "docs", "intro.md"), pageIntro, 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "docs", "intro.md"), pageIntro, 0o644)
 
 		rootPage := `---
 leafwiki_id: page-readme
 leafwiki_title: Readme
 ---
 # Readme`
-		mustWriteFile(t, filepath.Join(tmp, "root", "readme.md"), rootPage, 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "readme.md"), rootPage, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+			err)
 
 		// root has: docs(section), readme(page)
-		docs := findChildBySlug(t, tree, "docs")
-		if docs.Kind != NodeKindSection {
-			t.Fatalf("expected docs to be section, got %q", docs.Kind)
-		}
+		docs := findChildBySlug(tree, "docs")
+		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
+
 		// section title/id from index frontmatter
-		if docs.ID != "sec-docs" {
-			t.Fatalf("expected docs.ID=sec-docs, got %q", docs.ID)
-		}
-		if docs.Title != "Documentation" {
-			t.Fatalf("expected docs.Title=Documentation, got %q", docs.Title)
-		}
 
 		// ensure index.md wasn't turned into a page child
 		for _, ch := range docs.Children {
-			if ch.Slug == "index" {
-				t.Fatalf("index.md must be skipped as page, but found slug index")
-			}
+			Expect(ch.Slug).NotTo(Equal(newFixtureSlug("index")),
+				"index.md must be skipped as page, but found slug index",
+			)
+
 		}
 
-		intro := findChildBySlug(t, docs, "intro")
-		if intro.Kind != NodeKindPage {
-			t.Fatalf("expected intro to be page, got %q", intro.Kind)
-		}
+		intro := findChildBySlug(docs, "intro")
+		Expect(intro).To(matchTreeNode(NodeKindPage, newFixturePageID("page-intro"), "Introduction"))
+
 		// page title/id from frontmatter
-		if intro.ID != "page-intro" {
-			t.Fatalf("expected intro.ID=page-intro, got %q", intro.ID)
-		}
-		if intro.Title != "Introduction" {
-			t.Fatalf("expected intro.Title=Introduction, got %q", intro.Title)
-		}
 
-		readme := findChildBySlug(t, tree, "readme")
-		if readme.Kind != NodeKindPage {
-			t.Fatalf("expected readme to be page, got %q", readme.Kind)
-		}
-		if readme.ID != "page-readme" {
-			t.Fatalf("expected readme.ID=page-readme, got %q", readme.ID)
-		}
-		if readme.Title != "Readme" {
-			t.Fatalf("expected readme.Title=Readme, got %q", readme.Title)
-		}
+		readme := findChildBySlug(tree, "readme")
+		Expect(readme).To(matchTreeNode(NodeKindPage, newFixturePageID("page-readme"), "Readme"))
+		Expect(docs.Parent ==
+			nil || docs.
+			Parent.
+			ID != "root",
+		).To(BeFalse(), "expected docs parent root, got %#v",
+
+			docs.Parent)
+		Expect(intro.Parent ==
+			nil ||
+			intro.
+				Parent.ID != docs.
+				ID).To(
+			BeFalse(),
+			"expected intro parent docs, got %#v",
+
+			intro.Parent)
 
 		// parent pointers
-		if docs.Parent == nil || docs.Parent.ID != "root" {
-			t.Fatalf("expected docs parent root, got %#v", docs.Parent)
-		}
-		if intro.Parent == nil || intro.Parent.ID != docs.ID {
-			t.Fatalf("expected intro parent docs, got %#v", intro.Parent)
-		}
 
 	})
 })
 
 // - Uppercase INDEX.MD does not become a second child page when accepted by current index lookup rules
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_UsesUppercaseSectionIndex", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("uses uppercase section index", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		sectionDir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, sectionDir)
+		createTreeDirectory(sectionDir)
 		indexPath := filepath.Join(sectionDir, "INDEX.MD")
-		mustWriteFile(t, indexPath, `---
+		writeTreeFile(indexPath, `---
 leafwiki_id: sec-docs
 leafwiki_title: Documentation
 ---
 # Section
 `, 0o644)
-		mustWriteFile(t, filepath.Join(sectionDir, "intro.md"), `---
+		writeTreeFile(filepath.Join(sectionDir, "intro.md"), `---
 leafwiki_id: page-intro
 leafwiki_title: Introduction
 ---
@@ -182,81 +165,84 @@ leafwiki_title: Introduction
 `, 0o644)
 
 		resolvedIndexPath, hasIndex, err := store.sectionIndexPathInDir(sectionDir)
-		if err != nil {
-			t.Fatalf("sectionIndexPathInDir: %v", err)
-		}
-		if !hasIndex {
-			t.Fatalf("sectionIndexPathInDir did not find INDEX.MD")
-		}
-		if filepath.Base(resolvedIndexPath) != "INDEX.MD" {
-			t.Fatalf("sectionIndexPathInDir path = %q, want INDEX.MD", resolvedIndexPath)
-		}
+		Expect(err).To(Succeed(), "sectionIndexPathInDir: %v",
+
+			err)
+		Expect(hasIndex).To(
+			BeTrue(),
+			"sectionIndexPathInDir did not find INDEX.MD",
+		)
+		Expect(filepath.Base(resolvedIndexPath)).To(Equal("INDEX.MD"),
+			"sectionIndexPathInDir path = %q, want INDEX.MD",
+
+			resolvedIndexPath,
+		)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		docs := findChildBySlug(t, tree, "docs")
-		if docs.Kind != NodeKindSection {
-			t.Fatalf("expected docs to be section, got %q", docs.Kind)
-		}
-		if docs.ID != "sec-docs" {
-			t.Fatalf("expected docs.ID=sec-docs, got %q", docs.ID)
-		}
-		if docs.Title != "Documentation" {
-			t.Fatalf("expected docs.Title=Documentation, got %q", docs.Title)
-		}
+			err)
+
+		docs := findChildBySlug(tree, "docs")
+		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
+
 		for _, ch := range docs.Children {
-			if strings.EqualFold(ch.Slug.String(), "index") {
-				t.Fatalf("INDEX.MD must be skipped as page, but found slug %q", ch.Slug)
-			}
+			Expect(strings.EqualFold(ch.Slug.
+				String(), "index")).
+				To(BeFalse(), "INDEX.MD must be skipped as page, but found slug %q",
+
+					ch.Slug)
+
 		}
 
 		raw, err := store.ReadPageRaw(docs)
-		if err != nil {
-			t.Fatalf("ReadPageRaw section: %v", err)
-		}
-		if !strings.Contains(raw, "# Section") {
-			t.Fatalf("section raw content = %q, want INDEX.MD body", raw)
-		}
+		Expect(err).To(Succeed(), "ReadPageRaw section: %v",
+
+			err,
+		)
+		Expect(raw).To(ContainSubstring("# Section"),
+
+			"section raw content = %q, want INDEX.MD body",
+
+			raw)
 
 		entries, err := os.ReadDir(sectionDir)
-		if err != nil {
-			t.Fatalf("ReadDir section: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReadDir section: %v",
+
+			err)
+
 		for _, entry := range entries {
-			if entry.Name() == "index.md" {
-				t.Fatalf("reconstruct materialized lowercase index.md alongside INDEX.MD")
-			}
+			Expect(entry.Name()).
+				NotTo(Equal("index.md"), "reconstruct materialized lowercase index.md alongside INDEX.MD")
+
 		}
 
 		mdFile, err := markdown.LoadMarkdownFile(indexPath)
-		if err != nil {
-			t.Fatalf("LoadMarkdownFile INDEX.MD: %v", err)
-		}
-		fm := mdFile.GetFrontmatter()
-		if fm.LeafWikiID != "sec-docs" || fm.LeafWikiTitle != "Documentation" {
-			t.Fatalf("unexpected frontmatter after writeback: %#v", fm)
-		}
-		if fm.LeafWikiCreatedAt == "" || fm.LeafWikiUpdatedAt == "" {
-			t.Fatalf("expected metadata writeback to update INDEX.MD timestamps, got %#v", fm)
-		}
+		Expect(err).To(Succeed(), "LoadMarkdownFile INDEX.MD: %v",
+
+			err)
+
+		frontmatter := mdFile.GetFrontmatter()
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", Equal("sec-docs")),
+			HaveField("LeafWikiTitle", Equal("Documentation")),
+			HaveField("LeafWikiCreatedAt", Not(BeEmpty())),
+			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
+		))
 
 	})
 })
 
 // - README.md is fallback section default
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReadmeFallbackSectionWhenNoIndexExists", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("README fallback section when no index exists", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		sectionDir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, sectionDir)
+		createTreeDirectory(sectionDir)
 		readmePath := filepath.Join(sectionDir, "README.md")
-		mustWriteFile(t, readmePath, `---
+		writeTreeFile(readmePath, `---
 leafwiki_id: sec-docs
 leafwiki_title: Documentation
 ---
@@ -264,56 +250,60 @@ leafwiki_title: Documentation
 `, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		docs := findChildBySlug(t, tree, "docs")
-		if docs.Kind != NodeKindSection {
-			t.Fatalf("expected docs to be section, got %q", docs.Kind)
-		}
-		if docs.ID != "sec-docs" {
-			t.Fatalf("expected docs.ID from README.md frontmatter, got %q", docs.ID)
-		}
-		if docs.Title != "Documentation" {
-			t.Fatalf("expected docs.Title from README.md frontmatter, got %q", docs.Title)
-		}
+			err)
+
+		docs := findChildBySlug(tree, "docs")
+		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
+
 		for _, ch := range docs.Children {
-			if strings.EqualFold(ch.Slug.String(), "readme") {
-				t.Fatalf("README.md fallback must not be reconstructed as a child page")
-			}
+			Expect(strings.EqualFold(ch.Slug.
+				String(), "readme")).
+				To(BeFalse(), "README.md fallback must not be reconstructed as a child page")
+
 		}
 
 		raw, err := store.ReadPageRaw(docs)
-		if err != nil {
-			t.Fatalf("ReadPageRaw section: %v", err)
-		}
-		if !strings.Contains(raw, "# Section readme") {
-			t.Fatalf("section raw content = %q, want README.md body", raw)
-		}
-		if _, err := os.Stat(filepath.Join(sectionDir, "index.md")); !os.IsNotExist(err) {
-			t.Fatalf("README.md fallback must not materialize index.md, stat err = %v", err)
+		Expect(err).To(Succeed(), "ReadPageRaw section: %v",
+
+			err,
+		)
+		Expect(raw).To(ContainSubstring("# Section readme"),
+
+			"section raw content = %q, want README.md body",
+
+			raw)
+		{
+
+			_, err := os.Stat(filepath.Join(sectionDir, "index.md"))
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"README.md fallback must not materialize index.md, stat err = %v",
+
+				err)
 		}
 
 	})
 })
 
 // - index.md has precedence over README.md
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_IndexBeatsReadmeAndReadmeIsSeparatePage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("index beats README and README is separate page", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		sectionDir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, sectionDir)
-		mustWriteFile(t, filepath.Join(sectionDir, "index.md"), `---
+		createTreeDirectory(sectionDir)
+		writeTreeFile(filepath.Join(sectionDir, "index.md"), `---
 leafwiki_id: sec-docs
 leafwiki_title: Documentation
 ---
 # Index section
 `, 0o644)
-		mustWriteFile(t, filepath.Join(sectionDir, "README.md"), `---
+		writeTreeFile(filepath.Join(sectionDir, "README.md"), `---
 leafwiki_id: page-readme
 leafwiki_title: Readme Page
 ---
@@ -321,50 +311,61 @@ leafwiki_title: Readme Page
 `, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		docs := findChildBySlug(t, tree, "docs")
-		if docs.Kind != NodeKindSection || docs.ID != "sec-docs" {
-			t.Fatalf("docs = %#v, want section from index.md", docs)
-		}
+			err)
+
+		docs := findChildBySlug(tree, "docs")
+		Expect(docs.Kind !=
+			NodeKindSection ||
+			docs.ID != "sec-docs",
+		).
+			To(BeFalse(), "docs = %#v, want section from index.md",
+
+				docs)
+
 		raw, err := store.ReadPageRaw(docs)
-		if err != nil {
-			t.Fatalf("ReadPageRaw docs: %v", err)
-		}
-		if !strings.Contains(raw, "# Index section") {
-			t.Fatalf("docs raw = %q, want index.md content", raw)
-		}
-		readme := findChildBySlug(t, docs, "README")
-		if readme.Kind != NodeKindPage || readme.ID != "page-readme" {
-			t.Fatalf("README child = %#v, want separate page from README.md", readme)
-		}
+		Expect(err).To(Succeed(), "ReadPageRaw docs: %v",
+
+			err)
+		Expect(raw).To(ContainSubstring("# Index section"),
+
+			"docs raw = %q, want index.md content",
+
+			raw)
+
+		readme := findChildBySlug(docs, "README")
+		Expect(readme.Kind !=
+			NodeKindPage ||
+			readme.ID != "page-readme",
+		).To(BeFalse(),
+			"README child = %#v, want separate page from README.md",
+
+			readme)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_AllowsPageAndSectionWithSameBasename", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("allows page and section with same basename", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		docsDir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, filepath.Join(docsDir, "sync"))
-		mustWriteFile(t, filepath.Join(docsDir, "index.md"), `---
+		createTreeDirectory(filepath.Join(docsDir, "sync"))
+		writeTreeFile(filepath.Join(docsDir, "index.md"), `---
 leafwiki_id: sec-docs
 leafwiki_title: Documentation
 ---
 # Documentation
 `, 0o644)
-		mustWriteFile(t, filepath.Join(docsDir, "sync.md"), `---
+		writeTreeFile(filepath.Join(docsDir, "sync.md"), `---
 leafwiki_id: page-sync
 leafwiki_title: Sync Page
 ---
 # Sync Page
 `, 0o644)
-		mustWriteFile(t, filepath.Join(docsDir, "sync", "index.md"), `---
+		writeTreeFile(filepath.Join(docsDir, "sync", "index.md"), `---
 leafwiki_id: sec-sync
 leafwiki_title: Sync Section
 ---
@@ -372,11 +373,11 @@ leafwiki_title: Sync Section
 `, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		docs := findChildBySlug(t, tree, "docs")
+			err)
+
+		docs := findChildBySlug(tree, "docs")
 		var syncPage, syncSection *PageNode
 		for _, ch := range docs.Children {
 			if ch.Slug == "sync" && ch.Kind == NodeKindPage {
@@ -386,31 +387,35 @@ leafwiki_title: Sync Section
 				syncSection = ch
 			}
 		}
-		if syncPage == nil {
-			t.Fatalf("docs children = %#v, want sync.md page child", docs.Children)
-		}
-		if syncSection == nil {
-			t.Fatalf("docs children = %#v, want sync/ section child", docs.Children)
-		}
-		if syncPage.ID != "page-sync" {
-			t.Fatalf("sync page ID = %q, want page-sync", syncPage.ID)
-		}
-		if syncSection.ID != "sec-sync" {
-			t.Fatalf("sync section ID = %q, want sec-sync", syncSection.ID)
-		}
+		Expect(syncPage).NotTo(BeNil(),
+			"docs children = %#v, want sync.md page child",
+
+			docs.
+				Children)
+		Expect(syncSection).
+			NotTo(BeNil(), "docs children = %#v, want sync/ section child",
+
+				docs.Children)
+		Expect(syncPage.ID).
+			To(Equal(newFixturePageID("page-sync")), "sync page ID = %q, want page-sync",
+
+				syncPage.
+					ID)
+		Expect(syncSection.ID).To(Equal(newFixturePageID("sec-sync")), "sync section ID = %q, want sec-sync",
+
+			syncSection.ID)
 
 	})
 })
 
 // - root README.md is fallback only without root index.md
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_RootReadmeFallbackSectionWhenNoIndexExists", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("root README fallback section when no index exists", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustMkdir(t, filepath.Join(tmp, "root"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "README.md"), `---
+		createTreeDirectory(filepath.Join(tmp, "root"))
+		writeTreeFile(filepath.Join(tmp, "root", "README.md"), `---
 leafwiki_id: root
 leafwiki_title: Root Readme
 ---
@@ -418,42 +423,48 @@ leafwiki_title: Root Readme
 `, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		if tree.ID != "root" || tree.Title != "Root Readme" {
-			t.Fatalf("root = %#v, want stable root ID with README title", tree)
-		}
-		if len(tree.Children) != 0 {
-			t.Fatalf("root children = %v, want README.md used as root content only", slugs(tree.Children))
-		}
+			err)
+		Expect(tree.ID != "root" ||
+			tree.
+				Title !=
+				"Root Readme",
+		).To(BeFalse(), "root = %#v, want stable root ID with README title",
+
+			tree)
+		Expect(tree.Children).To(HaveLen(0),
+			"root children = %v, want README.md used as root content only",
+
+			slugs(tree.Children))
+
 		raw, err := store.ReadPageRaw(tree)
-		if err != nil {
-			t.Fatalf("ReadPageRaw root: %v", err)
-		}
-		if !strings.Contains(raw, "# Root readme") {
-			t.Fatalf("root raw = %q, want README.md body", raw)
-		}
+		Expect(err).To(Succeed(), "ReadPageRaw root: %v",
+
+			err)
+		Expect(raw).To(ContainSubstring("# Root readme"),
+
+			"root raw = %q, want README.md body",
+
+			raw)
 
 	})
 })
 
 // - root index.md has precedence over root README.md
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_RootIndexBeatsRootReadme", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("root index beats root README", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustMkdir(t, filepath.Join(tmp, "root"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "index.md"), `---
+		createTreeDirectory(filepath.Join(tmp, "root"))
+		writeTreeFile(filepath.Join(tmp, "root", "index.md"), `---
 leafwiki_id: root
 leafwiki_title: Root Index
 ---
 # Root index
 `, 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "README.md"), `---
+		writeTreeFile(filepath.Join(tmp, "root", "README.md"), `---
 leafwiki_id: root-readme
 leafwiki_title: Root Readme Page
 ---
@@ -461,120 +472,127 @@ leafwiki_title: Root Readme Page
 `, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		if tree.ID != "root" || tree.Title != "Root Index" {
-			t.Fatalf("root = %#v, want stable root ID with index title", tree)
-		}
+			err)
+		Expect(tree.ID != "root" ||
+			tree.
+				Title !=
+				"Root Index",
+		).To(BeFalse(), "root = %#v, want stable root ID with index title",
+
+			tree)
+
 		raw, err := store.ReadPageRaw(tree)
-		if err != nil {
-			t.Fatalf("ReadPageRaw root: %v", err)
-		}
-		if !strings.Contains(raw, "# Root index") {
-			t.Fatalf("root raw = %q, want index.md body", raw)
-		}
-		readme := findChildBySlug(t, tree, "README")
-		if readme.Kind != NodeKindPage || readme.ID != "root-readme" {
-			t.Fatalf("README child = %#v, want root README.md as separate page", readme)
-		}
+		Expect(err).To(Succeed(), "ReadPageRaw root: %v",
+
+			err)
+		Expect(raw).To(ContainSubstring("# Root index"),
+
+			"root raw = %q, want index.md body",
+
+			raw)
+
+		readme := findChildBySlug(tree, "README")
+		Expect(readme.Kind !=
+			NodeKindPage ||
+			readme.ID != "root-readme",
+		).To(BeFalse(),
+			"README child = %#v, want root README.md as separate page",
+
+			readme)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_SectionWithoutIndex_UsesDirNameAsTitleAndMaterializesIndex", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("section without index uses directory name as title and materializes index", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustMkdir(t, filepath.Join(tmp, "root", "emptysec"))
+		createTreeDirectory(filepath.Join(tmp, "root", "emptysec"))
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		sec := findChildBySlug(t, tree, "emptysec")
-		if sec.Kind != NodeKindSection {
-			t.Fatalf("expected section, got %q", sec.Kind)
-		}
-		if sec.Title != "emptysec" {
-			t.Fatalf("expected title=emptysec, got %q", sec.Title)
-		}
-		if strings.TrimSpace(sec.ID.String()) == "" {
-			t.Fatalf("expected some generated id, got empty")
-		}
+			err)
+
+		sec := findChildBySlug(tree, "emptysec")
+		Expect(sec).To(SatisfyAll(
+			HaveField("Kind", Equal(NodeKindSection)),
+			HaveField("Title", Equal("emptysec")),
+			HaveField("ID", Not(BeEmpty())),
+		), "unexpected materialized section: %#v", sec)
 
 		indexPath := filepath.Join(tmp, "root", "emptysec", "index.md")
 		raw, err := os.ReadFile(indexPath)
-		if err != nil {
-			t.Fatalf("expected reconstruct to materialize missing index.md: %v", err)
-		}
-		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter in materialized index")
-		}
-		if newFixturePageID(fm.LeafWikiID) != sec.ID || fm.LeafWikiTitle != sec.Title {
-			t.Fatalf("unexpected frontmatter in materialized index: %#v", fm)
-		}
-		if strings.TrimSpace(body) != "" {
-			t.Fatalf("expected empty body in materialized index, got %q", body)
-		}
+		Expect(err).To(Succeed(), "expected reconstruct to materialize missing index.md: %v",
+
+			err)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter in materialized index")
+		Expect(newFixturePageID(frontmatter.
+			LeafWikiID) != sec.
+			ID ||
+			frontmatter.
+				LeafWikiTitle !=
+				sec.Title).To(BeFalse(), "unexpected frontmatter in materialized index: %#v",
+
+			frontmatter)
+		Expect(strings.TrimSpace(body)).To(BeEmpty(),
+
+			"expected empty body in materialized index, got %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_PageWithoutFrontmatter_FallsBackToHeadlineTitle", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("page without frontmatter falls back to headline title", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		// FS: <tmp>/plain.md (no fm)
-		mustWriteFile(t, filepath.Join(tmp, "root", "plain.md"), "# hello\n", 0o644)
+		// FS: <tmp>/plain.md (no frontmatter)
+		writeTreeFile(filepath.Join(tmp, "root", "plain.md"), "# hello\n", 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		p := findChildBySlug(t, tree, "plain")
-		if p.Kind != NodeKindPage {
-			t.Fatalf("expected page, got %q", p.Kind)
-		}
+			err)
+
+		p := findChildBySlug(tree, "plain")
+		Expect(p).To(SatisfyAll(
+			HaveField("Kind", Equal(NodeKindPage)),
+			HaveField("Title", Equal("hello")),
+			HaveField("ID", Not(BeEmpty())),
+		))
 
 		// title fallback should be headline
-		if p.Title != "hello" {
-			t.Fatalf("expected title fallback to slug 'plain', got %q", p.Title)
-		}
-		if strings.TrimSpace(p.ID.String()) == "" {
-			// should still have generated id (unless you later decide to keep empty)
-			t.Fatalf("expected generated id, got empty")
-		}
+
+		// should still have generated id (unless you later decide to keep empty)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_PositionsAreContiguous", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("positions are contiguous", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		// Create several files/dirs
-		mustWriteFile(t, filepath.Join(tmp, "root", "b.md"), "# b", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "a.md"), "# a", 0o644)
-		mustMkdir(t, filepath.Join(tmp, "root", "zsec"))
+		writeTreeFile(filepath.Join(tmp, "root", "b.md"), "# b", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "a.md"), "# a", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "zsec"))
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+			err)
 
 		// Positions should be 0..n-1 regardless of order
 		seen := make([]int, 0, len(tree.Children))
@@ -582,120 +600,127 @@ var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_PositionsAreContigu
 			seen = append(seen, ch.Position)
 		}
 		sort.Ints(seen)
-		for i := range seen {
-			if seen[i] != i {
-				t.Fatalf("expected contiguous positions 0..%d, got %v (slugs=%v)", len(seen)-1, seen, slugs(tree.Children))
-			}
-		}
+		Expect(seen).To(HaveExactElements(0, 1, 2),
+			"expected contiguous positions 0..%d, got %v (slugs=%v)",
+			len(seen)-1, seen, slugs(tree.Children))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_OrderFileOverridesDefaultOrder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("order file overrides default order", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "a.md"), "---\nleafwiki_id: id-a\n---\n# A", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "b.md"), "---\nleafwiki_id: id-b\n---\n# B", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "c.md"), "---\nleafwiki_id: id-c\n---\n# C", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "a.md"), "---\nleafwiki_id: id-a\n---\n# A", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "b.md"), "---\nleafwiki_id: id-b\n---\n# B", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "c.md"), "---\nleafwiki_id: id-c\n---\n# C", 0o644)
 
 		orderRaw, err := json.Marshal(map[string][]string{
 			"ordered_ids": {"id-c", "id-a"},
 		})
-		if err != nil {
-			t.Fatalf("marshal order file: %v", err)
-		}
-		mustWriteFile(t, filepath.Join(tmp, "root", ".order.json"), string(orderRaw), 0o644)
+		Expect(err).To(Succeed(), "marshal order file: %v",
+
+			err,
+		)
+
+		writeTreeFile(filepath.Join(tmp, "root", ".order.json"), string(orderRaw), 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+			err)
 
 		got := slugs(tree.Children)
 		want := []string{"c", "a", "b"}
-		if strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Fatalf("unexpected child order: got %v want %v", got, want)
-		}
+		Expect(strings.Join(
+			got, ",")).
+			To(Equal(strings.Join(
+				want, ",",
+			)), "unexpected child order: got %v want %v",
+
+				got, want)
 
 		for i, child := range tree.Children {
-			if child.Position != i {
-				t.Fatalf("expected child %q position %d, got %d", child.Slug, i, child.Position)
-			}
+			Expect(child.Position).To(Equal(i),
+				"expected child %q position %d, got %d",
+
+				child.
+					Slug, i, child.Position)
+
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_OrderFileIgnoresUnknownIDsAndKeepsRemainingStable", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("order file ignores unknown IDs and keeps remaining stable", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "a.md"), "---\nleafwiki_id: id-a\n---\n# A", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "b.md"), "---\nleafwiki_id: id-b\n---\n# B", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "c.md"), "---\nleafwiki_id: id-c\n---\n# C", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "a.md"), "---\nleafwiki_id: id-a\n---\n# A", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "b.md"), "---\nleafwiki_id: id-b\n---\n# B", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "c.md"), "---\nleafwiki_id: id-c\n---\n# C", 0o644)
 
 		orderRaw, err := json.Marshal(map[string][]string{
 			"ordered_ids": {"missing-id", "id-b"},
 		})
-		if err != nil {
-			t.Fatalf("marshal order file: %v", err)
-		}
-		mustWriteFile(t, filepath.Join(tmp, "root", ".order.json"), string(orderRaw), 0o644)
+		Expect(err).To(Succeed(), "marshal order file: %v",
+
+			err,
+		)
+
+		writeTreeFile(filepath.Join(tmp, "root", ".order.json"), string(orderRaw), 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+			err)
 
 		got := slugs(tree.Children)
 		want := []string{"b", "a", "c"}
-		if strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Fatalf("unexpected child order: got %v want %v", got, want)
-		}
+		Expect(strings.Join(
+			got, ",")).
+			To(Equal(strings.Join(
+				want, ",",
+			)), "unexpected child order: got %v want %v",
+
+				got, want)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnDuplicateLeafWikiIDs", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("returns an error on duplicate LeafWiki IDs", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "a.md"), `---
+		writeTreeFile(filepath.Join(tmp, "root", "a.md"), `---
 leafwiki_id: dup-id
 leafwiki_title: A
 ---
 # A`, 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "b.md"), `---
+		writeTreeFile(filepath.Join(tmp, "root", "b.md"), `---
 leafwiki_id: dup-id
 leafwiki_title: B
 ---
 # B`, 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		if err == nil {
-			t.Fatalf("expected duplicate ID error")
-		}
-		if !errors.Is(err, ErrDuplicateLeafwikiID) {
-			t.Fatalf("expected duplicate ID error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected duplicate ID error")
+		Expect(err).To(MatchError(ErrDuplicateLeafwikiID), "expected duplicate ID error, got: %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnDuplicateCanonicalAndLegacyLeafWikiIDs", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("returns an error on duplicate canonical and legacy LeafWiki IDs", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "a.md"), `<!-- leafwiki
+		writeTreeFile(filepath.Join(tmp, "root", "a.md"), `<!-- leafwiki
 version: 1
 page:
   id: mixed-dup-id
@@ -703,19 +728,17 @@ page:
 -->
 
 # A`, 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "b.md"), `---
+		writeTreeFile(filepath.Join(tmp, "root", "b.md"), `---
 leafwiki_id: mixed-dup-id
 leafwiki_title: B
 ---
 # B`, 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		if err == nil {
-			t.Fatalf("expected duplicate ID error")
-		}
-		if !errors.Is(err, ErrDuplicateLeafwikiID) {
-			t.Fatalf("expected duplicate ID error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected duplicate ID error")
+		Expect(err).To(MatchError(ErrDuplicateLeafwikiID), "expected duplicate ID error, got: %v",
+
+			err)
 
 	})
 })
@@ -725,20 +748,21 @@ type malformedCanonicalMetadataCase struct {
 	raw  string
 }
 
-var _ = ginkgo.DescribeTable("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnMalformedCanonicalMetadata",
+var _ = ginkgo.DescribeTable("node store filesystem reconstruction returns an error on malformed canonical metadata",
 	func(tt malformedCanonicalMetadataCase) {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
-		mustWriteFile(t, filepath.Join(tmp, tt.path), tt.raw, 0o644)
+		writeTreeFile(filepath.Join(tmp, tt.path), tt.raw, 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		if err == nil {
-			t.Fatalf("expected reconstruct error")
-		}
-		if !errors.Is(err, markdown.ErrMetadataParse) {
-			t.Fatalf("expected metadata parse error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected reconstruct error")
+		Expect(err).To(MatchError(markdown.
+			ErrMetadataParse,
+		),
+			"expected metadata parse error, got: %v",
+
+			err)
+
 	},
 	ginkgo.Entry("page file", malformedCanonicalMetadataCase{
 		path: filepath.Join("root", "bad.md"),
@@ -774,48 +798,46 @@ page:
 	}),
 )
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnCaseInsensitiveDuplicateSlugs", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("returns an error on case insensitive duplicate slugs", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "abc.md"), "# lower", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "ABC.md"), "# upper", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "abc.md"), "# lower", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "ABC.md"), "# upper", 0o644)
 
 		entries, err := os.ReadDir(filepath.Join(tmp, "root"))
-		if err != nil {
-			t.Fatalf("read root dir: %v", err)
-		}
+		Expect(err).To(Succeed(), "read root directory: %v",
+
+			err,
+		)
+
 		if len(entries) < 2 {
-			t.Skip("filesystem does not preserve case-only duplicate filenames")
+			ginkgo.Skip("filesystem does not preserve case-only duplicate filenames")
 		}
 
 		_, err = store.ReconstructTreeFromFS()
-		if err == nil {
-			t.Fatalf("expected duplicate slug error")
-		}
-		if !errors.Is(err, ErrDuplicateReconstructedSlug) {
-			t.Fatalf("expected duplicate slug error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected duplicate slug error")
+		Expect(err).To(MatchError(ErrDuplicateReconstructedSlug), "expected duplicate slug error, got: %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_AllowsDirectoryFileSlugPair", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("allows directory file slug pair", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustMkdir(t, filepath.Join(tmp, "root", "notes"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "notes", "index.md"), `---
+		createTreeDirectory(filepath.Join(tmp, "root", "notes"))
+		writeTreeFile(filepath.Join(tmp, "root", "notes", "index.md"), `---
 leafwiki_id: notes-section
 leafwiki_title: Notes Section
 ---
 # Notes section
 `, 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "notes.md"), `---
+		writeTreeFile(filepath.Join(tmp, "root", "notes.md"), `---
 leafwiki_id: notes-page
 leafwiki_title: Notes Page
 ---
@@ -823,9 +845,10 @@ leafwiki_title: Notes Page
 `, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+			err)
+
 		var page, section *PageNode
 		for _, child := range tree.Children {
 			if child.Slug != "notes" {
@@ -838,237 +861,268 @@ leafwiki_title: Notes Page
 				section = child
 			}
 		}
-		if page == nil || page.ID != "notes-page" {
-			t.Fatalf("notes page = %#v, want notes-page", page)
-		}
-		if section == nil || section.ID != "notes-section" {
-			t.Fatalf("notes section = %#v, want notes-section", section)
-		}
+		Expect(page == nil ||
+			page.ID !=
+				"notes-page",
+		).To(BeFalse(),
+			"notes page = %#v, want notes-page",
+
+			page)
+		Expect(section == nil ||
+			section.
+				ID !=
+				"notes-section",
+		).To(BeFalse(), "notes section = %#v, want notes-section",
+
+			section)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ImportsNormalizableWorkspaceRoutes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("imports normalizable workspace routes", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustMkdir(t, filepath.Join(tmp, "root", "plans"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "plans", "index.md"), "# Plans", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md"), "# Agent Hooks Plan", 0o644)
-		mustMkdir(t, filepath.Join(tmp, "root", "User Guides"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "User Guides", "index.md"), "# User Guides", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "plans"))
+		writeTreeFile(filepath.Join(tmp, "root", "plans", "index.md"), "# Plans", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md"), "# Agent Hooks Plan", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "User Guides"))
+		writeTreeFile(filepath.Join(tmp, "root", "User Guides", "index.md"), "# User Guides", 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		plans := findChildBySlug(t, tree, "plans")
-		if plans.Kind != NodeKindSection {
-			t.Fatalf("plans.Kind = %q, want %q", plans.Kind, NodeKindSection)
-		}
-		plan := findChildBySlug(t, plans, "agent-hooks-plan")
-		if plan.Kind != NodeKindPage {
-			t.Fatalf("plan.Kind = %q, want %q", plan.Kind, NodeKindPage)
-		}
-		if plan.Title != "Agent Hooks Plan" {
-			t.Fatalf("plan.Title = %q, want Agent Hooks Plan", plan.Title)
-		}
+			err)
+
+		plans := findChildBySlug(tree, "plans")
+		Expect(plans).To(SatisfyAll(
+			HaveField("Kind", Equal(NodeKindSection)),
+			HaveField("Slug", Equal(newFixtureSlug("plans"))),
+		), "unexpected plans section: %#v", plans)
+
+		plan := findChildBySlug(plans, "agent-hooks-plan")
+		Expect(plan).To(SatisfyAll(
+			HaveField("Kind", Equal(NodeKindPage)),
+			HaveField("Title", Equal("Agent Hooks Plan")),
+		), "unexpected normalized plan page: %#v", plan)
+
 		raw, err := store.ReadPageRaw(plan)
-		if err != nil {
-			t.Fatalf("ReadPageRaw normalized plan: %v", err)
-		}
-		if !strings.Contains(raw, "Agent Hooks Plan") {
-			t.Fatalf("ReadPageRaw normalized plan = %q, want original file content", raw)
-		}
+		Expect(err).To(Succeed(), "ReadPageRaw normalized plan: %v",
 
-		guides := findChildBySlug(t, tree, "user-guides")
-		if guides.Kind != NodeKindSection {
-			t.Fatalf("guides.Kind = %q, want %q", guides.Kind, NodeKindSection)
-		}
+			err,
+		)
+		Expect(raw).To(ContainSubstring("Agent Hooks Plan"),
+
+			"ReadPageRaw normalized plan = %q, want original file content",
+
+			raw,
+		)
+
+		guides := findChildBySlug(tree, "user-guides")
+		Expect(guides.Kind).
+			To(Equal(NodeKindSection), "guides.Kind = %q, want %q",
+
+				guides.
+					Kind, NodeKindSection)
+
 		rawGuides, err := store.ReadPageRaw(guides)
-		if err != nil {
-			t.Fatalf("ReadPageRaw normalized section: %v", err)
-		}
-		if !strings.Contains(rawGuides, "User Guides") {
-			t.Fatalf("ReadPageRaw normalized section = %q, want original section content", rawGuides)
-		}
+		Expect(err).To(Succeed(), "ReadPageRaw normalized section: %v",
+
+			err)
+		Expect(rawGuides).To(ContainSubstring("User Guides"),
+
+			"ReadPageRaw normalized section = %q, want original section content",
+
+			rawGuides)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReturnsErrorOnNormalizedDuplicatePageRoutes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("returns an error on normalized duplicate page routes", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustMkdir(t, filepath.Join(tmp, "root", "plans"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "plans", "foo_bar.md"), "# Foo Bar", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "plans", "foo-bar.md"), "# Foo Bar Duplicate", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "plans"))
+		writeTreeFile(filepath.Join(tmp, "root", "plans", "foo_bar.md"), "# Foo Bar", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "plans", "foo-bar.md"), "# Foo Bar Duplicate", 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		if err == nil {
-			t.Fatalf("expected duplicate normalized slug error")
-		}
-		if !errors.Is(err, ErrDuplicateReconstructedSlug) {
-			t.Fatalf("expected duplicate page slug error, got: %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected duplicate normalized slug error")
+		Expect(err).To(MatchError(ErrDuplicateReconstructedSlug), "expected duplicate page slug error, got: %v",
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_SkipsTopLevelStaticAssets", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("skips top level static assets", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustMkdir(t, filepath.Join(tmp, "root", "assets", "install"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "assets", "install", "image.png"), "png", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "guide.md"), "# Guide", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "assets", "install"))
+		writeTreeFile(filepath.Join(tmp, "root", "assets", "install", "image.png"), "png", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "guide.md"), "# Guide", 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		findChildBySlug(t, tree, "guide")
+			err)
+
+		findChildBySlug(tree, "guide")
 		for _, child := range tree.Children {
-			if strings.EqualFold(child.Slug.String(), "assets") || strings.EqualFold(child.Slug.String(), "assets-1") {
-				t.Fatalf("top-level static assets directory became wiki child: %#v", child)
-			}
+			Expect(strings.EqualFold(child.
+				Slug.
+				String(), "assets",
+			) || strings.
+				EqualFold(child.
+					Slug.String(), "assets-1")).To(BeFalse(), "top-level static assets directory became wiki child: %#v",
+
+				child)
+
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_WritesIDsBackToFiles", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("writes IDs back to files", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		// Create files without leafwiki_id in frontmatter
-		mustWriteFile(t, filepath.Join(tmp, "root", "no-id.md"), "# No ID", 0o644)
-		mustMkdir(t, filepath.Join(tmp, "root", "section"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "section", "index.md"), "# Section No ID", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "no-id.md"), "# No ID", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "section"))
+		writeTreeFile(filepath.Join(tmp, "root", "section", "index.md"), "# Section No ID", 0o644)
 
 		// Run reconstruction
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+			err)
 
 		// Get the page and section nodes
-		page := findChildBySlug(t, tree, "no-id")
-		section := findChildBySlug(t, tree, "section")
+		page := findChildBySlug(tree, "no-id")
+		section := findChildBySlug(tree, "section")
+		Expect(page.ID).NotTo(BeEmpty(),
+
+			"expected page to have generated ID, got empty")
+		Expect(section.ID).NotTo(BeEmpty(),
+
+			"expected section to have generated ID, got empty",
+		)
 
 		// Verify that IDs were generated
-		if page.ID == "" {
-			t.Fatalf("expected page to have generated ID, got empty")
-		}
-		if section.ID == "" {
-			t.Fatalf("expected section to have generated ID, got empty")
-		}
 
 		// Now reload the files and check that IDs were written back
 		pageMd, err := markdown.LoadMarkdownFile(filepath.Join(tmp, "root", "no-id.md"))
-		if err != nil {
-			t.Fatalf("failed to reload page: %v", err)
-		}
-		if newFixturePageID(pageMd.GetFrontmatter().LeafWikiID) != page.ID {
-			t.Fatalf("expected page frontmatter ID=%q, got %q", page.ID, pageMd.GetFrontmatter().LeafWikiID)
-		}
+		Expect(err).To(Succeed(), "failed to reload page: %v",
+
+			err)
+		Expect(newFixturePageID(pageMd.
+			GetFrontmatter().LeafWikiID,
+		)).
+			To(Equal(page.
+				ID),
+				"expected page frontmatter ID=%q, got %q",
+				page.ID,
+
+				pageMd.GetFrontmatter().LeafWikiID)
 
 		sectionMd, err := markdown.LoadMarkdownFile(filepath.Join(tmp, "root", "section", "index.md"))
-		if err != nil {
-			t.Fatalf("failed to reload section index: %v", err)
-		}
-		if newFixturePageID(sectionMd.GetFrontmatter().LeafWikiID) != section.ID {
-			t.Fatalf("expected section frontmatter ID=%q, got %q", section.ID, sectionMd.GetFrontmatter().LeafWikiID)
-		}
+		Expect(err).To(Succeed(), "failed to reload section index: %v",
+
+			err)
+		Expect(newFixturePageID(sectionMd.
+			GetFrontmatter().LeafWikiID,
+		)).To(Equal(section.
+			ID), "expected section frontmatter ID=%q, got %q",
+
+			section.ID, sectionMd.GetFrontmatter().LeafWikiID)
 
 		// Run reconstruction again and verify IDs are stable (deterministic)
 		tree2, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("second ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "second ReconstructTreeFromFS: %v",
 
-		page2 := findChildBySlug(t, tree2, "no-id")
-		section2 := findChildBySlug(t, tree2, "section")
+			err,
+		)
 
-		if page2.ID != page.ID {
-			t.Fatalf("expected deterministic page ID on second run: first=%q, second=%q", page.ID, page2.ID)
-		}
-		if section2.ID != section.ID {
-			t.Fatalf("expected deterministic section ID on second run: first=%q, second=%q", section.ID, section2.ID)
-		}
+		page2 := findChildBySlug(tree2, "no-id")
+		section2 := findChildBySlug(tree2, "section")
+		Expect(page2.ID).To(
+			Equal(page.
+				ID),
+			"expected deterministic page ID on second run: first=%q, second=%q",
+
+			page.ID, page2.ID)
+		Expect(section2.ID).
+			To(Equal(section.
+				ID), "expected deterministic section ID on second run: first=%q, second=%q",
+
+				section.ID, section2.
+					ID)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_NormalizesImportableSlugsAndSkipsEmptyNormalizedSlugs", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("normalizes importable slugs and skips empty normalized slugs", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		// Create files and directories with names that were invalid route slugs but
 		// can be normalized safely.
-		mustWriteFile(t, filepath.Join(tmp, "root", "Valid Page.md"), "# Valid", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "UPPERCASE.md"), "# Upper", 0o644)
-		mustMkdir(t, filepath.Join(tmp, "root", "Valid Section"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "Valid Section", "index.md"), "# Section", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "!!!.md"), "# Invalid", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "Valid Page.md"), "# Valid", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "UPPERCASE.md"), "# Upper", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "Valid Section"))
+		writeTreeFile(filepath.Join(tmp, "root", "Valid Section", "index.md"), "# Section", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "!!!.md"), "# Invalid", 0o644)
 
 		// Create a valid file to ensure the test still works
-		mustWriteFile(t, filepath.Join(tmp, "root", "valid.md"), "# Valid", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "valid.md"), "# Valid", 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
+
+			err)
 
 		// The valid file should be present with normalized slug
-		findChildBySlug(t, tree, "valid")
-		findChildBySlug(t, tree, "UPPERCASE")
-		findChildBySlug(t, tree, "valid-page")
-		findChildBySlug(t, tree, "valid-section")
+		findChildBySlug(tree, "valid")
+		findChildBySlug(tree, "UPPERCASE")
+		findChildBySlug(tree, "valid-page")
+		findChildBySlug(tree, "valid-section")
+		Expect(tree.Children).To(HaveLen(4),
+			"expected only empty-normalized names to be skipped, got %v",
 
-		if len(tree.Children) != 4 {
-			t.Fatalf("expected only empty-normalized names to be skipped, got %v", slugs(tree.Children))
-		}
+			slugs(tree.Children))
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_PreservesMixedCaseSlugNames", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("preserves mixed case slug names", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "ABCD-efg.md"), "# Mixed Case", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "ABCD-efg.md"), "# Mixed Case", 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		findChildBySlug(t, tree, "ABCD-efg")
+			err)
+
+		findChildBySlug(tree, "ABCD-efg")
 
 	})
 })
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_ReadsMetadataFromFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("reads metadata from frontmatter", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "page.md"), `---
+		writeTreeFile(filepath.Join(tmp, "root", "page.md"), `---
 leafwiki_id: page-1
 leafwiki_title: Page One
 leafwiki_created_at: 2026-03-21T10:15:30Z
@@ -1079,38 +1133,53 @@ leafwiki_last_author_id: bob
 # Page One`, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		page := findChildBySlug(t, tree, "page")
-		if page.ID != "page-1" {
-			t.Fatalf("expected page ID from frontmatter, got %q", page.ID)
+			err)
+
+		page := findChildBySlug(tree, "page")
+		Expect(page.ID).To(Equal(newFixturePageID("page-1")),
+			"expected page ID from frontmatter, got %q",
+
+			page.ID)
+		{
+
+			got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal("2026-03-21T10:15:30Z"), "expected created_at from frontmatter, got %q",
+
+				got)
 		}
-		if got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339); got != "2026-03-21T10:15:30Z" {
-			t.Fatalf("expected created_at from frontmatter, got %q", got)
+		{
+
+			got := page.Metadata.UpdatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal("2026-03-21T11:16:31Z"), "expected updated_at from frontmatter, got %q",
+
+				got)
 		}
-		if got := page.Metadata.UpdatedAt.UTC().Format(time.RFC3339); got != "2026-03-21T11:16:31Z" {
-			t.Fatalf("expected updated_at from frontmatter, got %q", got)
-		}
-		if page.Metadata.CreatorID != "alice" || page.Metadata.LastAuthorID != "bob" {
-			t.Fatalf("expected author metadata from frontmatter, got %#v", page.Metadata)
-		}
+		Expect(page.Metadata.
+			CreatorID !=
+			"alice" ||
+			page.Metadata.
+				LastAuthorID !=
+				"bob",
+		).
+			To(BeFalse(), "expected author metadata from frontmatter, got %#v",
+
+				page.Metadata)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_CanonicalizesCompleteLegacyMetadata", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("canonicalizes complete legacy metadata", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		rootIndex := filepath.Join(tmp, "root", "index.md")
 		sectionIndex := filepath.Join(tmp, "root", "docs", "index.md")
 		pagePath := filepath.Join(tmp, "root", "docs", "page.md")
 
-		mustWriteFile(t, rootIndex, `---
+		writeTreeFile(rootIndex, `---
 leafwiki_id: root
 leafwiki_title: Root
 leafwiki_created_at: 2026-03-21T09:00:00Z
@@ -1119,7 +1188,7 @@ leafwiki_creator_id: root-author
 leafwiki_last_author_id: root-editor
 ---
 # Root`, 0o644)
-		mustWriteFile(t, sectionIndex, `---
+		writeTreeFile(sectionIndex, `---
 leafwiki_id: docs-section
 leafwiki_title: Docs
 leafwiki_created_at: 2026-03-21T10:00:00Z
@@ -1128,7 +1197,7 @@ leafwiki_creator_id: docs-author
 leafwiki_last_author_id: docs-editor
 ---
 # Docs`, 0o644)
-		mustWriteFile(t, pagePath, `---
+		writeTreeFile(pagePath, `---
 leafwiki_id: docs-page
 leafwiki_title: Page
 leafwiki_created_at: 2026-03-21T11:00:00Z
@@ -1139,104 +1208,138 @@ leafwiki_last_author_id: page-editor
 # Page`, 0o644)
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		if tree.ID != "root" {
-			t.Fatalf("root ID = %q", tree.ID)
-		}
-		section := findChildBySlug(t, tree, "docs")
-		if section.ID != "docs-section" {
-			t.Fatalf("section ID = %q", section.ID)
-		}
-		page := findChildBySlug(t, section, "page")
-		if page.ID != "docs-page" {
-			t.Fatalf("page ID = %q", page.ID)
-		}
+			err)
+		Expect(tree.ID).To(Equal(newFixturePageID("root")), "root ID = %q",
+			tree.
+				ID)
+
+		section := findChildBySlug(tree, "docs")
+		Expect(section.ID).To(Equal(newFixturePageID("docs-section")), "section ID = %q",
+
+			section.
+				ID)
+
+		page := findChildBySlug(section, "page")
+		Expect(page.ID).To(Equal(newFixturePageID("docs-page")), "page ID = %q",
+			page.ID,
+		)
 
 		for _, path := range []string{rootIndex, sectionIndex, pagePath} {
 			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("ReadFile(%s): %v", path, err)
-			}
+			Expect(err).To(Succeed(), "ReadFile(%s): %v",
+
+				path, err,
+			)
+
 			content := string(raw)
-			if !strings.HasPrefix(content, "<!-- leafwiki\n") {
-				t.Fatalf("%s was not canonicalized: %q", path, content)
+			Expect(content).
+				To(HavePrefix("<!-- leafwiki\n"),
+
+					"%s was not canonicalized: %q",
+
+					path, content)
+			Expect(content).NotTo(HavePrefix("---\n"),
+
+				"%s still starts with YAML frontmatter: %q",
+
+				path, content)
+			{
+
+				_, _, err := markdown.ParsePageDocument(content)
+				Expect(err).To(Succeed(), "ParsePageDocument(%s): %v",
+
+					path, err,
+				)
 			}
-			if strings.HasPrefix(content, "---\n") {
-				t.Fatalf("%s still starts with YAML frontmatter: %q", path, content)
-			}
-			if _, _, err := markdown.ParsePageDocument(content); err != nil {
-				t.Fatalf("ParsePageDocument(%s): %v", path, err)
-			}
+
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_MissingMetadataFallsBackToMtimeAndSystem", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("missing metadata falls back to mtime and system", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		pagePath := filepath.Join(tmp, "root", "page.md")
-		mustWriteFile(t, pagePath, `# Page One`, 0o644)
+		writeTreeFile(pagePath, `# Page One`, 0o644)
 
 		wantTime := time.Date(2026, time.March, 21, 12, 34, 56, 0, time.UTC)
-		if err := os.Chtimes(pagePath, wantTime, wantTime); err != nil {
-			t.Fatalf("Chtimes: %v", err)
+		{
+			err := os.Chtimes(pagePath, wantTime, wantTime)
+			Expect(err).To(Succeed(), "Chtimes: %v",
+
+				err)
 		}
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		page := findChildBySlug(t, tree, "page")
-		if strings.TrimSpace(page.ID.String()) == "" {
-			t.Fatalf("expected generated ID")
+			err)
+
+		page := findChildBySlug(tree, "page")
+		Expect(strings.TrimSpace(page.
+			ID.String())).NotTo(BeEmpty(),
+
+			"expected generated ID",
+		)
+		{
+
+			got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal(wantTime.
+				Format(time.RFC3339)),
+				"expected created_at fallback from mtime, got %q",
+
+				got)
 		}
-		if got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339); got != wantTime.Format(time.RFC3339) {
-			t.Fatalf("expected created_at fallback from mtime, got %q", got)
+		{
+
+			got := page.Metadata.UpdatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal(wantTime.
+				Format(time.RFC3339)),
+				"expected updated_at fallback from mtime, got %q",
+
+				got)
 		}
-		if got := page.Metadata.UpdatedAt.UTC().Format(time.RFC3339); got != wantTime.Format(time.RFC3339) {
-			t.Fatalf("expected updated_at fallback from mtime, got %q", got)
-		}
-		if page.Metadata.CreatorID != reconstructSystemUserID || page.Metadata.LastAuthorID != reconstructSystemUserID {
-			t.Fatalf("expected system user fallback, got %#v", page.Metadata)
-		}
+		Expect(page.Metadata.
+			CreatorID !=
+			reconstructSystemUserID ||
+			page.Metadata.
+				LastAuthorID !=
+				reconstructSystemUserID).To(BeFalse(),
+			"expected system user fallback, got %#v",
+
+			page.Metadata)
 
 		mdFile, err := markdown.LoadMarkdownFile(pagePath)
-		if err != nil {
-			t.Fatalf("LoadMarkdownFile: %v", err)
-		}
-		fm := mdFile.GetFrontmatter()
-		if newFixturePageID(fm.LeafWikiID) != page.ID {
-			t.Fatalf("expected generated ID to be written back, got %q want %q", fm.LeafWikiID, page.ID)
-		}
-		if fm.LeafWikiCreatedAt != wantTime.Format(time.RFC3339) {
-			t.Fatalf("expected created_at fallback to be written back, got %q", fm.LeafWikiCreatedAt)
-		}
-		if fm.LeafWikiUpdatedAt != wantTime.Format(time.RFC3339) {
-			t.Fatalf("expected updated_at fallback to be written back, got %q", fm.LeafWikiUpdatedAt)
-		}
-		if fm.LeafWikiCreatorID != reconstructSystemUserID || fm.LeafWikiLastAuthorID != reconstructSystemUserID {
-			t.Fatalf("expected system metadata fallback to be written back, got %#v", fm)
-		}
+		Expect(err).To(Succeed(), "LoadMarkdownFile: %v",
+
+			err)
+
+		frontmatter := mdFile.GetFrontmatter()
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", WithTransform(func(raw string) PageID {
+				return newFixturePageID(raw)
+			}, Equal(page.ID))),
+			HaveField("LeafWikiCreatedAt", Equal(wantTime.Format(time.RFC3339))),
+			HaveField("LeafWikiUpdatedAt", Equal(wantTime.Format(time.RFC3339))),
+			HaveField("LeafWikiCreatorID", Equal(reconstructSystemUserID)),
+			HaveField("LeafWikiLastAuthorID", Equal(reconstructSystemUserID)),
+		), "expected generated metadata fallback to be written back, got %#v", frontmatter)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReconstructTreeFromFS_InvalidMetadataTimestampFallsBackToMtime", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+	ginkgo.It("invalid metadata timestamp falls back to mtime", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		pagePath := filepath.Join(tmp, "root", "page.md")
-		mustWriteFile(t, pagePath, `---
+		writeTreeFile(pagePath, `---
 leafwiki_id: page-1
 leafwiki_title: Page One
 leafwiki_created_at: not-a-timestamp
@@ -1247,25 +1350,38 @@ leafwiki_last_author_id: bob
 # Page One`, 0o644)
 
 		wantTime := time.Date(2026, time.March, 21, 12, 34, 56, 0, time.UTC)
-		if err := os.Chtimes(pagePath, wantTime, wantTime); err != nil {
-			t.Fatalf("Chtimes: %v", err)
+		{
+			err := os.Chtimes(pagePath, wantTime, wantTime)
+			Expect(err).To(Succeed(), "Chtimes: %v",
+
+				err)
 		}
 
 		tree, err := store.ReconstructTreeFromFS()
-		if err != nil {
-			t.Fatalf("ReconstructTreeFromFS: %v", err)
-		}
+		Expect(err).To(Succeed(), "ReconstructTreeFromFS: %v",
 
-		page := findChildBySlug(t, tree, "page")
-		if got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339); got != wantTime.Format(time.RFC3339) {
-			t.Fatalf("expected invalid created_at to fall back to mtime, got %q", got)
+			err)
+
+		page := findChildBySlug(tree, "page")
+		{
+			got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal(wantTime.
+				Format(time.RFC3339)),
+				"expected invalid created_at to fall back to mtime, got %q",
+
+				got)
 		}
-		if got := page.Metadata.UpdatedAt.UTC().Format(time.RFC3339); got != "2026-03-21T11:16:31Z" {
-			t.Fatalf("expected valid updated_at to be preserved, got %q", got)
+		{
+
+			got := page.Metadata.UpdatedAt.UTC().Format(time.RFC3339)
+			Expect(got).To(Equal("2026-03-21T11:16:31Z"), "expected valid updated_at to be preserved, got %q",
+
+				got)
 		}
-		if page.Metadata.CreatorID != "alice" || page.Metadata.LastAuthorID != "bob" {
-			t.Fatalf("expected author metadata to be preserved, got %#v", page.Metadata)
-		}
+		Expect(page.Metadata).To(SatisfyAll(
+			HaveField("CreatorID", Equal(newFixtureUserID("alice"))),
+			HaveField("LastAuthorID", Equal(newFixtureUserID("bob"))),
+		))
 
 	})
 })

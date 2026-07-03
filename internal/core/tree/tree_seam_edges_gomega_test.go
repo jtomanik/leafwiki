@@ -14,7 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("tree seam edge coverage", func() {
+var _ = Describe("tree filesystem seam failure behavior", func() {
 	var (
 		base   string
 		root   string
@@ -23,13 +23,13 @@ var _ = Describe("tree seam edge coverage", func() {
 	)
 
 	BeforeEach(func() {
-		base = GinkgoT().TempDir()
+		base = tempTreeDir()
 		root = filepath.Join(base, "root")
 		store = NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "data"), RootDir: root})
 		parent = edgeSectionNode(RootPageID, "root", "Root", nil)
 	})
 
-	It("covers helper rename and remove failures through filesystem seams", func() {
+	It("filesystem helper seams propagate rename and remove failures", func() {
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch {
 			case strings.HasSuffix(path, "guide"):
@@ -60,7 +60,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(FoldPageFolderIfEmpty(root, "guide")).To(MatchError(removeErr))
 	})
 
-	It("covers metadata and section-index failure seams", func() {
+	It("metadata and section-index seams surface write failures", func() {
 		mdFile := markdown.NewMarkdownFile(filepath.Join(root, "page.md"), "# Page\n", markdown.Frontmatter{})
 		entry := edgePageNode("page", "page", "Page", parent)
 
@@ -93,7 +93,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(err).To(MatchError(ErrWriteMarkdownFile))
 	})
 
-	It("covers node store operation failures through filesystem seams", func() {
+	It("node store filesystem seams propagate operation failures", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		section := edgeSectionNode("section", "section", "Section", parent)
 
@@ -126,7 +126,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.CreateSection(parent, section)).To(MatchError(mkdirErr))
 	})
 
-	It("covers reconstruction branches through deterministic seams", func() {
+	It("reconstruction seams produce deterministic filesystem outcomes", func() {
 		errFixtureStatFailed := errors.New("stat failed")
 		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
 			return nil, errFixtureStatFailed
@@ -210,7 +210,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(loadErr))
 	})
 
-	It("covers CRUD stat, rename, and remove branches through seams", func() {
+	It("CRUD filesystem seams preserve stat, rename, and remove failure contracts", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		dest := edgeSectionNode("dest", "dest", "Dest", parent)
 		section := edgeSectionNode("section", "section", "Section", parent)
@@ -288,7 +288,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.DeleteSection(section)).To(MatchError(removeSectionErr))
 	})
 
-	It("covers rename, read, sync, path, resolve, and conversion seam branches", func() {
+	It("filesystem seams propagate rename, read, sync, path, resolve, and conversion failures", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		section := edgeSectionNode("section", "section", "Section", parent)
 
@@ -438,7 +438,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(convertRenameErr))
 	})
 
-	It("covers migration adapters, route mapping, and remaining content path branches", func() {
+	It("migration adapters, route mapping, and content paths preserve legacy compatibility", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		section := edgeSectionNode("section", "section", "Section", parent)
 
@@ -446,7 +446,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		_, err := adapter.ResolveNode(&migrationNodeAdapter{node: page})
 		Expect(err).To(HaveOccurred())
 
-		svc := NewTreeService(GinkgoT().TempDir())
+		svc := NewTreeService(tempTreeDir())
 		svc.tree = edgeSectionNode(RootPageID, "root", "Root", nil)
 		swapTreeSeam(&treeWriteFileAtomic, func(string, []byte, os.FileMode) error {
 			return errors.New("snapshot failed")
@@ -539,7 +539,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(err).To(MatchError(errFixtureResolveReadFailed))
 	})
 
-	It("covers remaining reconstruction duplicate, skip, and writeback branches", func() {
+	It("reconstruction seams handle duplicates, skipped paths, and metadata writeback", func() {
 		now := time.Now().UTC()
 
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) { return "generated", nil })
@@ -644,7 +644,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(fileWritebackErr))
 	})
 
-	It("covers remaining store operation path and conversion branches", func() {
+	It("store operation seams preserve path and conversion error contracts", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		section := edgeSectionNode("section", "section", "Section", parent)
 		dest := edgeSectionNode("dest", "dest", "Dest", parent)
@@ -889,7 +889,7 @@ var _ = Describe("tree seam edge coverage", func() {
 		Expect(store.ConvertNode(section, NodeKindPage)).To(MatchError(removeFolderErr))
 	})
 
-	It("covers final node store seam branches", func() {
+	It("node store seams propagate filesystem failure contracts", func() {
 		page := edgePageNode("page", "page", "Page", parent)
 		section := edgeSectionNode("section", "section", "Section", parent)
 		dest := edgeSectionNode("dest", "dest", "Dest", parent)

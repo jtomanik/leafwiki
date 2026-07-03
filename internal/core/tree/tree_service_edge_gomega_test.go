@@ -32,9 +32,9 @@ func HaveEmptyTreeIndexState() OmegaMatcher {
 	})
 }
 
-var _ = Describe("tree service edge coverage", func() {
-	It("covers unloaded service errors without constructing disk state", func() {
-		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", func() {
+	It("unloaded services return errors without disk state", func() {
+		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: tempTreeDir(), RootDir: filepath.Join(tempTreeDir(), "root")})
 
 		_, err := svc.FindPageByID("missing")
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
@@ -67,14 +67,14 @@ var _ = Describe("tree service edge coverage", func() {
 		Expect(err).To(matchInvalidOp("contentPathForNodeRead"))
 	})
 
-	It("covers index and lookup helpers directly", func() {
+	It("index and lookup helpers maintain stable tree results", func() {
 		root := edgeSectionNode(RootPageID, "root", "Root", nil)
 		docs := edgeSectionNode("docs", "docs", "Docs", root)
 		guide := edgePageNode("guide", "Guide", "Guide", docs)
 		docs.Children = []*PageNode{nil, guide}
 		root.Children = []*PageNode{nil, docs}
 
-		svc := NewTreeService(GinkgoT().TempDir())
+		svc := NewTreeService(tempTreeDir())
 		svc.tree = root
 		svc.rebuildIndexesLocked()
 
@@ -117,8 +117,8 @@ var _ = Describe("tree service edge coverage", func() {
 		})))
 	})
 
-	It("covers service lookup, read, and batch failure branches", func() {
-		svc, dataDir := newLoadedService(GinkgoT())
+	It("service lookup, read, and batch APIs propagate failure states", func() {
+		svc, dataDir := newLoadedService()
 
 		emptyLookup, err := svc.lookupPagePathLocked("", "")
 		Expect(err).NotTo(HaveOccurred())
@@ -175,8 +175,8 @@ var _ = Describe("tree service edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("covers legacy root comparison helpers", func() {
-		base := GinkgoT().TempDir()
+	It("legacy root comparison distinguishes equivalent roots", func() {
+		base := tempTreeDir()
 		sourceDir := filepath.Join(base, "source")
 		targetDir := filepath.Join(base, "target")
 		Expect(os.MkdirAll(sourceDir, 0o755)).To(Succeed())
@@ -217,8 +217,8 @@ var _ = Describe("tree service edge coverage", func() {
 		Expect(sameCleanPath(sourceDir, targetDir)).To(BeFalse())
 	})
 
-	It("covers legacy content path expectation branches", func() {
-		base := GinkgoT().TempDir()
+	It("legacy content path comparison reports stable expectations", func() {
+		base := tempTreeDir()
 		dataDir := filepath.Join(base, "data")
 		rootDir := filepath.Join(base, "configured")
 		defaultRoot := filepath.Join(dataDir, "root")

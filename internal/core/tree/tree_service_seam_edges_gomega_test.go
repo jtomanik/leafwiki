@@ -15,9 +15,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("tree service seam edge coverage", func() {
-	It("covers LoadTree migration and reconstruction error branches", func() {
-		svc := NewTreeService(GinkgoT().TempDir())
+var _ = Describe("tree service migration and store seam failure behavior", func() {
+	It("LoadTree reports migration and reconstruction seam failures", func() {
+		svc := NewTreeService(tempTreeDir())
 		schemaErr := errors.New("schema failed")
 		swapTreeSeam(&treeLoadSchema, func(string) (SchemaInfo, error) {
 			return SchemaInfo{}, schemaErr
@@ -74,8 +74,8 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(svc.LoadTree()).To(MatchError(ErrTreeReconstructionNil))
 	})
 
-	It("covers LoadTree legacy fallback and cleanup branches", func() {
-		dataDir := GinkgoT().TempDir()
+	It("LoadTree falls back to legacy data and cleans stale state", func() {
+		dataDir := tempTreeDir()
 		legacyPath := filepath.Join(dataDir, legacyTreeFilename)
 		root := edgeSectionNode(RootPageID, "root", "Root", nil)
 
@@ -124,7 +124,7 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(reconstructCalls).To(Equal(2))
 	})
 
-	It("covers reconstruction rollback and legacy comparison seam branches", func() {
+	It("reconstruction seams roll back state and compare legacy roots", func() {
 		svc := newInMemoryService()
 		oldTree := svc.tree
 
@@ -183,8 +183,8 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(sameCleanPath("/a/../b", "/other")).To(BeFalse())
 	})
 
-	It("covers configured legacy content comparison branches", func() {
-		base := GinkgoT().TempDir()
+	It("configured legacy content comparison reports mismatches", func() {
+		base := tempTreeDir()
 		dataDir := filepath.Join(base, "data")
 		rootDir := filepath.Join(base, "configured")
 		defaultRoot := filepath.Join(dataDir, "root")
@@ -265,8 +265,8 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(err).To(MatchError(ErrSlugEmpty))
 	})
 
-	It("covers legacy-root readiness helper branches", func() {
-		base := GinkgoT().TempDir()
+	It("legacy-root readiness helpers identify migration prerequisites", func() {
+		base := tempTreeDir()
 		dataDir := filepath.Join(base, "data")
 		rootDir := filepath.Join(base, "configured")
 		defaultRoot := filepath.Join(dataDir, "root")
@@ -313,11 +313,11 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(err).To(MatchError(ErrStatLegacyContentPath))
 	})
 
-	It("covers create and restore rollback/error branches through store seams", func() {
+	It("create and restore operations roll back on store seam errors", func() {
 		svc := newInMemoryService()
 		pageKind := NodeKindPage
 
-		unloaded := NewTreeService(GinkgoT().TempDir())
+		unloaded := NewTreeService(tempTreeDir())
 		_, err := unloaded.CreateNode("user", nil, "Unloaded", "unloaded", &pageKind)
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
 
@@ -378,7 +378,7 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(err).To(MatchError(ErrSyncRestoredMetadata))
 	})
 
-	It("covers create rollback and delete/convert branch seams", func() {
+	It("create rollback, delete, and convert seams preserve service state", func() {
 		pageKind := NodeKindPage
 		sectionKind := NodeKindSection
 
@@ -504,7 +504,7 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(convertSvc.ConvertNode("user", "section", NodeKindPage, pageVersionUnchecked)).To(MatchError(ErrPageHasChildren))
 	})
 
-	It("covers update, delete, convert, move, and sort orchestration branches", func() {
+	It("update, delete, convert, move, and sort operations propagate orchestration failures", func() {
 		svc := newInMemoryService()
 		page := edgePageNode("page", "page", "Page", svc.tree)
 		page.Metadata.UpdatedAt = time.Now().UTC()
@@ -612,7 +612,7 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(sortSvc.SortPages(RootPageID, []PageID{"sort-page", "sort-page"})).To(MatchError(ErrInvalidSortOrder))
 	})
 
-	It("covers service batch, lookup, ensure, and move rollback branches", func() {
+	It("batch, lookup, ensure, and move operations roll back through service seams", func() {
 		svc := newInMemoryService()
 		pageKind := NodeKindPage
 		page := edgePageNode("page", "page", "Page", svc.tree)
@@ -638,7 +638,7 @@ var _ = Describe("tree service seam edge coverage", func() {
 		_, err := svc.ReadPageRaw("page")
 		Expect(err).To(MatchError(ErrGetPageRawContent))
 
-		unloaded := NewTreeService(GinkgoT().TempDir())
+		unloaded := NewTreeService(tempTreeDir())
 		_, err = unloaded.FindPageByRoutePath("page")
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
 		_, err = svc.LookupPagePath("")
@@ -767,8 +767,8 @@ var _ = Describe("tree service seam edge coverage", func() {
 		Expect(convertedParent.Kind).To(Equal(NodeKindPage))
 	})
 
-	It("covers final service root, lookup, ensure, and move branches", func() {
-		base := GinkgoT().TempDir()
+	It("root, lookup, ensure, and move seams preserve service error contracts", func() {
+		base := tempTreeDir()
 		dataDir := filepath.Join(base, "data")
 		rootDir := filepath.Join(base, "configured")
 		defaultRoot := filepath.Join(dataDir, "root")
@@ -959,7 +959,7 @@ var _ = Describe("tree service seam edge coverage", func() {
 
 func newInMemoryService() *TreeService {
 	GinkgoHelper()
-	svc := NewTreeService(GinkgoT().TempDir())
+	svc := NewTreeService(tempTreeDir())
 	svc.tree = edgeSectionNode(RootPageID, "root", "Root", nil)
 	svc.rebuildIndexesLocked()
 	return svc

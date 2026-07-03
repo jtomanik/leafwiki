@@ -14,7 +14,7 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 )
 
-var _ = Describe("node store edge coverage", func() {
+var _ = Describe("node store filesystem and validation failure behavior", func() {
 	var (
 		store  *NodeStore
 		base   string
@@ -23,13 +23,13 @@ var _ = Describe("node store edge coverage", func() {
 	)
 
 	BeforeEach(func() {
-		base = GinkgoT().TempDir()
+		base = tempTreeDir()
 		root = filepath.Join(base, "root")
 		store = NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "data"), RootDir: root})
 		parent = edgeSectionNode(RootPageID, "root", "Root", nil)
 	})
 
-	It("covers helper filesystem error branches and containment edge cases", func() {
+	It("filesystem helper errors preserve containment boundaries", func() {
 		Expect(os.MkdirAll(root, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "guide"), []byte("blocks directory creation"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "guide.md"), []byte("# Guide"), 0o644)).To(Succeed())
@@ -54,7 +54,7 @@ var _ = Describe("node store edge coverage", func() {
 		}
 	})
 
-	It("covers store validation guards before touching disk", func() {
+	It("store validation guards reject invalid requests before disk writes", func() {
 		page := edgePageNode("page-1", "page", "Page", parent)
 		section := edgeSectionNode("section-1", "section", "Section", parent)
 
@@ -88,7 +88,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(err).To(matchInvalidOp("contentPathForNodeWrite"))
 	})
 
-	It("covers direct store read, order, and metadata write failures", func() {
+	It("store read, order, and metadata writes propagate filesystem failures", func() {
 		section := edgeSectionNode("docs", "docs", "Docs", parent)
 
 		_, err := store.ensureSectionIndex(edgeSectionNode("loose", "loose", "Loose", nil))
@@ -146,7 +146,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(child.Parent).NotTo(BeNil())
 	})
 
-	It("covers legacy and filesystem reconstruction failures", func() {
+	It("legacy and filesystem reconstruction report unreadable state", func() {
 		Expect(os.MkdirAll(filepath.Join(base, "legacy"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(base, "legacy", "tree.json"), []byte("{invalid"), 0o644)).To(Succeed())
 		_, err := loadLegacyTreeSnapshot(filepath.Join(base, "legacy"), "tree.json", slog.Default())
@@ -184,7 +184,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(err).To(MatchError(ErrDuplicateLeafwikiID))
 	})
 
-	It("covers CRUD drift and conversion edge branches", func() {
+	It("CRUD drift and conversion paths return domain errors", func() {
 		Expect(os.MkdirAll(root, 0o755)).To(Succeed())
 
 		page := edgePageNode("page", "page", "Page", parent)
@@ -235,7 +235,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(store.ConvertNode(nonEmpty, NodeKindPage)).To(matchConvertNotAllowed(NodeKindSection, NodeKindPage))
 	})
 
-	It("covers markdown parse failures through content upsert and read paths", func() {
+	It("markdown parse failures surface through content upsert and read paths", func() {
 		Expect(os.MkdirAll(root, 0o755)).To(Succeed())
 		page := edgePageNode("page", "page", "Page", parent)
 		badCanonical := "<!-- leafwiki\nversion: 1\n"
@@ -252,7 +252,7 @@ var _ = Describe("node store edge coverage", func() {
 		Expect(store.SyncMetadataIfExists(page)).To(MatchError(ErrLoadMarkdownFile))
 	})
 
-	It("covers path resolution and workspace source helpers directly", func() {
+	It("path resolution and workspace source helpers return normalized semantic paths", func() {
 		Expect(os.MkdirAll(root, 0o755)).To(Succeed())
 		docs := edgeSectionNode("docs", "docs", "Docs", parent)
 		guide := edgePageNode("guide", "guide", "Guide", docs)

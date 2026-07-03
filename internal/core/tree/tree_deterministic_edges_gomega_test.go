@@ -12,7 +12,7 @@ import (
 	"github.com/onsi/gomega/gstruct"
 )
 
-var _ = Describe("tree deterministic edge coverage", func() {
+var _ = Describe("deterministic tree edge behavior", func() {
 	It("records workspace route conflicts only for distinct sources of the same route and kind", func() {
 		var nilTracker *workspaceRouteConflictTracker
 		Expect(nilTracker.Record(WorkspaceMarkdownRoute{RoutePath: "docs", Kind: NodeKindPage})).To(BeNil())
@@ -39,7 +39,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 	})
 
 	It("maps workspace markdown edge paths without touching the tree store", func() {
-		root := GinkgoT().TempDir()
+		root := tempTreeDir()
 		Expect(os.MkdirAll(filepath.Join(root, "docs"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "docs", "INDEX.MD"), []byte("# Docs\n"), 0o644)).To(Succeed())
 
@@ -81,9 +81,9 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(sectionSourceDir(WorkspaceMarkdownRoute{})).To(BeEmpty())
 	})
 
-	It("covers node-store path and uniqueness guards directly", func() {
-		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
-		rootDir := GinkgoT().TempDir()
+	It("node-store path and uniqueness guards reject invalid inputs", func() {
+		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: tempTreeDir(), RootDir: filepath.Join(tempTreeDir(), "root")})
+		rootDir := tempTreeDir()
 
 		defaultIndex, exists, err := store.sectionIndexPathInDir(filepath.Join(rootDir, "missing"))
 		Expect(err).NotTo(HaveOccurred())
@@ -113,7 +113,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 	})
 
 	It("guards section index writes before touching disk", func() {
-		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: tempTreeDir(), RootDir: filepath.Join(tempTreeDir(), "root")})
 
 		_, err := store.ensureSectionIndex(nil)
 		Expect(err).To(matchInvalidOp("ensureSectionIndex"))
@@ -128,7 +128,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
-	It("covers reachable route, slug, and version validation edge branches", func() {
+	It("route, slug, and version validation reject invalid semantic values", func() {
 		versionTime := time.Date(2026, time.June, 26, 9, 0, 0, 0, time.UTC)
 		node := &PageNode{Metadata: PageMetadata{UpdatedAt: versionTime}}
 
@@ -154,26 +154,26 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(normalized).To(Equal("docs/user-guides"))
 
-		_, err = MapWorkspaceMarkdownRoute(GinkgoT().TempDir(), "!!!", true)
+		_, err = MapWorkspaceMarkdownRoute(tempTreeDir(), "!!!", true)
 		Expect(err).To(MatchError(ErrSlugEmpty))
-		_, err = MapWorkspaceMarkdownRoute(GinkgoT().TempDir(), "!!!/page.md", false)
+		_, err = MapWorkspaceMarkdownRoute(tempTreeDir(), "!!!/page.md", false)
 		Expect(err).To(MatchError(ErrSlugEmpty))
-		_, err = MapWorkspaceMarkdownRoute(GinkgoT().TempDir(), "docs/!!!.md", false)
+		_, err = MapWorkspaceMarkdownRoute(tempTreeDir(), "docs/!!!.md", false)
 		Expect(err).To(MatchError(ErrSlugEmpty))
 	})
 
 	It("uses deterministic fallback metadata times and route kind lookup", func() {
-		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: tempTreeDir(), RootDir: filepath.Join(tempTreeDir(), "root")})
 		fallback := time.Date(2026, time.June, 26, 10, 0, 0, 0, time.FixedZone("offset", 3600))
 		Expect(store.metadataFallbackTime(filepath.Join(store.rootDir, "missing.md"), fallback)).To(BeTemporally("==", fallback.UTC()))
 
-		existing := filepath.Join(GinkgoT().TempDir(), "existing.md")
+		existing := filepath.Join(tempTreeDir(), "existing.md")
 		Expect(os.WriteFile(existing, []byte("# Existing\n"), 0o644)).To(Succeed())
 		mtime := time.Date(2026, time.June, 25, 12, 0, 0, 0, time.UTC)
 		Expect(os.Chtimes(existing, mtime, mtime)).To(Succeed())
 		Expect(store.metadataFallbackTime(existing, fallback)).To(BeTemporally("==", mtime))
 
-		svc, _ := newLoadedService(GinkgoT())
+		svc, _ := newLoadedService()
 		docsID, err := svc.CreateNode(newFixtureUserID("editor"), nil, "Docs", "docs", ptrKind(NodeKindSection))
 		Expect(err).NotTo(HaveOccurred())
 		guideID, err := svc.CreateNode(newFixtureUserID("editor"), docsID, "Guide", "guide", ptrKind(NodeKindPage))
@@ -204,7 +204,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 	})
 
 	It("persists legacy migration snapshots only for loaded trees", func() {
-		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})
+		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: tempTreeDir(), RootDir: tempTreeDir()})
 
 		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ErrLegacySnapshotTreeRequired))
 
@@ -229,7 +229,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 	})
 
 	It("loads and saves schema files across first-run, corrupt, and write-error cases", func() {
-		tmp := GinkgoT().TempDir()
+		tmp := tempTreeDir()
 
 		schema, err := loadSchema(tmp)
 		Expect(err).NotTo(HaveOccurred())
@@ -244,13 +244,13 @@ var _ = Describe("tree deterministic edge coverage", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(schema.Version).To(Equal(CurrentSchemaVersion))
 
-		corruptDir := GinkgoT().TempDir()
+		corruptDir := tempTreeDir()
 		Expect(os.WriteFile(filepath.Join(corruptDir, "schema.json"), []byte("{invalid"), 0o644)).To(Succeed())
 		_, err = loadSchema(corruptDir)
 		Expect(err).To(HaveOccurred())
 
 		if runtime.GOOS != "windows" {
-			loopDir := GinkgoT().TempDir()
+			loopDir := tempTreeDir()
 			Expect(os.Symlink("schema.json", filepath.Join(loopDir, "schema.json"))).To(Succeed())
 			_, err = loadSchema(loopDir)
 			Expect(err).To(HaveOccurred())
@@ -264,7 +264,7 @@ var _ = Describe("tree deterministic edge coverage", func() {
 	})
 
 	It("converts flat page files to section folders and folds empty folders back", func() {
-		root := GinkgoT().TempDir()
+		root := tempTreeDir()
 		Expect(os.WriteFile(filepath.Join(root, "guide.md"), []byte("# Guide"), 0o644)).To(Succeed())
 
 		Expect(EnsurePageIsFolder(root, "guide")).To(Succeed())

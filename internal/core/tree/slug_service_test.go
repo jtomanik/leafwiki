@@ -7,9 +7,8 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_NoConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("unique child slug generation", func() {
+	ginkgo.It("uses the normalized title when no sibling conflicts", func() {
 		parent := &PageNode{
 			Children: []*PageNode{},
 		}
@@ -17,16 +16,10 @@ var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_NoConflict", func() {
 		s := NewSlugService()
 		result := s.GenerateUniqueChildSlug(parent, "", "My Page")
 
-		if result != "my-page" {
-			t.Errorf("Expected 'my-page', got '%s'", result)
-		}
-
+		Expect(result).To(Equal("my-page"))
 	})
-})
 
-var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_WithConflict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("adds a numeric suffix when a sibling already has the normalized slug", func() {
 		parent := &PageNode{
 			Children: []*PageNode{
 				{ID: "id", Slug: "my-page"},
@@ -36,16 +29,10 @@ var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_WithConflict", func() {
 		s := NewSlugService()
 		result := s.GenerateUniqueChildSlug(parent, "new-id-same-parent", "My Page")
 
-		if result != "my-page-1" {
-			t.Errorf("Expected 'my-page-1', got '%s'", result)
-		}
-
+		Expect(result).To(Equal("my-page-1"))
 	})
-})
 
-var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_MultipleConflicts", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("increments the suffix past all existing sibling collisions", func() {
 		parent := &PageNode{
 			Children: []*PageNode{
 				{ID: "id1", Slug: "my-page"},
@@ -57,16 +44,10 @@ var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_MultipleConflicts", func() 
 		s := NewSlugService()
 		result := s.GenerateUniqueChildSlug(parent, "new-id", "My Page")
 
-		if result != "my-page-3" {
-			t.Errorf("Expected 'my-page-3', got '%s'", result)
-		}
-
+		Expect(result).To(Equal("my-page-3"))
 	})
-})
 
-var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_SlugShouldBeTheSame", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps the existing slug when the collision belongs to the same child", func() {
 		parent := &PageNode{
 			Children: []*PageNode{
 				{ID: "id1", Slug: "my-page"},
@@ -76,30 +57,19 @@ var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_SlugShouldBeTheSame", func(
 		s := NewSlugService()
 		result := s.GenerateUniqueChildSlug(parent, "id1", "My Page")
 
-		if result != "my-page" {
-			t.Errorf("Expected 'my-page', got '%s'", result)
-		}
-
+		Expect(result).To(Equal("my-page"))
 	})
-})
 
-var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_SpecialCharacters", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("normalizes accented and punctuation-heavy titles", func() {
 		parent := &PageNode{}
 
 		s := NewSlugService()
 		result := s.GenerateUniqueChildSlug(parent, "", "Äpfel & Bäume!")
 
-		if result != "apfel-and-baume" {
-			t.Errorf("Expected 'aepfel-and-baume', got '%s'", result)
-		}
-
+		Expect(result).To(Equal("apfel-and-baume"))
 	})
-})
 
-var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_EmptyDesiredUsesValidFallback", func() {
-	ginkgo.It("preserves behavior", func() {
+	ginkgo.It("falls back to a valid page slug when the desired title is blank", func() {
 		s := NewSlugService()
 		result := make(chan string, 1)
 
@@ -113,9 +83,8 @@ var _ = ginkgo.Describe("TestGenerateUniqueChildSlug_EmptyDesiredUsesValidFallba
 	})
 })
 
-var _ = ginkgo.Describe("TestNormalizePath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("path normalization", func() {
+	ginkgo.It("normalizes each path segment into a route-safe slug", func() {
 		s := NewSlugService()
 
 		tests := []struct {
@@ -133,87 +102,51 @@ var _ = ginkgo.Describe("TestNormalizePath", func() {
 		for _, test := range tests {
 
 			result, err := s.NormalizePath(test.input, true)
-			if err != nil {
-				t.Errorf("Unexpected error for input %v: %v", test.input, err)
-				continue
-			}
-
-			if result != test.expected {
-				t.Errorf("For input %v, expected %v but got %v", test.input, test.expected, result)
-			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(test.expected))
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestIsValidSlug_AllowsUppercase", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("slug validation", func() {
+	ginkgo.It("accepts uppercase letters", func() {
 		s := NewSlugService()
 
-		if err := s.IsValidSlug("ABCD-efg"); err != nil {
-			t.Fatalf("expected uppercase slug to be valid, got %v", err)
-		}
-
+		Expect(s.IsValidSlug("ABCD-efg")).To(Succeed())
 	})
 })
 
-var _ = ginkgo.Describe("TestGenerateValidSlug_ReservedSlugGetsSuffix", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("reserved slug normalization", func() {
+	ginkgo.It("adds a suffix when generating a valid slug for a reserved segment", func() {
 		s := NewSlugService()
 
-		if got := s.GenerateValidSlug("api"); got != "api-1" {
-			t.Fatalf("GenerateValidSlug(api) = %q, want api-1", got)
-		}
-
+		Expect(s.GenerateValidSlug("api")).To(Equal("api-1"))
 	})
-})
 
-var _ = ginkgo.Describe("TestNormalizePathToValidSlugs_ReservedSegmentGetsSuffix", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("adds a suffix for reserved path segments", func() {
 		s := NewSlugService()
 
 		got, err := s.NormalizePathToValidSlugs("Reference/API")
-		if err != nil {
-			t.Fatalf("NormalizePathToValidSlugs err: %v", err)
-		}
-		if got != "reference/api-1" {
-			t.Fatalf("NormalizePathToValidSlugs = %q, want reference/api-1", got)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("reference/api-1"))
 
 	})
-})
 
-var _ = ginkgo.Describe("TestNormalizeFilenameToValidSlug_ReservedSlugGetsSuffix", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("adds a suffix for reserved filenames while preserving the extension", func() {
 		s := NewSlugService()
 
 		got, err := s.NormalizeFilenameToValidSlug("API.md")
-		if err != nil {
-			t.Fatalf("NormalizeFilenameToValidSlug err: %v", err)
-		}
-		if got != "api-1.md" {
-			t.Fatalf("NormalizeFilenameToValidSlug = %q, want api-1.md", got)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("api-1.md"))
 
 	})
-})
 
-var _ = ginkgo.Describe("TestNormalizeFilenameToValidSlug_UnderscoreFilename", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("normalizes underscores in filenames while preserving the extension", func() {
 		s := NewSlugService()
 
 		got, err := s.NormalizeFilenameToValidSlug("CODE_OF_CONDUCT.md")
-		if err != nil {
-			t.Fatalf("NormalizeFilenameToValidSlug err: %v", err)
-		}
-		if got != "code-of-conduct.md" {
-			t.Fatalf("NormalizeFilenameToValidSlug = %q, want code-of-conduct.md", got)
-		}
-
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("code-of-conduct.md"))
 	})
 })

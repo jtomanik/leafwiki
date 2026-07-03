@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.DescribeTable("TestMarkdownPathToRoutePath",
+var _ = ginkgo.DescribeTable("markdown paths map to wiki route paths",
 	func(path string, want string) {
 		Expect(MarkdownPathToRoutePath(path)).To(Equal(want))
 	},

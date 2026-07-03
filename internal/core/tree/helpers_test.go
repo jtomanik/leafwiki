@@ -6,98 +6,59 @@ import (
 	"strings"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("TestGenerateRoutePathFromPageNode", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("route path generation from page nodes", func() {
+	ginkgo.It("uses an empty route for the root and appends ancestor slugs for descendants", func() {
 		root := &PageNode{ID: "root", Slug: "root", Title: "root"}
 		docs := &PageNode{ID: "docs", Slug: "docs", Title: "Docs", Parent: root}
 		guide := &PageNode{ID: "guide", Slug: "guide", Title: "Guide", Parent: docs}
 
-		if got := GenerateRoutePathFromPageNode(root); got != "" {
-			t.Fatalf("root route path = %q, want empty", got)
-		}
-		if got := GenerateRoutePathFromPageNode(docs); got != "docs" {
-			t.Fatalf("root child route path = %q, want docs", got)
-		}
-		if got := GenerateRoutePathFromPageNode(guide); got != "docs/guide" {
-			t.Fatalf("nested route path = %q, want docs/guide", got)
-		}
-
+		Expect(GenerateRoutePathFromPageNode(root)).To(BeEmpty())
+		Expect(GenerateRoutePathFromPageNode(docs)).To(Equal(RoutePath("docs")))
+		Expect(GenerateRoutePathFromPageNode(guide)).To(Equal(RoutePath("docs/guide")))
 	})
 })
 
-var _ = ginkgo.Describe("TestEnsurePageIsFolder_ConvertsFlatFileToFolder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("page folder materialization", func() {
+	ginkgo.It("converts a flat markdown file into a folder with index content", func() {
+		tmp := tempTreeDir()
 		pagePath := "docs/guide"
 		flatFile := filepath.Join(tmp, "docs", "guide.md")
 
-		if err := os.MkdirAll(filepath.Dir(flatFile), 0o755); err != nil {
-			t.Fatalf("MkdirAll err: %v", err)
-		}
-		if err := os.WriteFile(flatFile, []byte("# Guide"), 0o644); err != nil {
-			t.Fatalf("WriteFile err: %v", err)
-		}
+		Expect(os.MkdirAll(filepath.Dir(flatFile), 0o755)).To(Succeed())
+		Expect(os.WriteFile(flatFile, []byte("# Guide"), 0o644)).To(Succeed())
 
-		if err := EnsurePageIsFolder(tmp, RoutePathFromString(pagePath)); err != nil {
-			t.Fatalf("EnsurePageIsFolder err: %v", err)
-		}
+		Expect(EnsurePageIsFolder(tmp, RoutePathFromString(pagePath))).To(Succeed())
 
-		if _, err := os.Stat(filepath.Join(tmp, "docs", "guide", "index.md")); err != nil {
-			t.Fatalf("expected index.md after conversion, got err: %v", err)
-		}
-		if _, err := os.Stat(flatFile); !os.IsNotExist(err) {
-			t.Fatalf("expected flat file to be removed, got err: %v", err)
-		}
-
+		Expect(filepath.Join(tmp, "docs", "guide", "index.md")).To(BeAnExistingFile())
+		Expect(flatFile).NotTo(BeAnExistingFile())
 	})
 })
 
-var _ = ginkgo.Describe("TestFoldPageFolderIfEmpty_FoldsIndexBackToFlatFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("empty page folder folding", func() {
+	ginkgo.It("folds an index-only folder back into a flat markdown file", func() {
+		tmp := tempTreeDir()
 		dir := filepath.Join(tmp, "docs", "guide")
 
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("MkdirAll err: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "index.md"), []byte("# Guide"), 0o644); err != nil {
-			t.Fatalf("WriteFile err: %v", err)
-		}
+		Expect(os.MkdirAll(dir, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(dir, "index.md"), []byte("# Guide"), 0o644)).To(Succeed())
 
-		if err := FoldPageFolderIfEmpty(tmp, "docs/guide"); err != nil {
-			t.Fatalf("FoldPageFolderIfEmpty err: %v", err)
-		}
+		Expect(FoldPageFolderIfEmpty(tmp, "docs/guide")).To(Succeed())
 
-		if _, err := os.Stat(filepath.Join(tmp, "docs", "guide.md")); err != nil {
-			t.Fatalf("expected folded flat file, got err: %v", err)
-		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("expected folder to be removed, got err: %v", err)
-		}
-
+		Expect(filepath.Join(tmp, "docs", "guide.md")).To(BeAnExistingFile())
+		Expect(dir).NotTo(BeAnExistingFile())
 	})
 })
 
-var _ = ginkgo.Describe("TestPageDiskPaths_WindowsPath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("page disk path construction", func() {
+	ginkgo.It("joins Windows-style roots with route paths", func() {
 		storageDir := `C:\wiki\data\root`
 		pagePath := "docs/guide"
 
-		if got, want := strings.ReplaceAll(pageDirectoryDiskPath(storageDir, pagePath), `\`, `/`), `C:/wiki/data/root/docs/guide`; got != want {
-			t.Fatalf("dir = %q, want %q", got, want)
-		}
-		if got, want := strings.ReplaceAll(pageMarkdownDiskPath(storageDir, pagePath), `\`, `/`), `C:/wiki/data/root/docs/guide.md`; got != want {
-			t.Fatalf("md = %q, want %q", got, want)
-		}
-		if got, want := strings.ReplaceAll(pageIndexDiskPath(storageDir, pagePath), `\`, `/`), `C:/wiki/data/root/docs/guide/index.md`; got != want {
-			t.Fatalf("index = %q, want %q", got, want)
-		}
-
+		Expect(strings.ReplaceAll(pageDirectoryDiskPath(storageDir, pagePath), `\`, `/`)).To(Equal(`C:/wiki/data/root/docs/guide`))
+		Expect(strings.ReplaceAll(pageMarkdownDiskPath(storageDir, pagePath), `\`, `/`)).To(Equal(`C:/wiki/data/root/docs/guide.md`))
+		Expect(strings.ReplaceAll(pageIndexDiskPath(storageDir, pagePath), `\`, `/`)).To(Equal(`C:/wiki/data/root/docs/guide/index.md`))
 	})
 })

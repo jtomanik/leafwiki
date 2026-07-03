@@ -1,13 +1,13 @@
 package tree
 
 import (
-	"errors"
 	"path/filepath"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("TestMapWorkspaceMarkdownRoute", func() {
+var _ = ginkgo.Describe("workspace markdown route mapping", func() {
 	for _, tt := range []struct {
 		name        string
 		relPath     string
@@ -73,91 +73,98 @@ var _ = ginkgo.Describe("TestMapWorkspaceMarkdownRoute", func() {
 	} {
 		tt := tt
 		ginkgo.It(tt.name, func() {
-			t := ginkgo.GinkgoT()
-			root := t.TempDir()
-			mustMkdir(t, filepath.Join(root, "plans"))
-			mustMkdir(t, filepath.Join(root, "docs"))
-			mustWriteFile(t, filepath.Join(root, "docs", "index.md"), "# Docs", 0o644)
+			root := tempTreeDir()
+			createTreeDirectory(filepath.Join(root, "plans"))
+			createTreeDirectory(filepath.Join(root, "docs"))
+			writeTreeFile(filepath.Join(root, "docs", "index.md"), "# Docs", 0o644)
 
 			got, err := MapWorkspaceMarkdownRoute(root, tt.relPath, tt.isDir)
-			if err != nil {
-				t.Fatalf("MapWorkspaceMarkdownRoute() error = %v", err)
-			}
-			if got.SourcePath != newFixtureWorkspaceSourcePath(tt.relPath) {
-				t.Fatalf("SourcePath = %q, want %q", got.SourcePath, tt.relPath)
-			}
-			if got.Skip != tt.wantSkip {
-				t.Fatalf("Skip = %v, want %v", got.Skip, tt.wantSkip)
-			}
-			if got.SkipReason != tt.wantReason {
-				t.Fatalf("SkipReason = %q, want %q", got.SkipReason, tt.wantReason)
-			}
+			Expect(err).To(Succeed(), "MapWorkspaceMarkdownRoute() error = %v",
+
+				err,
+			)
+			Expect(got).To(SatisfyAll(
+				HaveField("SourcePath", Equal(newFixtureWorkspaceSourcePath(tt.relPath))),
+				HaveField("Skip", Equal(tt.wantSkip)),
+				HaveField("SkipReason", Equal(tt.wantReason)),
+			), "unexpected workspace route skip decision: %#v", got)
+
 			if tt.wantSkip {
 				return
 			}
-			if got.RoutePath != newFixtureRoutePath(tt.wantRoute) {
-				t.Fatalf("RoutePath = %q, want %q", got.RoutePath, tt.wantRoute)
-			}
-			if got.Kind != tt.wantKind {
-				t.Fatalf("Kind = %q, want %q", got.Kind, tt.wantKind)
-			}
-			if got.ContentPath != newFixtureMarkdownPath(tt.wantContent) {
-				t.Fatalf("ContentPath = %q, want %q", got.ContentPath, tt.wantContent)
-			}
+			Expect(got).To(SatisfyAll(
+				HaveField("RoutePath", Equal(newFixtureRoutePath(tt.wantRoute))),
+				HaveField("Kind", Equal(tt.wantKind)),
+				HaveField("ContentPath", Equal(newFixtureMarkdownPath(tt.wantContent))),
+			), "unexpected workspace route mapping: %#v", got)
+
 		})
 	}
 })
 
-var _ = ginkgo.Describe("TestMapWorkspaceMarkdownRouteRejectsEmptyNormalizedSegments", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		root := t.TempDir()
+var _ = ginkgo.Describe("workspace markdown route mapping", func() {
+	ginkgo.It("map workspace markdown route rejects empty normalized segments", func() {
+		root := tempTreeDir()
 
 		_, err := MapWorkspaceMarkdownRoute(root, "plans/!!!.md", false)
-		if err == nil {
-			t.Fatalf("expected error")
-		}
-		if !errors.Is(err, ErrSlugEmpty) {
-			t.Fatalf("expected invalid slug segment error, got %v", err)
-		}
+		Expect(err).To(HaveOccurred(), "expected error")
+		Expect(err).To(MatchError(ErrSlugEmpty), "expected invalid slug segment error, got %v",
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestWorkspaceRouteConflictTrackerReportsNormalizedCollisions", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("workspace route conflict tracking", func() {
+	ginkgo.It("workspace route conflict tracker reports normalized collisions", func() {
 		tracker := newWorkspaceRouteConflictTracker()
 		first := WorkspaceMarkdownRoute{SourcePath: "plans/foo_bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
 		second := WorkspaceMarkdownRoute{SourcePath: "plans/foo-bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
+		{
 
-		if conflict := tracker.Record(first); conflict != nil {
-			t.Fatalf("first route conflict = %#v", conflict)
+			conflict := tracker.Record(first)
+			Expect(conflict).To(BeNil(), "first route conflict = %#v",
+
+				conflict,
+			)
 		}
+
 		conflict := tracker.Record(second)
-		if conflict == nil {
-			t.Fatalf("expected normalized route conflict")
-		}
-		if conflict.RoutePath != "plans/foo-bar" || conflict.Kind != NodeKindPage {
-			t.Fatalf("conflict route = %#v", conflict)
-		}
-		if conflict.FirstPath != "plans/foo_bar.md" || conflict.SecondPath != "plans/foo-bar.md" {
-			t.Fatalf("conflict paths = %#v", conflict)
-		}
+		Expect(conflict).NotTo(BeNil(),
+
+			"expected normalized route conflict",
+		)
+		Expect(conflict.
+			RoutePath != "plans/foo-bar" ||
+			conflict.Kind != NodeKindPage,
+		).To(BeFalse(), "conflict route = %#v",
+
+			conflict)
+		Expect(conflict.
+			FirstPath != "plans/foo_bar.md" ||
+			conflict.SecondPath !=
+				"plans/foo-bar.md").To(
+			BeFalse(), "conflict paths = %#v", conflict)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestWorkspaceRouteConflictTrackerAllowsPageAndSectionTwinRoutes", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("workspace route conflict tracking", func() {
+	ginkgo.It("workspace route conflict tracker allows page and section twin routes", func() {
 		tracker := newWorkspaceRouteConflictTracker()
+		{
 
-		if conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes", RoutePath: "notes", Kind: NodeKindSection}); conflict != nil {
-			t.Fatalf("section route conflict = %#v", conflict)
+			conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes", RoutePath: "notes", Kind: NodeKindSection})
+			Expect(conflict).To(BeNil(), "section route conflict = %#v",
+
+				conflict,
+			)
 		}
-		if conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes.md", RoutePath: "notes", Kind: NodeKindPage}); conflict != nil {
-			t.Fatalf("page and section twin route conflict = %#v", conflict)
+		{
+
+			conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes.md", RoutePath: "notes", Kind: NodeKindPage})
+			Expect(conflict).To(BeNil(), "page and section twin route conflict = %#v",
+
+				conflict)
 		}
 
 	})

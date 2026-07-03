@@ -2,7 +2,6 @@ package tree
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,79 +11,52 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 )
 
-func mustWriteFile(t treeTestT, path string, data string, perm os.FileMode) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(data), perm); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
+func writeTreeFile(path string, data string, perm os.FileMode) {
+	ginkgo.GinkgoHelper()
+	Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
+	Expect(os.WriteFile(path, []byte(data), perm)).To(Succeed())
 }
 
-func writeLegacyTreeJSON(t treeTestT, storageDir string, tree *PageNode) {
-	t.Helper()
+func writeLegacyTreeJSON(storageDir string, tree *PageNode) {
+	ginkgo.GinkgoHelper()
 	raw, err := json.Marshal(tree)
-	if err != nil {
-		t.Fatalf("marshal legacy tree: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(storageDir, "tree.json"), raw, 0o644); err != nil {
-		t.Fatalf("write legacy tree: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(os.WriteFile(filepath.Join(storageDir, "tree.json"), raw, 0o644)).To(Succeed())
 }
 
-func mustMkdir(t treeTestT, path string) {
-	t.Helper()
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+func createTreeDirectory(path string) {
+	ginkgo.GinkgoHelper()
+	Expect(os.MkdirAll(path, 0o755)).To(Succeed())
 }
 
-func assertCanonicalNodeStoreRawStorage(t treeTestT, raw string) {
-	t.Helper()
-	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-		t.Fatalf("expected canonical metadata comment at start of raw storage, got:\n%s", raw)
-	}
-	if strings.HasPrefix(raw, "---\n") {
-		t.Fatalf("expected raw storage not to start with legacy YAML frontmatter, got:\n%s", raw)
-	}
+func haveCanonicalNodeStoreRawStorage() types.GomegaMatcher {
+	return SatisfyAll(
+		HavePrefix("<!-- leafwiki\n"),
+		Not(HavePrefix("---\n")),
+	)
 }
 
-var _ = ginkgo.Describe("TestNodeStore_LoadTree_MissingFile_ReturnsDefaultRoot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("load tree missing file returns default root", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		tree, err := store.LoadTree("missing.json")
-		if err != nil {
-			t.Fatalf("LoadTree: %v", err)
-		}
-		if tree == nil {
-			t.Fatalf("expected tree, got nil")
-		}
-		if tree.ID != "root" || tree.Slug != "root" || tree.Title != "root" {
-			t.Fatalf("unexpected default root: %#v", tree)
-		}
-		if tree.Kind != NodeKindSection {
-			t.Fatalf("expected root kind %q, got %q", NodeKindSection, tree.Kind)
-		}
-		if tree.Parent != nil {
-			t.Fatalf("expected root parent nil")
-		}
-		if len(tree.Children) != 0 {
-			t.Fatalf("expected no children")
-		}
+		Expect(err).To(Succeed(), "LoadTree: %v",
+
+			err)
+		Expect(tree).To(matchRootSection(), "unexpected default root: %#v", tree)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_SaveTree_ThenLoadTree_AssignsParents", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("save tree then load tree assigns parents", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		tree := &PageNode{
@@ -110,109 +82,123 @@ var _ = ginkgo.Describe("TestNodeStore_SaveTree_ThenLoadTree_AssignsParents", fu
 			},
 		}
 
-		writeLegacyTreeJSON(t, tmp, tree)
+		writeLegacyTreeJSON(tmp, tree)
 
 		loaded, err := store.LoadTree("tree.json")
-		if err != nil {
-			t.Fatalf("LoadTree: %v", err)
-		}
+		Expect(err).To(Succeed(), "LoadTree: %v",
+
+			err)
 
 		sec := loaded.Children[0]
 		p := sec.Children[0]
+		Expect(sec.Parent ==
+			nil || sec.
+			Parent.
+			ID != "root").
+			To(BeFalse(), "expected section parent root, got %#v",
 
-		if sec.Parent == nil || sec.Parent.ID != "root" {
-			t.Fatalf("expected section parent root, got %#v", sec.Parent)
-		}
-		if p.Parent == nil || p.Parent.ID != "s1" {
-			t.Fatalf("expected page parent s1, got %#v", p.Parent)
-		}
+				sec.Parent)
+		Expect(p.Parent == nil ||
+			p.Parent.
+				ID !=
+				"s1").To(BeFalse(), "expected page parent s1, got %#v",
+
+			p.Parent)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreatePage_RejectsTraversalSlug", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		baseDir := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create page rejects traversal slug", func() {
+		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
 		parent := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "outside", Slug: "../outside", Title: "Outside", Kind: NodeKindPage, Parent: parent}
 
 		err := store.CreatePage(parent, entry)
-		if err == nil {
-			t.Fatalf("expected CreatePage to reject traversal slug")
-		}
-		if !errors.Is(err, ErrInvalidOperation) {
-			t.Fatalf("expected ErrInvalidOperation, got %v", err)
-		}
-		mustNotExist(t, filepath.Join(baseDir, "outside.md"))
+		Expect(err).To(HaveOccurred(), "expected CreatePage to reject traversal slug")
+		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
+
+			err)
+
+		Expect(filepath.Join(baseDir, "outside.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_RejectsTraversalSlug", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		baseDir := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node rejects traversal slug", func() {
+		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
 		parent := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "docs", Slug: "docs", Title: "Docs", Kind: NodeKindPage, Parent: parent}
-		if err := store.CreatePage(parent, entry); err != nil {
-			t.Fatalf("CreatePage failed: %v", err)
+		{
+			err := store.CreatePage(parent, entry)
+			Expect(err).To(Succeed(), "CreatePage failed: %v",
+
+				err)
 		}
 
 		err := store.RenameNode(entry, "../outside")
-		if err == nil {
-			t.Fatalf("expected RenameNode to reject traversal slug")
-		}
-		if !errors.Is(err, ErrInvalidOperation) {
-			t.Fatalf("expected ErrInvalidOperation, got %v", err)
-		}
-		mustStat(t, filepath.Join(rootDir, "docs.md"))
-		mustNotExist(t, filepath.Join(baseDir, "outside.md"))
+		Expect(err).To(HaveOccurred(), "expected RenameNode to reject traversal slug")
+		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
+
+			err)
+
+		statTreePath(filepath.Join(rootDir, "docs.md"))
+		Expect(filepath.Join(baseDir, "outside.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_UpsertContent_RejectsParentlessNonRootPage", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		baseDir := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content rejects parentless non root page", func() {
+		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
 		entry := &PageNode{ID: "loose", Slug: "loose", Title: "Loose", Kind: NodeKindPage}
 
 		err := store.UpsertContent(entry, "# Loose")
-		if err == nil {
-			t.Fatalf("expected UpsertContent to reject parentless non-root page")
-		}
-		if !errors.Is(err, ErrInvalidOperation) {
-			t.Fatalf("expected ErrInvalidOperation, got %v", err)
-		}
-		mustNotExist(t, rootDir+".md")
+		Expect(err).To(HaveOccurred(), "expected UpsertContent to reject parentless non-root page")
+		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
+
+			err)
+
+		Expect(rootDir + ".md").To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreatePage_RejectsSymlinkedParentEscapingRoot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create page rejects symlinked parent escaping root", func() {
 		if runtime.GOOS == "windows" {
-			t.Skip("symlink creation requires privileges on Windows")
+			ginkgo.Skip("symlink creation requires privileges on Windows")
 		}
-		baseDir := t.TempDir()
+		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		outsideDir := filepath.Join(baseDir, "outside")
-		if err := os.MkdirAll(rootDir, 0o755); err != nil {
-			t.Fatalf("mkdir root dir: %v", err)
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir root directory: %v",
+
+				err,
+			)
 		}
-		if err := os.MkdirAll(outsideDir, 0o755); err != nil {
-			t.Fatalf("mkdir outside dir: %v", err)
+		{
+
+			err := os.MkdirAll(outsideDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir outside directory: %v",
+
+				err)
 		}
-		if err := os.Symlink(outsideDir, filepath.Join(rootDir, "docs")); err != nil {
-			t.Fatalf("create symlinked section dir: %v", err)
+		{
+
+			err := os.Symlink(outsideDir, filepath.Join(rootDir, "docs"))
+			Expect(err).To(Succeed(), "create symlinked section directory: %v",
+
+				err)
 		}
 
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
@@ -221,34 +207,44 @@ var _ = ginkgo.Describe("TestNodeStore_CreatePage_RejectsSymlinkedParentEscaping
 		child := &PageNode{ID: "child", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: docs}
 
 		err := store.CreatePage(docs, child)
-		if err == nil {
-			t.Fatalf("expected CreatePage to reject symlinked parent outside root")
-		}
-		if !errors.Is(err, ErrInvalidOperation) {
-			t.Fatalf("expected ErrInvalidOperation, got %v", err)
-		}
-		mustNotExist(t, filepath.Join(outsideDir, "child.md"))
+		Expect(err).To(HaveOccurred(), "expected CreatePage to reject symlinked parent outside root")
+		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
+
+			err)
+
+		Expect(filepath.Join(outsideDir, "child.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_UpsertContent_RejectsSymlinkedParentEscapingRoot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content rejects symlinked parent escaping root", func() {
 		if runtime.GOOS == "windows" {
-			t.Skip("symlink creation requires privileges on Windows")
+			ginkgo.Skip("symlink creation requires privileges on Windows")
 		}
-		baseDir := t.TempDir()
+		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		outsideDir := filepath.Join(baseDir, "outside")
-		if err := os.MkdirAll(rootDir, 0o755); err != nil {
-			t.Fatalf("mkdir root dir: %v", err)
+		{
+			err := os.MkdirAll(rootDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir root directory: %v",
+
+				err,
+			)
 		}
-		if err := os.MkdirAll(outsideDir, 0o755); err != nil {
-			t.Fatalf("mkdir outside dir: %v", err)
+		{
+
+			err := os.MkdirAll(outsideDir, 0o755)
+			Expect(err).To(Succeed(), "mkdir outside directory: %v",
+
+				err)
 		}
-		if err := os.Symlink(outsideDir, filepath.Join(rootDir, "docs")); err != nil {
-			t.Fatalf("create symlinked section dir: %v", err)
+		{
+
+			err := os.Symlink(outsideDir, filepath.Join(rootDir, "docs"))
+			Expect(err).To(Succeed(), "create symlinked section directory: %v",
+
+				err)
 		}
 
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
@@ -257,21 +253,19 @@ var _ = ginkgo.Describe("TestNodeStore_UpsertContent_RejectsSymlinkedParentEscap
 		child := &PageNode{ID: "child", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: docs}
 
 		err := store.UpsertContent(child, "# Child")
-		if err == nil {
-			t.Fatalf("expected UpsertContent to reject symlinked parent outside root")
-		}
-		if !errors.Is(err, ErrInvalidOperation) {
-			t.Fatalf("expected ErrInvalidOperation, got %v", err)
-		}
-		mustNotExist(t, filepath.Join(outsideDir, "child.md"))
+		Expect(err).To(HaveOccurred(), "expected UpsertContent to reject symlinked parent outside root")
+		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
+
+			err)
+
+		Expect(filepath.Join(outsideDir, "child.md")).To(beMissingTreePath())
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_SaveChildOrder_Root_WritesOrderFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("save child order root writes order file", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{
@@ -284,45 +278,56 @@ var _ = ginkgo.Describe("TestNodeStore_SaveChildOrder_Root_WritesOrderFile", fun
 				{ID: "b"},
 			},
 		}
+		{
 
-		if err := store.SaveChildOrder(root); err != nil {
-			t.Fatalf("SaveChildOrder root: %v", err)
+			err := store.SaveChildOrder(root)
+			Expect(err).To(Succeed(), "SaveChildOrder root: %v",
+
+				err,
+			)
 		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", ".order.json")); err != nil {
-			t.Fatalf("expected root order file: %v", err)
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", ".order.json"))
+			Expect(err).To(Succeed(), "expected root order file: %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_SaveChildOrder_Page_ReturnsErrorWithoutCreatingDirectory", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("save child order page returns an error without creating directory", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "page1", Slug: "docs", Title: "Docs", Kind: NodeKindPage, Parent: root}
 
 		err := store.SaveChildOrder(page)
-		if err == nil {
-			t.Fatalf("expected SaveChildOrder to reject page nodes")
-		}
+		Expect(err).To(HaveOccurred(), "expected SaveChildOrder to reject page nodes")
+
 		var opErr *InvalidOpError
-		if !errors.As(err, &opErr) {
-			t.Fatalf("expected InvalidOpError, got %T (%v)", err, err)
-		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", "docs")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("expected no stray page directory, got err=%v", err)
+		Expect(err).To(matchErrorAs(&opErr),
+			"expected InvalidOpError, got %T (%v)",
+
+			err, err,
+		)
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "docs"))
+			Expect(err).To(MatchError(os.ErrNotExist), "expected no stray page directory, got err=%v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreateSection_CreatesFolderAndIndexWithFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create section creates folder and index with frontmatter", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -339,199 +344,248 @@ var _ = ginkgo.Describe("TestNodeStore_CreateSection_CreatesFolderAndIndexWithFr
 				LastAuthorID: "bob",
 			},
 		}
+		{
 
-		if err := store.CreateSection(root, sec); err != nil {
-			t.Fatalf("CreateSection: %v", err)
+			err := store.CreateSection(root, sec)
+			Expect(err).To(Succeed(), "CreateSection: %v",
+
+				err)
 		}
 
 		// expected folder: <tmp>/root/docs
-		dir := filepath.Join(tmp, "root", "docs")
-		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-			t.Fatalf("expected section folder at %s", dir)
+		directory := filepath.Join(tmp, "root", "docs")
+		{
+			st, err := os.Stat(directory)
+			Expect(err != nil ||
+				!st.IsDir()).To(BeFalse(), "expected section folder at %s",
+
+				directory,
+			)
 		}
 
-		index := filepath.Join(dir, "index.md")
-		raw := string(mustRead(t, index))
-		assertCanonicalNodeStoreRawStorage(t, raw)
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter in section index")
-		}
-		if fm.LeafWikiID != "sec1" || fm.LeafWikiTitle != "Docs" {
-			t.Fatalf("unexpected section frontmatter: %#v", fm)
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-22T11:16:31Z" {
-			t.Fatalf("unexpected section timestamp metadata: %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "bob" {
-			t.Fatalf("unexpected section author metadata: %#v", fm)
-		}
-		if strings.TrimSpace(body) != "" {
-			t.Fatalf("expected empty section body, got %q", body)
-		}
+		index := filepath.Join(directory, "index.md")
+		raw := string(readTreeFile(index))
+		Expect(raw).To(haveCanonicalNodeStoreRawStorage())
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter in section index")
+		Expect(frontmatter.LeafWikiID !=
+			"sec1" ||
+			frontmatter.
+				LeafWikiTitle !=
+				"Docs",
+		).To(
+			BeFalse(), "unexpected section frontmatter: %#v",
+			frontmatter,
+		)
+		Expect(frontmatter.LeafWikiCreatedAt !=
+			"2026-03-22T10:15:30Z" ||
+			frontmatter.
+				LeafWikiUpdatedAt !=
+				"2026-03-22T11:16:31Z").To(BeFalse(), "unexpected section timestamp metadata: %#v",
+			frontmatter)
+		Expect(frontmatter.LeafWikiCreatorID !=
+			"alice" || frontmatter.
+			LeafWikiLastAuthorID !=
+			"bob").To(BeFalse(), "unexpected section author metadata: %#v",
+
+			frontmatter)
+		Expect(strings.TrimSpace(body)).To(BeEmpty(),
+
+			"expected empty section body, got %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreateSection_KindGuards", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create section kind guards", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		rootPageWrong := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindPage}
 		sec := &PageNode{ID: "sec1", Slug: "docs", Title: "Docs", Kind: NodeKindSection}
+		{
 
-		if err := store.CreateSection(rootPageWrong, sec); err == nil {
-			t.Fatalf("expected error when parent is not a section")
+			err := store.CreateSection(rootPageWrong, sec)
+			Expect(err).To(HaveOccurred(), "expected error when parent is not a section")
 		}
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		pageWrong := &PageNode{ID: "x", Slug: "x", Title: "X", Kind: NodeKindPage}
-		if err := store.CreateSection(root, pageWrong); err == nil {
-			t.Fatalf("expected error when new entry is not a section")
+		{
+			err := store.CreateSection(root, pageWrong)
+			Expect(err).To(HaveOccurred(), "expected error when new entry is not a section")
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreatePage_CreatesMarkdownWithFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create page creates markdown with frontmatter", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "hello", Title: "Hello World", Kind: NodeKindPage, Parent: root}
+		{
 
-		if err := store.CreatePage(root, page); err != nil {
-			t.Fatalf("CreatePage: %v", err)
+			err := store.CreatePage(root, page)
+			Expect(err).To(Succeed(), "CreatePage: %v",
+
+				err)
 		}
 
 		p := filepath.Join(tmp, "root", "hello.md")
 		raw, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatalf("read created page: %v", err)
-		}
-		assertCanonicalNodeStoreRawStorage(t, string(raw))
+		Expect(err).To(Succeed(), "read created page: %v",
 
-		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter")
-		}
-		if strings.TrimSpace(fm.LeafWikiID) != "p1" {
-			t.Fatalf("expected leafwiki_id p1, got %q", fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "Hello World" {
-			t.Fatalf("expected leafwiki_title 'Hello World', got %q", fm.LeafWikiTitle)
-		}
-		if !strings.Contains(body, "# Hello World") {
-			t.Fatalf("expected H1 title in body, got: %q", body)
-		}
+			err)
+
+		Expect(string(raw)).To(haveCanonicalNodeStoreRawStorage())
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter")
+		Expect(strings.TrimSpace(frontmatter.
+			LeafWikiID)).To(
+			Equal("p1"),
+			"expected leafwiki_id p1, got %q",
+
+			frontmatter.LeafWikiID)
+		Expect(frontmatter.LeafWikiTitle).To(Equal("Hello World"), "expected leafwiki_title 'Hello World', got %q",
+
+			frontmatter.LeafWikiTitle,
+		)
+		Expect(body).To(ContainSubstring("# Hello World"),
+
+			"expected H1 title in body, got: %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreatePage_SetsLeafWikiTitleInitially", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create page sets LeafWiki title initially", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "hello", Title: "Hello World", Kind: NodeKindPage, Parent: root}
+		{
 
-		if err := store.CreatePage(root, page); err != nil {
-			t.Fatalf("CreatePage: %v", err)
+			err := store.CreatePage(root, page)
+			Expect(err).To(Succeed(), "CreatePage: %v",
+
+				err)
 		}
 
-		raw := string(mustRead(t, filepath.Join(tmp, "root", "hello.md")))
-		fm, _, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter")
-		}
-		if fm.LeafWikiID != "p1" {
-			t.Fatalf("expected leafwiki_id p1, got %q", fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "Hello World" {
-			t.Fatalf("expected CreatePage to set leafwiki_title, got %q", fm.LeafWikiTitle)
-		}
+		raw := string(readTreeFile(filepath.Join(tmp, "root", "hello.md")))
+		frontmatter, _, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter")
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", Equal("p1")),
+			HaveField("LeafWikiTitle", Equal("Hello World")),
+		), "expected CreatePage to write managed frontmatter, got %#v", frontmatter)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreatePage_RejectsExistingPageFileButAllowsSiblingSectionDirectory", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create page rejects existing page file but allows sibling section directory", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "dup.md"), "x", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "dup.md"), "x", 0o644)
 		page := &PageNode{ID: "p1", Slug: "dup", Title: "Dup", Kind: NodeKindPage, Parent: root}
-		if err := store.CreatePage(root, page); err == nil {
-			t.Fatalf("expected PageAlreadyExistsError for existing file")
+		{
+			err := store.CreatePage(root, page)
+			Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError for existing file")
 		}
 
-		mustMkdir(t, filepath.Join(tmp, "root", "sync"))
-		mustWriteFile(t, filepath.Join(tmp, "root", "sync", "index.md"), "# Section", 0o644)
+		createTreeDirectory(filepath.Join(tmp, "root", "sync"))
+		writeTreeFile(filepath.Join(tmp, "root", "sync", "index.md"), "# Section", 0o644)
 		page2 := &PageNode{ID: "p2", Slug: "sync", Title: "Sync Page", Kind: NodeKindPage, Parent: root}
-		if err := store.CreatePage(root, page2); err != nil {
-			t.Fatalf("CreatePage should allow sibling section directory with same basename: %v", err)
+		{
+			err := store.CreatePage(root, page2)
+			Expect(err).To(Succeed(), "CreatePage should allow sibling section directory with same basename: %v",
+
+				err)
 		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", "sync.md")); err != nil {
-			t.Fatalf("expected page file next to section directory: %v", err)
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "sync.md"))
+			Expect(err).To(Succeed(), "expected page file next to section directory: %v",
+
+				err)
 		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", "sync", "index.md")); err != nil {
-			t.Fatalf("expected sibling section index to remain: %v", err)
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "sync", "index.md"))
+			Expect(err).To(Succeed(), "expected sibling section index to remain: %v",
+
+				err,
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreateSection_RejectsExistingSectionDirectoryButAllowsSiblingPageFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create section rejects existing section directory but allows sibling page file", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 
-		mustMkdir(t, filepath.Join(tmp, "root", "dup"))
+		createTreeDirectory(filepath.Join(tmp, "root", "dup"))
 		section := &PageNode{ID: "s1", Slug: "dup", Title: "Dup", Kind: NodeKindSection, Parent: root}
-		if err := store.CreateSection(root, section); err == nil {
-			t.Fatalf("expected PageAlreadyExistsError for existing section directory")
+		{
+			err := store.CreateSection(root, section)
+			Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError for existing section directory")
 		}
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "sync.md"), "# Page", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "sync.md"), "# Page", 0o644)
 		section2 := &PageNode{ID: "s2", Slug: "sync", Title: "Sync Section", Kind: NodeKindSection, Parent: root}
-		if err := store.CreateSection(root, section2); err != nil {
-			t.Fatalf("CreateSection should allow sibling page file with same basename: %v", err)
+		{
+			err := store.CreateSection(root, section2)
+			Expect(err).To(Succeed(), "CreateSection should allow sibling page file with same basename: %v",
+
+				err)
 		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", "sync.md")); err != nil {
-			t.Fatalf("expected sibling page file to remain: %v", err)
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "sync.md"))
+			Expect(err).To(Succeed(), "expected sibling page file to remain: %v",
+
+				err)
 		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", "sync", "index.md")); err != nil {
-			t.Fatalf("expected section index next to page file: %v", err)
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "sync", "index.md"))
+			Expect(err).To(Succeed(), "expected section index next to page file: %v",
+
+				err,
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_UpsertContent_Page_CreatesOrUpdates_PreservesMode", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content page creates or updates preserves mode", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -539,56 +593,57 @@ var _ = ginkgo.Describe("TestNodeStore_UpsertContent_Page_CreatesOrUpdates_Prese
 
 		// create with custom mode
 		path := filepath.Join(tmp, "root", "p.md")
-		mustWriteFile(t, path, "# old", 0o600)
+		writeTreeFile(path, "# old", 0o600)
+		{
 
-		if err := store.UpsertContent(page, "# new"); err != nil {
-			t.Fatalf("UpsertContent: %v", err)
+			err := store.UpsertContent(page, "# new")
+			Expect(err).To(Succeed(), "UpsertContent: %v",
+
+				err)
 		}
 
 		st, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat: %v", err)
-		}
+		Expect(err).To(Succeed(), "stat: %v",
+
+			err)
+
 		// permissions should stay (best-effort; Windows behaves differently sometimes)
 		if runtime.GOOS != "windows" {
-			if st.Mode().Perm() != 0o600 {
-				t.Fatalf("expected perm 0600, got %o", st.Mode().Perm())
-			}
+			Expect(st.Mode().Perm()).To(Equal(os.FileMode(0o600)), "expected perm 0600, got %o",
+
+				st.
+					Mode().Perm())
+
 		}
 
 		raw, _ := os.ReadFile(path)
-		assertCanonicalNodeStoreRawStorage(t, string(raw))
-		fm, body, has, err := markdown.ParseFrontmatter(string(raw))
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected FM to exist")
-		}
-		if fm.LeafWikiID != "p1" {
-			t.Fatalf("expected id p1, got %q", fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "My Page" {
-			t.Fatalf("expected title 'My Page', got %q", fm.LeafWikiTitle)
-		}
-		if strings.TrimSpace(body) != "# new" {
-			t.Fatalf("expected body '# new', got %q", body)
-		}
+		Expect(string(raw)).To(haveCanonicalNodeStoreRawStorage())
+		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected FM to exist")
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", Equal("p1")),
+			HaveField("LeafWikiTitle", Equal("My Page")),
+		), "expected overwrite to preserve managed frontmatter, got %#v", frontmatter)
+		Expect(strings.TrimSpace(body)).To(Equal("# new"), "expected body '# new', got %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_UpsertContent_PreservesExistingCustomFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content preserves existing custom frontmatter", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "My Page", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
-		mustWriteFile(t, path, `---
+		writeTreeFile(path, `---
 custom_key: keep-me
 tags:
   - alpha
@@ -597,224 +652,278 @@ leafwiki_title: Old Title
 ---
 # old
 `, 0o644)
+		{
 
-		if err := store.UpsertContent(page, "# new"); err != nil {
-			t.Fatalf("UpsertContent: %v", err)
-		}
+			err := store.UpsertContent(page, "# new")
+			Expect(err).To(Succeed(), "UpsertContent: %v",
 
-		raw := string(mustRead(t, path))
-		if !strings.Contains(raw, "custom_key: keep-me") {
-			t.Fatalf("expected custom frontmatter to be preserved, got: %q", raw)
-		}
-		if !strings.Contains(raw, "- alpha") {
-			t.Fatalf("expected custom list frontmatter to be preserved, got: %q", raw)
+				err)
 		}
 
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected FM to exist")
-		}
-		if fm.LeafWikiID != "p1" {
-			t.Fatalf("expected id p1, got %q", fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "My Page" {
-			t.Fatalf("expected title 'My Page', got %q", fm.LeafWikiTitle)
-		}
-		if strings.TrimSpace(body) != "# new" {
-			t.Fatalf("expected body '# new', got %q", body)
-		}
+		raw := string(readTreeFile(path))
+		Expect(raw).
+			To(ContainSubstring("custom_key: keep-me"),
+
+				"expected custom frontmatter to be preserved, got: %q",
+
+				raw)
+		Expect(raw).To(ContainSubstring("- alpha"),
+
+			"expected custom list frontmatter to be preserved, got: %q",
+
+			raw)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected FM to exist")
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", Equal("p1")),
+			HaveField("LeafWikiTitle", Equal("My Page")),
+		), "expected replaced body to preserve managed frontmatter, got %#v", frontmatter)
+		Expect(strings.TrimSpace(body)).To(Equal("# new"), "expected body '# new', got %q",
+
+			body)
 
 	})
 })
 
 // UpsertContent must treat incoming content that looks like frontmatter as plain
 // body text — matching the UI behaviour where the editor sends raw markdown.
-var _ = ginkgo.Describe("TestNodeStore_UpsertContent_RawFrontmatter_TreatedAsPlainBody", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content raw frontmatter treated as plain body", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "My Page", Kind: NodeKindPage, Parent: root}
+		{
 
-		if err := store.CreatePage(root, page); err != nil {
-			t.Fatalf("CreatePage: %v", err)
+			err := store.CreatePage(root, page)
+			Expect(err).To(Succeed(), "CreatePage: %v",
+
+				err)
 		}
 
 		rawContent := "---\naliases:\n  - alpha\ncustom_key: keep-me\ntitle: Imported Title\n---\n\n# Imported Title\nBody"
-		if err := store.UpsertContent(page, rawContent); err != nil {
-			t.Fatalf("UpsertContent: %v", err)
+		{
+			err := store.UpsertContent(page, rawContent)
+			Expect(err).To(Succeed(), "UpsertContent: %v",
+
+				err)
 		}
 
 		path := filepath.Join(tmp, "root", "p.md")
-		raw := string(mustRead(t, path))
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected system frontmatter in written file")
-		}
+		raw := string(readTreeFile(path))
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected system frontmatter in written file")
+		Expect(body).
+			To(ContainSubstring("custom_key: keep-me"),
+
+				"expected raw content in body, got: %q",
+
+				body)
+		Expect(body).To(ContainSubstring("# Imported Title"),
+
+			"expected heading in body, got: %q",
+
+			body)
+		Expect(frontmatter.ExtraFields["custom_key"]).To(BeNil(), "expected custom_key to stay as body, got ExtraField %#v",
+
+			frontmatter.ExtraFields["custom_key"])
+		Expect(frontmatter).To(SatisfyAll(
+			HaveField("LeafWikiID", Equal("p1")),
+			HaveField("LeafWikiTitle", Equal("My Page")),
+		), "expected imported content to preserve managed frontmatter, got %#v", frontmatter)
+
 		// The full raw input must appear verbatim in the body.
-		if !strings.Contains(body, "custom_key: keep-me") {
-			t.Fatalf("expected raw content in body, got: %q", body)
-		}
-		if !strings.Contains(body, "# Imported Title") {
-			t.Fatalf("expected heading in body, got: %q", body)
-		}
+
 		// No user keys must leak into system ExtraFields.
-		if fm.ExtraFields["custom_key"] != nil {
-			t.Fatalf("expected custom_key to stay as body, got ExtraField %#v", fm.ExtraFields["custom_key"])
-		}
+
 		// Managed fields must come from the page node, not from user content.
-		if fm.LeafWikiID != "p1" {
-			t.Fatalf("expected managed leafwiki_id p1, got %q", fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "My Page" {
-			t.Fatalf("expected managed leafwiki_title 'My Page', got %q", fm.LeafWikiTitle)
-		}
 
 	})
 })
 
 // Regression test for #942: content typed in the UI that looks like frontmatter
 // must be stored as plain body text, not extracted and merged into system frontmatter.
-var _ = ginkgo.Describe("TestNodeStore_UpsertContent_TreatsLeadingFrontmatterAsPlainBody", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content treats leading frontmatter as plain body", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "My Page", Kind: NodeKindPage, Parent: root}
+		{
 
-		if err := store.CreatePage(root, page); err != nil {
-			t.Fatalf("CreatePage: %v", err)
+			err := store.CreatePage(root, page)
+			Expect(err).To(Succeed(), "CreatePage: %v",
+
+				err)
 		}
 
 		userContent := "---\ncustom: bar\ntitle: user-title\n---\n\n# Heading"
-		if err := store.UpsertContent(page, userContent); err != nil {
-			t.Fatalf("UpsertContent: %v", err)
+		{
+			err := store.UpsertContent(page, userContent)
+			Expect(err).To(Succeed(), "UpsertContent: %v",
+
+				err)
 		}
 
 		path := filepath.Join(tmp, "root", "p.md")
-		raw := string(mustRead(t, path))
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected system frontmatter in written file")
-		}
+		raw := string(readTreeFile(path))
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected system frontmatter in written file")
+		Expect(frontmatter.LeafWikiID).
+			To(Equal("p1"), "expected managed leafwiki_id, got %q",
+
+				frontmatter.LeafWikiID)
+		Expect(frontmatter.ExtraFields["custom"]).To(BeNil(),
+			"expected custom to stay as body text, got ExtraField %#v",
+
+			frontmatter.ExtraFields["custom"])
+		Expect(frontmatter.ExtraFields["title"]).To(BeNil(),
+			"expected title to stay as body text, got ExtraField %#v",
+
+			frontmatter.ExtraFields["title"])
+		Expect(body).To(ContainSubstring("custom: bar"),
+
+			"expected user frontmatter block preserved in body, got: %q",
+
+			body)
+		Expect(body).To(ContainSubstring("# Heading"),
+
+			"expected heading in body, got: %q",
+
+			body)
+
 		// System frontmatter must use the page's managed identity, not the user-supplied value.
-		if fm.LeafWikiID != "p1" {
-			t.Fatalf("expected managed leafwiki_id, got %q", fm.LeafWikiID)
-		}
+
 		// User-supplied keys must NOT be extracted into ExtraFields.
-		if fm.ExtraFields["custom"] != nil {
-			t.Fatalf("expected custom to stay as body text, got ExtraField %#v", fm.ExtraFields["custom"])
-		}
-		if fm.ExtraFields["title"] != nil {
-			t.Fatalf("expected title to stay as body text, got ExtraField %#v", fm.ExtraFields["title"])
-		}
+
 		// The full user content (including the frontmatter-like block) must be in the body.
-		if !strings.Contains(body, "custom: bar") {
-			t.Fatalf("expected user frontmatter block preserved in body, got: %q", body)
-		}
-		if !strings.Contains(body, "# Heading") {
-			t.Fatalf("expected heading in body, got: %q", body)
-		}
 
 	})
 })
 
 // UpsertContentPreservingFrontmatter is the legacy-named importer path: it parses
 // incoming metadata/frontmatter and writes the canonical metadata comment.
-var _ = ginkgo.Describe("TestNodeStore_UpsertContentPreservingFrontmatter_MergesExtrasIntoWrittenMetadata", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content preserving frontmatter merges extras into written metadata", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "My Page", Kind: NodeKindPage, Parent: root}
+		{
 
-		if err := store.CreatePage(root, page); err != nil {
-			t.Fatalf("CreatePage: %v", err)
+			err := store.CreatePage(root, page)
+			Expect(err).To(Succeed(), "CreatePage: %v",
+
+				err)
 		}
 
 		rawContent := "---\naliases:\n  - alpha\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: Imported Title\n---\n\n# Imported Title\nBody"
-		if err := store.UpsertContentPreservingFrontmatter(page, rawContent); err != nil {
-			t.Fatalf("UpsertContentPreservingFrontmatter: %v", err)
+		{
+			err := store.UpsertContentPreservingFrontmatter(page, rawContent)
+			Expect(err).To(Succeed(), "UpsertContentPreservingFrontmatter: %v",
+
+				err)
 		}
 
 		path := filepath.Join(tmp, "root", "p.md")
-		raw := string(mustRead(t, path))
-		if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-			t.Fatalf("expected canonical metadata comment, got: %q", raw)
+		raw := string(readTreeFile(path))
+		Expect(raw).To(HavePrefix("<!-- leafwiki\n"),
+
+			"expected canonical metadata comment, got: %q",
+
+			raw)
+		Expect(raw).NotTo(HavePrefix("---\n"),
+
+			"expected YAML frontmatter to be removed, got: %q",
+
+			raw)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter in written file")
+		Expect(body).To(Equal("\n# Imported Title\nBody"), "unexpected body: %q",
+
+			body,
+		)
+		{
+
+			got := frontmatter.ExtraFields["custom_key"]
+			Expect(got).To(Equal("keep-me"), "expected custom_key to be preserved, got %#v",
+
+				got,
+			)
 		}
-		if strings.HasPrefix(raw, "---\n") {
-			t.Fatalf("expected YAML frontmatter to be removed, got: %q", raw)
+		{
+
+			got := frontmatter.ExtraFields["title"]
+			Expect(got).To(Equal("Imported Title"), "expected title field to be preserved when leafwiki_title is present, got %#v",
+
+				got)
 		}
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter in written file")
-		}
-		if body != "\n# Imported Title\nBody" {
-			t.Fatalf("unexpected body: %q", body)
-		}
-		if got := fm.ExtraFields["custom_key"]; got != "keep-me" {
-			t.Fatalf("expected custom_key to be preserved, got %#v", got)
-		}
-		if got := fm.ExtraFields["title"]; got != "Imported Title" {
-			t.Fatalf("expected title field to be preserved when leafwiki_title is present, got %#v", got)
-		}
-		aliases, ok := fm.ExtraFields["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "alpha" {
-			t.Fatalf("expected aliases to be preserved, got %#v", fm.ExtraFields["aliases"])
-		}
-		if strings.Contains(raw, "leafwiki_id: source-id") {
-			t.Fatalf("expected source leafwiki_id to be dropped, got: %q", raw)
-		}
-		if fm.LeafWikiID != "p1" {
-			t.Fatalf("expected managed leafwiki_id, got %q", fm.LeafWikiID)
-		}
+
+		aliases, ok := frontmatter.ExtraFields["aliases"].([]interface{})
+		Expect(!ok || len(aliases) !=
+			1 || aliases[0] != "alpha",
+		).To(BeFalse(), "expected aliases to be preserved, got %#v",
+
+			frontmatter.ExtraFields["aliases"])
+		Expect(raw).NotTo(ContainSubstring("leafwiki_id: source-id"),
+
+			"expected source leafwiki_id to be dropped, got: %q",
+
+			raw)
+		Expect(frontmatter.LeafWikiID).
+			To(Equal("p1"), "expected managed leafwiki_id, got %q",
+
+				frontmatter.LeafWikiID)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_UpsertContent_Section_WritesIndexAndCreatesDir", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("upsert content section writes index and creates directory", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		{
 
-		if err := store.UpsertContent(sec, "# docs"); err != nil {
-			t.Fatalf("UpsertContent: %v", err)
+			err := store.UpsertContent(sec, "# docs")
+			Expect(err).To(Succeed(), "UpsertContent: %v",
+
+				err)
 		}
 
 		index := filepath.Join(tmp, "root", "docs", "index.md")
-		if _, err := os.Stat(index); err != nil {
-			t.Fatalf("expected index.md to exist: %v", err)
+		{
+			_, err := os.Stat(index)
+			Expect(err).To(Succeed(), "expected index.md to exist: %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_MoveNode_Page_MovesFileStrict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("move node page moves file strict", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -824,27 +933,40 @@ var _ = ginkgo.Describe("TestNodeStore_MoveNode_Page_MovesFileStrict", func() {
 
 		// create source file at old location (tree-based path)
 		src := filepath.Join(tmp, "root", "a", "p.md")
-		mustWriteFile(t, src, "# hi", 0o644)
+		writeTreeFile(src, "# hi", 0o644)
+		{
 
-		if err := store.MoveNode(page, secB); err != nil {
-			t.Fatalf("MoveNode: %v", err)
+			err := store.MoveNode(page, secB)
+			Expect(err).To(Succeed(), "MoveNode: %v",
+
+				err)
 		}
 
 		dst := filepath.Join(tmp, "root", "b", "p.md")
-		if _, err := os.Stat(dst); err != nil {
-			t.Fatalf("expected dest file: %v", err)
+		{
+			_, err := os.Stat(dst)
+			Expect(err).To(Succeed(), "expected dest file: %v",
+
+				err,
+			)
 		}
-		if _, err := os.Stat(src); !os.IsNotExist(err) {
-			t.Fatalf("expected src removed")
+		{
+
+			_, err := os.Stat(src)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected src removed",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_MoveNode_PageUsesWorkspaceSourcePath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("move node page uses workspace source path", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -860,30 +982,44 @@ var _ = ginkgo.Describe("TestNodeStore_MoveNode_PageUsesWorkspaceSourcePath", fu
 		}
 
 		src := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
-		mustWriteFile(t, src, "# plan", 0o644)
+		writeTreeFile(src, "# plan", 0o644)
+		{
 
-		if err := store.MoveNode(page, archive); err != nil {
-			t.Fatalf("MoveNode: %v", err)
+			err := store.MoveNode(page, archive)
+			Expect(err).To(Succeed(), "MoveNode: %v",
+
+				err)
 		}
 
 		dst := filepath.Join(tmp, "root", "archive", "agent_hooks.PLAN.md")
-		if _, err := os.Stat(dst); err != nil {
-			t.Fatalf("expected retained source filename at destination: %v", err)
+		{
+			_, err := os.Stat(dst)
+			Expect(err).To(Succeed(), "expected retained source filename at destination: %v",
+
+				err,
+			)
 		}
-		if _, err := os.Stat(src); !os.IsNotExist(err) {
-			t.Fatalf("expected original source file removed")
+		{
+
+			_, err := os.Stat(src)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected original source file removed",
+			)
 		}
-		if page.WorkspaceSourcePath != "archive/agent_hooks.PLAN.md" {
-			t.Fatalf("WorkspaceSourcePath = %q, want archive/agent_hooks.PLAN.md", page.WorkspaceSourcePath)
-		}
+		Expect(page.WorkspaceSourcePath).To(
+			Equal(newFixtureWorkspaceSourcePath("archive/agent_hooks.PLAN.md")), "WorkspaceSourcePath = %q, want archive/agent_hooks.PLAN.md",
+
+			page.WorkspaceSourcePath)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_MoveNode_DriftWhenMissingSource", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("move node drift when missing source", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -891,21 +1027,20 @@ var _ = ginkgo.Describe("TestNodeStore_MoveNode_DriftWhenMissingSource", func() 
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: sec}
 
 		err := store.MoveNode(page, root)
-		if err == nil {
-			t.Fatalf("expected DriftError, got nil")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError, got nil")
+
 		var de *DriftError
-		if !errors.As(err, &de) {
-			t.Fatalf("expected DriftError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_CreatePageUsesWorkspaceSourceParentDir", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("create page uses workspace source parent directory", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -918,54 +1053,68 @@ var _ = ginkgo.Describe("TestNodeStore_CreatePageUsesWorkspaceSourceParentDir", 
 			WorkspaceSourcePath: "My Docs",
 		}
 		page := &PageNode{ID: "p1", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: parent}
+		{
 
-		if err := store.CreatePage(parent, page); err != nil {
-			t.Fatalf("CreatePage: %v", err)
+			err := store.CreatePage(parent, page)
+			Expect(err).To(Succeed(), "CreatePage: %v",
+
+				err)
 		}
 
 		want := filepath.Join(tmp, "root", "My Docs", "child.md")
-		if _, err := os.Stat(want); err != nil {
-			t.Fatalf("expected page under retained parent source dir: %v", err)
+		{
+			_, err := os.Stat(want)
+			Expect(err).To(Succeed(), "expected page under retained parent source directory: %v",
+
+				err)
 		}
-		if page.WorkspaceSourcePath != "My Docs/child.md" {
-			t.Fatalf("WorkspaceSourcePath = %q, want My Docs/child.md", page.WorkspaceSourcePath)
-		}
+		Expect(page.WorkspaceSourcePath).To(
+			Equal(newFixtureWorkspaceSourcePath("My Docs/child.md")), "WorkspaceSourcePath = %q, want My Docs/child.md",
+
+			page.WorkspaceSourcePath,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_DeletePage_RemovesFile_OrDriftIfMissing", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("delete page removes file or drift if missing", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
-		mustWriteFile(t, path, "# x", 0o644)
+		writeTreeFile(path, "# x", 0o644)
+		{
 
-		if err := store.DeletePage(page); err != nil {
-			t.Fatalf("DeletePage: %v", err)
+			err := store.DeletePage(page)
+			Expect(err).To(Succeed(), "DeletePage: %v",
+
+				err)
 		}
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("expected file deleted")
+		{
+
+			_, err := os.Stat(path)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected file deleted",
+			)
 		}
 
 		// delete again -> drift
 		err := store.DeletePage(page)
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_DeletePageUsesWorkspaceSourcePath", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("delete page uses workspace source path", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -980,51 +1129,67 @@ var _ = ginkgo.Describe("TestNodeStore_DeletePageUsesWorkspaceSourcePath", func(
 		}
 
 		rawSource := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
-		mustWriteFile(t, rawSource, "# plan", 0o644)
+		writeTreeFile(rawSource, "# plan", 0o644)
+		{
 
-		if err := store.DeletePage(page); err != nil {
-			t.Fatalf("DeletePage: %v", err)
+			err := store.DeletePage(page)
+			Expect(err).To(Succeed(), "DeletePage: %v",
+
+				err)
 		}
-		if _, err := os.Stat(rawSource); !os.IsNotExist(err) {
-			t.Fatalf("expected raw source file deleted")
+		{
+
+			_, err := os.Stat(rawSource)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected raw source file deleted",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_DeleteSection_RemovesFolderRecursive_OrDriftIfMissing", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("delete section removes folder recursive or drift if missing", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 
-		dir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, dir)
-		mustWriteFile(t, filepath.Join(dir, "index.md"), "# hi", 0o644)
-		mustWriteFile(t, filepath.Join(dir, "nested.txt"), "x", 0o644)
+		directory := filepath.Join(tmp, "root", "docs")
+		createTreeDirectory(directory)
+		writeTreeFile(filepath.Join(directory, "index.md"), "# hi", 0o644)
+		writeTreeFile(filepath.Join(directory, "nested.txt"), "x", 0o644)
+		{
 
-		if err := store.DeleteSection(sec); err != nil {
-			t.Fatalf("DeleteSection: %v", err)
+			err := store.DeleteSection(sec)
+			Expect(err).To(Succeed(), "DeleteSection: %v",
+
+				err)
 		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("expected folder deleted")
+		{
+
+			_, err := os.Stat(directory)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected folder deleted",
+			)
 		}
 
 		err := store.DeleteSection(sec)
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_SaveChildOrderUsesWorkspaceSourceSectionDir", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("save child order uses workspace source section directory", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1040,25 +1205,37 @@ var _ = ginkgo.Describe("TestNodeStore_SaveChildOrderUsesWorkspaceSourceSectionD
 			},
 		}
 		assignParentToChildren(parent)
+		{
 
-		if err := store.SaveChildOrder(parent); err != nil {
-			t.Fatalf("SaveChildOrder: %v", err)
-		}
+			err := store.SaveChildOrder(parent)
+			Expect(err).To(Succeed(), "SaveChildOrder: %v",
 
-		if _, err := os.Stat(filepath.Join(tmp, "root", "My Docs", orderFilename)); err != nil {
-			t.Fatalf("expected child order under retained source dir: %v", err)
+				err)
 		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", "my-docs", orderFilename)); !os.IsNotExist(err) {
-			t.Fatalf("expected no child order file under normalized route dir")
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "My Docs", orderFilename))
+			Expect(err).To(Succeed(), "expected child order under retained source directory: %v",
+
+				err)
+		}
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "my-docs", orderFilename))
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected no child order file under normalized route directory",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_PageAndSection", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node page and section", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1066,35 +1243,46 @@ var _ = ginkgo.Describe("TestNodeStore_RenameNode_PageAndSection", func() {
 		// page rename
 		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
 		oldFile := filepath.Join(tmp, "root", "old.md")
-		mustWriteFile(t, oldFile, "# x", 0o644)
+		writeTreeFile(oldFile, "# x", 0o644)
+		{
 
-		if err := store.RenameNode(page, "new"); err != nil {
-			t.Fatalf("RenameNode(page): %v", err)
+			err := store.RenameNode(page, "new")
+			Expect(err).To(Succeed(), "RenameNode(page): %v",
+
+				err)
 		}
-		if _, err := os.Stat(filepath.Join(tmp, "root", "new.md")); err != nil {
-			t.Fatalf("expected new page file")
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "new.md"))
+			Expect(err).To(Succeed(), "expected new page file")
 		}
 
 		// section rename
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 		secDir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, secDir)
-		mustWriteFile(t, filepath.Join(secDir, "index.md"), "# y", 0o644)
+		createTreeDirectory(secDir)
+		writeTreeFile(filepath.Join(secDir, "index.md"), "# y", 0o644)
+		{
 
-		if err := store.RenameNode(sec, "docs2"); err != nil {
-			t.Fatalf("RenameNode(section): %v", err)
+			err := store.RenameNode(sec, "docs2")
+			Expect(err).To(Succeed(), "RenameNode(section): %v",
+
+				err,
+			)
 		}
-		if st, err := os.Stat(filepath.Join(tmp, "root", "docs2")); err != nil || !st.IsDir() {
-			t.Fatalf("expected renamed section dir")
+		{
+
+			st, err := os.Stat(filepath.Join(tmp, "root", "docs2"))
+			Expect(err != nil ||
+				!st.IsDir()).To(BeFalse(), "expected renamed section directory")
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_PageUsesWorkspaceSourcePathAndClearsDefaultSource", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node page uses workspace source path and clears default source", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1108,207 +1296,225 @@ var _ = ginkgo.Describe("TestNodeStore_RenameNode_PageUsesWorkspaceSourcePathAnd
 			WorkspaceSourcePath: "plans/agent_hooks.PLAN.md",
 		}
 		rawSource := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
-		mustWriteFile(t, rawSource, "# plan", 0o644)
+		writeTreeFile(rawSource, "# plan", 0o644)
+		{
 
-		if err := store.RenameNode(page, "agent-hooks-v2"); err != nil {
-			t.Fatalf("RenameNode: %v", err)
-		}
+			err := store.RenameNode(page, "agent-hooks-v2")
+			Expect(err).To(Succeed(), "RenameNode: %v",
 
-		if _, err := os.Stat(filepath.Join(tmp, "root", "plans", "agent-hooks-v2.md")); err != nil {
-			t.Fatalf("expected renamed canonical page file: %v", err)
+				err)
 		}
-		if _, err := os.Stat(rawSource); !os.IsNotExist(err) {
-			t.Fatalf("expected raw source filename removed")
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "plans", "agent-hooks-v2.md"))
+			Expect(err).To(Succeed(), "expected renamed canonical page file: %v",
+
+				err)
 		}
-		if page.WorkspaceSourcePath != "" {
-			t.Fatalf("WorkspaceSourcePath = %q, want cleared default source", page.WorkspaceSourcePath)
+		{
+
+			_, err := os.Stat(rawSource)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected raw source filename removed",
+			)
 		}
+		Expect(page.WorkspaceSourcePath).To(
+			BeEmpty(), "WorkspaceSourcePath = %q, want cleared default source",
+
+			page.WorkspaceSourcePath)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_RejectsEmptySlugAndRoot", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node rejects empty slug and root", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
+		{
 
-		if err := store.RenameNode(page, "   "); err == nil {
-			t.Fatalf("expected empty slug to be rejected")
+			err := store.RenameNode(page, "   ")
+			Expect(err).To(HaveOccurred(), "expected empty slug to be rejected")
 		}
-		if err := store.RenameNode(root, "new-root"); err == nil {
-			t.Fatalf("expected root rename to be rejected")
+		{
+
+			err := store.RenameNode(root, "new-root")
+			Expect(err).To(HaveOccurred(), "expected root rename to be rejected")
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_ReturnsNilWhenSlugUnchanged", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node returns nil when slug unchanged", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "same", Title: "P", Kind: NodeKindPage, Parent: root}
 		file := filepath.Join(tmp, "root", "same.md")
-		mustWriteFile(t, file, "# x", 0o644)
+		writeTreeFile(file, "# x", 0o644)
+		{
 
-		if err := store.RenameNode(page, "same"); err != nil {
-			t.Fatalf("expected unchanged slug rename to be a no-op, got %v", err)
+			err := store.RenameNode(page, "same")
+			Expect(err).To(Succeed(), "expected unchanged slug rename to be a no-op, got %v",
+
+				err,
+			)
 		}
-		if _, err := os.Stat(file); err != nil {
-			t.Fatalf("expected original file to remain: %v", err)
+		{
+
+			_, err := os.Stat(file)
+			Expect(err).To(Succeed(), "expected original file to remain: %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_RejectsDestinationCollision", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node rejects destination collision", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
-		mustWriteFile(t, filepath.Join(tmp, "root", "old.md"), "# x", 0o644)
-		mustWriteFile(t, filepath.Join(tmp, "root", "new.md"), "# y", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "old.md"), "# x", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "new.md"), "# y", 0o644)
 
 		err := store.RenameNode(page, "new")
-		if err == nil {
-			t.Fatalf("expected PageAlreadyExistsError")
-		}
+		Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError")
+
 		var existsErr *PageAlreadyExistsError
-		if !errors.As(err, &existsErr) {
-			t.Fatalf("expected PageAlreadyExistsError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&existsErr), "expected PageAlreadyExistsError, got %T: %v",
+
+			err, err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_Page_DriftWhenSourceIsFolder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node page drift when source is folder", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
-		mustMkdir(t, filepath.Join(tmp, "root", "old.md"))
+		createTreeDirectory(filepath.Join(tmp, "root", "old.md"))
 
 		err := store.RenameNode(page, "new")
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
+
 		var de *DriftError
-		if !errors.As(err, &de) {
-			t.Fatalf("expected DriftError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_Section_DriftWhenSourceIsFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node section drift when source is file", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
-		mustWriteFile(t, filepath.Join(tmp, "root", "docs"), "not a dir", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "docs"), "not a directory", 0o644)
 
 		err := store.RenameNode(sec, "docs2")
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
+
 		var de *DriftError
-		if !errors.As(err, &de) {
-			t.Fatalf("expected DriftError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_RenameNode_RejectsUnknownKind", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("rename node rejects unknown kind", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "x1", Slug: "weird", Title: "Weird", Kind: NodeKind("mystery"), Parent: root}
 
 		err := store.RenameNode(entry, "other")
-		if err == nil {
-			t.Fatalf("expected InvalidOpError")
-		}
+		Expect(err).To(HaveOccurred(), "expected InvalidOpError")
+
 		var opErr *InvalidOpError
-		if !errors.As(err, &opErr) {
-			t.Fatalf("expected InvalidOpError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&opErr),
+			"expected InvalidOpError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReadPageRaw_Section_NoIndex_ReturnsEmptyNil", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("read page raw section no index returns empty nil", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 
-		mustMkdir(t, filepath.Join(tmp, "root", "docs"))
+		createTreeDirectory(filepath.Join(tmp, "root", "docs"))
 
 		raw, err := store.ReadPageRaw(sec)
-		if err != nil {
-			t.Fatalf("ReadPageRaw: %v", err)
-		}
-		if raw != "" {
-			t.Fatalf("expected empty raw for section without index, got %q", raw)
-		}
+		Expect(err).To(Succeed(), "ReadPageRaw: %v",
 
-		if _, err := os.Stat(filepath.Join(tmp, "root", "docs", "index.md")); err == nil {
-			t.Fatalf("expected no index.md side effect on read")
+			err)
+		Expect(raw).To(BeEmpty(),
+
+			"expected empty raw for section without index, got %q",
+
+			raw,
+		)
+		{
+
+			_, err := os.Stat(filepath.Join(tmp, "root", "docs", "index.md"))
+			Expect(err).To(HaveOccurred(), "expected no index.md side effect on read")
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReadPageRaw_Page_Missing_IsDrift", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("read page raw page missing is drift", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
 
 		_, err := store.ReadPageRaw(page)
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReadPageContent_StripsFrontmatterAndPreservesBody", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("read page content strips frontmatter and preserves body", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
-		mustWriteFile(t, path, `---
+		writeTreeFile(path, `---
 custom_key: keep-me
 leafwiki_id: p1
 leafwiki_title: Existing Title
@@ -1318,22 +1524,21 @@ Hello
 `, 0o644)
 
 		content, err := store.ReadPageContent(page)
-		if err != nil {
-			t.Fatalf("ReadPageContent: %v", err)
-		}
-		if content != `# Body
+		Expect(err).To(Succeed(), "ReadPageContent: %v",
+
+			err)
+		Expect(content).To(Equal(`# Body
 Hello
-` {
-			t.Fatalf("expected body without frontmatter, got %q", content)
-		}
+`), "expected body without frontmatter, got %q",
+
+			content)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ReadPageContent_InvalidFrontmatterReturnsRaw", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("read page content invalid frontmatter returns raw", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1346,23 +1551,21 @@ leafwiki_id: [broken
 # Body
 Hello
 `
-		mustWriteFile(t, path, raw, 0o644)
+		writeTreeFile(path, raw, 0o644)
 
 		content, err := store.ReadPageContent(page)
-		if err == nil {
-			t.Fatalf("expected parse error for invalid frontmatter")
-		}
-		if content != raw {
-			t.Fatalf("expected raw content fallback on parse error, got %q", content)
-		}
+		Expect(err).To(HaveOccurred(), "expected parse error for invalid frontmatter")
+		Expect(content).To(Equal(raw),
+			"expected raw content fallback on parse error, got %q",
+
+			content)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_SyncFrontmatterIfExists_Page_UpdatesOrAddsFM", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("sync frontmatter if exists page updates or adds frontmatter", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1383,74 +1586,103 @@ var _ = ginkgo.Describe("TestNodeStore_SyncFrontmatterIfExists_Page_UpdatesOrAdd
 		path := filepath.Join(tmp, "root", "p.md")
 
 		// file without FM
-		mustWriteFile(t, path, "# Body\nHello", 0o644)
+		writeTreeFile(path, "# Body\nHello", 0o644)
+		{
 
-		if err := store.SyncFrontmatterIfExists(page); err != nil {
-			t.Fatalf("SyncFrontmatterIfExists: %v", err)
+			err := store.SyncFrontmatterIfExists(page)
+			Expect(err).To(Succeed(), "SyncFrontmatterIfExists: %v",
+
+				err)
 		}
 
-		raw := string(mustRead(t, path))
-		assertCanonicalNodeStoreRawStorage(t, raw)
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected fm after sync")
-		}
-		if fm.LeafWikiID != "p1" || fm.LeafWikiTitle != "Title A" {
-			t.Fatalf("unexpected fm: %#v", fm)
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-21T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-21T11:16:31Z" {
-			t.Fatalf("unexpected timestamp metadata: %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "bob" {
-			t.Fatalf("unexpected author metadata: %#v", fm)
-		}
-		if strings.TrimSpace(body) != "# Body\nHello" {
-			t.Fatalf("body changed unexpectedly: %q", body)
-		}
+		raw := string(readTreeFile(path))
+		Expect(raw).To(haveCanonicalNodeStoreRawStorage())
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after sync")
+		Expect(frontmatter.LeafWikiID !=
+			"p1" ||
+			frontmatter.
+				LeafWikiTitle !=
+				"Title A",
+		).To(
+			BeFalse(), "unexpected frontmatter: %#v", frontmatter,
+		)
+		Expect(frontmatter.LeafWikiCreatedAt !=
+			"2026-03-21T10:15:30Z" ||
+			frontmatter.
+				LeafWikiUpdatedAt !=
+				"2026-03-21T11:16:31Z").To(BeFalse(), "unexpected timestamp metadata: %#v",
+			frontmatter)
+		Expect(frontmatter.LeafWikiCreatorID !=
+			"alice" || frontmatter.
+			LeafWikiLastAuthorID !=
+			"bob").To(BeFalse(), "unexpected author metadata: %#v",
+
+			frontmatter)
+		Expect(strings.TrimSpace(body)).To(Equal("# Body\nHello"), "body changed unexpectedly: %q",
+
+			body)
 
 		// update title and id
 		page.Title = "Title B"
 		page.ID = "p1b"
 		page.Metadata.UpdatedAt = time.Date(2026, time.March, 21, 12, 17, 32, 0, time.UTC)
 		page.Metadata.LastAuthorID = "carol"
-		if err := store.SyncFrontmatterIfExists(page); err != nil {
-			t.Fatalf("SyncFrontmatterIfExists(update): %v", err)
+		{
+			err := store.SyncFrontmatterIfExists(page)
+			Expect(err).To(Succeed(), "SyncFrontmatterIfExists(update): %v",
+
+				err,
+			)
 		}
-		raw2 := string(mustRead(t, path))
+
+		raw2 := string(readTreeFile(path))
 		fm2, body2, has2, err := markdown.ParseFrontmatter(raw2)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has2 || fm2.LeafWikiID != "p1b" || fm2.LeafWikiTitle != "Title B" {
-			t.Fatalf("expected updated fm, got %#v", fm2)
-		}
-		if fm2.LeafWikiCreatedAt != "2026-03-21T10:15:30Z" || fm2.LeafWikiUpdatedAt != "2026-03-21T12:17:32Z" {
-			t.Fatalf("expected updated timestamps in fm, got %#v", fm2)
-		}
-		if fm2.LeafWikiCreatorID != "alice" || fm2.LeafWikiLastAuthorID != "carol" {
-			t.Fatalf("expected updated author metadata in fm, got %#v", fm2)
-		}
-		if strings.TrimSpace(body2) != "# Body\nHello" {
-			t.Fatalf("body changed unexpectedly on update: %q", body2)
-		}
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(!has2 || fm2.
+			LeafWikiID !=
+			"p1b" ||
+			fm2.LeafWikiTitle !=
+				"Title B").
+			To(BeFalse(), "expected updated frontmatter, got %#v", fm2)
+		Expect(fm2.LeafWikiCreatedAt !=
+			"2026-03-21T10:15:30Z" ||
+			fm2.LeafWikiUpdatedAt !=
+				"2026-03-21T12:17:32Z",
+		).To(BeFalse(), "expected updated timestamps in frontmatter, got %#v",
+
+			fm2)
+		Expect(fm2.LeafWikiCreatorID !=
+			"alice" ||
+			fm2.LeafWikiLastAuthorID !=
+				"carol",
+		).To(
+			BeFalse(), "expected updated author metadata in frontmatter, got %#v",
+
+			fm2)
+		Expect(strings.TrimSpace(body2)).To(
+			Equal("# Body\nHello"), "body changed unexpectedly on update: %q",
+
+			body2)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_SyncFrontmatterIfExists_PreservesExistingCustomFrontmatter", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("sync frontmatter if exists preserves existing custom frontmatter", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "Title A", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
-		mustWriteFile(t, path, `---
+		writeTreeFile(path, `---
 custom_key: keep-me
 aliases:
   - one
@@ -1460,132 +1692,171 @@ leafwiki_title: Old Title
 # Body
 Hello
 `, 0o644)
+		{
 
-		if err := store.SyncFrontmatterIfExists(page); err != nil {
-			t.Fatalf("SyncFrontmatterIfExists: %v", err)
-		}
+			err := store.SyncFrontmatterIfExists(page)
+			Expect(err).To(Succeed(), "SyncFrontmatterIfExists: %v",
 
-		raw := string(mustRead(t, path))
-		if !strings.Contains(raw, "custom_key: keep-me") {
-			t.Fatalf("expected custom frontmatter to be preserved, got: %q", raw)
-		}
-		if !strings.Contains(raw, "- one") {
-			t.Fatalf("expected custom list frontmatter to be preserved, got: %q", raw)
+				err)
 		}
 
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected FM to exist")
-		}
-		if fm.LeafWikiID != "p1" || fm.LeafWikiTitle != "Title A" {
-			t.Fatalf("unexpected fm: %#v", fm)
-		}
-		if strings.TrimSpace(body) != `# Body
-Hello` {
-			t.Fatalf("body changed unexpectedly: %q", body)
-		}
+		raw := string(readTreeFile(path))
+		Expect(raw).
+			To(ContainSubstring("custom_key: keep-me"),
+
+				"expected custom frontmatter to be preserved, got: %q",
+
+				raw)
+		Expect(raw).To(ContainSubstring("- one"),
+
+			"expected custom list frontmatter to be preserved, got: %q",
+
+			raw)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected FM to exist")
+		Expect(frontmatter.LeafWikiID !=
+			"p1" ||
+			frontmatter.
+				LeafWikiTitle !=
+				"Title A",
+		).To(
+			BeFalse(), "unexpected frontmatter: %#v", frontmatter,
+		)
+		Expect(strings.TrimSpace(body)).To(Equal(`# Body
+Hello`), "body changed unexpectedly: %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_SyncFrontmatterIfExists_Section_NoIndex_NoSideEffects", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("sync frontmatter if exists section no index no side effects", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		{
 
-		// Do NOT create folder: sync must not mkdir via write-path; should return nil.
-		if err := store.SyncFrontmatterIfExists(sec); err != nil {
-			t.Fatalf("SyncFrontmatterIfExists(section): %v", err)
+			// Do NOT create folder: sync must not mkdir via write-path; should return nil.
+			err := store.SyncFrontmatterIfExists(sec)
+			Expect(err).To(Succeed(), "SyncFrontmatterIfExists(section): %v",
+
+				err)
 		}
-		// Ensure no folder created implicitly
-		if _, err := os.Stat(filepath.Join(tmp, "root", "docs")); err == nil {
-			t.Fatalf("expected no side effects (folder created), but folder exists")
+		{
+
+			// Ensure no folder created implicitly
+			_, err := os.Stat(filepath.Join(tmp, "root", "docs"))
+			Expect(err).To(HaveOccurred(), "expected no side effects (folder created), but folder exists")
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_resolveNode_FileVsFolder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("resolve node file vs folder", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
-		mustWriteFile(t, filepath.Join(tmp, "root", "p.md"), "# x", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "p.md"), "# x", 0o644)
 
 		r1, err := store.resolveNode(page)
-		if err != nil {
-			t.Fatalf("resolveNode(page): %v", err)
-		}
-		if r1.Kind != NodeKindPage || !r1.HasContent || !strings.HasSuffix(r1.FilePath, "p.md") {
-			t.Fatalf("unexpected resolved: %#v", r1)
-		}
+		Expect(err).To(Succeed(), "resolveNode(page): %v",
+
+			err)
+		Expect(r1.Kind != NodeKindPage ||
+			!r1.
+				HasContent || !strings.HasSuffix(r1.FilePath,
+
+			"p.md")).To(BeFalse(), "unexpected resolved: %#v",
+
+			r1)
 
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 		secDir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, secDir)
+		createTreeDirectory(secDir)
 
 		r2, err := store.resolveNode(sec)
-		if err != nil {
-			t.Fatalf("resolveNode(sec without index): %v", err)
-		}
-		if r2.Kind != NodeKindSection || r2.HasContent {
-			t.Fatalf("expected section without content: %#v", r2)
-		}
+		Expect(err).To(Succeed(), "resolveNode(sec without index): %v",
 
-		mustWriteFile(t, filepath.Join(secDir, "index.md"), "# idx", 0o644)
+			err,
+		)
+		Expect(r2.Kind != NodeKindSection ||
+			r2.HasContent).To(BeFalse(),
+			"expected section without content: %#v",
+
+			r2)
+
+		writeTreeFile(filepath.Join(secDir, "index.md"), "# idx", 0o644)
 		r3, err := store.resolveNode(sec)
-		if err != nil {
-			t.Fatalf("resolveNode(sec with index): %v", err)
-		}
-		if r3.Kind != NodeKindSection || !r3.HasContent || !strings.HasSuffix(r3.FilePath, "index.md") {
-			t.Fatalf("unexpected resolved: %#v", r3)
-		}
+		Expect(err).To(Succeed(), "resolveNode(sec with index): %v",
+
+			err)
+		Expect(r3.Kind != NodeKindSection ||
+			!r3.HasContent ||
+			!strings.
+				HasSuffix(r3.
+					FilePath,
+
+					"index.md")).To(BeFalse(), "unexpected resolved: %#v",
+
+			r3)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_PageToSection_MovesToIndex", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node page to section moves to index", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
 
 		file := filepath.Join(tmp, "root", "p.md")
-		mustWriteFile(t, file, "# hi", 0o644)
+		writeTreeFile(file, "# hi", 0o644)
+		{
 
-		if err := store.ConvertNode(entry, NodeKindSection); err != nil {
-			t.Fatalf("ConvertNode(page->section): %v", err)
+			err := store.ConvertNode(entry, NodeKindSection)
+			Expect(err).To(Succeed(), "ConvertNode(page->section): %v",
+
+				err)
 		}
 
 		index := filepath.Join(tmp, "root", "p", "index.md")
-		if _, err := os.Stat(index); err != nil {
-			t.Fatalf("expected index at %s", index)
+		{
+			_, err := os.Stat(index)
+			Expect(err).To(Succeed(), "expected index at %s",
+
+				index,
+			)
 		}
-		if _, err := os.Stat(file); !os.IsNotExist(err) {
-			t.Fatalf("expected old file removed")
+		{
+
+			_, err := os.Stat(file)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected old file removed",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_PageToSection_PreservesExistingMetadataAndBody", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node page to section preserves existing metadata and body", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1604,176 +1875,230 @@ var _ = ginkgo.Describe("TestNodeStore_ConvertNode_PageToSection_PreservesExisti
 		}
 
 		file := filepath.Join(tmp, "root", "p.md")
-		mustWriteFile(t, file, `---
+		writeTreeFile(file, `---
 custom_key: keep-me
 leafwiki_id: legacy-id
 leafwiki_title: Legacy Title
 ---
 # hi
 `, 0o644)
+		{
 
-		if err := store.ConvertNode(entry, NodeKindSection); err != nil {
-			t.Fatalf("ConvertNode(page->section): %v", err)
+			err := store.ConvertNode(entry, NodeKindSection)
+			Expect(err).To(Succeed(), "ConvertNode(page->section): %v",
+
+				err)
 		}
 
 		index := filepath.Join(tmp, "root", "p", "index.md")
-		raw := string(mustRead(t, index))
-		if !strings.Contains(raw, "custom_key: keep-me") {
-			t.Fatalf("expected custom frontmatter to be preserved, got %q", raw)
-		}
+		raw := string(readTreeFile(index))
+		Expect(raw).
+			To(ContainSubstring("custom_key: keep-me"),
 
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after conversion")
-		}
-		if fm.LeafWikiID != "p1" || fm.LeafWikiTitle != "Section Title" {
-			t.Fatalf("expected managed frontmatter from tree metadata, got %#v", fm)
-		}
-		if fm.LeafWikiCreatedAt != "2026-03-22T10:15:30Z" || fm.LeafWikiUpdatedAt != "2026-03-22T11:16:31Z" {
-			t.Fatalf("expected timestamps from tree metadata, got %#v", fm)
-		}
-		if fm.LeafWikiCreatorID != "alice" || fm.LeafWikiLastAuthorID != "bob" {
-			t.Fatalf("expected author metadata from tree metadata, got %#v", fm)
-		}
-		if strings.TrimSpace(body) != "# hi" {
-			t.Fatalf("expected body to be preserved, got %q", body)
-		}
+				"expected custom frontmatter to be preserved, got %q",
+
+				raw)
+
+		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(has).To(BeTrue(), "expected frontmatter after conversion")
+		Expect(frontmatter.LeafWikiID !=
+			"p1" ||
+			frontmatter.
+				LeafWikiTitle !=
+				"Section Title",
+		).To(BeFalse(), "expected managed frontmatter from tree metadata, got %#v",
+
+			frontmatter,
+		)
+		Expect(frontmatter.LeafWikiCreatedAt !=
+			"2026-03-22T10:15:30Z" ||
+			frontmatter.
+				LeafWikiUpdatedAt !=
+				"2026-03-22T11:16:31Z").To(BeFalse(), "expected timestamps from tree metadata, got %#v",
+			frontmatter,
+		)
+		Expect(frontmatter.LeafWikiCreatorID !=
+			"alice" || frontmatter.
+			LeafWikiLastAuthorID !=
+			"bob").To(BeFalse(), "expected author metadata from tree metadata, got %#v",
+
+			frontmatter,
+		)
+		Expect(strings.TrimSpace(body)).To(Equal("# hi"), "expected body to be preserved, got %q",
+
+			body)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_SectionToPage_RejectsNonEmptyFolder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node section to page rejects non empty folder", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 
-		dir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, dir)
-		mustWriteFile(t, filepath.Join(dir, "index.md"), "# idx", 0o644)
-		mustWriteFile(t, filepath.Join(dir, "other.txt"), "nope", 0o644)
+		directory := filepath.Join(tmp, "root", "docs")
+		createTreeDirectory(directory)
+		writeTreeFile(filepath.Join(directory, "index.md"), "# idx", 0o644)
+		writeTreeFile(filepath.Join(directory, "other.txt"), "nope", 0o644)
 
 		err := store.ConvertNode(entry, NodeKindPage)
-		if err == nil {
-			t.Fatalf("expected ConvertNotAllowedError")
-		}
+		Expect(err).To(HaveOccurred(), "expected ConvertNotAllowedError")
+
 		var cna *ConvertNotAllowedError
-		if !errors.As(err, &cna) {
-			t.Fatalf("expected ConvertNotAllowedError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&cna), "expected ConvertNotAllowedError, got %T: %v",
+
+			err,
+
+			err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_SectionToPage_WithIndex_MovesAndRemovesFolder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node section to page with index moves and removes folder", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 
-		dir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, dir)
-		mustWriteFile(t, filepath.Join(dir, "index.md"), "# idx", 0o644)
+		directory := filepath.Join(tmp, "root", "docs")
+		createTreeDirectory(directory)
+		writeTreeFile(filepath.Join(directory, "index.md"), "# idx", 0o644)
+		{
 
-		if err := store.ConvertNode(entry, NodeKindPage); err != nil {
-			t.Fatalf("ConvertNode(section->page): %v", err)
+			err := store.ConvertNode(entry, NodeKindPage)
+			Expect(err).To(Succeed(), "ConvertNode(section->page): %v",
+
+				err)
 		}
 
 		pageFile := filepath.Join(tmp, "root", "docs.md")
-		if _, err := os.Stat(pageFile); err != nil {
-			t.Fatalf("expected page file: %v", err)
+		{
+			_, err := os.Stat(pageFile)
+			Expect(err).To(Succeed(), "expected page file: %v",
+
+				err,
+			)
 		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("expected folder removed")
+		{
+
+			_, err := os.Stat(directory)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected folder removed",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_SectionToPage_NoIndex_CreatesEmptyPageWithFM", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node section to page no index creates empty page with frontmatter", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 
-		dir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, dir)
-		// empty folder, no index.md
+		directory := filepath.Join(tmp, "root", "docs")
+		createTreeDirectory(directory)
+		{
+			// empty folder, no index.md
 
-		if err := store.ConvertNode(entry, NodeKindPage); err != nil {
-			t.Fatalf("ConvertNode(section->page no index): %v", err)
+			err := store.ConvertNode(entry, NodeKindPage)
+			Expect(err).To(Succeed(), "ConvertNode(section->page no index): %v",
+
+				err)
 		}
 
 		pageFile := filepath.Join(tmp, "root", "docs.md")
-		raw := string(mustRead(t, pageFile))
-		assertCanonicalNodeStoreRawStorage(t, raw)
-		fm, _, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter: %v", err)
-		}
-		if !has || fm.LeafWikiID != "s1" || fm.LeafWikiTitle != "Docs" {
-			t.Fatalf("unexpected fm: %#v", fm)
-		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("expected folder removed")
+		raw := string(readTreeFile(pageFile))
+		Expect(raw).To(haveCanonicalNodeStoreRawStorage())
+		frontmatter, _, has, err := markdown.ParseFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
+
+			err)
+		Expect(!has || frontmatter.
+			LeafWikiID !=
+			"s1" || frontmatter.
+			LeafWikiTitle !=
+			"Docs",
+		).To(BeFalse(), "unexpected frontmatter: %#v", frontmatter)
+		{
+
+			_, err := os.Stat(directory)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected folder removed",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_SectionToPage_WithOrderMetadata_PreservesIndexContent", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node section to page with order metadata preserves index content", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 
-		dir := filepath.Join(tmp, "root", "docs")
-		mustMkdir(t, dir)
-		indexPath := filepath.Join(dir, "index.md")
-		mustWriteFile(t, indexPath, `---
+		directory := filepath.Join(tmp, "root", "docs")
+		createTreeDirectory(directory)
+		indexPath := filepath.Join(directory, "index.md")
+		writeTreeFile(indexPath, `---
 leafwiki_id: existing
 leafwiki_title: Existing
 custom: keep
 ---
 # idx
 `, 0o644)
-		mustWriteFile(t, filepath.Join(dir, orderFilename), `{"ordered_ids":[]}`, 0o644)
+		writeTreeFile(filepath.Join(directory, orderFilename), `{"ordered_ids":[]}`, 0o644)
+		{
 
-		if err := store.ConvertNode(entry, NodeKindPage); err != nil {
-			t.Fatalf("ConvertNode(section->page with order metadata): %v", err)
+			err := store.ConvertNode(entry, NodeKindPage)
+			Expect(err).To(Succeed(), "ConvertNode(section->page with order metadata): %v",
+
+				err)
 		}
 
 		pageFile := filepath.Join(tmp, "root", "docs.md")
-		raw := string(mustRead(t, pageFile))
-		if !strings.Contains(raw, "custom: keep") || !strings.Contains(raw, "# idx") {
-			t.Fatalf("expected converted page to keep index content, got: %s", raw)
-		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("expected folder removed")
+		raw := string(readTreeFile(pageFile))
+		Expect(!strings.Contains(raw,
+			"custom: keep",
+		) || !strings.
+			Contains(raw, "# idx")).To(BeFalse(), "expected converted page to keep index content, got: %s",
+
+			raw)
+		{
+
+			_, err := os.Stat(directory)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected folder removed",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_MoveNode_Section_MovesFolderStrict", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("move node section moves folder strict", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1782,76 +2107,87 @@ var _ = ginkgo.Describe("TestNodeStore_MoveNode_Section_MovesFolderStrict", func
 		entry := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: secA}
 
 		srcDir := filepath.Join(tmp, "root", "a", "docs")
-		mustMkdir(t, srcDir)
-		mustWriteFile(t, filepath.Join(srcDir, "index.md"), "# hi", 0o644)
+		createTreeDirectory(srcDir)
+		writeTreeFile(filepath.Join(srcDir, "index.md"), "# hi", 0o644)
+		{
 
-		if err := store.MoveNode(entry, secB); err != nil {
-			t.Fatalf("MoveNode(section): %v", err)
+			err := store.MoveNode(entry, secB)
+			Expect(err).To(Succeed(), "MoveNode(section): %v",
+
+				err)
 		}
 
 		dstDir := filepath.Join(tmp, "root", "b", "docs")
-		if st, err := os.Stat(dstDir); err != nil || !st.IsDir() {
-			t.Fatalf("expected moved section dir, err=%v", err)
+		{
+			st, err := os.Stat(dstDir)
+			Expect(err != nil ||
+				!st.IsDir()).To(BeFalse(), "expected moved section directory, err=%v",
+
+				err)
 		}
-		if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
-			t.Fatalf("expected old section dir removed")
+		{
+
+			_, err := os.Stat(srcDir)
+			Expect(err).To(MatchError(os.
+				ErrNotExist,
+			),
+
+				"expected old section directory removed",
+			)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_MoveNode_Page_DriftWhenSourceIsFolder", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("move node page drift when source is folder", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{ID: "s", Slug: "s", Title: "S", Kind: NodeKindSection, Parent: root}
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: sec}
 
-		mustMkdir(t, filepath.Join(tmp, "root", "s", "p.md"))
+		createTreeDirectory(filepath.Join(tmp, "root", "s", "p.md"))
 
 		err := store.MoveNode(page, root)
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
+
 		var de *DriftError
-		if !errors.As(err, &de) {
-			t.Fatalf("expected DriftError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_MoveNode_Section_DriftWhenSourceIsFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("move node section drift when source is file", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{ID: "s", Slug: "s", Title: "S", Kind: NodeKindSection, Parent: root}
 		entry := &PageNode{ID: "p1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: sec}
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "s", "docs"), "not a dir", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "s", "docs"), "not a directory", 0o644)
 
 		err := store.MoveNode(entry, root)
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
+
 		var de *DriftError
-		if !errors.As(err, &de) {
-			t.Fatalf("expected DriftError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_MoveNode_RejectsDestinationCollision", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("move node rejects destination collision", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
@@ -1861,91 +2197,92 @@ var _ = ginkgo.Describe("TestNodeStore_MoveNode_RejectsDestinationCollision", fu
 
 		src := filepath.Join(tmp, "root", "a", "p.md")
 		dst := filepath.Join(tmp, "root", "b", "p.md")
-		mustWriteFile(t, src, "# hi", 0o644)
-		mustWriteFile(t, dst, "# existing", 0o644)
+		writeTreeFile(src, "# hi", 0o644)
+		writeTreeFile(dst, "# existing", 0o644)
 
 		err := store.MoveNode(page, secB)
-		if err == nil {
-			t.Fatalf("expected PageAlreadyExistsError")
-		}
+		Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError")
+
 		var existsErr *PageAlreadyExistsError
-		if !errors.As(err, &existsErr) {
-			t.Fatalf("expected PageAlreadyExistsError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&existsErr), "expected PageAlreadyExistsError, got %T: %v",
+
+			err, err)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_PageToSection_CreatesIndexWhenPageMissing", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node page to section creates index when page missing", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
+		{
 
-		if err := store.ConvertNode(entry, NodeKindSection); err != nil {
-			t.Fatalf("ConvertNode(page->section missing page): %v", err)
+			err := store.ConvertNode(entry, NodeKindSection)
+			Expect(err).To(Succeed(), "ConvertNode(page->section missing page): %v",
+
+				err)
 		}
 
 		index := filepath.Join(tmp, "root", "p", "index.md")
-		if _, err := os.Stat(index); err != nil {
-			t.Fatalf("expected materialized section index: %v", err)
+		{
+			_, err := os.Stat(index)
+			Expect(err).To(Succeed(), "expected materialized section index: %v",
+
+				err)
 		}
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_RejectsUnknownTarget", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node rejects unknown target", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
 
 		err := store.ConvertNode(entry, NodeKind("weird"))
-		if err == nil {
-			t.Fatalf("expected InvalidOpError")
-		}
+		Expect(err).To(HaveOccurred(), "expected InvalidOpError")
+
 		var opErr *InvalidOpError
-		if !errors.As(err, &opErr) {
-			t.Fatalf("expected InvalidOpError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&opErr),
+			"expected InvalidOpError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-var _ = ginkgo.Describe("TestNodeStore_ConvertNode_SectionToPage_DriftWhenPathIsFile", func() {
-	ginkgo.It("preserves behavior", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
+var _ = ginkgo.Describe("node store persistence", func() {
+	ginkgo.It("convert node section to page drift when path is file", func() {
+		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		entry := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
 
-		mustWriteFile(t, filepath.Join(tmp, "root", "docs"), "not a dir", 0o644)
+		writeTreeFile(filepath.Join(tmp, "root", "docs"), "not a directory", 0o644)
 
 		err := store.ConvertNode(entry, NodeKindPage)
-		if err == nil {
-			t.Fatalf("expected DriftError")
-		}
+		Expect(err).To(HaveOccurred(), "expected DriftError")
+
 		var de *DriftError
-		if !errors.As(err, &de) {
-			t.Fatalf("expected DriftError, got %T: %v", err, err)
-		}
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
+
+			err, err,
+		)
 
 	})
 })
 
-func mustRead(t treeTestT, path string) []byte {
-	t.Helper()
+func readTreeFile(path string) []byte {
+	ginkgo.GinkgoHelper()
 	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return b
 }
