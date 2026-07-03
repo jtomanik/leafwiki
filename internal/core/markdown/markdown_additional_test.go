@@ -208,6 +208,6 @@ New body`)
 		mf, err := LoadMarkdownFile(path)
 
 		Expect(mf).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMarkdownPathError())
 	})
 })

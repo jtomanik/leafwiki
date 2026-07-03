@@ -303,9 +303,10 @@ var _ = ginkgo.Describe("frontmatter", func() {
 				fm, body, has, err := ParseFrontmatter(tt.input)
 
 				if tt.wantErr {
-					Expect(err).To(HaveOccurred())
 					if tt.wantErrType != nil {
 						Expect(err).To(MatchError(tt.wantErrType))
+					} else {
+						Expect(err).To(MatchError(ErrFrontmatterParse))
 					}
 				} else {
 					Expect(err).To(Succeed())

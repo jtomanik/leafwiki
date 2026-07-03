@@ -108,7 +108,7 @@ leafwiki_id: [broken
 `
 
 		doc, result, err := ParsePageDocument(raw)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(ErrFrontmatterParse))
 		Expect(result.RequiresWriteback).To(BeFalse())
 		Expect(doc.Metadata.Page.ID).To(BeEmpty())
 	})

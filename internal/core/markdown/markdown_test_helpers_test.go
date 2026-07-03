@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,29 @@ func writeMarkdownTestFile(base string, rel string, content string) string {
 	Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
 	Expect(os.WriteFile(path, []byte(content), 0o644)).To(Succeed())
 	return path
+}
+
+type markdownPathErrorMatcher struct{}
+
+func matchMarkdownPathError() types.GomegaMatcher {
+	return markdownPathErrorMatcher{}
+}
+
+func (markdownPathErrorMatcher) Match(actual interface{}) (bool, error) {
+	err, ok := actual.(error)
+	if !ok {
+		return false, fmt.Errorf("expected error, got %T", actual)
+	}
+	var pathErr *os.PathError
+	return errors.As(err, &pathErr), nil
+}
+
+func (markdownPathErrorMatcher) FailureMessage(actual interface{}) string {
+	return fmt.Sprintf("Expected\n\t%#v\nto wrap a markdown file path error", actual)
+}
+
+func (markdownPathErrorMatcher) NegatedFailureMessage(actual interface{}) string {
+	return fmt.Sprintf("Expected\n\t%#v\nnot to wrap a markdown file path error", actual)
 }
 
 type pageMetadataMatcher struct {

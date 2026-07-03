@@ -14,7 +14,6 @@ import (
 var _ = ginkgo.Describe("markdown metadata parse render and writeback failures", func() {
 	ginkgo.It("returns stable errors for malformed legacy frontmatter fallbacks", func() {
 		_, err := parseFrontmatterYAML("leafwiki_title: {{title}}\nbroken: [")
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ErrFrontmatterParse))
 
 		fm, err := parseFrontmatterYAML("")
@@ -30,11 +29,10 @@ var _ = ginkgo.Describe("markdown metadata parse render and writeback failures",
 		))
 
 		err = parseFrontmatterWithMetadataResult("<!-- leafwiki")
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ErrMetadataParse))
 
 		_, err = toYAMLNode(failingYAMLValue{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(errYAMLMarshalFailed))
 	})
 
 	ginkgo.It("preserves or replaces raw content while reporting parse errors", func() {
@@ -105,13 +103,12 @@ Legacy body`
 			requiresWriteback: true,
 		}
 
-		Expect(mf.WriteToFile()).To(HaveOccurred())
+		Expect(mf.WriteToFile()).To(matchMarkdownPathError())
 		Expect(mf.RequiresWriteback()).To(BeTrue())
 	})
 
 	ginkgo.It("reports canonical metadata parser and renderer edge errors", func() {
 		_, _, err := ParsePageDocument("<!-- leafwiki")
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ErrMetadataParse))
 
 		_, _, err = ParsePageDocument(`<!-- leafwiki
@@ -132,7 +129,7 @@ Body`)
 				},
 			},
 		})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(errYAMLMarshalFailed))
 
 		_, err = renderCanonicalMetadataYAML(PageMetadata{
 			Version: 1,
@@ -141,7 +138,7 @@ Body`)
 				"bad": failingYAMLValue{},
 			},
 		})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(errYAMLMarshalFailed))
 
 		mapping := &yaml.Node{Kind: yaml.MappingNode}
 		appendYAMLScalar(mapping, "bad", failingYAMLValue{})
@@ -163,7 +160,6 @@ Body`)
 			return failingCanonicalMetadataYAMLEncoder{encodeErr: encodeErr}
 		}
 		_, err := renderCanonicalMetadataYAML(validMetadata)
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ErrMetadataParse))
 		Expect(err).To(MatchError(encodeErr))
 
@@ -172,7 +168,6 @@ Body`)
 			return failingCanonicalMetadataYAMLEncoder{closeErr: closeErr}
 		}
 		_, err = renderCanonicalMetadataYAML(validMetadata)
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(MatchError(ErrMetadataParse))
 		Expect(err).To(MatchError(closeErr))
 	})
@@ -200,10 +195,12 @@ Body`)
 	})
 })
 
+var errYAMLMarshalFailed = errors.New("yaml failed")
+
 type failingYAMLValue struct{}
 
 func (failingYAMLValue) MarshalYAML() (interface{}, error) {
-	return nil, errors.New("yaml failed")
+	return nil, errYAMLMarshalFailed
 }
 
 var errFrontmatterPresent = errors.New("frontmatter present")

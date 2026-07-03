@@ -255,6 +255,6 @@ leafwiki_id: [broken
 ---
 # Body
 `)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(ErrFrontmatterParse))
 	})
 })

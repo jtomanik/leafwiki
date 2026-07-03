@@ -226,7 +226,7 @@ Body text.
 			tt := tt
 			ginkgo.It(tt.name, func() {
 				_, _, err := ParsePageDocument(tt.raw)
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(ErrMetadataParse))
 			})
 		}
 	})
@@ -236,7 +236,7 @@ Body text.
 			tt := tt
 			ginkgo.It(tt.name, func() {
 				_, _, err := ParsePageDocument(tt.raw)
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(ErrMetadataParse))
 			})
 		}
 	})
@@ -246,7 +246,7 @@ Body text.
 			tt := tt
 			ginkgo.It(tt.name, func() {
 				_, err := RenderPageDocument(tt.doc)
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(ErrMetadataParse))
 			})
 		}
 	})
