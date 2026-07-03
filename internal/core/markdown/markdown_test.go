@@ -2,103 +2,67 @@ package markdown
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"os"
-	"strings"
 )
 
 var _ = ginkgo.Describe("markdown", func() {
-	ginkgo.It("TestPlanner_extractTitleFromMDFile_FrontmatterTitleWins", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "t.md", "---\ntitle: FM Title\n---\n\n# Heading")
+	ginkgo.It("uses the standard frontmatter title before heading fallback", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "t.md", "---\ntitle: FM Title\n---\n\n# Heading")
 
 		mdFile, err := LoadMarkdownFile(abs)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		title, err := mdFile.GetTitle()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if title != "FM Title" {
-			t.Fatalf("title = %q", title)
-		}
+		Expect(err).To(Succeed())
+		Expect(title).To(Equal("FM Title"))
 	})
 
-	ginkgo.It("TestPlanner_extractTitleFromMDFile_LeafwikiTitle", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "t.md", "---\nleafwiki_title: Leaf\n---\n\n# Heading")
+	ginkgo.It("uses the LeafWiki frontmatter title before heading fallback", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "t.md", "---\nleafwiki_title: Leaf\n---\n\n# Heading")
 
 		mdFile, err := LoadMarkdownFile(abs)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		title, err := mdFile.GetTitle()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if title != "Leaf" {
-			t.Fatalf("title = %q", title)
-		}
+		Expect(err).To(Succeed())
+		Expect(title).To(Equal("Leaf"))
 	})
 
-	ginkgo.It("TestPlanner_extractTitleFromMDFile_FirstHeadingFallback", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "t.md", "no fm\n\n# Heading Only\nx")
+	ginkgo.It("uses the first markdown heading when metadata has no title", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "t.md", "no fm\n\n# Heading Only\nx")
 
 		mdFile, err := LoadMarkdownFile(abs)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		title, err := mdFile.GetTitle()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if title != "Heading Only" {
-			t.Fatalf("title = %q", title)
-		}
+		Expect(err).To(Succeed())
+		Expect(title).To(Equal("Heading Only"))
 	})
 
-	ginkgo.It("TestPlanner_extractTitleFromMDFile_FilenameFallback", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "some-file.md", "no title")
+	ginkgo.It("uses the filename stem when metadata and headings have no title", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "some-file.md", "no title")
 
 		mdFile, err := LoadMarkdownFile(abs)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		title, err := mdFile.GetTitle()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if title != "some-file" {
-			t.Fatalf("title = %q", title)
-		}
+		Expect(err).To(Succeed())
+		Expect(title).To(Equal("some-file"))
 	})
 
-	ginkgo.It("TestPlanner_extractTitleFromMDFile_FilenameFallback_WindowsPath", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("uses the filename stem from Windows paths when no title exists", func() {
 		mdFile, err := NewMarkdownFileFromRaw(`C:\Users\johnjkr\AppData\Local\Temp\import-1280817455\1999-07-23 - Memo to Staff.md`, "no title")
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		title, err := mdFile.GetTitle()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if title != "1999-07-23 - Memo to Staff" {
-			t.Fatalf("title = %q", title)
-		}
+		Expect(err).To(Succeed())
+		Expect(title).To(Equal("1999-07-23 - Memo to Staff"))
 	})
 
-	ginkgo.It("TestMarkdownFile_WriteToFile_WritesCanonicalMetadata", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "t.md", `---
+	ginkgo.It("writes legacy frontmatter back as canonical metadata while preserving custom fields", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "t.md", `---
 custom_key: keep-me
 aliases:
   - one
@@ -109,56 +73,41 @@ leafwiki_title: Old Title
 # Heading`)
 
 		mdFile, err := LoadMarkdownFile(abs)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		mdFile.setMetadataID("new-id")
-		if err := mdFile.WriteToFile(); err != nil {
-			t.Fatalf("WriteToFile err: %v", err)
-		}
+		Expect(mdFile.WriteToFile()).To(Succeed())
 
 		rawBytes, err := os.ReadFile(abs)
-		if err != nil {
-			t.Fatalf("ReadFile err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		raw := string(rawBytes)
-		if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-			t.Fatalf("expected canonical metadata comment, got: %q", raw)
-		}
-		if strings.HasPrefix(raw, "---\n") {
-			t.Fatalf("expected YAML frontmatter to be removed, got: %q", raw)
-		}
+		Expect(raw).To(HavePrefix("<!-- leafwiki\n"))
+		Expect(raw).NotTo(HavePrefix("---\n"))
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument err: %v", err)
-		}
-		if result.RequiresWriteback {
-			t.Fatalf("newly written canonical metadata should not require writeback")
-		}
-		if doc.Metadata.Page.ID != "new-id" {
-			t.Fatalf("expected id 'new-id', got %q", doc.Metadata.Page.ID)
-		}
-		if doc.Metadata.Page.Title != "Old Title" {
-			t.Fatalf("expected title 'Old Title', got %q", doc.Metadata.Page.Title)
-		}
-		if got := doc.Metadata.Fields["custom_key"]; got != "keep-me" {
-			t.Fatalf("expected custom scalar metadata to be preserved in fields, got %#v", got)
-		}
-		aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "one" {
-			t.Fatalf("expected custom list metadata to be preserved in extra, got %#v", doc.Metadata.Extra["aliases"])
-		}
-		if doc.Body != "\n# Heading" {
-			t.Fatalf("unexpected body: %q", doc.Body)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeFalse())
+		Expect(doc).To(matchExactPageDocument(PageDocument{
+			Body: "\n# Heading",
+			Metadata: PageMetadata{
+				Version: 1,
+				Page: PageMetadataPage{
+					ID:    "new-id",
+					Title: "Old Title",
+				},
+				Fields: map[string]interface{}{
+					"custom_key": "keep-me",
+				},
+				Extra: map[string]interface{}{
+					"aliases": []interface{}{"one"},
+				},
+			},
+		}))
 	})
 
-	ginkgo.It("TestMarkdownFile_WriteToFile_PreservesCanonicalFieldsAndExtraBoundaries", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "t.md", `<!-- leafwiki
+	ginkgo.It("preserves canonical fields and extra boundaries during writeback", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "t.md", `<!-- leafwiki
 version: 1
 page:
   id: page-123
@@ -178,46 +127,35 @@ extra:
 Body`)
 
 		mdFile, err := LoadMarkdownFile(abs)
-		if err != nil {
-			t.Fatalf("LoadMarkdownFile err: %v", err)
-		}
-		if err := mdFile.WriteToFile(); err != nil {
-			t.Fatalf("WriteToFile err: %v", err)
-		}
+		Expect(err).To(Succeed())
+		Expect(mdFile.WriteToFile()).To(Succeed())
 
 		rawBytes, err := os.ReadFile(abs)
-		if err != nil {
-			t.Fatalf("ReadFile err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		doc, _, err := ParsePageDocument(string(rawBytes))
-		if err != nil {
-			t.Fatalf("ParsePageDocument err: %v", err)
-		}
-		if got := doc.Metadata.Fields["priority"]; got != 2 {
-			t.Fatalf("priority field = %#v", got)
-		}
-		if got := doc.Metadata.Fields["published"]; got != false {
-			t.Fatalf("published field = %#v", got)
-		}
-		if got := doc.Metadata.Fields["status"]; got != "draft" {
-			t.Fatalf("status field = %#v", got)
-		}
-		if _, exists := doc.Metadata.Fields["source"]; exists {
-			t.Fatalf("scalar extra source moved into fields: %#v", doc.Metadata.Fields)
-		}
-		if got := doc.Metadata.Extra["source"]; got != "imported" {
-			t.Fatalf("source extra = %#v", got)
-		}
-		aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "old" {
-			t.Fatalf("aliases extra = %#v", doc.Metadata.Extra["aliases"])
-		}
+		Expect(err).To(Succeed())
+		Expect(doc.Metadata).To(matchExactPageMetadata(PageMetadata{
+			Version: 1,
+			Page: PageMetadataPage{
+				ID:    "page-123",
+				Title: "Boundary Test",
+			},
+			Tags: []string{"keep"},
+			Fields: map[string]interface{}{
+				"priority":  2,
+				"published": false,
+				"status":    "draft",
+			},
+			Extra: map[string]interface{}{
+				"source":  "imported",
+				"aliases": []interface{}{"old"},
+			},
+		}))
 	})
 
-	ginkgo.It("TestMarkdownFile_SetRawContentPreservingManagedMetadata_PreservesHiddenMetadata", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "page.md", "")
+	ginkgo.It("preserves hidden metadata while replacing raw markdown content", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "page.md", "")
 		existing := `<!-- leafwiki
 version: 1
 page:
@@ -237,9 +175,7 @@ extra:
 
 Old body`
 		mdFile, err := NewMarkdownFileFromRaw(abs, existing)
-		if err != nil {
-			t.Fatalf("NewMarkdownFileFromRaw err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		incoming := `<!-- leafwiki
 version: 1
@@ -253,60 +189,46 @@ fields:
 -->
 
 New body`
-		if err := mdFile.SetRawContentPreservingManagedMetadata(incoming); err != nil {
-			t.Fatalf("SetRawContentPreservingManagedMetadata err: %v", err)
-		}
-		if err := mdFile.WriteToFile(); err != nil {
-			t.Fatalf("WriteToFile err: %v", err)
-		}
+		Expect(mdFile.SetRawContentPreservingManagedMetadata(incoming)).To(Succeed())
+		Expect(mdFile.WriteToFile()).To(Succeed())
 		rawBytes, err := os.ReadFile(abs)
-		if err != nil {
-			t.Fatalf("ReadFile err: %v", err)
-		}
+		Expect(err).To(Succeed())
 		doc, _, err := ParsePageDocument(string(rawBytes))
-		if err != nil {
-			t.Fatalf("ParsePageDocument err: %v", err)
-		}
-		if len(doc.Metadata.Tags) != 1 || doc.Metadata.Tags[0] != "new" {
-			t.Fatalf("tags = %#v", doc.Metadata.Tags)
-		}
-		if got := doc.Metadata.Fields["status"]; got != "ready" {
-			t.Fatalf("status field = %#v", got)
-		}
-		if got := doc.Metadata.Fields["priority"]; got != 2 {
-			t.Fatalf("priority field = %#v", got)
-		}
-		if got := doc.Metadata.Fields["published"]; got != false {
-			t.Fatalf("published field = %#v", got)
-		}
-		if got := doc.Metadata.Extra["source"]; got != "imported" {
-			t.Fatalf("source extra = %#v", got)
-		}
-		if doc.Body != "New body" {
-			t.Fatalf("body = %q", doc.Body)
-		}
+		Expect(err).To(Succeed())
+		Expect(doc).To(matchExactPageDocument(PageDocument{
+			Body: "New body",
+			Metadata: PageMetadata{
+				Version: 1,
+				Page: PageMetadataPage{
+					ID:    "page-123",
+					Title: "Existing",
+				},
+				Tags: []string{"new"},
+				Fields: map[string]interface{}{
+					"status":    "ready",
+					"priority":  2,
+					"published": false,
+				},
+				Extra: map[string]interface{}{
+					"source":  "imported",
+					"aliases": []interface{}{"old"},
+				},
+			},
+		}))
 	})
 
-	ginkgo.It("TestLoadMarkdownFile_UppercaseExtension", func() {
-		t := ginkgo.GinkgoT()
-		tmp := t.TempDir()
-		abs := writeMarkdownTestFile(t, tmp, "README.MD", "# Uppercase Extension\n\nThis file has .MD extension")
+	ginkgo.It("loads markdown files with uppercase extensions", func() {
+		tmp := markdownTempDir()
+		abs := writeMarkdownTestFile(tmp, "README.MD", "# Uppercase Extension\n\nThis file has .MD extension")
 
 		mdFile, err := LoadMarkdownFile(abs)
-		if err != nil {
-			t.Fatalf("expected no error for .MD extension, got: %v", err)
-		}
+		Expect(err).To(Succeed())
 		title, err := mdFile.GetTitle()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if title != "Uppercase Extension" {
-			t.Fatalf("title = %q, want %q", title, "Uppercase Extension")
-		}
+		Expect(err).To(Succeed())
+		Expect(title).To(Equal("Uppercase Extension"))
 	})
 
-	ginkgo.It("TestNewMarkdownFileFromRaw_PreservesCustomFrontmatter", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("preserves custom legacy frontmatter when parsing raw markdown", func() {
 		mdFile, err := NewMarkdownFileFromRaw("/tmp/test.md", `---
 custom_key: keep-me
 leafwiki_id: p1
@@ -315,33 +237,24 @@ leafwiki_title: Existing Title
 # Body
 Hello
 `)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
+		Expect(err).To(Succeed())
 
-		if mdFile.GetFrontmatter().LeafWikiID != "p1" {
-			t.Fatalf("expected id p1, got %q", mdFile.GetFrontmatter().LeafWikiID)
-		}
-		if mdFile.GetFrontmatter().LeafWikiTitle != "Existing Title" {
-			t.Fatalf("expected title 'Existing Title', got %q", mdFile.GetFrontmatter().LeafWikiTitle)
-		}
-		if got := mdFile.GetContent(); got != "# Body\nHello\n" {
-			t.Fatalf("unexpected content: %q", got)
-		}
-		if got := mdFile.GetFrontmatter().ExtraFields["custom_key"]; got != "keep-me" {
-			t.Fatalf("expected custom_key to be preserved, got %#v", got)
-		}
+		Expect(mdFile.GetFrontmatter()).To(Equal(Frontmatter{
+			LeafWikiID:    "p1",
+			LeafWikiTitle: "Existing Title",
+			ExtraFields: map[string]interface{}{
+				"custom_key": "keep-me",
+			},
+		}))
+		Expect(mdFile.GetContent()).To(Equal("# Body\nHello\n"))
 	})
 
-	ginkgo.It("TestNewMarkdownFileFromRaw_InvalidFrontmatter", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rejects invalid legacy frontmatter in raw markdown", func() {
 		_, err := NewMarkdownFileFromRaw("/tmp/test.md", `---
 leafwiki_id: [broken
 ---
 # Body
 `)
-		if err == nil {
-			t.Fatalf("expected parse error")
-		}
+		Expect(err).To(HaveOccurred())
 	})
 })

@@ -1,9 +1,8 @@
 package markdown
 
 import (
-	"errors"
 	ginkgo "github.com/onsi/ginkgo/v2"
-	"reflect"
+	. "github.com/onsi/gomega"
 )
 
 type splitFrontmatterCase struct {
@@ -255,84 +254,56 @@ var parseFrontmatterCases = []parseFrontmatterCase{
 }
 
 var _ = ginkgo.Describe("frontmatter", func() {
-	ginkgo.Describe("TestSplitFrontmatter", func() {
+	ginkgo.Describe("frontmatter block splitting", func() {
 		for _, tt := range splitFrontmatterCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
-				t := ginkgo.GinkgoT()
 				fm, body, has := splitFrontmatter(tt.input)
 
-				if has != tt.wantHas {
-					t.Fatalf("has = %v, want %v", has, tt.wantHas)
-				}
-				if fm != tt.wantFM {
-					t.Fatalf("frontmatter = %q, want %q", fm, tt.wantFM)
-				}
-				if body != tt.wantBody {
-					t.Fatalf("body = %q, want %q", body, tt.wantBody)
-				}
+				Expect(has).To(Equal(tt.wantHas))
+				Expect(fm).To(Equal(tt.wantFM))
+				Expect(body).To(Equal(tt.wantBody))
 			})
 		}
 	})
 
-	ginkgo.Describe("TestParseFrontmatter", func() {
+	ginkgo.Describe("legacy frontmatter parsing", func() {
 		for _, tt := range parseFrontmatterCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
-				t := ginkgo.GinkgoT()
 				fm, body, has, err := ParseFrontmatter(tt.input)
 
-				if (err != nil) != tt.wantErr {
-					t.Fatalf("ParseFrontmatter() error = %v, wantErr %v", err, tt.wantErr)
-				}
-
-				if tt.wantErr && tt.wantErrType != nil {
-					if !errors.Is(err, tt.wantErrType) {
-						t.Fatalf("ParseFrontmatter() error = %v, want error type %v", err, tt.wantErrType)
+				if tt.wantErr {
+					Expect(err).To(HaveOccurred())
+					if tt.wantErrType != nil {
+						Expect(err).To(MatchError(tt.wantErrType))
 					}
+				} else {
+					Expect(err).To(Succeed())
 				}
-
-				if has != tt.wantHas {
-					t.Fatalf("has = %v, want %v", has, tt.wantHas)
-				}
-
-				if !reflect.DeepEqual(fm, tt.wantFM) {
-					t.Fatalf("frontmatter = %+v, want %+v", fm, tt.wantFM)
-				}
-
-				if body != tt.wantBody {
-					t.Fatalf("body = %q, want %q", body, tt.wantBody)
-				}
+				Expect(has).To(Equal(tt.wantHas))
+				Expect(fm).To(Equal(tt.wantFM))
+				Expect(body).To(Equal(tt.wantBody))
 			})
 		}
 	})
 
-	ginkgo.It("TestParseFrontmatter_ScalarLeafWikiValuesArePreserved", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("preserves scalar LeafWiki values as frontmatter strings", func() {
 		fm, body, has, err := ParseFrontmatter(`---
 leafwiki_id: 123
 leafwiki_title: true
 ---
 Body`)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter() error = %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter")
-		}
-		if fm.LeafWikiID != "123" {
-			t.Fatalf("expected numeric id to be preserved, got %q", fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "true" {
-			t.Fatalf("expected bool title to be preserved, got %q", fm.LeafWikiTitle)
-		}
-		if body != "Body" {
-			t.Fatalf("unexpected body %q", body)
-		}
+		Expect(err).To(Succeed())
+		Expect(has).To(BeTrue())
+		Expect(fm).To(Equal(Frontmatter{
+			LeafWikiID:    "123",
+			LeafWikiTitle: "true",
+		}))
+		Expect(body).To(Equal("Body"))
 	})
 
-	ginkgo.It("TestParseFrontmatter_CanonicalMetadataCompatibility", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("adapts canonical metadata comments to legacy frontmatter callers", func() {
 		fm, body, has, err := ParseFrontmatter(`<!-- leafwiki
 version: 1
 page:
@@ -344,23 +315,16 @@ fields:
   status: open
 -->
 Body`)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter() error = %v", err)
-		}
-		if !has {
-			t.Fatalf("expected canonical metadata")
-		}
-		if fm.LeafWikiID != "abc123" {
-			t.Fatalf("expected id abc123, got %q", fm.LeafWikiID)
-		}
-		if fm.LeafWikiTitle != "Canonical Title" {
-			t.Fatalf("expected title, got %q", fm.LeafWikiTitle)
-		}
-		if got := fm.ExtraFields["status"]; got != "open" {
-			t.Fatalf("expected status field, got %#v", got)
-		}
-		if body != "Body" {
-			t.Fatalf("body = %q", body)
-		}
+		Expect(err).To(Succeed())
+		Expect(has).To(BeTrue())
+		Expect(fm).To(Equal(Frontmatter{
+			LeafWikiID:    "abc123",
+			LeafWikiTitle: "Canonical Title",
+			ExtraFields: map[string]interface{}{
+				"tags":   []string{"demo"},
+				"status": "open",
+			},
+		}))
+		Expect(body).To(Equal("Body"))
 	})
 })

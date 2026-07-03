@@ -193,7 +193,7 @@ New body`)
 	})
 
 	ginkgo.It("LoadMarkdownFile rejects non-markdown extensions", func() {
-		path := filepath.Join(ginkgo.GinkgoT().TempDir(), "page.txt")
+		path := filepath.Join(markdownTempDir(), "page.txt")
 		Expect(os.WriteFile(path, []byte("body"), 0o644)).To(Succeed())
 
 		mf, err := LoadMarkdownFile(path)
@@ -203,7 +203,7 @@ New body`)
 	})
 
 	ginkgo.It("LoadMarkdownFile propagates missing file errors", func() {
-		path := filepath.Join(ginkgo.GinkgoT().TempDir(), "missing.md")
+		path := filepath.Join(markdownTempDir(), "missing.md")
 
 		mf, err := LoadMarkdownFile(path)
 

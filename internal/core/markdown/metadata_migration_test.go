@@ -2,11 +2,11 @@ package markdown
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = ginkgo.Describe("metadata migration", func() {
-	ginkgo.It("TestParsePageDocument_LegacyFrontmatterMigratesToMetadata", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("migrates legacy frontmatter into canonical metadata and requests writeback", func() {
 		raw := `---
 leafwiki_id: page-123
 leafwiki_title: Example Page
@@ -26,58 +26,34 @@ aliases:
 `
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if !result.RequiresWriteback {
-			t.Fatalf("legacy frontmatter should require canonical writeback")
-		}
-		if doc.Body != "# Example Page\n" {
-			t.Fatalf("body = %q", doc.Body)
-		}
-
-		meta := doc.Metadata
-		if meta.Version != 1 {
-			t.Fatalf("version = %d, want 1", meta.Version)
-		}
-		if meta.Page.ID != "page-123" {
-			t.Fatalf("page id = %q", meta.Page.ID)
-		}
-		if meta.Page.Title != "Example Page" {
-			t.Fatalf("page title = %q", meta.Page.Title)
-		}
-		if meta.Page.CreatedAt != "2026-06-13T10:00:00Z" {
-			t.Fatalf("created_at = %q", meta.Page.CreatedAt)
-		}
-		if meta.Page.UpdatedAt != "2026-06-13T11:00:00Z" {
-			t.Fatalf("updated_at = %q", meta.Page.UpdatedAt)
-		}
-		if meta.Page.CreatorID != "alice" {
-			t.Fatalf("creator_id = %q", meta.Page.CreatorID)
-		}
-		if meta.Page.LastAuthorID != "bob" {
-			t.Fatalf("last_author_id = %q", meta.Page.LastAuthorID)
-		}
-		if len(meta.Tags) != 1 || meta.Tags[0] != "research" {
-			t.Fatalf("tags = %#v", meta.Tags)
-		}
-		if got := meta.Fields["status"]; got != "open" {
-			t.Fatalf("status field = %#v", got)
-		}
-		if got := meta.Fields["priority"]; got != 2 {
-			t.Fatalf("priority field = %#v", got)
-		}
-		if got := meta.Fields["published"]; got != false {
-			t.Fatalf("published field = %#v", got)
-		}
-		aliases, ok := meta.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "old-example" {
-			t.Fatalf("aliases extra = %#v", meta.Extra["aliases"])
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeTrue())
+		Expect(doc).To(matchExactPageDocument(PageDocument{
+			Body: "# Example Page\n",
+			Metadata: PageMetadata{
+				Version: 1,
+				Page: PageMetadataPage{
+					ID:           "page-123",
+					Title:        "Example Page",
+					CreatedAt:    "2026-06-13T10:00:00Z",
+					UpdatedAt:    "2026-06-13T11:00:00Z",
+					CreatorID:    "alice",
+					LastAuthorID: "bob",
+				},
+				Tags: []string{"research"},
+				Fields: map[string]interface{}{
+					"status":    "open",
+					"priority":  2,
+					"published": false,
+				},
+				Extra: map[string]interface{}{
+					"aliases": []interface{}{"old-example"},
+				},
+			},
+		}))
 	})
 
-	ginkgo.It("TestParsePageDocument_LegacyTitleAliasOnlyConsumedWhenManagedTitleAbsent", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("uses title aliases only when the managed title is absent", func() {
 		raw := `---
 leafwiki_title: Managed Title
 title: User Title Field
@@ -86,15 +62,9 @@ title: User Title Field
 `
 
 		doc, _, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if doc.Metadata.Page.Title != "Managed Title" {
-			t.Fatalf("page title = %q", doc.Metadata.Page.Title)
-		}
-		if got := doc.Metadata.Fields["title"]; got != "User Title Field" {
-			t.Fatalf("expected legacy title field to be preserved, got %#v", got)
-		}
+		Expect(err).To(Succeed())
+		Expect(doc.Metadata.Page.Title).To(Equal("Managed Title"))
+		Expect(doc.Metadata.Fields).To(HaveKeyWithValue("title", "User Title Field"))
 
 		aliasOnly := `---
 title: Alias Title
@@ -102,19 +72,12 @@ title: Alias Title
 # Body
 `
 		doc, _, err = ParsePageDocument(aliasOnly)
-		if err != nil {
-			t.Fatalf("ParsePageDocument(aliasOnly) error = %v", err)
-		}
-		if doc.Metadata.Page.Title != "Alias Title" {
-			t.Fatalf("alias page title = %q", doc.Metadata.Page.Title)
-		}
-		if _, exists := doc.Metadata.Fields["title"]; exists {
-			t.Fatalf("title alias should not be duplicated as a field: %#v", doc.Metadata.Fields)
-		}
+		Expect(err).To(Succeed())
+		Expect(doc.Metadata.Page.Title).To(Equal("Alias Title"))
+		Expect(doc.Metadata.Fields).NotTo(HaveKey("title"))
 	})
 
-	ginkgo.It("TestParsePageDocument_LegacyReservedKeysAreCaseInsensitive", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps mixed-case reserved legacy keys out of canonical fields", func() {
 		raw := `---
 leafwiki_id: page-123
 LeafWiki_status: hidden
@@ -124,22 +87,20 @@ status: public
 `
 
 		doc, _, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if got := doc.Metadata.Fields["status"]; got != "public" {
-			t.Fatalf("status field = %#v", got)
-		}
-		if _, exists := doc.Metadata.Fields["LeafWiki_status"]; exists {
-			t.Fatalf("reserved mixed-case key must not enter fields: %#v", doc.Metadata.Fields)
-		}
-		if got := doc.Metadata.Extra["LeafWiki_status"]; got != "hidden" {
-			t.Fatalf("reserved mixed-case key should be preserved in extra, got %#v", got)
-		}
+		Expect(err).To(Succeed())
+		Expect(doc.Metadata).To(matchExactPageMetadata(PageMetadata{
+			Version: 1,
+			Page:    PageMetadataPage{ID: "page-123"},
+			Fields: map[string]interface{}{
+				"status": "public",
+			},
+			Extra: map[string]interface{}{
+				"LeafWiki_status": "hidden",
+			},
+		}))
 	})
 
-	ginkgo.It("TestParsePageDocument_MalformedLegacyFrontmatterFailsWithoutGeneratedIdentity", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("rejects malformed legacy frontmatter without generating page identity", func() {
 		raw := `---
 leafwiki_id: [broken
 ---
@@ -147,16 +108,12 @@ leafwiki_id: [broken
 `
 
 		doc, result, err := ParsePageDocument(raw)
-		if err == nil {
-			t.Fatalf("ParsePageDocument() error = nil, doc = %#v, result = %#v", doc, result)
-		}
-		if doc.Metadata.Page.ID != "" {
-			t.Fatalf("malformed legacy frontmatter generated page id %q", doc.Metadata.Page.ID)
-		}
+		Expect(err).To(HaveOccurred())
+		Expect(result.RequiresWriteback).To(BeFalse())
+		Expect(doc.Metadata.Page.ID).To(BeEmpty())
 	})
 
-	ginkgo.It("TestParsePageDocument_LegacyUnknownMapAndNullValuesStayInExtra", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps unknown map and null legacy values in extra metadata", func() {
 		raw := `---
 leafwiki_id: page-123
 nested:
@@ -167,29 +124,19 @@ empty_value: null
 `
 
 		doc, _, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if _, exists := doc.Metadata.Fields["nested"]; exists {
-			t.Fatalf("nested map moved into fields: %#v", doc.Metadata.Fields)
-		}
-		if _, exists := doc.Metadata.Fields["empty_value"]; exists {
-			t.Fatalf("null value moved into fields: %#v", doc.Metadata.Fields)
-		}
-		nested, ok := doc.Metadata.Extra["nested"].(map[string]interface{})
-		if !ok || nested["owner"] != "docs" {
-			t.Fatalf("nested extra = %#v", doc.Metadata.Extra["nested"])
-		}
-		if _, exists := doc.Metadata.Extra["empty_value"]; !exists {
-			t.Fatalf("null extra key missing: %#v", doc.Metadata.Extra)
-		}
-		if got := doc.Metadata.Extra["empty_value"]; got != nil {
-			t.Fatalf("empty_value extra = %#v, want nil", got)
-		}
+		Expect(err).To(Succeed())
+		Expect(doc.Metadata).To(matchExactPageMetadata(PageMetadata{
+			Version: 1,
+			Page:    PageMetadataPage{ID: "page-123"},
+			Fields:  map[string]interface{}{},
+			Extra: map[string]interface{}{
+				"nested":      map[string]interface{}{"owner": "docs"},
+				"empty_value": nil,
+			},
+		}))
 	})
 
-	ginkgo.It("TestParsePageDocument_LegacyCanonicalTopLevelNamesStayInExtra", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps legacy keys that collide with canonical top-level names in extra metadata", func() {
 		raw := `---
 leafwiki_id: page-123
 version: 99
@@ -204,27 +151,21 @@ extra:
 `
 
 		doc, _, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if doc.Metadata.Version != 1 {
-			t.Fatalf("metadata version = %d, want canonical migration version 1", doc.Metadata.Version)
-		}
-		if doc.Metadata.Page.ID != "page-123" {
-			t.Fatalf("page id = %q", doc.Metadata.Page.ID)
-		}
-		for _, key := range []string{"version", "page", "fields", "extra"} {
-			if _, exists := doc.Metadata.Fields[key]; exists {
-				t.Fatalf("%s moved into fields: %#v", key, doc.Metadata.Fields)
-			}
-			if _, exists := doc.Metadata.Extra[key]; !exists {
-				t.Fatalf("%s missing from extra: %#v", key, doc.Metadata.Extra)
-			}
-		}
+		Expect(err).To(Succeed())
+		Expect(doc.Metadata).To(matchExactPageMetadata(PageMetadata{
+			Version: 1,
+			Page:    PageMetadataPage{ID: "page-123"},
+			Fields:  map[string]interface{}{},
+			Extra: map[string]interface{}{
+				"version": 99,
+				"page":    map[string]interface{}{"id": "colliding"},
+				"fields":  map[string]interface{}{"status": "hidden"},
+				"extra":   map[string]interface{}{"owner": "docs"},
+			},
+		}))
 	})
 
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataStripsLegacyFrontmatterBody", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps canonical identity while stripping legacy frontmatter from the body", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -239,20 +180,12 @@ leafwiki_title: Legacy Title
 `
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if !result.RequiresWriteback {
-			t.Fatalf("mixed canonical and legacy frontmatter should require writeback")
-		}
-		if doc.Metadata.Page.ID != "canonical-id" {
-			t.Fatalf("page id = %q", doc.Metadata.Page.ID)
-		}
-		if doc.Metadata.Page.Title != "Canonical Title" {
-			t.Fatalf("page title = %q", doc.Metadata.Page.Title)
-		}
-		if doc.Body != "# Body\n" {
-			t.Fatalf("body = %q", doc.Body)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeTrue())
+		Expect(doc.Metadata.Page).To(Equal(PageMetadataPage{
+			ID:    "canonical-id",
+			Title: "Canonical Title",
+		}))
+		Expect(doc.Body).To(Equal("# Body\n"))
 	})
 })

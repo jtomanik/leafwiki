@@ -11,7 +11,7 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
-var _ = ginkgo.Describe("markdown parser and renderer edge branches", func() {
+var _ = ginkgo.Describe("markdown metadata parse render and writeback failures", func() {
 	ginkgo.It("returns stable errors for malformed legacy frontmatter fallbacks", func() {
 		_, err := parseFrontmatterYAML("leafwiki_title: {{title}}\nbroken: [")
 		Expect(err).To(HaveOccurred())
@@ -84,12 +84,12 @@ Legacy body`
 
 	ginkgo.It("returns write errors before mutating writeback state", func() {
 		invalid := &MarkdownFile{
-			path: filepath.Join(ginkgo.GinkgoT().TempDir(), "page.md"),
+			path: filepath.Join(markdownTempDir(), "page.md"),
 			doc:  PageDocument{Metadata: PageMetadata{Version: 1}},
 		}
 		Expect(invalid.WriteToFile()).To(MatchError(ErrMetadataPageIDRequired))
 
-		blocker := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-directory")
+		blocker := filepath.Join(markdownTempDir(), "not-a-directory")
 		Expect(os.WriteFile(blocker, []byte("file"), 0o600)).To(Succeed())
 		mf := &MarkdownFile{
 			path: filepath.Join(blocker, "page.md"),

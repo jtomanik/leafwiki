@@ -2,7 +2,7 @@ package markdown
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
-	"strings"
+	. "github.com/onsi/gomega"
 )
 
 type pageDocumentRawErrorCase struct {
@@ -148,8 +148,7 @@ var invalidCanonicalMetadataRenderCases = []renderPageDocumentErrorCase{
 }
 
 var _ = ginkgo.Describe("metadata codec", func() {
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataComment", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("parses canonical metadata comments without requiring writeback", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -177,86 +176,22 @@ Body text.
 `
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if result.RequiresWriteback {
-			t.Fatalf("canonical metadata should not require writeback")
-		}
-		if doc.Body != "# Example Page\n\nBody text.\n" {
-			t.Fatalf("body = %q", doc.Body)
-		}
-
-		meta := doc.Metadata
-		if meta.Version != 1 {
-			t.Fatalf("version = %d, want 1", meta.Version)
-		}
-		if meta.Page.ID != "page-123" {
-			t.Fatalf("page id = %q", meta.Page.ID)
-		}
-		if meta.Page.Title != "Example Page" {
-			t.Fatalf("page title = %q", meta.Page.Title)
-		}
-		if meta.Page.CreatedAt != "2026-06-13T10:00:00Z" {
-			t.Fatalf("created_at = %q", meta.Page.CreatedAt)
-		}
-		if meta.Page.UpdatedAt != "2026-06-13T11:00:00Z" {
-			t.Fatalf("updated_at = %q", meta.Page.UpdatedAt)
-		}
-		if meta.Page.CreatorID != "alice" {
-			t.Fatalf("creator_id = %q", meta.Page.CreatorID)
-		}
-		if meta.Page.LastAuthorID != "bob" {
-			t.Fatalf("last_author_id = %q", meta.Page.LastAuthorID)
-		}
-		if len(meta.Tags) != 2 || meta.Tags[0] != "research" || meta.Tags[1] != "draft" {
-			t.Fatalf("tags = %#v", meta.Tags)
-		}
-		if got := meta.Fields["status"]; got != "open" {
-			t.Fatalf("status field = %#v", got)
-		}
-		if got := meta.Fields["priority"]; got != 2 {
-			t.Fatalf("priority field = %#v", got)
-		}
-		if got := meta.Fields["published"]; got != false {
-			t.Fatalf("published field = %#v", got)
-		}
-		aliases, ok := meta.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "old-example" {
-			t.Fatalf("aliases extra = %#v", meta.Extra["aliases"])
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeFalse())
+		Expect(doc).To(matchExactPageDocument(PageDocument{
+			Body:     "# Example Page\n\nBody text.\n",
+			Metadata: exampleCanonicalMetadata(),
+		}))
 	})
 
-	ginkgo.It("TestRenderPageDocument_CanonicalMetadataComment", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("renders canonical metadata comments in stable field order", func() {
 		doc := PageDocument{
-			Metadata: PageMetadata{
-				Version: 1,
-				Page: PageMetadataPage{
-					ID:           "page-123",
-					Title:        "Example Page",
-					CreatedAt:    "2026-06-13T10:00:00Z",
-					UpdatedAt:    "2026-06-13T11:00:00Z",
-					CreatorID:    "alice",
-					LastAuthorID: "bob",
-				},
-				Tags: []string{"research", "draft"},
-				Fields: map[string]interface{}{
-					"status":    "open",
-					"priority":  2,
-					"published": false,
-				},
-				Extra: map[string]interface{}{
-					"aliases": []interface{}{"old-example"},
-				},
-			},
-			Body: "# Example Page\n\nBody text.\n",
+			Metadata: exampleCanonicalMetadata(),
+			Body:     "# Example Page\n\nBody text.\n",
 		}
 
 		got, err := RenderPageDocument(doc)
-		if err != nil {
-			t.Fatalf("RenderPageDocument() error = %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		want := `<!-- leafwiki
 version: 1
@@ -283,50 +218,40 @@ extra:
 
 Body text.
 `
-		if got != want {
-			t.Fatalf("RenderPageDocument() =\n%q\nwant:\n%q", got, want)
-		}
+		Expect(got).To(Equal(want))
 	})
 
-	ginkgo.Describe("TestParsePageDocument_CanonicalMetadataSchemaErrors", func() {
+	ginkgo.Describe("canonical metadata schema validation", func() {
 		for _, tt := range canonicalMetadataSchemaErrorCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
-				t := ginkgo.GinkgoT()
-				doc, _, err := ParsePageDocument(tt.raw)
-				if err == nil {
-					t.Fatalf("ParsePageDocument() error = nil, doc = %#v", doc)
-				}
+				_, _, err := ParsePageDocument(tt.raw)
+				Expect(err).To(HaveOccurred())
 			})
 		}
 	})
 
-	ginkgo.Describe("TestParsePageDocument_MetadataLookingMarkerVariantsFail", func() {
+	ginkgo.Describe("metadata-looking marker validation", func() {
 		for _, tt := range metadataLookingMarkerVariantErrorCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
-				t := ginkgo.GinkgoT()
-				if _, _, err := ParsePageDocument(tt.raw); err == nil {
-					t.Fatalf("ParsePageDocument() error = nil")
-				}
+				_, _, err := ParsePageDocument(tt.raw)
+				Expect(err).To(HaveOccurred())
 			})
 		}
 	})
 
-	ginkgo.Describe("TestRenderPageDocument_RejectsInvalidCanonicalMetadata", func() {
+	ginkgo.Describe("canonical metadata render validation", func() {
 		for _, tt := range invalidCanonicalMetadataRenderCases {
 			tt := tt
 			ginkgo.It(tt.name, func() {
-				t := ginkgo.GinkgoT()
-				if got, err := RenderPageDocument(tt.doc); err == nil {
-					t.Fatalf("RenderPageDocument() error = nil, got %q", got)
-				}
+				_, err := RenderPageDocument(tt.doc)
+				Expect(err).To(HaveOccurred())
 			})
 		}
 	})
 
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataKeepsInvalidLegacyLookingBody", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps invalid legacy-looking frontmatter when it belongs to the canonical body", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -338,20 +263,12 @@ leafwiki_id: [broken
 Body`
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if result.RequiresWriteback {
-			t.Fatalf("literal body content should not require metadata writeback")
-		}
-		wantBody := "---\nleafwiki_id: [broken\n---\nBody"
-		if doc.Body != wantBody {
-			t.Fatalf("body = %q, want %q", doc.Body, wantBody)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeFalse())
+		Expect(doc.Body).To(Equal("---\nleafwiki_id: [broken\n---\nBody"))
 	})
 
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataStripsLegacyFrontmatterAfterBlankSeparator", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("strips legacy frontmatter after a blank separator below canonical metadata", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -365,20 +282,12 @@ leafwiki_title: Legacy Page
 Body`
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if !result.RequiresWriteback {
-			t.Fatalf("mixed canonical/legacy metadata should require writeback")
-		}
-		wantBody := "Body"
-		if doc.Body != wantBody {
-			t.Fatalf("body = %q, want %q", doc.Body, wantBody)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeTrue())
+		Expect(doc.Body).To(Equal("Body"))
 	})
 
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataStripsTagsAndPropertiesOnlyLegacyFrontmatter", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("strips tag and property-only legacy frontmatter below canonical metadata", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -394,19 +303,12 @@ priority: 2
 Body`
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if !result.RequiresWriteback {
-			t.Fatalf("mixed canonical/legacy metadata should require writeback")
-		}
-		if doc.Body != "Body" {
-			t.Fatalf("body = %q, want Body", doc.Body)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeTrue())
+		Expect(doc.Body).To(Equal("Body"))
 	})
 
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataStripsLegacyFrontmatterWithUnknownNonScalarValues", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("strips legacy frontmatter with unknown non-scalar values below canonical metadata", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -423,19 +325,12 @@ empty_value: null
 Body`
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if !result.RequiresWriteback {
-			t.Fatalf("mixed canonical/legacy metadata should require writeback")
-		}
-		if doc.Body != "Body" {
-			t.Fatalf("body = %q, want Body", doc.Body)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeTrue())
+		Expect(doc.Body).To(Equal("Body"))
 	})
 
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataStripsTitleOnlyLegacyFrontmatterAfterBlankSeparator", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("strips title-only legacy frontmatter below canonical metadata", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -448,19 +343,12 @@ title: User Body
 Body`
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if !result.RequiresWriteback {
-			t.Fatalf("mixed canonical/legacy metadata should require writeback")
-		}
-		if doc.Body != "Body" {
-			t.Fatalf("body = %q, want Body", doc.Body)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeTrue())
+		Expect(doc.Body).To(Equal("Body"))
 	})
 
-	ginkgo.It("TestRenderPageDocument_ProtectsLiteralBodyFrontmatter", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("protects literal body frontmatter when rendering canonical metadata", func() {
 		body := "---\ntitle: User Body\n---\nBody"
 		raw, err := RenderPageDocument(PageDocument{
 			Body: body,
@@ -469,27 +357,16 @@ Body`
 				Page:    PageMetadataPage{ID: "page-123"},
 			},
 		})
-		if err != nil {
-			t.Fatalf("RenderPageDocument() error = %v", err)
-		}
-		if !strings.Contains(raw, "-->\n\n\n---\ntitle: User Body") {
-			t.Fatalf("rendered document did not protect body frontmatter:\n%s", raw)
-		}
+		Expect(err).To(Succeed())
+		Expect(raw).To(ContainSubstring("-->\n\n\n---\ntitle: User Body"))
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if result.RequiresWriteback {
-			t.Fatalf("renderer-protected body frontmatter should not require writeback")
-		}
-		if doc.Body != body {
-			t.Fatalf("body = %q, want %q", doc.Body, body)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeFalse())
+		Expect(doc.Body).To(Equal(body))
 	})
 
-	ginkgo.It("TestParsePageDocument_CanonicalMetadataKeepsLiteralCanonicalCommentBody", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("keeps literal canonical comments when they belong to the body", func() {
 		raw := `<!-- leafwiki
 version: 1
 page:
@@ -504,15 +381,8 @@ page:
 Body`
 
 		doc, result, err := ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument() error = %v", err)
-		}
-		if result.RequiresWriteback {
-			t.Fatalf("literal body comment should not require metadata writeback")
-		}
-		wantBody := "<!-- leafwiki\nversion: 1\npage:\n  id: body-comment\n-->\nBody"
-		if doc.Body != wantBody {
-			t.Fatalf("body = %q, want %q", doc.Body, wantBody)
-		}
+		Expect(err).To(Succeed())
+		Expect(result.RequiresWriteback).To(BeFalse())
+		Expect(doc.Body).To(Equal("<!-- leafwiki\nversion: 1\npage:\n  id: body-comment\n-->\nBody"))
 	})
 })
