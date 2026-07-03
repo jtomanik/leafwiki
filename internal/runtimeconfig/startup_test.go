@@ -177,7 +177,7 @@ var _ = Describe("YAML startup config", func() {
 	)
 
 	It("reports file read errors with the config source", func() {
-		err := ApplyYAMLConfigPath(newRuntimeFlagSet(), map[string]bool{}, filepath.Join(GinkgoT().TempDir(), "missing.yml"), "test config")
+		err := ApplyYAMLConfigPath(newRuntimeFlagSet(), map[string]bool{}, filepath.Join(tempRuntimeConfigDir(), "missing.yml"), "test config")
 
 		Expect(err).To(matchConfigFileError(ConfigFileErrorReasonRead, ""))
 	})
@@ -185,8 +185,8 @@ var _ = Describe("YAML startup config", func() {
 
 var _ = Describe("daemon service startup config", func() {
 	It("resolves default daemon paths from HOME", func() {
-		home := GinkgoT().TempDir()
-		GinkgoT().Setenv("HOME", home)
+		home := tempRuntimeConfigDir()
+		setRuntimeConfigEnv("HOME", home)
 
 		dataDir, err := DefaultDaemonServiceDataDir()
 		Expect(err).NotTo(HaveOccurred())
@@ -198,7 +198,7 @@ var _ = Describe("daemon service startup config", func() {
 	})
 
 	It("returns home resolution errors when daemon defaults require HOME", func() {
-		GinkgoT().Setenv("HOME", "")
+		setRuntimeConfigEnv("HOME", "")
 
 		_, err := DefaultDaemonServiceDataDir()
 		Expect(err).To(HaveOccurred())
@@ -217,8 +217,8 @@ var _ = Describe("daemon service startup config", func() {
 	})
 
 	It("wraps the missing default daemon service config path", func() {
-		home := GinkgoT().TempDir()
-		GinkgoT().Setenv("HOME", home)
+		home := tempRuntimeConfigDir()
+		setRuntimeConfigEnv("HOME", home)
 
 		err := ApplyDaemonServiceConfig(newRuntimeFlagSet(), map[string]bool{}, []string{"daemon"})
 
@@ -226,8 +226,8 @@ var _ = Describe("daemon service startup config", func() {
 	})
 
 	It("returns service config parse errors before applying defaults", func() {
-		home := GinkgoT().TempDir()
-		GinkgoT().Setenv("HOME", home)
+		home := tempRuntimeConfigDir()
+		setRuntimeConfigEnv("HOME", home)
 		Expect(os.MkdirAll(filepath.Join(home, ".leafwiki"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(home, ".leafwiki", "leafwiki.yml"), []byte("unknown: value\n"), 0o644)).To(Succeed())
 
@@ -237,8 +237,8 @@ var _ = Describe("daemon service startup config", func() {
 	})
 
 	It("applies daemon service config and fills daemon defaults", func() {
-		home := GinkgoT().TempDir()
-		GinkgoT().Setenv("HOME", home)
+		home := tempRuntimeConfigDir()
+		setRuntimeConfigEnv("HOME", home)
 		Expect(os.MkdirAll(filepath.Join(home, ".leafwiki"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(home, ".leafwiki", "leafwiki.yml"), []byte("port: \"9090\"\nlog-target: stderr\n"), 0o644)).To(Succeed())
 		fs := newRuntimeFlagSet()
@@ -353,7 +353,30 @@ func newRuntimeFlagSet() *flag.FlagSet {
 func writeRuntimeConfig(contents string) string {
 	GinkgoHelper()
 
-	path := filepath.Join(GinkgoT().TempDir(), "leafwiki.yml")
+	path := filepath.Join(tempRuntimeConfigDir(), "leafwiki.yml")
 	Expect(os.WriteFile(path, []byte(contents), 0o644)).To(Succeed())
 	return path
+}
+
+func tempRuntimeConfigDir() string {
+	GinkgoHelper()
+
+	path, err := os.MkdirTemp("", "leafwiki-runtimeconfig-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, path)
+	return path
+}
+
+func setRuntimeConfigEnv(key string, value string) {
+	GinkgoHelper()
+
+	previous, hadPrevious := os.LookupEnv(key)
+	Expect(os.Setenv(key, value)).To(Succeed())
+	DeferCleanup(func() {
+		if hadPrevious {
+			Expect(os.Setenv(key, previous)).To(Succeed())
+			return
+		}
+		Expect(os.Unsetenv(key)).To(Succeed())
+	})
 }

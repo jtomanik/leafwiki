@@ -27,7 +27,7 @@ func matchMCPTransportError(reason MCPTransportErrorReason) types.GomegaMatcher 
 }
 
 var _ = Describe("MCP transport parsing", func() {
-	It("TestParseMCPTransports", func() {
+	It("enables HTTP and stdio transports from a comma-separated runtime setting", func() {
 		got, err := ParseMCPTransports("http,stdio")
 
 		Expect(err).NotTo(HaveOccurred())
@@ -40,16 +40,16 @@ type invalidMCPTransportCase struct {
 	reason MCPTransportErrorReason
 }
 
-var _ = DescribeTable("TestParseMCPTransportsRejectsInvalidValues",
+var _ = DescribeTable("MCP transport validation returns stable reasons for invalid settings",
 	func(tc invalidMCPTransportCase) {
 		_, err := ParseMCPTransports(tc.raw)
 
 		Expect(err).To(matchMCPTransportError(tc.reason))
 	},
-	Entry("unknown", invalidMCPTransportCase{raw: "websocket", reason: MCPTransportErrorReasonInvalid}),
-	Entry("none combined", invalidMCPTransportCase{raw: "none,stdio", reason: MCPTransportErrorReasonNoneMixed}),
-	Entry("duplicate", invalidMCPTransportCase{raw: "stdio,stdio", reason: MCPTransportErrorReasonDuplicate}),
-	Entry("empty part", invalidMCPTransportCase{raw: "stdio,", reason: MCPTransportErrorReasonInvalid}),
+	Entry("rejects unknown transport names", invalidMCPTransportCase{raw: "websocket", reason: MCPTransportErrorReasonInvalid}),
+	Entry("rejects none mixed with active transports", invalidMCPTransportCase{raw: "none,stdio", reason: MCPTransportErrorReasonNoneMixed}),
+	Entry("rejects duplicate transport names", invalidMCPTransportCase{raw: "stdio,stdio", reason: MCPTransportErrorReasonDuplicate}),
+	Entry("rejects empty transport entries", invalidMCPTransportCase{raw: "stdio,", reason: MCPTransportErrorReasonInvalid}),
 )
 
 type validMCPTransportCase struct {
@@ -57,7 +57,7 @@ type validMCPTransportCase struct {
 	want MCPTransports
 }
 
-var _ = DescribeTable("ParseMCPTransports parser edge coverage",
+var _ = DescribeTable("MCP transport parsing accepts empty, single, and mixed runtime settings",
 	func(tc validMCPTransportCase) {
 		got, err := ParseMCPTransports(tc.raw)
 
@@ -66,17 +66,17 @@ var _ = DescribeTable("ParseMCPTransports parser edge coverage",
 	},
 	Entry("empty defaults to none", validMCPTransportCase{raw: "", want: MCPTransports{}}),
 	Entry("whitespace defaults to none", validMCPTransportCase{raw: " \t\n ", want: MCPTransports{}}),
-	Entry("target parsing trims and case-normalizes mixed transports", validMCPTransportCase{raw: " HTTP , StDiO ", want: MCPTransports{HTTP: true, Stdio: true}}),
-	Entry("single http", validMCPTransportCase{raw: "http", want: MCPTransports{HTTP: true}}),
-	Entry("single stdio", validMCPTransportCase{raw: "stdio", want: MCPTransports{Stdio: true}}),
+	Entry("trims and case-normalizes mixed transports", validMCPTransportCase{raw: " HTTP , StDiO ", want: MCPTransports{HTTP: true, Stdio: true}}),
+	Entry("enables only HTTP", validMCPTransportCase{raw: "http", want: MCPTransports{HTTP: true}}),
+	Entry("enables only stdio", validMCPTransportCase{raw: "stdio", want: MCPTransports{Stdio: true}}),
 )
 
-var _ = DescribeTable("ParseMCPTransports rejects parser edge cases",
+var _ = DescribeTable("MCP transport parsing rejects ambiguous runtime settings",
 	func(tc invalidMCPTransportCase) {
 		_, err := ParseMCPTransports(tc.raw)
 
 		Expect(err).To(matchMCPTransportError(tc.reason))
 	},
-	Entry("mixed triple", invalidMCPTransportCase{raw: "http,stdio,none", reason: MCPTransportErrorReasonInvalid}),
-	Entry("duplicate with whitespace and case", invalidMCPTransportCase{raw: "stdio, STDIO", reason: MCPTransportErrorReasonDuplicate}),
+	Entry("rejects none after active transports", invalidMCPTransportCase{raw: "http,stdio,none", reason: MCPTransportErrorReasonInvalid}),
+	Entry("rejects duplicates after trimming and case normalization", invalidMCPTransportCase{raw: "stdio, STDIO", reason: MCPTransportErrorReasonDuplicate}),
 )
