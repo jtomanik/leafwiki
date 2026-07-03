@@ -231,7 +231,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: coreauth.APIKeyID("key-1")}
 	})
 
-	ginkgo.It("LoginUseCase, LogoutUseCase, and RefreshTokenUseCase return ErrAuthDisabled without an auth service", func() {
+		ginkgo.It("returns auth-disabled errors for login, logout, and refresh when no auth service is configured", func() {
 		_, err := NewLoginUseCase(nil).Execute(context.Background(), LoginInput{Identifier: "admin", Password: "password"})
 		Expect(err).To(MatchError(ErrAuthDisabled))
 
@@ -398,7 +398,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(apiSuccessMessage(MessageIDAuthLoginSuccess)).NotTo(BeEmpty())
 	})
 
-	ginkgo.It("LoginUseCase, RefreshTokenUseCase, and LogoutUseCase delegate to AuthService", func() {
+		ginkgo.It("delegates login, refresh, and logout operations to the configured auth service", func() {
 		userSvc := setupUserService()
 		sessionStore, err := coreauth.NewSessionStore(tempAuthStorageDir())
 		Expect(err).NotTo(HaveOccurred())
