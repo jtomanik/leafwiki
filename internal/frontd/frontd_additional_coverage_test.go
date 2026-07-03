@@ -77,9 +77,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 
 	DescribeTable("workspace MCP path parsing",
 		func(path string) {
-			workspaceID, ok := parseWorkspaceMCPPath(path)
-			Expect(ok).To(BeFalse())
-			Expect(workspaceID).To(BeEmpty())
+			Expect(workspaceMCPPathResult(path)).To(RejectWorkspaceMCPPath())
 		},
 		Entry("rejects the root MCP path", "/mcp"),
 		Entry("rejects a missing workspace ID", "/mcp/workspaces/"),
@@ -106,9 +104,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/mcp/workspaces/alpha", nil))
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
-		workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1"))
-		Expect(ok).To(BeTrue())
-		Expect(workspace).To(Equal(workspaceid.WorkspaceID("alpha")))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha")))
 	})
 
 	DescribeTable("ingress base-path routing",

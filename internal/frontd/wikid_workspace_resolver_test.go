@@ -69,9 +69,12 @@ var _ = Describe("wikid workspace resolver", func() {
 	})
 
 	It("rejects invalid workspace IDs before ensuring them in wikid", func() {
-		upstreamCalled := false
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			upstreamCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+			"workspace":{"id":"docs"},
+			"status":{"workspaceId":"docs","state":"running","url":"http://127.0.0.1:49152"}
+		}`))
 		}))
 		DeferCleanup(upstream.Close)
 
@@ -80,7 +83,6 @@ var _ = Describe("wikid workspace resolver", func() {
 
 		_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/%20docs/tree", nil), workspaceid.WorkspaceID(" docs"))
 		Expect(err).To(MatchError(ErrWorkspaceNotFound))
-		Expect(upstreamCalled).To(BeFalse())
 	})
 
 	It("preserves the original root MCP path when resolving a single workspace", func() {

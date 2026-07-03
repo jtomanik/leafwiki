@@ -12,12 +12,10 @@ import (
 
 var _ = Describe("workspace router semantic IDs", func() {
 	It("parses workspace routes into typed workspace identifiers", func() {
-		routeID, upstreamPath, ok := parseWorkspaceAPIPath("/api/workspaces/home/tree")
-		Expect(ok).To(BeTrue())
-
-		var typedRouteID workspaceid.WorkspaceID = routeID
-		Expect(typedRouteID).To(Equal(workspaceid.WorkspaceID("home")))
-		Expect(upstreamPath).To(Equal("/api/tree"))
+		Expect(workspaceAPIPathResult("/api/workspaces/home/tree")).To(ResolveWorkspaceAPIPath(
+			workspaceid.WorkspaceID("home"),
+			"/api/tree",
+		))
 	})
 
 	It("accepts typed workspace callbacks for resolver and actor dependencies", func() {

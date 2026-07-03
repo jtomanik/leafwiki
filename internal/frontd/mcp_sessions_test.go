@@ -32,8 +32,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		bindings := NewMCPSessionBindings()
 
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID(" alpha "))).To(HaveOccurred())
-		_, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1"))
-		Expect(ok).To(BeFalse())
+		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("session-1")))
 	})
 
 	It("routes explicit workspace MCP requests and binds the client session", func() {
@@ -59,9 +58,7 @@ var _ = Describe("workspace MCP session routing", func() {
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusAccepted))
 		Expect(seenPath).To(Equal("/mcp"))
-		workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1"))
-		Expect(ok).To(BeTrue())
-		Expect(workspace).To(Equal(workspaceid.WorkspaceID("home")))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("home")))
 
 		req = httptest.NewRequest(http.MethodPost, "/mcp/workspaces/alpha", nil)
 		req.Header.Set("Mcp-Session-Id", "session-1")
@@ -96,21 +93,17 @@ var _ = Describe("workspace MCP session routing", func() {
 		handler.ServeHTTP(rec, req)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusAccepted))
-		workspace, ok := bindings.Workspace(MCPSessionIDFromHeader("server-session-1"))
-		Expect(ok).To(BeTrue())
-		Expect(workspace).To(Equal(workspaceid.WorkspaceID("alpha")))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session-1"), workspaceid.WorkspaceID("alpha")))
 	})
 
 	It("routes root MCP through an existing session binding", func() {
 		bindings := NewMCPSessionBindings()
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
 		var seenID workspaceid.WorkspaceID
-		resolveRootCalled := false
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
 			ResolveRoot: func(*http.Request) (workspaceid.WorkspaceID, error) {
-				resolveRootCalled = true
-				return "", nil
+				return "unexpected-root", nil
 			},
 			Resolve: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (WorkspaceRoute, error) {
 				seenID = workspaceID
@@ -130,7 +123,6 @@ var _ = Describe("workspace MCP session routing", func() {
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusAccepted))
 		Expect(seenID).To(Equal(workspaceid.WorkspaceID("alpha")))
-		Expect(resolveRootCalled).To(BeFalse())
 	})
 
 	It("clears a session binding after a successful DELETE", func() {
@@ -157,8 +149,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		handler.ServeHTTP(rec, req)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		_, ok := bindings.Workspace(MCPSessionIDFromHeader("session-1"))
-		Expect(ok).To(BeFalse())
+		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("session-1")))
 
 		req = httptest.NewRequest(http.MethodPost, "/mcp", nil)
 		req.Header.Set("Mcp-Session-Id", "session-1")
@@ -170,15 +161,15 @@ var _ = Describe("workspace MCP session routing", func() {
 
 	It("authorizes explicit workspace requests before binding the session", func() {
 		bindings := NewMCPSessionBindings()
-		proxyCalled := false
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
 				return WorkspaceRoute{}, ErrWorkspaceForbidden
 			},
 			Proxy: func(WorkspaceRoute) http.Handler {
-				proxyCalled = true
-				return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+				return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusAccepted)
+				})
 			},
 		})
 
@@ -188,9 +179,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		handler.ServeHTTP(rec, req)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
-		_, ok := bindings.Workspace(MCPSessionIDFromHeader("forbidden-session"))
-		Expect(ok).To(BeFalse())
-		Expect(proxyCalled).To(BeFalse())
+		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("forbidden-session")))
 	})
 
 	DescribeTable("root MCP workspace resolution",
