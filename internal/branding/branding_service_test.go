@@ -39,6 +39,19 @@ func HaveBrandingSiteNameFieldError(code errors.FieldErrorCode, messageID errors
 	return testmatchers.ContainFieldError(brandingSiteNameValidationField, code, messageID)
 }
 
+func HaveBrandingSiteNameValidationError(code errors.FieldErrorCode, messageID errors.MessageID) types.GomegaMatcher {
+	return WithTransform(func(err error) []*errors.FieldError {
+		var ve *errors.ValidationErrors
+		if !stderrors.As(err, &ve) {
+			return nil
+		}
+		return ve.Errors
+	}, SatisfyAll(
+		HaveLen(1),
+		HaveBrandingSiteNameFieldError(code, messageID),
+	))
+}
+
 func HavePositiveBrandingUploadConstraints() types.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("SiteName", Not(BeEmpty())),
@@ -266,10 +279,7 @@ var _ = Describe("branding service", func() {
 		err := svc.UpdateBranding("")
 		Expect(err).To(HaveOccurred())
 
-		ve, ok := err.(*errors.ValidationErrors)
-		Expect(ok).To(BeTrue())
-		Expect(ve.Errors).To(HaveLen(1))
-		Expect(ve).To(HaveBrandingSiteNameFieldError(FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired))
+		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired))
 
 	})
 
@@ -279,10 +289,7 @@ var _ = Describe("branding service", func() {
 		err := svc.UpdateBranding("   ")
 		Expect(err).To(HaveOccurred())
 
-		ve, ok := err.(*errors.ValidationErrors)
-		Expect(ok).To(BeTrue())
-		Expect(ve.Errors).To(HaveLen(1))
-		Expect(ve).To(HaveBrandingSiteNameFieldError(FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired))
+		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired))
 
 	})
 
@@ -295,10 +302,7 @@ var _ = Describe("branding service", func() {
 		err := svc.UpdateBranding(longName)
 		Expect(err).To(HaveOccurred())
 
-		ve, ok := err.(*errors.ValidationErrors)
-		Expect(ok).To(BeTrue())
-		Expect(ve.Errors).To(HaveLen(1))
-		Expect(ve).To(HaveBrandingSiteNameFieldError(FieldCodeBrandingSiteNameTooLong, MessageIDBrandingSiteNameTooLong))
+		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameTooLong, MessageIDBrandingSiteNameTooLong))
 
 	})
 
@@ -326,10 +330,7 @@ var _ = Describe("branding service", func() {
 		err := svc.UpdateBranding(nameWithControl)
 		Expect(err).To(HaveOccurred())
 
-		ve, ok := err.(*errors.ValidationErrors)
-		Expect(ok).To(BeTrue())
-		Expect(ve.Errors).To(HaveLen(1))
-		Expect(ve).To(HaveBrandingSiteNameFieldError(FieldCodeBrandingSiteNameControlCharacters, MessageIDBrandingSiteNameControlCharacters))
+		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameControlCharacters, MessageIDBrandingSiteNameControlCharacters))
 
 	})
 
