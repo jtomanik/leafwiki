@@ -22,8 +22,8 @@ import (
 	"github.com/perber/wiki/internal/core/identity"
 )
 
-var _ = Describe("git revision edge coverage", func() {
-	It("covers helper defaults and parsing branches", func() {
+var _ = Describe("git revision edge behavior", func() {
+	It("handles helper defaults and parser fallbacks", func() {
 		Expect(nonFilesystemInitStorage{}.Init()).To(Succeed())
 
 		target, ok := parseGitDirFile("not-a-gitdir", "/workspace")
@@ -39,10 +39,12 @@ var _ = Describe("git revision edge coverage", func() {
 		Expect(target).To(Equal(filepath.Clean("/tmp/repo/.git")))
 
 		Expect(mergeMarkdownPaths([]string{" a.md ", "", "nested/b.md"}, []string{"a.md"})).To(Equal([]string{"a.md", "nested/b.md"}))
-		_, messageTrailers, _ := parseCommitMessage(commitMessage(CommitRequest{}, "batch-1", nil))
-		Expect(messageTrailers).To(HaveKeyWithValue("LeafWiki-Source", string(SourceUnknown)))
-		Expect(commitMessage(CommitRequest{Reason: ReasonStartup}, "batch-1", nil)).To(HavePrefix("LeafWiki initial workspace snapshot"))
-		Expect(commitMessage(CommitRequest{Reason: ReasonRestore}, "batch-1", nil)).To(HavePrefix("LeafWiki workspace restore"))
+		messageCommit := commitFromObject(&object.Commit{Message: commitMessage(CommitRequest{}, "batch-1", nil)})
+		Expect(messageCommit.Source).To(Equal(SourceUnknown))
+		startupCommit := commitFromObject(&object.Commit{Message: commitMessage(CommitRequest{Reason: ReasonStartup}, "batch-1", nil)})
+		Expect(startupCommit.Reason).To(Equal(ReasonStartup))
+		restoreCommit := commitFromObject(&object.Commit{Message: commitMessage(CommitRequest{Reason: ReasonRestore}, "batch-1", nil)})
+		Expect(restoreCommit.Reason).To(Equal(ReasonRestore))
 		Expect(commitActorIDs(CommitRequest{AdditionalActors: []Actor{{}, {ID: "public-editor"}}})).To(Equal([]ActorID{"public-editor"}))
 
 		restoreRand := setGitRevisionSeam(&gitRevisionRandRead, func([]byte) (int, error) {
@@ -61,13 +63,12 @@ var _ = Describe("git revision edge coverage", func() {
 			"Email": Equal("agent-1@leafwiki.local"),
 		})))
 
-		title, trailers, actors := parseCommitMessage("Title\nnot-a-trailer\nOther: value\nLeafWiki-Actor: alice\n")
+		title, _, actors := parseCommitMessage("Title\nnot-a-trailer\nOther: value\nLeafWiki-Actor: alice\n")
 		Expect(title).To(Equal("Title"))
-		Expect(trailers).To(HaveKeyWithValue("LeafWiki-Actor", "alice"))
 		Expect(actors).To(Equal([]ActorID{"alice"}))
 	})
 
-	It("covers Open validation and dependency failures", func() {
+	It("reports Open validation and dependency failures", func() {
 		_, err := Open(StoreOptions{})
 		Expect(err).To(MatchError(ErrDataDirRequired))
 
@@ -78,7 +79,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreMkdir := setGitRevisionSeam(&gitRevisionMkdirAll, func(string, os.FileMode) error {
 			return errMkdirInternalFailed
 		})
-		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+		_, err = Open(StoreOptions{DataDir: gitRevisionTempDir(), RootDir: filepath.Join(gitRevisionTempDir(), "root")})
 		Expect(err).To(MatchError(errMkdirInternalFailed))
 		restoreMkdir()
 
@@ -91,7 +92,7 @@ var _ = Describe("git revision edge coverage", func() {
 			}
 			return nil
 		})
-		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+		_, err = Open(StoreOptions{DataDir: gitRevisionTempDir(), RootDir: filepath.Join(gitRevisionTempDir(), "root")})
 		Expect(err).To(MatchError(errMkdirRootFailed))
 		restoreMkdir()
 
@@ -102,7 +103,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreInit := setGitRevisionSeam(&gitRevisionGitInit, func(gitstorage.Storer, ...git.InitOption) (*git.Repository, error) {
 			return nil, errInitFailed
 		})
-		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+		_, err = Open(StoreOptions{DataDir: gitRevisionTempDir(), RootDir: filepath.Join(gitRevisionTempDir(), "root")})
 		Expect(err).To(MatchError(errInitFailed))
 		restoreInit()
 		restoreOpen()
@@ -119,7 +120,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreInit = setGitRevisionSeam(&gitRevisionGitInit, func(gitstorage.Storer, ...git.InitOption) (*git.Repository, error) {
 			return nil, nil
 		})
-		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+		_, err = Open(StoreOptions{DataDir: gitRevisionTempDir(), RootDir: filepath.Join(gitRevisionTempDir(), "root")})
 		Expect(err).To(MatchError(errSecondOpenFailed))
 		restoreInit()
 		restoreOpen()
@@ -128,37 +129,37 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreCleanup := setGitRevisionSeam(&gitRevisionRemoveInternalRootGitFile, func(string, string) error {
 			return errRemoveRootGitFileFailed
 		})
-		_, err = Open(StoreOptions{DataDir: GinkgoT().TempDir(), RootDir: filepath.Join(GinkgoT().TempDir(), "root")})
+		_, err = Open(StoreOptions{DataDir: gitRevisionTempDir(), RootDir: filepath.Join(gitRevisionTempDir(), "root")})
 		Expect(err).To(MatchError(errRemoveRootGitFileFailed))
 		restoreCleanup()
 	})
 
-	It("covers root .git cleanup branches", func() {
+	It("cleans up only the internal root git file", func() {
 		errStatFailed := errors.New("stat failed")
 		restoreLstat := setGitRevisionSeam(&gitRevisionLstat, func(string) (os.FileInfo, error) {
 			return nil, errStatFailed
 		})
-		Expect(removeInternalRootGitFile(GinkgoT().TempDir(), "/internal/git")).To(MatchError(errStatFailed))
+		Expect(removeInternalRootGitFile(gitRevisionTempDir(), "/internal/git")).To(MatchError(errStatFailed))
 		restoreLstat()
 
-		rootDir := GinkgoT().TempDir()
-		internal := filepath.Join(GinkgoT().TempDir(), ".leafwiki", "git")
+		rootDir := gitRevisionTempDir()
+		internal := filepath.Join(gitRevisionTempDir(), ".leafwiki", "git")
 		Expect(os.MkdirAll(filepath.Join(rootDir, ".git"), 0o755)).To(Succeed())
 		Expect(removeInternalRootGitFile(rootDir, internal)).To(Succeed())
 
-		rootDir = GinkgoT().TempDir()
+		rootDir = gitRevisionTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, ".git"), []byte("gitdir: ../elsewhere\n"), 0o644)).To(Succeed())
 		Expect(removeInternalRootGitFile(rootDir, internal)).To(Succeed())
 		Expect(os.ReadFile(filepath.Join(rootDir, ".git"))).To(Equal([]byte("gitdir: ../elsewhere\n")))
 
-		rootDir = GinkgoT().TempDir()
+		rootDir = gitRevisionTempDir()
 		Expect(os.MkdirAll(internal, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, ".git"), []byte("gitdir: "+internal+"\n"), 0o644)).To(Succeed())
 		Expect(removeInternalRootGitFile(rootDir, internal)).To(Succeed())
 		_, err := os.Stat(filepath.Join(rootDir, ".git"))
 		Expect(err).To(MatchError(os.ErrNotExist))
 
-		rootDir = GinkgoT().TempDir()
+		rootDir = gitRevisionTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, ".git"), []byte("gitdir: "+internal+"\n"), 0o644)).To(Succeed())
 		errReadFailed := errors.New("read failed")
 		restoreRead := setGitRevisionSeam(&gitRevisionReadFile, func(string) ([]byte, error) {
@@ -167,7 +168,7 @@ var _ = Describe("git revision edge coverage", func() {
 		Expect(removeInternalRootGitFile(rootDir, internal)).To(MatchError(errReadFailed))
 		restoreRead()
 
-		rootDir = GinkgoT().TempDir()
+		rootDir = gitRevisionTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, ".git"), []byte("gitdir: "+internal+"\n"), 0o644)).To(Succeed())
 		errRemoveFailed := errors.New("remove failed")
 		restoreRemove := setGitRevisionSeam(&gitRevisionRemove, func(string) error {
@@ -177,7 +178,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreRemove()
 	})
 
-	It("covers commit fallback and error branches through seams", func() {
+	It("reports commit fallback and dependency errors through seams", func() {
 		store := &Store{}
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -298,7 +299,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreWorktree()
 	})
 
-	It("covers index and tracked-file store errors", func() {
+	It("reports index and tracked-file store errors", func() {
 		store := &Store{}
 		indexErr := errors.New("index failed")
 		restoreIndex := setGitRevisionSeam(&gitRevisionRepositoryIndex, func(*git.Repository) (*index.Index, error) {
@@ -403,7 +404,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreHead()
 	})
 
-	It("covers stageMarkdownChanges error branches through seams", func() {
+	It("reports staging errors through markdown change seams", func() {
 		store := &Store{rootDir: "/workspace"}
 
 		errCollectFailed := errors.New("collect failed")
@@ -484,7 +485,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreRead()
 	})
 
-	It("covers collectMarkdownPaths walk and rel errors", func() {
+	It("reports markdown path collection walk and relative-path errors", func() {
 		walkErr := errors.New("walk failed")
 		restoreWalk := setGitRevisionSeam(&gitRevisionWalkDir, func(root string, fn fs.WalkDirFunc) error {
 			return fn(filepath.Join(root, "bad.md"), fakeDirEntry{name: "bad.md"}, walkErr)
@@ -507,7 +508,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreWalk()
 	})
 
-	It("covers list, get, restore, and file read validation branches", func() {
+	It("reports canceled list, get, restore, and file read operations", func() {
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()
 
@@ -569,8 +570,8 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreWrite()
 	})
 
-	It("covers commit iteration, changed entries, restore, and file content seams", func() {
-		store := &Store{rootDir: GinkgoT().TempDir()}
+	It("reports commit iteration, changed-entry, restore, and file-content seam errors", func() {
+		store := &Store{rootDir: gitRevisionTempDir()}
 
 		errLogFailed := errors.New("log failed")
 		restoreLog := setGitRevisionSeam(&gitRevisionRepoLog, func(*git.Repository, *git.LogOptions) (object.CommitIter, error) {
@@ -661,14 +662,14 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreCommitTree()
 		restoreCommitObject()
 
-		dataDir := GinkgoT().TempDir()
-		rootDir := filepath.Join(GinkgoT().TempDir(), "workspace")
-		writeFile(GinkgoT(), filepath.Join(rootDir, "page.md"), "# Old\n")
+		dataDir := gitRevisionTempDir()
+		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
+		writeFile(filepath.Join(rootDir, "page.md"), "# Old\n")
 		realStore, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = realStore.Capture(context.Background(), CommitRequest{Actor: PublicEditorActor()})
 		Expect(err).NotTo(HaveOccurred())
-		writeFile(GinkgoT(), filepath.Join(rootDir, "page.md"), "# New\n")
+		writeFile(filepath.Join(rootDir, "page.md"), "# New\n")
 		second, err := realStore.Capture(context.Background(), CommitRequest{Actor: PublicEditorActor()})
 		Expect(err).NotTo(HaveOccurred())
 		secondHash := identity.CommitHashFromString(second.Hash)
@@ -919,7 +920,7 @@ var _ = Describe("git revision edge coverage", func() {
 		restoreCommitObject()
 	})
 
-	It("covers final changed-entry and file-content cancellation branches", func() {
+	It("reports parent lookup and file-content cancellation failures", func() {
 		store := &Store{}
 		hash := identity.CommitHashFromString("1111111111111111111111111111111111111111")
 
