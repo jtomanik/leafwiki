@@ -55,7 +55,7 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 		recoverableErr := errors.New("recoverable schema failed")
 		reopenErr := errors.New("reopen failed")
 		var openCalls int
-		var removed bool
+		var cleanupRequests []string
 		openTagsDB = func(dbPath string) (*sql.DB, error) {
 			openCalls++
 			if openCalls == 1 {
@@ -69,8 +69,8 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 		isRecoverableTagsDBError = func(err error) bool {
 			return errors.Is(err, recoverableErr)
 		}
-		removeTagsSQLiteFiles = func(string) {
-			removed = true
+		removeTagsSQLiteFiles = func(dbPath string) {
+			cleanupRequests = append(cleanupRequests, dbPath)
 		}
 		ginkgo.DeferCleanup(func() {
 			openTagsDB = previousOpen
@@ -79,12 +79,13 @@ var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
 			removeTagsSQLiteFiles = previousRemove
 		})
 
-		store, err := NewTagsStore(tempTagsDir())
+		storageDir := tempTagsDir()
+		store, err := NewTagsStore(storageDir)
 
 		Expect(store).To(BeNil())
 		Expect(err).To(MatchError(reopenErr))
 		Expect(openCalls).To(Equal(2))
-		Expect(removed).To(BeTrue())
+		Expect(cleanupRequests).To(ConsistOf(filepath.Join(storageDir, "tags.db")))
 	})
 
 	ginkgo.It("returns second schema errors after recoverable initialization retry", func() {
