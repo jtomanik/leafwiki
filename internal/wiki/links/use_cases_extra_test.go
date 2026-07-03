@@ -42,9 +42,11 @@ var _ = ginkgo.Describe("link use cases", func() {
 	})
 
 	ginkgo.It("GetLinkStatusUseCase maps missing pages to localized link-page-not-found errors", func() {
+		dataDir := tempLinksDir()
+		rootDir := tempLinksDir()
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-			DataDir: ginkgo.GinkgoT().TempDir(),
-			RootDir: ginkgo.GinkgoT().TempDir(),
+			DataDir: dataDir,
+			RootDir: rootDir,
 		})
 		Expect(treeService.LoadTree()).To(Succeed())
 
@@ -53,7 +55,7 @@ var _ = ginkgo.Describe("link use cases", func() {
 	})
 
 	ginkgo.It("GetLinkStatusUseCase returns non-not-found tree lookup errors directly", func() {
-		treeService := tree.NewTreeService(ginkgo.GinkgoT().TempDir())
+		treeService := tree.NewTreeService(tempLinksDir())
 
 		out, err := NewGetLinkStatusUseCase(&corelinks.LinkService{}, treeService).Execute(context.Background(), GetLinkStatusInput{PageID: newFixturePageID("page-1")})
 
@@ -173,7 +175,7 @@ type wikiLinksFixture struct {
 
 func newWikiLinksFixture() wikiLinksFixture {
 	ginkgo.GinkgoHelper()
-	dataDir := ginkgo.GinkgoT().TempDir()
+	dataDir := tempLinksDir()
 	Expect(os.WriteFile(
 		dataDir+"/schema.json",
 		[]byte(fmt.Sprintf(`{"version":%d}`, tree.CurrentSchemaVersion)),
@@ -198,6 +200,15 @@ func newWikiLinksFixture() wikiLinksFixture {
 	Expect(linkService.UpdateLinksForPage(sourcePage, "[target](/target.md) [missing](/missing)")).To(Succeed())
 
 	return wikiLinksFixture{dataDir: dataDir, tree: treeService, links: linkService, sourceID: *sourceID, targetID: *targetID}
+}
+
+func tempLinksDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-links-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func dropLinksTable(dataDir string) {

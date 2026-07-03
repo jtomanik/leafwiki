@@ -14,7 +14,7 @@ import (
 )
 
 var _ = ginkgo.Describe("link errors", func() {
-	ginkgo.It("TestRespondWithLinkError_PageNotFound", func() {
+	ginkgo.It("returns a localized not-found response for missing link pages", func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("link errors", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusNotFound, ErrCodeLinkPageNotFound, sharederrors.MessageIDForCode(ErrCodeLinkPageNotFound)))
 	})
 
-	ginkgo.It("TestRespondWithLinkError_ServiceUnavailable", func() {
+	ginkgo.It("returns a localized service-unavailable response when links are unavailable", func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
@@ -39,7 +39,7 @@ var _ = ginkgo.Describe("link errors", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusServiceUnavailable, ErrCodeLinkUnavailable, sharederrors.MessageIDForCode(ErrCodeLinkUnavailable)))
 	})
 
-	ginkgo.It("TestRespondWithLinkError_InternalErrorIsSanitized", func() {
+	ginkgo.It("sanitizes unknown link failures as internal structured errors", func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
