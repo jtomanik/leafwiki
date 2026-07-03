@@ -30,6 +30,8 @@ const (
 	testVisibleLocalizedMessage        string                 = "visible message"
 )
 
+var errLocalizedErrorAbsent = stderrors.New("localized error absent")
+
 var _ = Describe("localized errors", func() {
 	It("exposes typed codes and message IDs for defined errors", func() {
 		cause := stderrors.New("storage failed")
@@ -214,15 +216,22 @@ var _ = Describe("localized error derived contracts", func() {
 		localized := sharederrors.NewLocalizedError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsFallback, testAuthInvalidCredentialsFallback, nil)
 		wrapped := fmt.Errorf("wrap: %w", localized)
 
-		got, ok := sharederrors.AsLocalizedError(wrapped)
-		Expect(ok).To(BeTrue())
+		got, err := localizedErrorResult(wrapped)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(BeIdenticalTo(localized))
 
-		got, ok = sharederrors.AsLocalizedError(stderrors.New("plain"))
-		Expect(ok).To(BeFalse())
-		Expect(got).To(BeZero())
+		_, err = localizedErrorResult(stderrors.New("plain"))
+		Expect(err).To(MatchError(errLocalizedErrorAbsent))
 	})
 })
+
+func localizedErrorResult(err error) (*sharederrors.LocalizedError, error) {
+	localized, ok := sharederrors.AsLocalizedError(err)
+	if !ok {
+		return nil, errLocalizedErrorAbsent
+	}
+	return localized, nil
+}
 
 func renderedMessage(messageID sharederrors.MessageID, defaultEnglish string, args ...string) string {
 	return localization.English.Render(messageID, defaultEnglish, args...).Message
