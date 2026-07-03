@@ -1321,6 +1321,8 @@ func TestAgentPresence() {
 	Expect(linkRemoved).To(BeTrue())
 	fileRenamed := true
 	Expect(fileRenamed).To(BeTrue())
+	userSetInContext := true
+	Expect(userSetInContext).To(BeTrue())
 }
 `)
 			calls := append(h.findCalls("To"), h.findCalls("foundState")...)
@@ -1330,6 +1332,7 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",

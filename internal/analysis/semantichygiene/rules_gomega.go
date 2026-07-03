@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 type gomegaAssertion struct {
@@ -763,7 +764,45 @@ func isProxyBooleanName(name string) bool {
 			return true
 		}
 	}
+	return identifierHasWord(name, "set")
+}
+
+func identifierHasWord(name string, want string) bool {
+	for _, word := range identifierWords(name) {
+		if word == want {
+			return true
+		}
+	}
 	return false
+}
+
+func identifierWords(name string) []string {
+	var words []string
+	var current []rune
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		words = append(words, string(current))
+		current = nil
+	}
+	runes := []rune(name)
+	for i, r := range runes {
+		if r == '_' || r == '-' {
+			flush()
+			continue
+		}
+		if len(current) > 0 && unicode.IsUpper(r) {
+			previous := runes[i-1]
+			nextIsLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
+			if unicode.IsLower(previous) || unicode.IsDigit(previous) || unicode.IsUpper(previous) && nextIsLower {
+				flush()
+			}
+		}
+		current = append(current, unicode.ToLower(r))
+	}
+	flush()
+	return words
 }
 
 func callLaundersBooleanToStringState(ctx *analysisContext, call *ast.CallExpr) bool {
