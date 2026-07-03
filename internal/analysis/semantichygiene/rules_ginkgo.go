@@ -183,6 +183,11 @@ func ginkgoDescriptionLooksMigratedTestName(description string) bool {
 		return true
 	}
 	fields := strings.Fields(description)
+	for _, field := range fields {
+		if hasMigratedIdentifierFragment(field) {
+			return true
+		}
+	}
 	if len(fields) < 2 {
 		return false
 	}
@@ -199,6 +204,34 @@ func ginkgoDescriptionLooksMigratedTestName(description string) bool {
 	return len(fields) <= 4 &&
 		titleCaseCount == len(fields)-1 &&
 		isLowercaseWord(fields[0])
+}
+
+func hasMigratedIdentifierFragment(field string) bool {
+	field = trimGinkgoNamePunctuation(field)
+	if field == "" {
+		return false
+	}
+	if strings.Contains(field, "_") {
+		parts := strings.FieldsFunc(field, func(r rune) bool {
+			return r == '_'
+		})
+		if len(parts) > 1 {
+			return true
+		}
+	}
+	return isLowerCamelIdentifierFragment(field)
+}
+
+func isLowerCamelIdentifierFragment(field string) bool {
+	if len(field) < 4 || field[0] < 'a' || field[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(field); i++ {
+		if field[i] >= 'A' && field[i] <= 'Z' {
+			return true
+		}
+	}
+	return false
 }
 
 func isMigratedTitleCaseFragment(field string) bool {
