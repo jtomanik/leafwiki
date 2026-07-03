@@ -11,8 +11,17 @@ import (
 	"github.com/perber/wiki/internal/localization"
 )
 
+func tempRunMessageDir() string {
+	GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-run-messages-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
+
 var _ = Describe("run message export", func() {
-	It("TestRunMessagesExportMatchesGeneratedFile", func() {
+	It("renders the shell variables that match the generated run message file", func() {
 		generated, err := GenerateRunMessages()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -33,12 +42,12 @@ var _ = Describe("run message export", func() {
 	})
 })
 
-var _ = Describe("run message export edge coverage", func() {
-	It("shellSingleQuote escapes single quotes for shell variables", func() {
+var _ = Describe("run message shell rendering", func() {
+	It("escapes single quotes for shell variables", func() {
 		Expect(shellSingleQuote("can't stop")).To(Equal(`can'"'"'t stop`))
 	})
 
-	It("GenerateRunMessages writes a deterministic generated header and ordering", func() {
+	It("writes a deterministic generated header and variable ordering", func() {
 		generated, err := GenerateRunMessages()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -47,7 +56,7 @@ var _ = Describe("run message export edge coverage", func() {
 		Expect(strings.Index(generated, "LEAFWIKI_RUN_MSG_HELP_BODY=")).To(BeNumerically("<", strings.Index(generated, "LEAFWIKI_RUN_MSG_ERROR_PREFIX=")))
 	})
 
-	It("GenerateRunMessages includes newer error variables used by run.sh", func() {
+	It("includes newer error variables used by run.sh", func() {
 		generated, err := GenerateRunMessages()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -61,8 +70,8 @@ var _ = Describe("run message export edge coverage", func() {
 		}
 	})
 
-	It("ValidateGeneratedRunMessages rejects stale files with a helpful error", func() {
-		path := filepath.Join(GinkgoT().TempDir(), "run_messages.sh")
+	It("rejects stale generated files with a regeneration error", func() {
+		path := filepath.Join(tempRunMessageDir(), "run_messages.sh")
 		Expect(os.WriteFile(path, []byte("# stale\n"), 0o600)).To(Succeed())
 
 		err := ValidateGeneratedRunMessages(path)
@@ -70,15 +79,15 @@ var _ = Describe("run message export edge coverage", func() {
 		Expect(err).To(MatchError(ErrGeneratedRunMessagesFile))
 	})
 
-	It("ValidateGeneratedRunMessages returns read errors for missing files", func() {
-		path := filepath.Join(GinkgoT().TempDir(), "missing.sh")
+	It("returns read errors for missing generated files", func() {
+		path := filepath.Join(tempRunMessageDir(), "missing.sh")
 
 		err := ValidateGeneratedRunMessages(path)
 
 		Expect(err).To(MatchError(fs.ErrNotExist))
 	})
 
-	It("GenerateRunMessages fails when the English renderer cannot render messages", func() {
+	It("fails when the English renderer cannot render messages", func() {
 		previous := localization.English
 		localization.English = nil
 		DeferCleanup(func() {
@@ -91,14 +100,14 @@ var _ = Describe("run message export edge coverage", func() {
 		Expect(generated).To(BeEmpty())
 	})
 
-	It("ValidateGeneratedRunMessages returns generator errors before reading the target file", func() {
+	It("returns generator errors before reading the target file", func() {
 		previous := localization.English
 		localization.English = nil
 		DeferCleanup(func() {
 			localization.English = previous
 		})
 
-		err := ValidateGeneratedRunMessages(filepath.Join(GinkgoT().TempDir(), "missing.sh"))
+		err := ValidateGeneratedRunMessages(filepath.Join(tempRunMessageDir(), "missing.sh"))
 
 		Expect(err).To(MatchError(ErrRunMessageRenderedEmpty))
 	})
