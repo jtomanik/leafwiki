@@ -14,7 +14,7 @@ import (
 )
 
 var _ = Describe("OAuth deterministic service behavior", func() {
-	It("covers fixed-client redirect adapters and client assertion replay guards", func() {
+	It("applies fixed-client redirect overrides and rejects replayed client assertions", func() {
 		ctx := context.Background()
 		store := newFositeStore()
 		Expect(store.setClient(fixedOAuthClient())).To(Succeed())
@@ -209,7 +209,7 @@ var _ = Describe("OAuth deterministic service behavior", func() {
 		Expect(routes.validateAuthorizeRequest(badResourceReq, newRequest(), "")).To(MatchError(fosite.ErrInvalidRequest))
 	})
 
-	It("covers registration handler error exits", func() {
+	It("returns structured registration errors for invalid client metadata and store failures", func() {
 		service, err := NewService(ServiceConfig{})
 		Expect(err).NotTo(HaveOccurred())
 		routes := NewRoutes(service)
@@ -261,7 +261,7 @@ var _ = Describe("OAuth deterministic service behavior", func() {
 		))
 	})
 
-	It("covers approval cleanup and malformed form parsing", func() {
+	It("removes expired approval grants and rejects malformed authorize query forms", func() {
 		service, err := NewService(ServiceConfig{})
 		Expect(err).NotTo(HaveOccurred())
 		userID := coreauth.UserIDFromString("approval-user")
