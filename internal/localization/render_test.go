@@ -34,7 +34,7 @@ const (
 )
 
 var _ = Describe("English renderer", func() {
-	It("TestEnglishRendererUsesCatalogAndPositionalArgs", func() {
+	It("renders catalog messages with positional arguments", func() {
 		rendered := English.Render("errors.page.version_conflict", "fallback", "docs.md", "README.md")
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
@@ -47,7 +47,7 @@ var _ = Describe("English renderer", func() {
 		}))
 	})
 
-	It("TestEnglishRendererFallsBackWhenCatalogEntryIsMissing", func() {
+	It("renders the fallback template and marks missing catalog entries", func() {
 		rendered := English.Render("errors.test.missing", missingCatalogFallbackTemplate, "value")
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
@@ -56,7 +56,7 @@ var _ = Describe("English renderer", func() {
 		}))
 	})
 
-	It("TestEnglishRendererFallsBackWhenTemplateDataDoesNotMatch", func() {
+	It("uses the fallback template when catalog data cannot render safely", func() {
 		rendered := English.Render("errors.page.version_conflict", safeFallbackTemplate, "page.md")
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
@@ -65,7 +65,7 @@ var _ = Describe("English renderer", func() {
 		}))
 	})
 
-	It("TestRegistryRejectsDuplicateMessageIDWithDifferentEnglish", func() {
+	It("rejects duplicate message IDs with conflicting English defaults", func() {
 		err := validateDefinitions([]Definition{
 			{ID: MessageIDCLIHelpUsage, Default: duplicateMessageDefaultUsage},
 			{ID: MessageIDCLIHelpUsage, Default: duplicateMessageDefaultOther},
@@ -74,11 +74,11 @@ var _ = Describe("English renderer", func() {
 		Expect(err).To(MatchError(ErrMessageDefinitionDefaultConflict))
 	})
 
-	It("TestCommittedCatalogCoversRegistry", func() {
+	It("keeps the committed catalog synchronized with registry definitions", func() {
 		Expect(ValidateCommittedCatalog()).To(Succeed())
 	})
 
-	It("TestEnglishRendererIsConcurrentSafe", func() {
+	It("renders English messages safely from concurrent callers", func() {
 		var wg sync.WaitGroup
 		errs := make(chan string, 32)
 		for i := 0; i < 32; i++ {
@@ -104,7 +104,7 @@ func (id stringMessageID) String() string {
 	return string(id)
 }
 
-var _ = Describe("localization edge coverage", func() {
+var _ = Describe("localization fallback and catalog validation contracts", func() {
 	It("nil renderer falls back using positional template data", func() {
 		var renderer *Renderer
 

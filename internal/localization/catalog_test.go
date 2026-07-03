@@ -11,13 +11,12 @@ import (
 )
 
 var _ = Describe("committed localization catalog", func() {
-	It("TestCommittedCatalogCoversProductionMessageIDConstants", func() {
-		t := GinkgoT()
-		repoRoot := repoRoot(t)
+	It("covers every production message ID constant", func() {
+		root := repoRoot()
 		catalog, err := committedCatalog()
 		Expect(err).NotTo(HaveOccurred())
 		missing := []string{}
-		for _, id := range productionMessageIDConstants(t, repoRoot) {
+		for _, id := range productionMessageIDConstants(root) {
 			if _, ok := catalog[id]; !ok {
 				missing = append(missing, id)
 			}
@@ -25,31 +24,28 @@ var _ = Describe("committed localization catalog", func() {
 		Expect(missing).To(BeEmpty(), "catalog missing production MessageID constants: %s", strings.Join(missing, ", "))
 	})
 
-	It("TestProductionMessageIDConstantsIncludesMCPToolMessageIDs", func() {
-		t := GinkgoT()
+	It("treats MCP tool success messages as production catalog obligations", func() {
 		ids := map[string]struct{}{}
-		for _, id := range productionMessageIDConstants(t, repoRoot(t)) {
+		for _, id := range productionMessageIDConstants(repoRoot()) {
 			ids[id] = struct{}{}
 		}
 		Expect(ids).To(HaveKey("mcp.tools.wiki_move_page.success"))
 	})
 
-	It("TestProductionMessageIDConstantsIncludesMCPToolDescriptionIDs", func() {
-		t := GinkgoT()
+	It("treats MCP tool descriptions as production catalog obligations", func() {
 		ids := map[string]struct{}{}
-		for _, id := range productionMessageIDConstants(t, repoRoot(t)) {
+		for _, id := range productionMessageIDConstants(repoRoot()) {
 			ids[id] = struct{}{}
 		}
 		Expect(ids).To(HaveKey("mcp.tools.wiki_move_page.description"))
 	})
 
-	It("TestCommittedCatalogCoversProductionErrorCodeMessageIDs", func() {
-		t := GinkgoT()
-		repoRoot := repoRoot(t)
+	It("covers message IDs derived from production error codes", func() {
+		root := repoRoot()
 		catalog, err := committedCatalog()
 		Expect(err).NotTo(HaveOccurred())
 		missing := []string{}
-		for _, id := range productionErrorCodeMessageIDs(t, repoRoot) {
+		for _, id := range productionErrorCodeMessageIDs(root) {
 			if _, ok := catalog[id]; !ok {
 				missing = append(missing, id)
 			}
@@ -58,13 +54,9 @@ var _ = Describe("committed localization catalog", func() {
 	})
 })
 
-type catalogTestTB interface {
-	Helper()
-	Fatalf(format string, args ...any)
-}
+func productionMessageIDConstants(repoRoot string) []string {
+	GinkgoHelper()
 
-func productionMessageIDConstants(t catalogTestTB, repoRoot string) []string {
-	t.Helper()
 	re := regexp.MustCompile(`(?m)(?:MessageID|ToolMessage|ToolDescription)[A-Za-z0-9_]*\s+[^=\n]*=\s+"([^"]+)"`)
 	ids := map[string]struct{}{}
 	err := filepath.WalkDir(filepath.Join(repoRoot, "internal"), func(path string, d os.DirEntry, err error) error {
@@ -90,9 +82,7 @@ func productionMessageIDConstants(t catalogTestTB, repoRoot string) []string {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk production Go files: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	out := make([]string, 0, len(ids))
 	for id := range ids {
 		out = append(out, id)
@@ -100,8 +90,9 @@ func productionMessageIDConstants(t catalogTestTB, repoRoot string) []string {
 	return out
 }
 
-func productionErrorCodeMessageIDs(t catalogTestTB, repoRoot string) []string {
-	t.Helper()
+func productionErrorCodeMessageIDs(repoRoot string) []string {
+	GinkgoHelper()
+
 	re := regexp.MustCompile(`(?m)(?:ErrCode|errCode|runtimeErrorCode)[A-Za-z0-9_]*\s+sharederrors\.ErrorCode\s*=\s*"([^"]+)"`)
 	ids := map[string]struct{}{}
 	for _, root := range []string{"internal", "cmd"} {
@@ -128,9 +119,7 @@ func productionErrorCodeMessageIDs(t catalogTestTB, repoRoot string) []string {
 			}
 			return nil
 		})
-		if err != nil {
-			t.Fatalf("walk %s Go files: %v", root, err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 	}
 	out := make([]string, 0, len(ids))
 	for id := range ids {
@@ -147,11 +136,10 @@ func messageIDForErrorCode(code string) string {
 	return "errors." + head + "." + tail
 }
 
-func repoRoot(t catalogTestTB) string {
-	t.Helper()
+func repoRoot() string {
+	GinkgoHelper()
+
 	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return filepath.Clean(filepath.Join(dir, "..", ".."))
 }
