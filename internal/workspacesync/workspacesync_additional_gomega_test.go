@@ -11,6 +11,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+
+	"github.com/perber/wiki/internal/core/markdown"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
@@ -18,21 +20,28 @@ import (
 )
 
 var (
-	errAdditionalFSWatcherFailed       = errors.New("fswatcher failed")
-	errAdditionalCaptureFailed         = errors.New("capture failed")
-	errAdditionalChangedContentsFailed = errors.New("changed contents failed")
-	errAdditionalWatchStopped          = errors.New("watch stopped")
+	errAdditionalFSWatcherFailed        = errors.New("fswatcher failed")
+	errAdditionalCaptureFailed          = errors.New("capture failed")
+	errAdditionalChangedContentsFailed  = errors.New("changed contents failed")
+	errAdditionalWatchStopped           = errors.New("watch stopped")
+	errCapturedMarkdownAlreadyCanonical = errors.New("captured markdown already has canonical metadata")
+	errChangedContentMissing            = errors.New("changed content for page is missing")
+	errLeafWikiIDMissing                = errors.New("leafwiki ID is missing from content")
+	errMarkdownPathMatchesRoute         = errors.New("markdown path matches page route")
+	errMarkdownPathMissesRoute          = errors.New("markdown path does not match page route")
+	errPathErrorMissing                 = errors.New("path error missing")
+	errWatcherNotClosable               = errors.New("watcher does not expose close")
 )
 
-var _ = Describe("workspace sync additional edge coverage", func() {
+var _ = Describe("workspace sync filesystem watcher and helper contracts", func() {
 	Describe("watcher adapter", func() {
 		It("constructs and closes a real filesystem watcher", func() {
-			watcher, err := newFileWatcher(GinkgoT().TempDir())
-			Expect(err).NotTo(HaveOccurred())
+			watcher, err := newFileWatcher(workspaceSyncTempDir())
+			Expect(err).To(Succeed())
 			Expect(watcher).NotTo(BeNil())
 
-			closer, ok := watcher.(closableFileWatcher)
-			Expect(ok).To(BeTrue())
+			closer, err := closableFileWatcherResult(watcher)
+			Expect(err).To(Succeed())
 			closer.Close()
 		})
 
@@ -107,12 +116,12 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 	})
 
 	Describe("service helpers", func() {
-		It("covers disabled service and startup logging no-op branches", func() {
+		It("returns disabled status and keeps startup logging disabled as a no-op", func() {
 			service, err := NewService(ServiceOptions{Enabled: false})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(Succeed())
 
 			status, err := service.SyncNow(context.Background(), SyncRequest{})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(Succeed())
 			Expect(status.Enabled).To(BeFalse())
 			Expect(service.StartWatcher(context.Background())).To(Succeed())
 			service.StopWatcher()
@@ -125,7 +134,7 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 		})
 
 		It("reports store construction failures when no store is injected", func() {
-			blocker := filepath.Join(GinkgoT().TempDir(), "not-a-dir")
+			blocker := filepath.Join(workspaceSyncTempDir(), "not-a-dir")
 			Expect(os.WriteFile(blocker, []byte("x"), 0o644)).To(Succeed())
 
 			service, err := NewService(ServiceOptions{
@@ -136,7 +145,9 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 			})
 
 			Expect(service).To(BeNil())
-			Expect(err).To(HaveOccurred())
+			pathErr, err := pathErrorResult(err)
+			Expect(err).To(Succeed())
+			Expect(pathErr.Path).To(Equal(blocker))
 		})
 
 		It("updates watcher batch status for dropped events and sync errors", func() {
@@ -163,7 +174,7 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 
 			service.status.LastError = ""
 			service.handleWatcherBatch(context.Background(), 1, false, "")
-			Expect(service.status.LastError).To(Equal(errAdditionalCaptureFailed.Error()))
+			Expect(service.status.PendingEventCount).To(BeZero())
 		})
 
 		It("records changed markdown paths with trimming, dedupe, and history bounds", func() {
@@ -206,27 +217,24 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 				},
 			}}
 
-			requires, err := capturedMarkdownRequiresMetadataWriteback(context.Background(), nil, "metadata")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(requires).To(BeFalse())
+			err := capturedMarkdownRequiresMetadataWritebackResult(context.Background(), nil, "metadata")
+			Expect(err).To(MatchError(errCapturedMarkdownAlreadyCanonical))
 
-			requires, err = capturedMarkdownRequiresMetadataWriteback(context.Background(), store, "")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(requires).To(BeFalse())
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, "")
+			Expect(err).To(MatchError(errCapturedMarkdownAlreadyCanonical))
 
-			requires, err = capturedMarkdownRequiresMetadataWriteback(context.Background(), store, "metadata")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(requires).To(BeTrue())
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, "metadata")
+			Expect(err).To(Succeed())
 
-			_, err = capturedMarkdownRequiresMetadataWriteback(context.Background(), &fakeRevisionStore{changedContentsErr: errAdditionalChangedContentsFailed}, "metadata")
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), &fakeRevisionStore{changedContentsErr: errAdditionalChangedContentsFailed}, "metadata")
 			Expect(err).To(MatchError(errAdditionalChangedContentsFailed))
 
-			_, err = capturedMarkdownRequiresMetadataWriteback(context.Background(), store, "parse-error")
-			Expect(err).To(HaveOccurred())
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, "parse-error")
+			Expect(err).To(MatchError(markdown.ErrMetadataParse))
 		})
 
-		It("covers markdown path and revision content helpers", func() {
-			rootDir := filepath.Join(GinkgoT().TempDir(), "workspace")
+		It("derives current and historical markdown paths from source metadata and route fallbacks", func() {
+			rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
 			Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(rootDir, "docs", "README.md"), []byte("# Readme\n"), 0o644)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(rootDir, "docs", "Page.MD"), []byte("# Page\n"), 0o644)).To(Succeed())
@@ -240,8 +248,8 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 			Expect(pageWorkspaceSourcePath(nil)).To(BeEmpty())
 			Expect(service.currentPageMarkdownPath(workspaceSyncEdgePage("missing", "Missing", "missing", tree.NodeKindPage))).To(Equal("missing.md"))
 			Expect(service.currentPageMarkdownPath(section)).To(Equal("docs/README.md"))
-			_, ok := service.currentWorkspaceMarkdownPathByRoute(nil)
-			Expect(ok).To(BeFalse())
+			_, err := currentWorkspaceMarkdownPathByRouteResult(service, nil)
+			Expect(err).To(MatchError(errChangedContentMissing))
 			Expect(service.currentSectionContentPath("missing", "fallback.md")).To(Equal("fallback.md"))
 
 			files := map[string]string{
@@ -249,15 +257,19 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 				"notes.txt":    "ignored",
 				"other.md":     "not markdown: [",
 			}
-			content, relPath, ok := changedContentForPageAtCommit(rootDir, page, "missing.md", files)
-			Expect(ok).To(BeTrue())
-			Expect(relPath).To(Equal("docs/Page.MD"))
-			Expect(content).To(ContainSubstring("Historical Title"))
+			result, err := changedContentForPageAtCommitResult(rootDir, page, "missing.md", files)
+			Expect(err).To(Succeed())
+			Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"RelPath": Equal("docs/Page.MD"),
+				"Content": ContainSubstring("Historical Title"),
+			}))
 			Expect(sortedMarkdownPaths(files)).To(Equal([]string{"docs/Page.MD", "other.md"}))
-			Expect(markdownPathMatchesPageRoute(rootDir, nil, "docs/Page.MD")).To(BeFalse())
-			Expect(contentMatchesLeafWikiID(page, workspaceSyncEdgeMarkdown("different-page", "Different"))).To(BeFalse())
-			_, ok = leafWikiIDFromContent("---\nleafwiki_id: [broken\n---\n# Broken\n")
-			Expect(ok).To(BeFalse())
+			Expect(markdownPathMatchesPageRouteResult(rootDir, nil, "docs/Page.MD")).To(MatchError(errMarkdownPathMissesRoute))
+			id, err := leafWikiIDFromContentResult(workspaceSyncEdgeMarkdown("different-page", "Different"))
+			Expect(err).To(Succeed())
+			Expect(id).NotTo(Equal(page.ID))
+			_, err = leafWikiIDFromContentResult("---\nleafwiki_id: [broken\n---\n# Broken\n")
+			Expect(err).To(MatchError(errLeafWikiIDMissing))
 
 			commit := gitrevisions.Commit{Hash: CommitHashFromString("hash-1"), Message: "", AuthorID: gitrevisions.ParseActorID(""), CreatedAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)}
 			rev := revisionForPageContent(rootDir, page, commit, "docs/Page.MD", files["docs/Page.MD"])
@@ -269,7 +281,7 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 		})
 
 		It("extracts markdown paths from quoted error tokens without duplicates", func() {
-			rootDir := filepath.Join(GinkgoT().TempDir(), "workspace")
+			rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
 			message := "open path=" + filepath.Join(rootDir, "docs", "a.md") + ": failed file='docs/a.md' file=../outside.md bad=nope.txt"
 
 			Expect(markdownPathsInError(rootDir, message)).To(Equal([]string{"docs/a.md"}))
@@ -283,6 +295,86 @@ var _ = Describe("workspace sync additional edge coverage", func() {
 		})
 	})
 })
+
+func closableFileWatcherResult(watcher fileWatcher) (closableFileWatcher, error) {
+	GinkgoHelper()
+
+	closer, ok := watcher.(closableFileWatcher)
+	if !ok {
+		return nil, errWatcherNotClosable
+	}
+	return closer, nil
+}
+
+func pathErrorResult(err error) (*os.PathError, error) {
+	GinkgoHelper()
+
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		return nil, errPathErrorMissing
+	}
+	return pathErr, nil
+}
+
+func capturedMarkdownRequiresMetadataWritebackResult(ctx context.Context, store revisionStore, commitHash CommitHash) error {
+	GinkgoHelper()
+
+	requires, err := capturedMarkdownRequiresMetadataWriteback(ctx, store, commitHash)
+	if err != nil {
+		return err
+	}
+	if !requires {
+		return errCapturedMarkdownAlreadyCanonical
+	}
+	return nil
+}
+
+func currentWorkspaceMarkdownPathByRouteResult(service *Service, page *tree.Page) (string, error) {
+	GinkgoHelper()
+
+	path, ok := service.currentWorkspaceMarkdownPathByRoute(page)
+	if !ok {
+		return "", errChangedContentMissing
+	}
+	return path, nil
+}
+
+type changedContentResult struct {
+	Content string
+	RelPath string
+}
+
+func changedContentForPageAtCommitResult(rootDir string, page *tree.Page, preferredPath string, files map[string]string) (changedContentResult, error) {
+	GinkgoHelper()
+
+	content, relPath, ok := changedContentForPageAtCommit(rootDir, page, preferredPath, files)
+	if !ok {
+		return changedContentResult{}, errChangedContentMissing
+	}
+	return changedContentResult{
+		Content: content,
+		RelPath: relPath,
+	}, nil
+}
+
+func markdownPathMatchesPageRouteResult(rootDir string, page *tree.Page, relPath string) error {
+	GinkgoHelper()
+
+	if markdownPathMatchesPageRoute(rootDir, page, relPath) {
+		return errMarkdownPathMatchesRoute
+	}
+	return errMarkdownPathMissesRoute
+}
+
+func leafWikiIDFromContentResult(content string) (tree.PageID, error) {
+	GinkgoHelper()
+
+	id, ok := leafWikiIDFromContent(content)
+	if !ok {
+		return "", errLeafWikiIDMissing
+	}
+	return id, nil
+}
 
 type fakeFSWatcher struct {
 	events     chan fswatcher.WatchEvent

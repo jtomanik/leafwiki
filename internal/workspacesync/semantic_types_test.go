@@ -6,10 +6,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 )
 
-var _ = It("WorkspaceSyncCommitHashContracts", func() {
-	var _ CommitHash = SyncStatus{}.LastCommitHash
-	var _ CommitHash = Snapshot{}.ID
-	var _ CommitHash = SnapshotList{}.NextCursor
-	var _ func(*Service, context.Context, CommitHash, Actor) (SyncStatus, error) = (*Service).RestoreWorkspace
-	var _ func(*Service, context.Context, CommitHash, Actor, Source) (SyncStatus, error) = (*Service).RestoreWorkspaceWithSource
+var _ = Describe("workspace sync commit hash contracts", func() {
+	It("keeps status snapshots and restore APIs typed by commit hash", func() {
+		var _ CommitHash = SyncStatus{}.LastCommitHash
+		var _ CommitHash = Snapshot{}.ID
+		var _ CommitHash = SnapshotList{}.NextCursor
+		var _ func(*Service, context.Context, CommitHash, Actor) (SyncStatus, error) = (*Service).RestoreWorkspace
+		var _ func(*Service, context.Context, CommitHash, Actor, Source) (SyncStatus, error) = (*Service).RestoreWorkspaceWithSource
+	})
 })

@@ -20,7 +20,7 @@ type markdownLinkRootPrefixScenarioCoverage struct {
 
 var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenarioCoverage{
 	{"Prefixed absolute page link resolves inside wiki root", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixResolvesPageInsideWikiRoot")},
-	{"Unprefixed absolute page link still resolves but canonicalizes to the configured prefix", mlrpEvidence("internal/workspacesync/service_test.go", "ServiceSyncNowCanonicalizesAbsoluteLinksWithMarkdownLinkRootPrefix")},
+	{"Unprefixed absolute page link still resolves but canonicalizes to the configured prefix", mlrpEvidence("internal/workspacesync/service_test.go", "adds the configured root prefix to absolute markdown links without repeat revisions")},
 	{"Configured prefix root resolves to the wiki root section", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixResolvesPrefixRootToWikiRoot")},
 	{"Configured prefix distinguishes section and page syntax", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixDistinguishesSectionAndPageSyntax")},
 	{"Relative links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesRelativeLinkUnchanged")},

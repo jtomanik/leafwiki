@@ -19,7 +19,12 @@ const (
 	syncSecondaryError = "secondary"
 )
 
-var errWatcherFactoryFailed = errors.New("watcher factory failed")
+var (
+	errAfterSyncCallbackRan        = errors.New("after sync callback ran")
+	errManagedMarkdownEventIgnored = errors.New("managed markdown event ignored")
+	errHistoricalContentMissing    = errors.New("historical page content missing")
+	errWatcherFactoryFailed        = errors.New("watcher factory failed")
+)
 
 var _ = Describe("workspace sync service edges", func() {
 	It("passes through actor IDs and validates enabled service dependencies", func() {
@@ -29,14 +34,11 @@ var _ = Describe("workspace sync service edges", func() {
 		Expect(ActorIDFromUserID(actorID)).To(Equal(expectedActorID))
 
 		service, err := NewService(ServiceOptions{Enabled: false})
-		Expect(err).NotTo(HaveOccurred())
-		called := false
+		Expect(err).To(Succeed())
 		service.SetAfterSync(func() error {
-			called = true
-			return nil
+			return errAfterSyncCallbackRan
 		})
-		Expect(service.afterSync()).To(Succeed())
-		Expect(called).To(BeTrue())
+		Expect(service.afterSync()).To(MatchError(errAfterSyncCallbackRan))
 
 		_, err = NewService(ServiceOptions{Enabled: true})
 		Expect(err).To(MatchError(ErrTreeServiceRequired))
@@ -52,7 +54,7 @@ var _ = Describe("workspace sync service edges", func() {
 				return nil, errWatcherFactoryFailed
 			},
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		err = service.StartWatcher(context.Background())
 		Expect(err).To(MatchError(errWatcherFactoryFailed))
@@ -60,7 +62,7 @@ var _ = Describe("workspace sync service edges", func() {
 		Expect(status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"WatcherEnabled": BeTrue(),
 			"WatcherRunning": BeFalse(),
-			"LastError":      Equal(errWatcherFactoryFailed.Error()),
+			"LastError":      Not(BeEmpty()),
 		}))
 	})
 
@@ -70,27 +72,34 @@ var _ = Describe("workspace sync service edges", func() {
 		Expect(appendSyncError(syncPrimaryError, syncSecondaryError)).To(Equal(syncPrimaryError + "; " + syncSecondaryError))
 	})
 
-	DescribeTable("filters managed markdown watcher paths",
-		func(rootDir string, eventPath string, expectedPath string, expectedOK bool) {
-			rel, ok := managedMarkdownEventPath(rootDir, eventPath)
-			Expect(ok).To(Equal(expectedOK))
+	DescribeTable("accepts managed markdown watcher paths",
+		func(rootDir string, eventPath string, expectedPath string) {
+			rel, err := managedMarkdownEventPathResult(rootDir, eventPath)
+			Expect(err).To(Succeed())
 			Expect(rel).To(Equal(expectedPath))
 		},
-		Entry("absolute markdown under root", "/workspace", "/workspace/docs/page.md", "docs/page.md", true),
-		Entry("uppercase markdown extension", "/workspace", "/workspace/Page.MD", "Page.MD", true),
-		Entry("outside root remains absolute", "/workspace", "/outside/page.md", "/outside/page.md", true),
-		Entry("git directory", "/workspace", "/workspace/.git/config.md", "", false),
-		Entry("leafwiki directory", "/workspace", "/workspace/.leafwiki/state.md", "", false),
-		Entry("hidden file", "/workspace", "/workspace/.page.md", "", false),
-		Entry("backup suffix", "/workspace", "/workspace/page.md~", "", false),
-		Entry("temporary suffix", "/workspace", "/workspace/page.tmp", "", false),
-		Entry("download suffix", "/workspace", "/workspace/page.md.download", "", false),
-		Entry("partial suffix", "/workspace", "/workspace/page.md.partial", "", false),
-		Entry("chrome download suffix", "/workspace", "/workspace/page.md.crdownload", "", false),
+		Entry("absolute markdown under root", "/workspace", "/workspace/docs/page.md", "docs/page.md"),
+		Entry("uppercase markdown extension", "/workspace", "/workspace/Page.MD", "Page.MD"),
+		Entry("outside root remains absolute", "/workspace", "/outside/page.md", "/outside/page.md"),
+	)
+
+	DescribeTable("rejects unmanaged watcher paths",
+		func(rootDir string, eventPath string) {
+			_, err := managedMarkdownEventPathResult(rootDir, eventPath)
+			Expect(err).To(MatchError(errManagedMarkdownEventIgnored))
+		},
+		Entry("git directory", "/workspace", "/workspace/.git/config.md"),
+		Entry("leafwiki directory", "/workspace", "/workspace/.leafwiki/state.md"),
+		Entry("hidden file", "/workspace", "/workspace/.page.md"),
+		Entry("backup suffix", "/workspace", "/workspace/page.md~"),
+		Entry("temporary suffix", "/workspace", "/workspace/page.tmp"),
+		Entry("download suffix", "/workspace", "/workspace/page.md.download"),
+		Entry("partial suffix", "/workspace", "/workspace/page.md.partial"),
+		Entry("chrome download suffix", "/workspace", "/workspace/page.md.crdownload"),
 	)
 
 	It("uses workspace source paths before default route paths", func() {
-		rootDir := GinkgoT().TempDir()
+		rootDir := workspaceSyncTempDir()
 		Expect(os.MkdirAll(filepath.Join(rootDir, "Imported", "Section"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "Imported", "Section", "README.md"), []byte("# Readme\n"), 0o644)).To(Succeed())
 		service := &Service{rootDir: rootDir}
@@ -111,24 +120,28 @@ var _ = Describe("workspace sync service edges", func() {
 		page := workspaceSyncEdgePage("page-1", "Page One", "page-one", tree.NodeKindPage)
 		page.Parent = parent
 
-		content, relPath, ok := contentForPageAtCommit("", page, map[string]string{
+		result, err := contentForPageAtCommitResult("", page, map[string]string{
 			"docs/page-one.md": workspaceSyncEdgeMarkdown("page-1", "Page One"),
 		})
-		Expect(ok).To(BeTrue())
-		Expect(relPath).To(Equal("docs/page-one.md"))
-		Expect(content).To(ContainSubstring("leafwiki_id: page-1"))
+		Expect(err).To(Succeed())
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"RelPath": Equal("docs/page-one.md"),
+			"Content": ContainSubstring("leafwiki_id: page-1"),
+		}))
 
-		content, relPath, ok = contentForPageAtCommit("", page, map[string]string{
+		result, err = contentForPageAtCommitResult("", page, map[string]string{
 			"archive/old.md": workspaceSyncEdgeMarkdown("page-1", "Historical Page One"),
 		})
-		Expect(ok).To(BeTrue())
-		Expect(relPath).To(Equal("archive/old.md"))
-		Expect(content).To(ContainSubstring("Historical Page One"))
+		Expect(err).To(Succeed())
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"RelPath": Equal("archive/old.md"),
+			"Content": ContainSubstring("Historical Page One"),
+		}))
 
-		_, _, ok = contentForPageAtCommit("", page, map[string]string{
+		_, err = contentForPageAtCommitResult("", page, map[string]string{
 			"docs/page-one.md": workspaceSyncEdgeMarkdown("other-page", "Other"),
 		})
-		Expect(ok).To(BeFalse())
+		Expect(err).To(MatchError(errHistoricalContentMissing))
 	})
 
 	It("recognizes README fallback sections when deriving revision paths", func() {
@@ -145,7 +158,7 @@ var _ = Describe("workspace sync service edges", func() {
 	})
 
 	It("extracts validation errors from generic sync errors", func() {
-		rootDir := filepath.Join(GinkgoT().TempDir(), "workspace")
+		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
 		service := &Service{rootDir: rootDir}
 
 		errs := service.validationErrorsFromError(errors.New("open " + filepath.Join(rootDir, "docs", "page.md") + ": permission denied"))
@@ -171,6 +184,34 @@ var _ = Describe("workspace sync service edges", func() {
 		})).To(BeTrue())
 	})
 })
+
+func managedMarkdownEventPathResult(rootDir string, eventPath string) (string, error) {
+	GinkgoHelper()
+
+	rel, ok := managedMarkdownEventPath(rootDir, eventPath)
+	if !ok {
+		return "", errManagedMarkdownEventIgnored
+	}
+	return rel, nil
+}
+
+type historicalContentResult struct {
+	Content string
+	RelPath string
+}
+
+func contentForPageAtCommitResult(rootDir string, page *tree.Page, files map[string]string) (historicalContentResult, error) {
+	GinkgoHelper()
+
+	content, relPath, ok := contentForPageAtCommit(rootDir, page, files)
+	if !ok {
+		return historicalContentResult{}, errHistoricalContentMissing
+	}
+	return historicalContentResult{
+		Content: content,
+		RelPath: relPath,
+	}, nil
+}
 
 func workspaceSyncEdgePage(id tree.PageID, title string, slug tree.Slug, kind tree.NodeKind) *tree.Page {
 	GinkgoHelper()

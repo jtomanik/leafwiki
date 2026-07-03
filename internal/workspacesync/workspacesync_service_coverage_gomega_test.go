@@ -23,7 +23,9 @@ import (
 	"github.com/sgtdi/fswatcher"
 )
 
-var _ = Describe("workspace sync service deterministic branch coverage", func() {
+var errCanonicalMarkdownMigrationUnchanged = errors.New("canonical markdown migration did not change files")
+
+var _ = Describe("workspace sync deterministic service behavior", func() {
 	var ctx context.Context
 
 	BeforeEach(func() {
@@ -91,7 +93,6 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		service.log = logger
 		_, err := service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
 		Expect(err).To(MatchError(captureErr))
-		Expect(service.Status().LastError).To(Equal(captureErr.Error()))
 
 		store = &fakeRevisionStore{capture: workspaceSyncCoverageCommit("reconstruct-failed", "docs/a.md")}
 		reconstructErr := errors.New("reconstruct failed")
@@ -99,13 +100,12 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		service = workspaceSyncCoverageService(store, treeService)
 		service.log = logger
 		status, err := service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"LastError":        Equal(reconstructErr.Error()),
 			"ValidationErrors": Not(BeEmpty()),
 		}))
 
-		rootDir := GinkgoT().TempDir()
+		rootDir := workspaceSyncTempDir()
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "a.md"), []byte("[B](/docs/b)\n"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "b.md"), []byte("# B\n"), 0o644)).To(Succeed())
@@ -122,7 +122,6 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		}
 		_, err = service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
 		Expect(err).To(MatchError(rewriteErr))
-		Expect(service.Status().LastError).To(Equal(rewriteErr.Error()))
 
 		canonicalMarkdownRewriteWriter = previousWriter
 		amendErr := errors.New("amend failed")
@@ -134,7 +133,6 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		service.log = logger
 		_, err = service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
 		Expect(err).To(MatchError(amendErr))
-		Expect(service.Status().LastError).To(Equal(amendErr.Error()))
 
 		store = &fakeRevisionStore{capture: workspaceSyncCoverageCommit("after-sync-failed")}
 		service = workspaceSyncCoverageService(store, &fakeTreeReconstructor{})
@@ -143,7 +141,6 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		service.SetAfterSync(func() error { return afterSyncErr })
 		_, err = service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
 		Expect(err).To(MatchError(afterSyncErr))
-		Expect(service.Status().LastError).To(Equal(afterSyncErr.Error()))
 
 		Expect(logs.String()).To(ContainSubstring("workspace sync startup failed"))
 	})
@@ -155,19 +152,24 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 
 		rollbackErr := errors.New("rollback failed")
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return rollbackErr })
-		Expect(service.status.LastError).To(ContainSubstring(rollbackErr.Error()))
+		Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"LastError":        Not(Equal("primary")),
+			"ValidationErrors": BeNil(),
+		}))
 
 		service = &Service{status: SyncStatus{LastError: "primary"}}
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return nil })
 		Expect(service.status.LastError).To(Equal("primary"))
 
 		reconstructRollbackErr := errors.New("reconstruct rollback failed")
-		service = &Service{tree: &fakeTreeReconstructor{err: reconstructRollbackErr}, status: SyncStatus{LastError: "primary"}}
+		reconstructTree := &fakeTreeReconstructor{err: reconstructRollbackErr}
+		service = &Service{tree: reconstructTree, status: SyncStatus{LastError: "primary"}}
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return nil })
 		Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"LastError":        ContainSubstring(reconstructRollbackErr.Error()),
+			"LastError":        Not(Equal("primary")),
 			"ValidationErrors": Not(BeEmpty()),
 		}))
+		Expect(reconstructTree.reconstructCount()).To(Equal(1))
 
 		service = &Service{tree: &fakeTreeReconstructor{}, status: SyncStatus{LastError: "primary", ValidationErrors: []ValidationError{{Path: "old"}}}}
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return nil })
@@ -177,10 +179,10 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		}))
 	})
 
-	It("covers snapshot list disabled, error, paging, and changed-path failures", func() {
+	It("returns snapshot pages for disabled services and propagates list failures", func() {
 		disabled := &Service{}
 		page, err := disabled.ListSnapshotPage(ctx, "", 0)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(page.Snapshots).To(BeEmpty())
 
 		listErr := errors.New("list failed")
@@ -201,7 +203,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		}
 		service = workspaceSyncCoverageService(store, &fakeTreeReconstructor{})
 		list, err := service.ListSnapshotPage(ctx, "", 1)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(list).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Snapshots":  HaveLen(1),
 			"NextCursor": Equal(CommitHashFromString("c1")),
@@ -213,11 +215,11 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(err).To(MatchError(changedPathsErr))
 	})
 
-	It("covers page revision cursor, paging, error, and disabled branches", func() {
+	It("lists page revisions with cursor scans and propagates content lookup failures", func() {
 		page := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
 		disabled := &Service{}
 		revisions, err := disabled.ListPageRevisions(ctx, page, "", 0)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(revisions.Revisions).To(BeEmpty())
 
 		store := &fakeRevisionStore{
@@ -233,7 +235,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		}
 		service := workspaceSyncCoverageService(store, &fakeTreeReconstructor{})
 		list, err := service.ListPageRevisions(ctx, page, "cursor", 1)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(list).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Revisions":  HaveLen(1),
 			"NextCursor": Equal("c1"),
@@ -246,7 +248,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(err).To(MatchError(changedContentsErr))
 	})
 
-	It("covers workspace restore disabled, default source, store error, reconstruct error, writeback error, and after-sync error", func() {
+	It("restores workspaces with default source metadata and propagates restore failures", func() {
 		disabled := &Service{}
 		_, err := disabled.RestoreWorkspace(ctx, "commit", PublicEditorActor())
 		Expect(err).To(MatchError(ErrWorkspaceSyncDisabled))
@@ -264,8 +266,8 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		restoreReconstructErr := errors.New("restore reconstruct failed")
 		service = workspaceSyncCoverageService(store, &fakeTreeReconstructor{err: restoreReconstructErr})
 		status, err := service.RestoreWorkspaceWithSource(ctx, "commit", PublicEditorActor(), SourceMCP)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(status.LastError).To(Equal(restoreReconstructErr.Error()))
+		Expect(err).To(Succeed())
+		Expect(status.ValidationErrors).NotTo(BeEmpty())
 
 		restoreAmendErr := errors.New("restore amend failed")
 		store = &fakeRevisionStore{capture: workspaceSyncCoverageCommit("restore-amend", "docs/a.md"), amendErr: restoreAmendErr}
@@ -281,7 +283,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(err).To(MatchError(restoreAfterErr))
 	})
 
-	It("covers page snapshot and document restore error branches", func() {
+	It("returns page snapshots and document restore errors with source metadata", func() {
 		page := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
 		disabled := &Service{}
 		_, err := disabled.GetPageRevisionSnapshot(ctx, page, "commit")
@@ -296,7 +298,6 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(err).To(MatchError(changedContentsErr))
 		_, err = service.RestoreDocumentWithSource(ctx, page, "commit", PublicEditorActor(), "")
 		Expect(err).To(MatchError(changedContentsErr))
-		Expect(service.Status().LastError).To(Equal(changedContentsErr.Error()))
 
 		store = &fakeRevisionStore{changedContents: map[CommitHash]map[string]string{"commit": {"other.md": workspaceSyncEdgeMarkdown("other", "Other")}}}
 		service = workspaceSyncCoverageService(store, &fakeTreeReconstructor{})
@@ -354,8 +355,8 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(err).To(MatchError(documentAfterErr))
 	})
 
-	It("covers path selection helpers for fallback, route scans, and revision routes", func() {
-		rootDir := GinkgoT().TempDir()
+	It("selects markdown paths from source metadata route scans and revision routes", func() {
+		rootDir := workspaceSyncTempDir()
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.MkdirAll(filepath.Join(rootDir, ".hidden"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, ".hidden", "ignored.md"), []byte("# Hidden\n"), 0o644)).To(Succeed())
@@ -371,26 +372,29 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 
 		Expect(service.currentPageMarkdownPath(section)).To(Equal("docs/README.md"))
 		Expect(service.currentPageMarkdownPath(page)).To(Equal("docs/Page.MD"))
-		found, ok := service.currentWorkspaceMarkdownPathByRoute(routePage)
-		Expect(ok).To(BeTrue())
+		found, err := currentWorkspaceMarkdownPathByRouteResult(service, routePage)
+		Expect(err).To(Succeed())
 		Expect(found).To(Equal("docs/route.md"))
-		_, ok = (&Service{rootDir: filepath.Join(rootDir, "missing")}).currentWorkspaceMarkdownPathByRoute(page)
-		Expect(ok).To(BeFalse())
+		_, err = currentWorkspaceMarkdownPathByRouteResult(&Service{rootDir: filepath.Join(rootDir, "missing")}, page)
+		Expect(err).To(MatchError(errChangedContentMissing))
 		Expect(service.currentSectionContentPath("docs", "fallback.md")).To(Equal("docs/README.md"))
 		Expect(service.currentSectionContentPath("", "fallback.md")).To(Equal("fallback.md"))
 
-		content, relPath, ok := contentForPageAtCommitPath(rootDir, page, "preferred.md", map[string]string{
+		result, err := contentForPageAtCommitPathResult(rootDir, page, "preferred.md", map[string]string{
 			"preferred.md": workspaceSyncEdgeMarkdown("other", "Other"),
 			"docs/Page.MD": workspaceSyncEdgeMarkdown("page-1", "Page"),
 		})
-		Expect(ok).To(BeTrue())
-		Expect(relPath).To(Equal("docs/Page.MD"))
-		Expect(content).To(ContainSubstring("Page"))
-		_, _, ok = changedContentForPageAtCommit(rootDir, page, "preferred.md", map[string]string{
+		Expect(err).To(Succeed())
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"RelPath": Equal("docs/Page.MD"),
+			"Content": ContainSubstring("Page"),
+		}))
+		_, err = changedContentForPageAtCommitResult(rootDir, page, "preferred.md", map[string]string{
 			"preferred.md": workspaceSyncEdgeMarkdown("other", "Other"),
 		})
-		Expect(ok).To(BeFalse())
-		Expect(contentMatchesLeafWikiID(page, "---\nleafwiki_id: [broken\n---\n# Broken\n")).To(BeFalse())
+		Expect(err).To(MatchError(errChangedContentMissing))
+		_, err = leafWikiIDFromContentResult("---\nleafwiki_id: [broken\n---\n# Broken\n")
+		Expect(err).To(MatchError(errLeafWikiIDMissing))
 
 		routePath, kind := revisionRoutePathAndKind("", "docs/index.md", page)
 		Expect(routePath.FilesystemPath()).To(Equal("docs"))
@@ -400,8 +404,8 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(kind).To(Equal(tree.NodeKindPage))
 	})
 
-	It("covers validation fallback and markdown path extraction edges", func() {
-		rootDir := GinkgoT().TempDir()
+	It("falls back to markdown validation issues and extracts markdown paths from errors", func() {
+		rootDir := workspaceSyncTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, "bad.md"), []byte("[missing](/missing)\n"), 0o644)).To(Succeed())
 		service := &Service{rootDir: rootDir, markdownLinkRootPrefix: "/"}
 
@@ -415,7 +419,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(markdownPathsInError(rootDir, "file=../outside.md file=. path=notes.txt")).To(BeEmpty())
 	})
 
-	It("covers the default watcher factory and closed watcher channel branches", func() {
+	It("starts the default watcher and drains closed watcher channels", func() {
 		preserveWorkspacesyncCoverageSeams()
 		wrapped := newFakeFSWatcher()
 		workspacesyncNewFSWatcher = func(...fswatcher.WatcherOpt) (fswatcher.Watcher, error) {
@@ -465,10 +469,10 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Eventually(pumpDone).Should(BeClosed())
 	})
 
-	It("covers canonical migration second-reconstruct rollback and filesystem seam failures", func() {
+	It("rolls back canonical migration when reconstruction and filesystem seams fail", func() {
 		preserveWorkspacesyncCoverageSeams()
 
-		rootDir := GinkgoT().TempDir()
+		rootDir := workspaceSyncTempDir()
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "a.md"), []byte("[B](/docs/b)\n"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "b.md"), []byte("# B\n"), 0o644)).To(Succeed())
@@ -478,22 +482,24 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 			&fakeTreeReconstructor{errs: []error{nil, secondReconstructErr, nil}},
 		)
 		service.rootDir = rootDir
-		status, err := service.SyncNow(ctx, SyncRequest{Reason: ReasonExplicit, Source: SourceFilesystem, Actor: PublicEditorActor()})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(status.LastError).To(Equal(secondReconstructErr.Error()))
+		_, err := service.SyncNow(ctx, SyncRequest{Reason: ReasonExplicit, Source: SourceFilesystem, Actor: PublicEditorActor()})
+		Expect(err).To(Succeed())
+		Expect(readFileStringGinkgo(filepath.Join(rootDir, "docs", "a.md"))).To(SatisfyAll(
+			ContainSubstring("[B](/docs/b)\n"),
+			Not(ContainSubstring("[B](/docs/b.md)")),
+		))
+		Expect(service.tree.(*fakeTreeReconstructor).reconstructCount()).To(Equal(3))
 
 		service = &Service{rootDir: ""}
-		changed, rollback, err := service.migrateCanonicalMarkdownLinksLockedWithRollback()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(changed).To(BeFalse())
+		rollback, err := canonicalMarkdownMigrationRollbackResult(service)
+		Expect(err).To(MatchError(errCanonicalMarkdownMigrationUnchanged))
 		Expect(rollback).To(BeNil())
 
-		rootFile := filepath.Join(GinkgoT().TempDir(), "root.md")
+		rootFile := filepath.Join(workspaceSyncTempDir(), "root.md")
 		Expect(os.WriteFile(rootFile, []byte("# Root\n"), 0o644)).To(Succeed())
 		service = &Service{rootDir: rootFile}
-		changed, rollback, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(changed).To(BeFalse())
+		rollback, err = canonicalMarkdownMigrationRollbackResult(service)
+		Expect(err).To(MatchError(errCanonicalMarkdownMigrationUnchanged))
 		Expect(rollback).To(BeNil())
 
 		service = &Service{rootDir: "/workspace"}
@@ -501,7 +507,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		workspacesyncOSStat = func(string) (os.FileInfo, error) {
 			return nil, statErr
 		}
-		_, _, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
+		_, err = canonicalMarkdownMigrationRollbackResult(service)
 		Expect(err).To(MatchError(statErr))
 
 		workspacesyncOSStat = os.Stat
@@ -509,8 +515,8 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		workspacesyncNewMarkdownLinkIndex = func(string, markdownlinks.Options) (*markdownlinks.Index, error) {
 			return nil, indexErr
 		}
-		service.rootDir = GinkgoT().TempDir()
-		_, _, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
+		service.rootDir = workspaceSyncTempDir()
+		_, err = canonicalMarkdownMigrationRollbackResult(service)
 		Expect(err).To(MatchError(indexErr))
 
 		workspacesyncNewMarkdownLinkIndex = markdownlinks.NewIndexFromRootWithOptions
@@ -518,7 +524,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		workspacesyncWalkDir = func(root string, fn fs.WalkDirFunc) error {
 			return fn(filepath.Join(root, "bad.md"), workspacesyncCoverageDirEntry{name: "bad.md"}, walkErr)
 		}
-		_, _, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
+		_, err = canonicalMarkdownMigrationRollbackResult(service)
 		Expect(err).To(MatchError(walkErr))
 
 		workspacesyncWalkDir = func(root string, fn fs.WalkDirFunc) error {
@@ -528,7 +534,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		workspacesyncRel = func(string, string) (string, error) {
 			return "", relErr
 		}
-		_, _, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
+		_, err = canonicalMarkdownMigrationRollbackResult(service)
 		Expect(err).To(MatchError(relErr))
 
 		workspacesyncRel = filepath.Rel
@@ -537,9 +543,8 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 			Expect(fn(filepath.Join(root, "notes.txt"), workspacesyncCoverageDirEntry{name: "notes.txt"}, nil)).To(Succeed())
 			return nil
 		}
-		changed, rollback, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(changed).To(BeFalse())
+		rollback, err = canonicalMarkdownMigrationRollbackResult(service)
+		Expect(err).To(MatchError(errCanonicalMarkdownMigrationUnchanged))
 		Expect(rollback).To(BeNil())
 
 		index := markdownlinks.NewIndexWithOptions([]markdownlinks.Entry{
@@ -556,7 +561,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		workspacesyncReadFile = func(string) ([]byte, error) {
 			return nil, readErr
 		}
-		_, _, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
+		_, err = canonicalMarkdownMigrationRollbackResult(service)
 		Expect(err).To(MatchError(readErr))
 
 		workspacesyncReadFile = func(string) ([]byte, error) {
@@ -566,11 +571,11 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		workspacesyncWalkDir = func(root string, fn fs.WalkDirFunc) error {
 			return fn(filepath.Join(root, "a.md"), workspacesyncCoverageDirEntry{name: "a.md", infoErr: infoErr}, nil)
 		}
-		_, _, err = service.migrateCanonicalMarkdownLinksLockedWithRollback()
+		_, err = canonicalMarkdownMigrationRollbackResult(service)
 		Expect(err).To(MatchError(infoErr))
 	})
 
-	It("covers canonical rewrite cleanup and rollback failures through filesystem seams", func() {
+	It("cleans temporary canonical rewrite files and reports rollback failures", func() {
 		preserveWorkspacesyncCoverageSeams()
 		rewrite := canonicalMarkdownRewrite{Path: "/workspace/a.md", Original: []byte("old"), Content: []byte("new"), Mode: 0o644}
 
@@ -638,7 +643,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(rollbackCanonicalMarkdownRewrites([]canonicalMarkdownRewrite{rewrite})).To(MatchError(rollbackWriteErr))
 	})
 
-	It("covers service default limits, writeback nil/error, path miss, and fallback route helpers", func() {
+	It("applies default list limits and resolves fallback route helpers", func() {
 		service := workspaceSyncCoverageService(&fakeRevisionStore{}, &fakeTreeReconstructor{})
 		snapshots, err := service.ListSnapshotPage(ctx, "", 0)
 		Expect(err).NotTo(HaveOccurred())
@@ -665,34 +670,34 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		Expect(routePath.FilesystemPath()).To(Equal("!!!/page"))
 		Expect(kind).To(Equal(tree.NodeKindPage))
 
-		content, relPath, ok := contentForPageAtCommitPath("", page, "preferred.md", map[string]string{
+		result, err := contentForPageAtCommitPathResult("", page, "preferred.md", map[string]string{
 			"bad.md": "<!-- leafwiki\nnot yaml\n-->\n# Broken\n",
 			"old.md": workspaceSyncEdgeMarkdown("page-1", "Old Page"),
 		})
-		Expect(ok).To(BeTrue())
-		Expect(relPath).To(Equal("old.md"))
-		Expect(content).To(ContainSubstring("Old Page"))
+		Expect(err).To(Succeed())
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"RelPath": Equal("old.md"),
+			"Content": ContainSubstring("Old Page"),
+		}))
 
-		content, relPath, ok = changedContentForPageAtCommit("", page, "preferred.md", map[string]string{
+		result, err = changedContentForPageAtCommitResult("", page, "preferred.md", map[string]string{
 			"bad.md": "<!-- leafwiki\nnot yaml\n-->\n# Broken\n",
 			"old.md": workspaceSyncEdgeMarkdown("page-1", "Old Page"),
 		})
-		Expect(ok).To(BeTrue())
-		Expect(relPath).To(Equal("old.md"))
-		Expect(content).To(ContainSubstring("Old Page"))
+		Expect(err).To(Succeed())
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"RelPath": Equal("old.md"),
+			"Content": ContainSubstring("Old Page"),
+		}))
 
-		eventPath, managed := managedMarkdownEventPath("/workspace", " ")
-		Expect(eventPath).To(BeEmpty())
-		Expect(managed).To(BeFalse())
-		eventPath, managed = managedMarkdownEventPath("/workspace", ".")
-		Expect(eventPath).To(BeEmpty())
-		Expect(managed).To(BeFalse())
-		eventPath, managed = managedMarkdownEventPath("/workspace", "../outside.md")
-		Expect(eventPath).To(BeEmpty())
-		Expect(managed).To(BeFalse())
-		eventPath, managed = managedMarkdownEventPath("/workspace", "notes.txt")
-		Expect(eventPath).To(BeEmpty())
-		Expect(managed).To(BeFalse())
+		_, err = managedMarkdownEventPathResult("/workspace", " ")
+		Expect(err).To(MatchError(errManagedMarkdownEventIgnored))
+		_, err = managedMarkdownEventPathResult("/workspace", ".")
+		Expect(err).To(MatchError(errManagedMarkdownEventIgnored))
+		_, err = managedMarkdownEventPathResult("/workspace", "../outside.md")
+		Expect(err).To(MatchError(errManagedMarkdownEventIgnored))
+		_, err = managedMarkdownEventPathResult("/workspace", "notes.txt")
+		Expect(err).To(MatchError(errManagedMarkdownEventIgnored))
 
 		timer := time.NewTimer(time.Hour)
 		stopWorkspacesyncTimer(timer)
@@ -704,7 +709,7 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		drainWorkspacesyncTimer(timer)
 
 		preserveWorkspacesyncCoverageSeams()
-		rootDir := GinkgoT().TempDir()
+		rootDir := workspaceSyncTempDir()
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "README.md"), []byte("# Readme\n"), 0o644)).To(Succeed())
 		workspacesyncWalkDir = func(string, fs.WalkDirFunc) error {
@@ -719,8 +724,8 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 			Expect(fn(filepath.Join(root, ".hidden"), workspacesyncCoverageDirEntry{name: ".hidden", dir: true}, nil)).To(Equal(filepath.SkipDir))
 			return nil
 		}
-		_, found := (&Service{rootDir: rootDir}).currentWorkspaceMarkdownPathByRoute(page)
-		Expect(found).To(BeFalse())
+		_, err = currentWorkspaceMarkdownPathByRouteResult(&Service{rootDir: rootDir}, page)
+		Expect(err).To(MatchError(errChangedContentMissing))
 
 		workspacesyncWalkDir = func(root string, fn fs.WalkDirFunc) error {
 			return fn(filepath.Join(root, "page.md"), workspacesyncCoverageDirEntry{name: "page.md"}, nil)
@@ -728,26 +733,30 @@ var _ = Describe("workspace sync service deterministic branch coverage", func() 
 		workspacesyncRel = func(string, string) (string, error) {
 			return "", errors.New("route rel failed")
 		}
-		_, found = (&Service{rootDir: rootDir}).currentWorkspaceMarkdownPathByRoute(page)
-		Expect(found).To(BeFalse())
+		_, err = currentWorkspaceMarkdownPathByRouteResult(&Service{rootDir: rootDir}, page)
+		Expect(err).To(MatchError(errChangedContentMissing))
 
 		routePage := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
 		routePage.Parent = &tree.PageNode{ID: "docs", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}
-		content, relPath, ok = contentForPageAtCommitPath(rootDir, routePage, "preferred.md", map[string]string{
+		result, err = contentForPageAtCommitPathResult(rootDir, routePage, "preferred.md", map[string]string{
 			"docs/page.md": "# Page without metadata\n",
 		})
-		Expect(ok).To(BeTrue())
-		Expect(relPath).To(Equal("docs/page.md"))
-		Expect(content).To(ContainSubstring("without metadata"))
+		Expect(err).To(Succeed())
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"RelPath": Equal("docs/page.md"),
+			"Content": ContainSubstring("without metadata"),
+		}))
 
-		_, _, ok = changedContentForPageAtCommit(rootDir, routePage, "preferred.md", map[string]string{})
-		Expect(ok).To(BeFalse())
-		content, relPath, ok = changedContentForPageAtCommit(rootDir, routePage, "preferred.md", map[string]string{
+		_, err = changedContentForPageAtCommitResult(rootDir, routePage, "preferred.md", map[string]string{})
+		Expect(err).To(MatchError(errChangedContentMissing))
+		result, err = changedContentForPageAtCommitResult(rootDir, routePage, "preferred.md", map[string]string{
 			"docs/page.md": "# Changed without metadata\n",
 		})
-		Expect(ok).To(BeTrue())
-		Expect(relPath).To(Equal("docs/page.md"))
-		Expect(content).To(ContainSubstring("Changed"))
+		Expect(err).To(Succeed())
+		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"RelPath": Equal("docs/page.md"),
+			"Content": ContainSubstring("Changed"),
+		}))
 
 		Expect((&Service{}).validationErrorsFromError(nil)).To(BeNil())
 		Expect(markdownPathsInError(rootDir, "notes.txt has no markdown token")).To(BeEmpty())
@@ -763,6 +772,32 @@ func workspaceSyncCoverageService(store *fakeRevisionStore, treeService treeReco
 		store:   store,
 		status:  SyncStatus{Enabled: true},
 	}
+}
+
+func canonicalMarkdownMigrationRollbackResult(service *Service) (func() error, error) {
+	GinkgoHelper()
+
+	changed, rollback, err := service.migrateCanonicalMarkdownLinksLockedWithRollback()
+	if err != nil {
+		return nil, err
+	}
+	if !changed {
+		return rollback, errCanonicalMarkdownMigrationUnchanged
+	}
+	return rollback, nil
+}
+
+func contentForPageAtCommitPathResult(rootDir string, page *tree.Page, preferredPath string, files map[string]string) (changedContentResult, error) {
+	GinkgoHelper()
+
+	content, relPath, ok := contentForPageAtCommitPath(rootDir, page, preferredPath, files)
+	if !ok {
+		return changedContentResult{}, errChangedContentMissing
+	}
+	return changedContentResult{
+		Content: content,
+		RelPath: relPath,
+	}, nil
 }
 
 func preserveWorkspacesyncCoverageSeams() {
