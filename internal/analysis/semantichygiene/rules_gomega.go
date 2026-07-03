@@ -145,7 +145,7 @@ func checkGomegaIgnoredSemanticBoolean(ctx *analysisContext, assign *ast.AssignS
 		return
 	}
 	call, ok := unparenExpr(assign.Rhs[0]).(*ast.CallExpr)
-	if !ok || !callTargetsLeafWikiProduction(ctx, call) {
+	if !ok {
 		return
 	}
 	results, ok := ctx.pass.TypesInfo.TypeOf(call).(*types.Tuple)
@@ -160,8 +160,18 @@ func checkGomegaIgnoredSemanticBoolean(ctx *analysisContext, assign *ast.AssignS
 		if !ok || ident.Name != "_" {
 			continue
 		}
+		if !callReturnsSemanticBoolean(ctx, call, results, i) {
+			continue
+		}
 		ctx.report(ruleGomegaIgnoredSemanticBoolean, ident, gomegaIgnoredSemanticBooleanDiagnostic())
 	}
+}
+
+func callReturnsSemanticBoolean(ctx *analysisContext, call *ast.CallExpr, results *types.Tuple, index int) bool {
+	if callTargetsLeafWikiProduction(ctx, call) {
+		return true
+	}
+	return callTargetsTestLocalSemanticLookup(ctx, call, results, index)
 }
 
 func callTargetsLeafWikiProduction(ctx *analysisContext, call *ast.CallExpr) bool {
@@ -176,6 +186,78 @@ func callTargetsLeafWikiProduction(ctx *analysisContext, call *ast.CallExpr) boo
 		}
 	}
 	path := fn.Pkg().Path()
+	return path == ctx.pass.Pkg.Path() || strings.HasPrefix(path, "github.com/perber/wiki/")
+}
+
+func callTargetsTestLocalSemanticLookup(ctx *analysisContext, call *ast.CallExpr, results *types.Tuple, ignoredBoolIndex int) bool {
+	fn := calledFunctionObject(ctx, call)
+	if fn == nil || !fn.Pos().IsValid() {
+		return false
+	}
+	filename := ctx.filename(fn.Pos())
+	if !isTestFile(filename) && !isTestSupportFile(filename) {
+		return false
+	}
+	if !semanticLookupFunctionName(fn.Name()) {
+		return false
+	}
+	return tupleHasLeafWikiDomainResult(ctx, results, ignoredBoolIndex)
+}
+
+func semanticLookupFunctionName(name string) bool {
+	canonical := canonicalName(name)
+	return strings.HasPrefix(canonical, "find") ||
+		strings.HasPrefix(canonical, "lookup") ||
+		strings.HasPrefix(canonical, "resolve") ||
+		strings.Contains(canonical, "registered") ||
+		strings.Contains(canonical, "provider") ||
+		strings.Contains(canonical, "grant") ||
+		strings.Contains(canonical, "remoteuser")
+}
+
+func tupleHasLeafWikiDomainResult(ctx *analysisContext, results *types.Tuple, ignoredBoolIndex int) bool {
+	for i := 0; i < results.Len(); i++ {
+		if i == ignoredBoolIndex {
+			continue
+		}
+		typ := results.At(i).Type()
+		if isBoolType(typ) || typeImplementsError(typ) {
+			continue
+		}
+		if typeContainsLeafWikiDomainType(ctx, typ) {
+			return true
+		}
+	}
+	return false
+}
+
+func typeContainsLeafWikiDomainType(ctx *analysisContext, typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	typ = types.Unalias(typ)
+	switch t := typ.(type) {
+	case *types.Pointer:
+		return typeContainsLeafWikiDomainType(ctx, t.Elem())
+	case *types.Named:
+		return namedTypeIsLeafWikiDomain(ctx, t)
+	case *types.Slice:
+		return typeContainsLeafWikiDomainType(ctx, t.Elem())
+	case *types.Array:
+		return typeContainsLeafWikiDomainType(ctx, t.Elem())
+	case *types.Map:
+		return typeContainsLeafWikiDomainType(ctx, t.Key()) ||
+			typeContainsLeafWikiDomainType(ctx, t.Elem())
+	default:
+		return false
+	}
+}
+
+func namedTypeIsLeafWikiDomain(ctx *analysisContext, named *types.Named) bool {
+	if named == nil || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return false
+	}
+	path := named.Obj().Pkg().Path()
 	return path == ctx.pass.Pkg.Path() || strings.HasPrefix(path, "github.com/perber/wiki/")
 }
 

@@ -159,7 +159,7 @@ func gomegaCommaOKAssertionDiagnostic() string {
 }
 
 func gomegaIgnoredSemanticBooleanDiagnostic() string {
-	return "assert the semantic presence/status result instead of discarding a production boolean return with _"
+	return "assert the semantic presence/status result instead of discarding a semantic boolean return with _"
 }
 
 func gomegaProxyBooleanDiagnostic() string {

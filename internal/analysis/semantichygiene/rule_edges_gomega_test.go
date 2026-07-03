@@ -1330,7 +1330,7 @@ func TestAgentPresence() {
 			))
 		})
 
-		ginkgo.It("reports discarded production boolean returns in specs", func() {
+		ginkgo.It("reports discarded semantic boolean returns in specs", func() {
 			h := newRuleHarnessWithFiles("/repo/internal/agenthooks/agenthooks_test.go", "github.com/perber/wiki/internal/agenthooks", map[string]string{
 				"/repo/internal/agenthooks/agenthooks.go": `package agenthooks
 
@@ -1345,8 +1345,18 @@ func Normalize(provider ProviderID, raw []byte) (Event, bool) {
 `,
 				"/repo/internal/agenthooks/agenthooks_test.go": `package agenthooks
 
+type RoleHealth struct {
+	PID int
+}
+
+func findRoleHealth() (RoleHealth, bool) {
+	return RoleHealth{PID: 123}, true
+}
+
 func TestAgentHookNormalization() {
 	_, _ = Normalize(ProviderCodex, []byte("{}"))
+	initial, _ := findRoleHealth()
+	_ = initial
 }
 `,
 			})
@@ -1359,7 +1369,8 @@ func TestAgentHookNormalization() {
 			})
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
-				"semh:gomega.ignored-semantic-boolean: assert the semantic presence/status result instead of discarding a production boolean return with _",
+				"semh:gomega.ignored-semantic-boolean: assert the semantic presence/status result instead of discarding a semantic boolean return with _",
+				"semh:gomega.ignored-semantic-boolean: assert the semantic presence/status result instead of discarding a semantic boolean return with _",
 			))
 		})
 
