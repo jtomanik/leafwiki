@@ -197,7 +197,7 @@ var _ = DescribeTable("provider permission response protocol",
 	Entry("unsupported", allowResponseCase{provider: rawProviderUnsupportedFixture, want: ""}),
 )
 
-var _ = Describe("agent hook validation coverage", func() {
+var _ = Describe("agent hook normalized event validation", func() {
 	It("accepts normalized events produced by Normalize", func() {
 		event, ok := Normalize(ProviderCodex, []byte(`{
 			"hook_event_name":"PreToolUse",
