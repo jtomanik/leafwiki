@@ -43,6 +43,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesErrError(ctx, assertion) && isMatcherNamed(assertion.matcher, "Equal", "ContainSubstring") {
 		ctx.report(ruleGomegaErrorString, assertion.actual, gomegaErrorStringMatcherDiagnostic())
 	}
+	if matcherTreeUsesErrError(ctx, assertion.matcher) {
+		ctx.report(ruleGomegaErrorString, assertion.matcher, gomegaErrorStringMatcherDiagnostic())
+	}
 	if assertionUsesRawStringMatchError(ctx, assertion) {
 		ctx.report(ruleGomegaRawStringMatchError, assertion.matcher, gomegaRawStringMatchErrorDiagnostic())
 	}
@@ -531,6 +534,22 @@ func isNegativeAssertionMethod(name string) bool {
 
 func assertionUsesErrError(ctx *analysisContext, assertion gomegaAssertion) bool {
 	return exprIsErrorStringCall(ctx, assertion.actual)
+}
+
+func matcherTreeUsesErrError(ctx *analysisContext, expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if ok && exprIsErrorStringCall(ctx, call) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func checkErrorStringPredicate(ctx *analysisContext, call *ast.CallExpr) {

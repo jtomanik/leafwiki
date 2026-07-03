@@ -436,25 +436,29 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	count := 1
 	now := time.Now()
 	payload := structuredError{Code: "page_not_found", MessageID: "errors.page.not_found"}
+	status := struct{ LastError string }{}
 
-	Expect(err.Error()).To(Equal("boom"))                        // want "assert error values with MatchError instead of matching err.Error\\(\\)"
-	Expect(err.Error()).To(ContainSubstring("boom"))             // want "assert error values with MatchError instead of matching err.Error\\(\\)"
-	Expect(err).To(BeNil())                                      // want "use HaveOccurred matcher instead of nil assertions on error values"
-	Expect(err).NotTo(BeNil())                                   // want "use HaveOccurred matcher instead of nil assertions on error values"
-	Expect(err).To(Equal(nil))                                   // want "use HaveOccurred matcher instead of nil assertions on error values"
-	Expect(strings.Contains(text, "a")).To(BeTrue())             // want "use ContainSubstring matcher instead of asserting strings.Contains with BeTrue/BeFalse"
-	_ = strings.Contains(err.Error(), messageFixture)            // want "assert error values with MatchError instead of matching err.Error\\(\\)"
-	Expect(strings.HasPrefix(text, "a")).To(BeTrue())            // want "use HavePrefix matcher instead of asserting strings.HasPrefix with BeTrue/BeFalse"
-	Expect(strings.HasSuffix(text, "c")).To(BeFalse())           // want "use HaveSuffix matcher instead of asserting strings.HasSuffix with BeTrue/BeFalse"
-	Expect(regexp.MatchString("a+", text)).To(BeTrue())          // want "use MatchRegexp matcher instead of asserting regexp.MatchString with BeTrue/BeFalse"
-	Expect(errors.Is(err, sentinel)).To(BeTrue())                // want "use MatchError matcher instead of asserting errors.Is with BeTrue/BeFalse"
-	Expect(err).To(MatchError("boom"))                           // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
-	Expect(err).To(MatchError(ContainSubstring("boom")))         // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
-	Expect(err).To(MatchError(ContainSubstring(messageFixture))) // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+	Expect(err.Error()).To(Equal("boom"))                              // want "assert error values with MatchError instead of matching err.Error\\(\\)"
+	Expect(err.Error()).To(ContainSubstring("boom"))                   // want "assert error values with MatchError instead of matching err.Error\\(\\)"
+	Expect(status.LastError).To(Equal(sentinel.Error()))               // want "assert error values with MatchError instead of matching err.Error\\(\\)"
+	Expect(status).To(HaveField("LastError", Equal(sentinel.Error()))) // want "assert error values with MatchError instead of matching err.Error\\(\\)"
+	Expect(err).To(MatchError(sentinel.Error()))                       // want "assert error values with MatchError instead of matching err.Error\\(\\)"
+	Expect(err).To(BeNil())                                            // want "use HaveOccurred matcher instead of nil assertions on error values"
+	Expect(err).NotTo(BeNil())                                         // want "use HaveOccurred matcher instead of nil assertions on error values"
+	Expect(err).To(Equal(nil))                                         // want "use HaveOccurred matcher instead of nil assertions on error values"
+	Expect(strings.Contains(text, "a")).To(BeTrue())                   // want "use ContainSubstring matcher instead of asserting strings.Contains with BeTrue/BeFalse"
+	_ = strings.Contains(err.Error(), messageFixture)                  // want "assert error values with MatchError instead of matching err.Error\\(\\)"
+	Expect(strings.HasPrefix(text, "a")).To(BeTrue())                  // want "use HavePrefix matcher instead of asserting strings.HasPrefix with BeTrue/BeFalse"
+	Expect(strings.HasSuffix(text, "c")).To(BeFalse())                 // want "use HaveSuffix matcher instead of asserting strings.HasSuffix with BeTrue/BeFalse"
+	Expect(regexp.MatchString("a+", text)).To(BeTrue())                // want "use MatchRegexp matcher instead of asserting regexp.MatchString with BeTrue/BeFalse"
+	Expect(errors.Is(err, sentinel)).To(BeTrue())                      // want "use MatchError matcher instead of asserting errors.Is with BeTrue/BeFalse"
+	Expect(err).To(MatchError("boom"))                                 // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+	Expect(err).To(MatchError(ContainSubstring("boom")))               // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+	Expect(err).To(MatchError(ContainSubstring(messageFixture)))       // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 	_ = hiddenRawStringErrorMatcher()
-	Expect(len(items)).To(Equal(1))                              // want "use HaveLen matcher instead of asserting len\\(\\) with Equal"
-	Expect(count == 1).To(BeTrue())                              // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
-	Expect(count > 0).To(BeTrue())                               // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
+	Expect(len(items)).To(Equal(1)) // want "use HaveLen matcher instead of asserting len\\(\\) with Equal"
+	Expect(count == 1).To(BeTrue()) // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
+	Expect(count > 0).To(BeTrue())  // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
 	decoded, ok := any(text).(string)
 	Expect(ok).To(BeTrue()) // want "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
 	_ = decoded
