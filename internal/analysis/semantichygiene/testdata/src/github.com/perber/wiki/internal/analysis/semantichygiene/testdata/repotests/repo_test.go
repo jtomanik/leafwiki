@@ -300,7 +300,7 @@ var _ = It("local helper is not a Ginkgo DSL call", func() {})
 
 var _ = ginkgo.Describe("ginkgo and gomega quality regressions", func() {
 	ginkgo.Describe("git revision edge coverage", func() {}) // want "Ginkgo node name \"git revision edge coverage\" reads like a coverage bucket; describe observable behavior instead"
-	ginkgo.It("covers filesystem seam branches", func() {})   // want "Ginkgo node name \"covers filesystem seam branches\" reads like a coverage bucket; describe observable behavior instead"
+	ginkgo.It("covers filesystem seam branches", func() {})  // want "Ginkgo node name \"covers filesystem seam branches\" reads like a coverage bucket; describe observable behavior instead"
 
 	shared := strings.Builder{}           // want "move state initialization out of Ginkgo container body; declare variables in containers and initialize in setup nodes"
 	Expect(shared.String()).To(Equal("")) // want "move Expect out of Ginkgo container body; containers should only declare specs and setup nodes" "use BeEmpty matcher instead of Equal\\(empty\\) for empty collection/string assertions"
@@ -449,13 +449,14 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(resp.StatusCode).To(Equal(http.StatusCreated))        // want "use HaveHTTPStatus matcher instead of asserting response status fields directly"
 	Expect(rec.Body.String()).To(ContainSubstring("ok"))         // want "use HaveHTTPBody matcher instead of matching recorder body strings directly"
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("ok")))
-	Expect(rec).To(HaveHTTPBody(ContainSubstring("done")))                        // want "compose repeated HaveHTTPBody assertions for the same response into one matcher"
-	Expect(resp.Header.Get("X-Request-Id")).To(Equal("abc"))                      // want "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
-	Expect(count).To(BeEquivalentTo(int64(1)))                                    // want "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"
-	Expect(now).To(Equal(now))                                                    // want "use BeTemporally for time.Time equality assertions"
-	Expect(payload.Code).To(Equal("page_not_found"))                              // want "assert structured error semantics with a typed domain matcher/helper instead of matching Code directly" "raw stable contract literal \"page_not_found\" used in test assertion code; use the typed constant or semantic helper"
-	Expect(payload.MessageID).To(Equal("errors.page.not_found"))                  // want "assert structured error semantics with a typed domain matcher/helper instead of matching MessageID directly" "raw stable contract literal \"errors.page.not_found\" used in test assertion code; use the typed constant or semantic helper"
-	Expect(commitMessage()).To(HavePrefix("LeafWiki initial workspace snapshot")) // want "raw localized prose \"LeafWiki initial workspace snapshot\" used in test assertion code; assert a semantic code/message ID instead"
+	Expect(rec).To(HaveHTTPBody(ContainSubstring("done")))                                                     // want "compose repeated HaveHTTPBody assertions for the same response into one matcher"
+	Expect(resp.Header.Get("X-Request-Id")).To(Equal("abc"))                                                   // want "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
+	Expect(httptest.NewRequest(http.MethodGet, "/", nil)).To(HaveHTTPHeaderWithValue("X-Request-Id", "req-1")) // want "HaveHTTPHeaderWithValue matches HTTP responses; assert request headers with request-header semantics instead"
+	Expect(count).To(BeEquivalentTo(int64(1)))                                                                 // want "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"
+	Expect(now).To(Equal(now))                                                                                 // want "use BeTemporally for time.Time equality assertions"
+	Expect(payload.Code).To(Equal("page_not_found"))                                                           // want "assert structured error semantics with a typed domain matcher/helper instead of matching Code directly" "raw stable contract literal \"page_not_found\" used in test assertion code; use the typed constant or semantic helper"
+	Expect(payload.MessageID).To(Equal("errors.page.not_found"))                                               // want "assert structured error semantics with a typed domain matcher/helper instead of matching MessageID directly" "raw stable contract literal \"errors.page.not_found\" used in test assertion code; use the typed constant or semantic helper"
+	Expect(commitMessage()).To(HavePrefix("LeafWiki initial workspace snapshot"))                              // want "raw localized prose \"LeafWiki initial workspace snapshot\" used in test assertion code; assert a semantic code/message ID instead"
 	Expect(payload).To(MatchFields(nil, Fields{
 		"Message": Equal("LeafWiki workspace sync"), // want "raw localized prose \"LeafWiki workspace sync\" used in test assertion code; assert a semantic code/message ID instead"
 	}))

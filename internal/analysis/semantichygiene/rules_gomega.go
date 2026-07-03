@@ -87,6 +87,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesHTTPHeaderGet(ctx, assertion) {
 		ctx.report(ruleGomegaHTTPHeader, assertion.actual, gomegaHTTPHeaderMatcherDiagnostic())
 	}
+	if assertionUsesResponseHeaderMatcherOnRequest(ctx, assertion) {
+		ctx.report(ruleGomegaHTTPHeader, assertion.matcher, gomegaHTTPHeaderResponseMatcherOnRequestDiagnostic())
+	}
 	if assertionUsesNumericBeEquivalentTo(ctx, assertion) {
 		ctx.report(ruleGomegaNumericEquivalent, assertion.matcher, gomegaNumericEquivalentDiagnostic())
 	}
@@ -689,6 +692,11 @@ func assertionUsesHTTPHeaderGet(ctx *analysisContext, assertion gomegaAssertion)
 	}
 	return isNamedTypeFromPackage(ctx.pass.TypesInfo.TypeOf(header.X), "net/http", "Response") ||
 		isNamedTypeFromPackage(ctx.pass.TypesInfo.TypeOf(header), "net/http", "Header")
+}
+
+func assertionUsesResponseHeaderMatcherOnRequest(ctx *analysisContext, assertion gomegaAssertion) bool {
+	return isMatcherNamed(assertion.matcher, "HaveHTTPHeaderWithValue") &&
+		isNamedTypeFromPackage(ctx.pass.TypesInfo.TypeOf(assertion.actual), "net/http", "Request")
 }
 
 func assertionUsesNumericBeEquivalentTo(ctx *analysisContext, assertion gomegaAssertion) bool {

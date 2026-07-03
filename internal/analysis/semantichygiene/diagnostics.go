@@ -182,6 +182,10 @@ func gomegaHTTPHeaderMatcherDiagnostic() string {
 	return "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
 }
 
+func gomegaHTTPHeaderResponseMatcherOnRequestDiagnostic() string {
+	return "HaveHTTPHeaderWithValue matches HTTP responses; assert request headers with request-header semantics instead"
+}
+
 func gomegaAsyncCallbackExpectDiagnostic() string {
 	return "use the Gomega value passed into Eventually/Consistently callbacks instead of global Expect"
 }
