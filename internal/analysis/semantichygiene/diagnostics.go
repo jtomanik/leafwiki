@@ -138,6 +138,10 @@ func gomegaErrorNilMatcherDiagnostic() string {
 	return "use HaveOccurred matcher instead of nil assertions on error values"
 }
 
+func gomegaGenericHaveOccurredDiagnostic() string {
+	return "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+}
+
 func gomegaInlineErrorSucceedDiagnostic() string {
 	return "use Succeed matcher for inline single-error calls instead of NotTo(HaveOccurred())"
 }

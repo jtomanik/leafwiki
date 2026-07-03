@@ -553,6 +553,7 @@ func TestRepoTestGomegaInlineErrorShortcutsAreRejected(t *testing.T) {
 
 	err := returnError()
 	Expect(err).NotTo(HaveOccurred())
+	Expect(err).To(HaveOccurred()) // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
 }
 
 func TestRepoTestGomegaAsyncShortcutsAreRejected(t *testing.T) {

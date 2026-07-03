@@ -46,6 +46,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesErrorNilMatcher(ctx, assertion) {
 		ctx.report(ruleGomegaErrorNilMatcher, assertion.actual, gomegaErrorNilMatcherDiagnostic())
 	}
+	if assertionUsesGenericHaveOccurred(ctx, assertion) {
+		ctx.report(ruleGomegaGenericHaveOccurred, assertion.matcher, gomegaGenericHaveOccurredDiagnostic())
+	}
 	if assertionUsesInlineErrorReturnHaveOccurred(ctx, assertion) {
 		ctx.report(ruleGomegaInlineErrorSucceed, assertion.actual, gomegaInlineErrorSucceedDiagnostic())
 	}
@@ -614,6 +617,13 @@ func assertionUsesInlineErrorReturnHaveOccurred(ctx *analysisContext, assertion 
 	}
 	call, ok := assertion.actual.(*ast.CallExpr)
 	return ok && callReturnsSingleError(ctx, call)
+}
+
+func assertionUsesGenericHaveOccurred(ctx *analysisContext, assertion gomegaAssertion) bool {
+	if !isMatcherNamed(assertion.matcher, "HaveOccurred") || isNegativeAssertionMethod(assertion.method) {
+		return false
+	}
+	return typeImplementsError(ctx.pass.TypesInfo.TypeOf(assertion.actual))
 }
 
 func assertionUsesMultiReturnErrorMatcher(ctx *analysisContext, assertion gomegaAssertion) bool {
