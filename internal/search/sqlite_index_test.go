@@ -18,402 +18,213 @@ import (
 )
 
 var _ = ginkgo.Describe("SQLite search index", func() {
-	ginkgo.It("TestSQLiteIndex_IndexPage", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("stores searchable page metadata and plain text content", func() {
+		index := newSQLiteIndexForSpec()
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		// Testdata
 		path := "docs/test.md"
 		pageID := newFixturePageID("test123")
 		title := "Test Page"
 		content := "This is a **test** page."
 		expectedContent := "This is a test page."
 
-		err = index.IndexPage(path, path, pageID, title, tree.NodeKindPage, content)
-		if err != nil {
-			t.Fatalf("IndexPage failed: %v", err)
-		}
+		Expect(index.IndexPage(path, path, pageID, title, tree.NodeKindPage, content)).To(Succeed())
 
-		var row *sql.Row
-
-		if err := index.withDB(func(db *sql.DB) error {
-			row = db.QueryRow(`SELECT path, title, content FROM pages WHERE pageID = ?`, pageID)
-			if row == nil {
-				t.Fatalf("no data found for pageID %s", pageID)
-			}
-			return nil
-		}); err != nil {
-			t.Fatalf("failed to read indexed data: %v", err)
-		}
-
-		var gotPath, gotTitle, gotContent string
-		err = row.Scan(&gotPath, &gotTitle, &gotContent)
-		if err != nil {
-			t.Fatalf("failed to read indexed data: %v", err)
-		}
-
-		// Assertions
-		if gotPath != path {
-			t.Errorf("expected path %s, got %s", path, gotPath)
-		}
-		if gotTitle != title {
-			t.Errorf("expected title %s, got %s", title, gotTitle)
-		}
-		if !strings.HasPrefix(gotContent, expectedContent) {
-			t.Errorf("expected content '%s', got '%s'", expectedContent, gotContent)
-		}
+		record := storedPageRecord(index, pageID)
+		Expect(record).To(matchIndexedPageRecord(path, title, HavePrefix(expectedContent)))
 	})
 
-	ginkgo.It("TestSearchIndexDatabasePath_WindowsPath", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("builds database paths for Windows-style storage roots", func() {
 		got := strings.ReplaceAll(searchIndexDatabasePath(`C:\wiki\data`, "search.db"), `\`, `/`)
 		want := `C:/wiki/data/search.db`
-		if got != want {
-			t.Fatalf("path = %q, want %q", got, want)
-		}
+
+		Expect(got).To(Equal(want))
 	})
 
-	ginkgo.It("TestSQLiteIndex_CreatesDatabaseInStorageDir", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("creates the SQLite database inside the storage directory", func() {
+		tmpDir := tempSearchDir()
 
 		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		closeSQLiteIndex(index)
 
-		if _, err := os.Stat(filepath.Join(tmpDir, "search.db")); err != nil {
-			t.Fatalf("expected search.db in storage dir, got err: %v", err)
-		}
+		_, err = os.Stat(filepath.Join(tmpDir, "search.db"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 
-	ginkgo.It("TestSQLiteIndex_Search", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("returns ranked highlighted results across indexed page and section content", func() {
+		index := newSQLiteIndexForSpec()
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
+		Expect(index.IndexPage("notes/alpha", "notes/alpha.md", "alpha1", "Alpha Search Test", tree.NodeKindPage, "This content is about SQLite search.")).To(Succeed())
+		Expect(index.IndexPage("notes/beta", "notes/beta.md", "beta2", "Unrelated Page", tree.NodeKindSection, "This content is not about the search term.")).To(Succeed())
 
-		// Index two pages
-		err = index.IndexPage("notes/alpha", "notes/alpha.md", "alpha1", "Alpha Search Test", tree.NodeKindPage, "This content is about SQLite search.")
-		if err != nil {
-			t.Fatalf("failed to index alpha page: %v", err)
-		}
-
-		err = index.IndexPage("notes/beta", "notes/beta.md", "beta2", "Unrelated Page", tree.NodeKindSection, "This content is not about the search term.")
-		if err != nil {
-			t.Fatalf("failed to index beta page: %v", err)
-		}
-
-		// Perform search
 		result, err := index.Search("content:search*", nil, 0, 10)
-		if err != nil {
-			t.Fatalf("search failed: %v", err)
-		}
-
-		// Assertions
-		if result.Count != 2 {
-			t.Errorf("expected 2 result, got %d", result.Count)
-		}
-
-		if len(result.Items) != 2 {
-			t.Fatalf("expected 2 result item, got %d", len(result.Items))
-		}
-
-		if result.Items[0].PageID != "alpha1" {
-			t.Errorf("expected alpha1 to be ranked first, got %s", result.Items[0].PageID)
-		}
-
-		if result.Items[0].Kind != tree.NodeKindPage {
-			t.Errorf("expected first result kind %q, got %q", tree.NodeKindPage, result.Items[0].Kind)
-		}
-
-		if result.Items[1].Kind != tree.NodeKindSection {
-			t.Errorf("expected second result kind %q, got %q", tree.NodeKindSection, result.Items[1].Kind)
-		}
-
-		if !strings.Contains(result.Items[0].Excerpt, "<b>") {
-			t.Errorf("expected highlighted search snippet, got %q", result.Items[0].Excerpt)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(matchSearchResult(gstruct.Fields{
+			"Count": Equal(2),
+			"Items": HaveExactElements(
+				matchSearchItem(gstruct.Fields{
+					"PageID":  Equal(newFixturePageID("alpha1")),
+					"Kind":    Equal(tree.NodeKindPage),
+					"Excerpt": ContainSubstring("<b>"),
+				}),
+				matchSearchItem(gstruct.Fields{
+					"Kind": Equal(tree.NodeKindSection),
+				}),
+			),
+		}))
 	})
 
-	ginkgo.It("TestSQLiteIndex_Search_RanksTitleMatchHigherThanContent", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("ranks title matches ahead of content-only matches", func() {
+		index := newSQLiteIndexForSpec()
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		// page with match in title
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/titleMatch",
 			"docs/titleMatch.md",
 			"titleMatch",
 			"Search term in title",
 			tree.NodeKindPage,
 			"Lorem ipsum dolor sit amet.",
-		)
-		if err != nil {
-			t.Fatalf("failed to index titleMatch page: %v", err)
-		}
+		)).To(Succeed())
 
-		// page with match only in content
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/contentMatch",
 			"docs/contentMatch.md",
 			"contentMatch",
 			"Content only match",
 			tree.NodeKindPage,
 			"This page has the search term only in the content.",
-		)
-		if err != nil {
-			t.Fatalf("failed to index contentMatch page: %v", err)
-		}
+		)).To(Succeed())
 
-		// "search" is converted by buildFuzzyQuery to "search*", matching both
 		result, err := index.Search("search", nil, 0, 10)
-		if err != nil {
-			t.Fatalf("search failed: %v", err)
-		}
-
-		if result.Count != 2 {
-			t.Fatalf("expected 2 results, got %d", result.Count)
-		}
-		if len(result.Items) != 2 {
-			t.Fatalf("expected 2 result items, got %d", len(result.Items))
-		}
-
-		// Title match should be ranked higher than content match
-		if result.Items[0].PageID != "titleMatch" {
-			t.Errorf("expected titleMatch to be ranked first, got %s", result.Items[0].PageID)
-		}
-
-		// and the rank value should be higher (because 1/(1+score), score smaller)
-		if result.Items[0].Rank < result.Items[1].Rank {
-			t.Errorf("expected higher rank for titleMatch (got %f, %f)", result.Items[0].Rank, result.Items[1].Rank)
-		}
-
-		// sanity check: Ranks should be > 0 and <= 1
-		for i, item := range result.Items {
-			if item.Rank <= 0 || item.Rank > 1 {
-				t.Errorf("expected rank for item %d to be in (0,1], got %f", i, item.Rank)
-			}
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(matchSearchResult(gstruct.Fields{
+			"Count": Equal(2),
+			"Items": HaveExactElements(
+				matchSearchItem(gstruct.Fields{
+					"PageID": Equal(newFixturePageID("titleMatch")),
+					"Rank":   BeNumerically(">", 0),
+				}),
+				matchSearchItem(gstruct.Fields{
+					"PageID": Equal(newFixturePageID("contentMatch")),
+					"Rank":   BeNumerically(">", 0),
+				}),
+			),
+		}))
 	})
 
-	ginkgo.It("TestSQLiteIndex_Search_RanksHeadingHigherThanContent", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("ranks heading matches ahead of content-only matches", func() {
+		index := newSQLiteIndexForSpec()
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		// page with match in heading (Markdown heading)
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/headingMatch",
 			"docs/headingMatch.md",
 			"headingMatch",
 			"No search in title",
 			tree.NodeKindPage,
 			"## Search term in heading\n\nSome additional body text.",
-		)
-		if err != nil {
-			t.Fatalf("failed to index headingMatch page: %v", err)
-		}
+		)).To(Succeed())
 
-		// page with match only in content
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/contentOnly",
 			"docs/contentOnly.md",
 			"contentOnly",
 			"No search in title",
 			tree.NodeKindPage,
 			"This page has the search term only in the content.",
-		)
-		if err != nil {
-			t.Fatalf("failed to index contentOnly page: %v", err)
-		}
+		)).To(Succeed())
 
 		result, err := index.Search("search", nil, 0, 10)
-		if err != nil {
-			t.Fatalf("search failed: %v", err)
-		}
-
-		if result.Count != 2 {
-			t.Fatalf("expected 2 results, got %d", result.Count)
-		}
-		if len(result.Items) != 2 {
-			t.Fatalf("expected 2 result items, got %d", len(result.Items))
-		}
-
-		// Heading match should be ranked higher than content match
-		if result.Items[0].PageID != "headingMatch" {
-			t.Errorf("expected headingMatch to be ranked first, got %s", result.Items[0].PageID)
-		}
-
-		if result.Items[0].Rank < result.Items[1].Rank {
-			t.Errorf("expected higher rank for headingMatch (got %f, %f)", result.Items[0].Rank, result.Items[1].Rank)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(matchSearchResult(gstruct.Fields{
+			"Count": Equal(2),
+			"Items": HaveExactElements(
+				matchSearchItem(gstruct.Fields{
+					"PageID": Equal(newFixturePageID("headingMatch")),
+					"Rank":   BeNumerically(">", 0),
+				}),
+				matchSearchItem(gstruct.Fields{
+					"PageID": Equal(newFixturePageID("contentOnly")),
+					"Rank":   BeNumerically(">", 0),
+				}),
+			),
+		}))
 	})
 
-	ginkgo.It("TestSQLiteIndex_SearchPageIDs_RespectsQueryAndPageFilters", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("returns only matching page IDs from the supplied filter", func() {
+		index := newSQLiteIndexForSpec()
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		err = index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha Page", tree.NodeKindPage, "Shared token in alpha.")
-		if err != nil {
-			t.Fatalf("failed to index alpha page: %v", err)
-		}
-
-		err = index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta Page", tree.NodeKindPage, "Shared token in beta.")
-		if err != nil {
-			t.Fatalf("failed to index beta page: %v", err)
-		}
-
-		err = index.IndexPage("docs/gamma", "docs/gamma.md", "gamma", "Gamma Page", tree.NodeKindPage, "Gamma only content.")
-		if err != nil {
-			t.Fatalf("failed to index gamma page: %v", err)
-		}
+		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha Page", tree.NodeKindPage, "Shared token in alpha.")).To(Succeed())
+		Expect(index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta Page", tree.NodeKindPage, "Shared token in beta.")).To(Succeed())
+		Expect(index.IndexPage("docs/gamma", "docs/gamma.md", "gamma", "Gamma Page", tree.NodeKindPage, "Gamma only content.")).To(Succeed())
 
 		pageIDs, err := index.SearchPageIDs("shared token", []tree.PageID{"alpha"})
-		if err != nil {
-			t.Fatalf("SearchPageIDs failed: %v", err)
-		}
-
-		if len(pageIDs) != 1 || pageIDs[0] != "alpha" {
-			t.Fatalf("expected only alpha page, got %#v", pageIDs)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pageIDs).To(Equal([]tree.PageID{newFixturePageID("alpha")}))
 
 		noMatches, err := index.SearchPageIDs("shared token", []tree.PageID{})
-		if err != nil {
-			t.Fatalf("SearchPageIDs with empty page filter failed: %v", err)
-		}
-		if len(noMatches) != 0 {
-			t.Fatalf("expected no matches for empty page filter, got %#v", noMatches)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(noMatches).To(BeEmpty())
 	})
 
-	ginkgo.It("TestSQLiteIndex_Search_FiltersByPageIDs", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("filters search results to requested page IDs", func() {
+		index := newSQLiteIndexForSpec()
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/react-guide",
 			"docs/react-guide.md",
 			"react-guide",
 			"React guide",
 			tree.NodeKindPage,
 			"Search term appears here.",
-		)
-		if err != nil {
-			t.Fatalf("failed to index react-guide page: %v", err)
-		}
+		)).To(Succeed())
 
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/plain-guide",
 			"docs/plain-guide.md",
 			"plain-guide",
 			"Plain guide",
 			tree.NodeKindPage,
 			"Search term appears here as well.",
-		)
-		if err != nil {
-			t.Fatalf("failed to index plain-guide page: %v", err)
-		}
+		)).To(Succeed())
 
 		result, err := index.Search("search", []tree.PageID{"react-guide"}, 0, 10)
-		if err != nil {
-			t.Fatalf("search failed: %v", err)
-		}
-
-		if result.Count != 1 {
-			t.Fatalf("expected 1 filtered result, got %d", result.Count)
-		}
-		if len(result.Items) != 1 {
-			t.Fatalf("expected 1 filtered result item, got %d", len(result.Items))
-		}
-		if result.Items[0].PageID != "react-guide" {
-			t.Fatalf("expected filtered page react-guide, got %s", result.Items[0].PageID)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(matchSearchResult(gstruct.Fields{
+			"Count": Equal(1),
+			"Items": HaveExactElements(matchSearchItem(gstruct.Fields{
+				"PageID": Equal(newFixturePageID("react-guide")),
+			})),
+		}))
 	})
 
-	ginkgo.It("TestSQLiteIndex_Search_ReturnsNoResultsWhenPageIDFilterIsEmpty", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("returns no search results for an empty page ID filter", func() {
+		index := newSQLiteIndexForSpec()
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/react-guide",
 			"docs/react-guide.md",
 			"react-guide",
 			"React guide",
 			tree.NodeKindPage,
 			"Search term appears here.",
-		)
-		if err != nil {
-			t.Fatalf("failed to index react-guide page: %v", err)
-		}
+		)).To(Succeed())
 
 		result, err := index.Search("search", []tree.PageID{}, 0, 10)
-		if err != nil {
-			t.Fatalf("search failed: %v", err)
-		}
-
-		if result.Count != 0 {
-			t.Fatalf("expected 0 filtered results, got %d", result.Count)
-		}
-		if len(result.Items) != 0 {
-			t.Fatalf("expected 0 filtered result items, got %d", len(result.Items))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(matchSearchResult(gstruct.Fields{
+			"Count": BeZero(),
+			"Items": BeEmpty(),
+		}))
 	})
 
-	ginkgo.It("TestSQLiteIndex_IndexPage_StripsShoutoutFenceSyntaxButKeepsLabel", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("indexes shoutout labels and body text without fence markers", func() {
+		index := newSQLiteIndexForSpec()
+		pageID := newFixturePageID("shoutout1")
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/shoutout",
 			"docs/shoutout.md",
-			"shoutout1",
+			pageID,
 			"Shoutout Page",
 			tree.NodeKindPage,
 			strings.Join([]string{
@@ -421,136 +232,94 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 				"Shoutout body text.",
 				":::",
 			}, "\n"),
-		)
-		if err != nil {
-			t.Fatalf("IndexPage failed: %v", err)
-		}
+		)).To(Succeed())
 
-		var gotContent string
-		if err := index.withDB(func(db *sql.DB) error {
-			return db.QueryRow(`SELECT content FROM pages WHERE pageID = ?`, "shoutout1").Scan(&gotContent)
-		}); err != nil {
-			t.Fatalf("failed to read indexed content: %v", err)
-		}
-
-		if strings.Contains(gotContent, ":::") {
-			t.Fatalf("expected indexed content to exclude shoutout fences, got %q", gotContent)
-		}
-		if !strings.Contains(gotContent, "blue") {
-			t.Fatalf("expected indexed content to keep shoutout label, got %q", gotContent)
-		}
-		if !strings.Contains(gotContent, "Shoutout body text.") {
-			t.Fatalf("expected indexed content to keep shoutout body, got %q", gotContent)
-		}
+		gotContent := storedPageContent(index, pageID)
+		Expect(gotContent).NotTo(ContainSubstring(":::"))
+		Expect(gotContent).To(SatisfyAll(
+			ContainSubstring("blue"),
+			ContainSubstring("Shoutout body text."),
+		))
 	})
 
-	ginkgo.It("TestSQLiteIndex_IndexPage_StripsMarkdownFormattingFromIndexedContent", func() {
-		t := ginkgo.GinkgoT()
-		tmpDir := t.TempDir()
+	ginkgo.It("indexes markdown emphasis as plain text", func() {
+		index := newSQLiteIndexForSpec()
+		pageID := newFixturePageID("markdown1")
 
-		index, err := NewSQLiteIndex(tmpDir)
-		if err != nil {
-			t.Fatalf("failed to create SQLiteIndex: %v", err)
-		}
-		closeSQLiteIndex(index)
-
-		err = index.IndexPage(
+		Expect(index.IndexPage(
 			"docs/markdown",
 			"docs/markdown.md",
-			"markdown1",
+			pageID,
 			"Markdown Page",
 			tree.NodeKindPage,
 			"LeafWiki **fett** und _kursiv_.",
-		)
-		if err != nil {
-			t.Fatalf("IndexPage failed: %v", err)
-		}
+		)).To(Succeed())
 
-		var gotContent string
-		if err := index.withDB(func(db *sql.DB) error {
-			return db.QueryRow(`SELECT content FROM pages WHERE pageID = ?`, "markdown1").Scan(&gotContent)
-		}); err != nil {
-			t.Fatalf("failed to read indexed content: %v", err)
-		}
-
-		if strings.Contains(gotContent, "**") || strings.Contains(gotContent, "_") {
-			t.Fatalf("expected indexed content to exclude markdown emphasis markers, got %q", gotContent)
-		}
+		Expect(storedPageContent(index, pageID)).NotTo(Or(
+			ContainSubstring("**"),
+			ContainSubstring("_"),
+		))
 	})
 
-	ginkgo.It("TestExtractHeadings_SingleH1", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("extracts a single H1 heading", func() {
 		got := extractHeadings("# Hello World")
-		if !strings.Contains(got, "Hello World") {
-			t.Errorf("expected heading text, got %q", got)
-		}
+
+		Expect(got).To(ContainSubstring("Hello World"))
 	})
 
-	ginkgo.It("TestExtractHeadings_MultipleHeadings", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("extracts heading text from multiple levels", func() {
 		input := "# First\n## Second\n### Third"
 		got := extractHeadings(input)
-		for _, want := range []string{"First", "Second", "Third"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("expected %q in result, got %q", want, got)
-			}
-		}
+
+		Expect(got).To(SatisfyAll(
+			ContainSubstring("First"),
+			ContainSubstring("Second"),
+			ContainSubstring("Third"),
+		))
 	})
 
-	ginkgo.It("TestExtractHeadings_InlineFormatting", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("strips inline formatting from heading text", func() {
 		got := extractHeadings("## **Bold** and _italic_ heading")
-		if strings.Contains(got, "**") || strings.Contains(got, "_") {
-			t.Errorf("expected formatting markers stripped, got %q", got)
-		}
-		if !strings.Contains(got, "Bold") || !strings.Contains(got, "italic") || !strings.Contains(got, "heading") {
-			t.Errorf("expected heading words preserved, got %q", got)
-		}
+
+		Expect(got).NotTo(Or(ContainSubstring("**"), ContainSubstring("_")))
+		Expect(got).To(SatisfyAll(
+			ContainSubstring("Bold"),
+			ContainSubstring("italic"),
+			ContainSubstring("heading"),
+		))
 	})
 
-	ginkgo.It("TestExtractHeadings_IgnoresBodyText", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("ignores non-heading body text", func() {
 		got := extractHeadings("# Title\n\nSome body paragraph that should not appear.")
-		if strings.Contains(got, "body paragraph") {
-			t.Errorf("body text should not appear in headings, got %q", got)
-		}
-		if !strings.Contains(got, "Title") {
-			t.Errorf("expected heading text, got %q", got)
-		}
+
+		Expect(got).NotTo(ContainSubstring("body paragraph"))
+		Expect(got).To(ContainSubstring("Title"))
 	})
 
-	ginkgo.It("TestExtractHeadings_NoHeadings", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("returns empty text when markdown has no headings", func() {
 		got := extractHeadings("Just plain text without any heading.")
-		if got != "" {
-			t.Errorf("expected empty result for no headings, got %q", got)
-		}
+
+		Expect(got).To(BeEmpty())
 	})
 
-	ginkgo.It("TestExtractHeadings_EmptyInput", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("returns empty text for empty markdown", func() {
 		got := extractHeadings("")
-		if got != "" {
-			t.Errorf("expected empty result for empty input, got %q", got)
-		}
+
+		Expect(got).To(BeEmpty())
 	})
 
-	ginkgo.It("TestExtractHeadings_HeadingWithCodeSpan", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("strips code span markers from heading text", func() {
 		got := extractHeadings("## Heading `code` here")
-		if strings.Contains(got, "`") {
-			t.Errorf("expected backticks stripped, got %q", got)
-		}
-		if !strings.Contains(got, "Heading") || !strings.Contains(got, "here") {
-			t.Errorf("expected heading words preserved, got %q", got)
-		}
+
+		Expect(got).NotTo(ContainSubstring("`"))
+		Expect(got).To(SatisfyAll(
+			ContainSubstring("Heading"),
+			ContainSubstring("here"),
+		))
 	})
 
 	ginkgo.It("Clear removes indexed pages from subsequent searches", func() {
-		t := ginkgo.GinkgoT()
-		index, err := NewSQLiteIndex(t.TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		Expect(index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta", tree.NodeKindPage, "shared token")).To(Succeed())
@@ -562,17 +331,14 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		Expect(index.Clear()).To(Succeed())
 		after, err := index.Search("shared", nil, 0, 10)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(after).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		Expect(after).To(matchSearchResult(gstruct.Fields{
 			"Count": BeZero(),
 			"Items": BeEmpty(),
-		})))
+		}))
 	})
 
 	ginkgo.It("RemovePage and RemovePageByFilePath remove only matching records", func() {
-		t := ginkgo.GinkgoT()
-		index, err := NewSQLiteIndex(t.TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		Expect(index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta", tree.NodeKindPage, "shared token")).To(Succeed())
@@ -592,10 +358,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("empty query with page filters returns matching pages ordered by title and path", func() {
-		t := ginkgo.GinkgoT()
-		index, err := NewSQLiteIndex(t.TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 
 		Expect(index.IndexPage("docs/zeta", "docs/zeta.md", "zeta", "Zeta", tree.NodeKindPage, "Zeta body")).To(Succeed())
 		Expect(index.IndexPage("docs/alpha-b", "docs/alpha-b.md", "alpha-b", "Alpha", tree.NodeKindPage, "Alpha B body")).To(Succeed())
@@ -603,24 +366,24 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 
 		result, err := index.Search("", []tree.PageID{"zeta", "alpha-b", "alpha-a"}, 0, 10)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		Expect(result).To(matchSearchResult(gstruct.Fields{
 			"Count":    Equal(3),
 			"StartAt":  Equal(ResultOffset(0)),
 			"PageSize": Equal(ResultLimit(10)),
 			"Items": HaveExactElements(
-				gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				matchSearchItem(gstruct.Fields{
 					"PageID":  Equal(tree.PageID("alpha-a")),
 					"Rank":    Equal(float64(1)),
 					"Excerpt": ContainSubstring("Alpha A body"),
 				}),
-				gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				matchSearchItem(gstruct.Fields{
 					"PageID": Equal(tree.PageID("alpha-b")),
 				}),
-				gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				matchSearchItem(gstruct.Fields{
 					"PageID": Equal(tree.PageID("zeta")),
 				}),
 			),
-		})))
+		}))
 
 		pageIDs, err := index.SearchPageIDs("", []tree.PageID{"zeta", "alpha-b", "alpha-a"})
 		Expect(err).NotTo(HaveOccurred())
@@ -628,10 +391,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("pagination returns the requested window and preserves request metadata", func() {
-		t := ginkgo.GinkgoT()
-		index, err := NewSQLiteIndex(t.TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		Expect(index.IndexPage("docs/beta", "docs/beta.md", "beta", "Beta", tree.NodeKindPage, "shared token")).To(Succeed())
@@ -639,18 +399,18 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 
 		result, err := index.Search("", []tree.PageID{"alpha", "beta", "gamma"}, 1, 1)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		Expect(result).To(matchSearchResult(gstruct.Fields{
 			"Count":    Equal(3),
 			"StartAt":  Equal(ResultOffset(1)),
 			"PageSize": Equal(ResultLimit(1)),
-			"Items": HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Items": HaveExactElements(matchSearchItem(gstruct.Fields{
 				"PageID": Equal(tree.PageID("beta")),
 			})),
-		})))
+		}))
 	})
 
 	ginkgo.It("Ping succeeds on an open index and Close is idempotent", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
+		index, err := NewSQLiteIndex(tempSearchDir())
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(index.Ping()).To(Succeed())
@@ -659,7 +419,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("recovers from a corrupt database during initialization", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := tempSearchDir()
 		Expect(os.WriteFile(filepath.Join(storageDir, "search.db"), []byte("not sqlite"), 0o644)).To(Succeed())
 
 		index, err := NewSQLiteIndex(storageDir)
@@ -705,7 +465,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 			closeSQLiteSearchDB = previousClose
 		})
 
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
+		index, err := NewSQLiteIndex(tempSearchDir())
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(index).NotTo(BeNil())
@@ -737,7 +497,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 			removeSearchSQLiteFiles = previousRemove
 		})
 
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
+		index, err := NewSQLiteIndex(tempSearchDir())
 
 		Expect(index).To(BeNil())
 		Expect(err).To(MatchError(finalErr))
@@ -753,7 +513,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		ginkgo.DeferCleanup(func() {
 			openSQLiteSearchDB = previousOpen
 		})
-		index := &SQLiteIndex{storageDir: ginkgo.GinkgoT().TempDir(), databaseFile: "search.db"}
+		index := &SQLiteIndex{storageDir: tempSearchDir(), databaseFile: "search.db"}
 
 		err := index.Ping()
 
@@ -761,7 +521,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns initialization errors for locked databases", func() {
-		storageDir := ginkgo.GinkgoT().TempDir()
+		storageDir := tempSearchDir()
 		db, err := sql.Open("sqlite", filepath.Join(storageDir, "search.db"))
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
@@ -780,18 +540,16 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns empty results for empty nil-filter searches", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 
 		result, err := index.Search("", nil, 7, 11)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		Expect(result).To(matchSearchResult(gstruct.Fields{
 			"Count":    BeZero(),
 			"Items":    BeEmpty(),
 			"StartAt":  Equal(ResultOffset(7)),
 			"PageSize": Equal(ResultLimit(11)),
-		})))
+		}))
 
 		pageIDs, err := index.SearchPageIDs("", nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -799,11 +557,9 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns malformed markdown errors before indexing", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 
-		err = index.IndexPage(
+		err := index.IndexPage(
 			"docs/broken",
 			"docs/broken.md",
 			"broken",
@@ -816,9 +572,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns database errors while indexing and removing pages", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 
 		Expect(index.withDB(func(db *sql.DB) error {
 			_, err := db.Exec(`DROP TABLE pages`)
@@ -826,9 +580,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		})).To(Succeed())
 		Expect(index.IndexPage("docs/delete-error", "docs/delete-error.md", "delete-error", "Delete Error", tree.NodeKindPage, "body")).To(matchSQLitePrimaryError())
 
-		insertErrorIndex, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(insertErrorIndex)
+		insertErrorIndex := newSQLiteIndexForSpec()
 		Expect(insertErrorIndex.withDB(func(db *sql.DB) error {
 			if _, err := db.Exec(`DROP TABLE pages`); err != nil {
 				return err
@@ -844,9 +596,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns rows-affected errors while removing pages by filepath", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 		Expect(index.IndexPage("docs/delete-error", "docs/delete-error.md", "delete-error", "Delete Error", tree.NodeKindPage, "body")).To(Succeed())
 		previousRowsAffected := searchRowsAffected
 		rowsAffectedErr := errors.New("rows affected failed")
@@ -864,23 +614,19 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns database query errors from malformed search tables", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 		Expect(index.withDB(func(db *sql.DB) error {
 			_, err := db.Exec(`DROP TABLE pages`)
 			return err
 		})).To(Succeed())
 
-		_, err = index.Search("needle", nil, 0, 10)
+		_, err := index.Search("needle", nil, 0, 10)
 		Expect(err).To(matchSQLitePrimaryError())
 
 		_, err = index.SearchPageIDs("needle", nil)
 		Expect(err).To(matchSQLitePrimaryError())
 
-		queryErrorIndex, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(queryErrorIndex)
+		queryErrorIndex := newSQLiteIndexForSpec()
 		Expect(queryErrorIndex.withDB(func(db *sql.DB) error {
 			if _, err := db.Exec(`DROP TABLE pages`); err != nil {
 				return err
@@ -894,9 +640,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns row scan errors from malformed search rows", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 		Expect(index.withDB(func(db *sql.DB) error {
 			_, err := db.Exec(
 				`INSERT INTO pages (path, filepath, pageID, kind, title, headings, content) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -911,12 +655,10 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 			return err
 		})).To(Succeed())
 
-		_, err = index.Search("", []tree.PageID{"null-title"}, 0, 10)
+		_, err := index.Search("", []tree.PageID{"null-title"}, 0, 10)
 		Expect(err).To(HaveOccurred())
 
-		pageIDIndex, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(pageIDIndex)
+		pageIDIndex := newSQLiteIndexForSpec()
 		Expect(pageIDIndex.withDB(func(db *sql.DB) error {
 			if _, err := db.Exec(`DROP TABLE pages`); err != nil {
 				return err
@@ -933,9 +675,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("logs row close errors from search readers", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		previousCloseRows := closeSearchRows
 		closeRowsErr := errors.New("close rows failed")
@@ -957,9 +697,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	})
 
 	ginkgo.It("returns row iteration errors from search results", func() {
-		index, err := NewSQLiteIndex(ginkgo.GinkgoT().TempDir())
-		Expect(err).NotTo(HaveOccurred())
-		closeSQLiteIndex(index)
+		index := newSQLiteIndexForSpec()
 		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		previousRowsErr := searchRowsErr
 		rowsErr := errors.New("rows failed")
@@ -970,7 +708,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 			searchRowsErr = previousRowsErr
 		})
 
-		_, err = index.Search("shared", nil, 0, 10)
+		_, err := index.Search("shared", nil, 0, 10)
 
 		Expect(err).To(MatchError(rowsErr))
 	})
@@ -988,11 +726,77 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	)
 })
 
+type indexedPageRecord struct {
+	path    string
+	title   string
+	content string
+}
+
+func tempSearchDir() string {
+	ginkgo.GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-search-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+
+	return dir
+}
+
+func newSQLiteIndexForSpec() *SQLiteIndex {
+	ginkgo.GinkgoHelper()
+
+	index, err := NewSQLiteIndex(tempSearchDir())
+	Expect(err).NotTo(HaveOccurred())
+	closeSQLiteIndex(index)
+
+	return index
+}
+
 func closeSQLiteIndex(index *SQLiteIndex) {
 	ginkgo.GinkgoHelper()
 	ginkgo.DeferCleanup(func() {
 		Expect(index.Close()).To(Succeed())
 	})
+}
+
+func storedPageRecord(index *SQLiteIndex, pageID tree.PageID) indexedPageRecord {
+	ginkgo.GinkgoHelper()
+
+	var record indexedPageRecord
+	Expect(index.withDB(func(db *sql.DB) error {
+		return db.QueryRow(`SELECT path, title, content FROM pages WHERE pageID = ?`, pageID).
+			Scan(&record.path, &record.title, &record.content)
+	})).To(Succeed())
+
+	return record
+}
+
+func storedPageContent(index *SQLiteIndex, pageID tree.PageID) string {
+	ginkgo.GinkgoHelper()
+
+	return storedPageRecord(index, pageID).content
+}
+
+func matchIndexedPageRecord(path string, title string, content types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return SatisfyAll(
+		WithTransform(func(record indexedPageRecord) string { return record.path }, Equal(path)),
+		WithTransform(func(record indexedPageRecord) string { return record.title }, Equal(title)),
+		WithTransform(func(record indexedPageRecord) string { return record.content }, content),
+	)
+}
+
+func matchSearchResult(fields gstruct.Fields) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchSearchItem(fields gstruct.Fields) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
 func matchSQLitePrimaryError() types.GomegaMatcher {
