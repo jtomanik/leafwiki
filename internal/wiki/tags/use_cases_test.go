@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
@@ -75,7 +76,7 @@ func setupUseCases() (*GetPagesByTagsUseCase, *coretags.TagsService, *tree.TreeS
 
 func setupUseCasesWithDataDir() (*GetPagesByTagsUseCase, *coretags.TagsService, *tree.TreeService, string) {
 	ginkgo.GinkgoHelper()
-	dir := ginkgo.GinkgoT().TempDir()
+	dir := newTagsTempDir()
 	ts := tree.NewTreeService(dir)
 	Expect(ts.LoadTree()).To(Succeed())
 
@@ -113,8 +114,8 @@ func createAndIndexPage(ts *tree.TreeService, svc *coretags.TagsService, title, 
 
 // ─── GetPagesByTagsUseCase ─────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
-	ginkgo.It("TestGetPagesByTagsUseCase_ReturnsMatchingPages", func() {
+var _ = ginkgo.Describe("tagged page lookup", func() {
+	ginkgo.It("returns pages that match a requested tag", func() {
 		uc, svc, ts := setupUseCases()
 
 		id1 := createAndIndexPage(ts, svc, "React Guide", "react-guide", []string{"react", "frontend"}, "React guide body.")
@@ -126,7 +127,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		Expect(out.Pages).To(ConsistOf(matchTaggedPageWithID(id1)))
 	})
 
-	ginkgo.It("TestGetPagesByTagsUseCase_ExcerptComesFromDB_NoDiskRead", func() {
+	ginkgo.It("returns indexed excerpts for matching pages", func() {
 		uc, svc, ts := setupUseCases()
 
 		createAndIndexPage(ts, svc, "Excerpt Page", "excerpt-page", []string{"docs"}, "This is the excerpt content.")
@@ -137,7 +138,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		Expect(out.Pages).To(ConsistOf(matchTaggedPageWithExcerpt("This is the excerpt content.")))
 	})
 
-	ginkgo.It("TestGetPagesByTagsUseCase_ANDLogic", func() {
+	ginkgo.It("requires every requested tag to match", func() {
 		uc, svc, ts := setupUseCases()
 
 		id1 := createAndIndexPage(ts, svc, "Both Tags", "both", []string{"react", "typescript"}, "body")
@@ -149,7 +150,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		Expect(out.Pages).To(ConsistOf(matchTaggedPageWithID(id1)))
 	})
 
-	ginkgo.It("TestGetPagesByTagsUseCase_EmptyTagsReturnsEmpty", func() {
+	ginkgo.It("returns no pages when no tags are requested", func() {
 		uc, _, _ := setupUseCases()
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{}})
@@ -158,7 +159,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		Expect(out.Pages).To(BeEmpty())
 	})
 
-	ginkgo.It("TestGetPagesByTagsUseCase_NormalizesInputTags", func() {
+	ginkgo.It("normalizes query tags before matching pages", func() {
 		uc, svc, ts := setupUseCases()
 
 		createAndIndexPage(ts, svc, "Go Page", "go-page", []string{"go"}, "body")
@@ -169,7 +170,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		Expect(out.Pages).To(HaveLen(1))
 	})
 
-	ginkgo.It("TestGetPagesByTagsUseCase_NoMatchReturnsEmpty", func() {
+	ginkgo.It("returns no pages when no indexed page matches", func() {
 		uc, svc, ts := setupUseCases()
 
 		createAndIndexPage(ts, svc, "Go Page", "go-page", []string{"go"}, "body")
@@ -180,7 +181,7 @@ var _ = ginkgo.Describe("GetPagesByTagsUseCase", func() {
 		Expect(out.Pages).To(BeEmpty())
 	})
 
-	ginkgo.It("TestGetPagesByTagsUseCase_PageTagsReturnedInResult", func() {
+	ginkgo.It("includes indexed tag metadata in each matching page", func() {
 		uc, svc, ts := setupUseCases()
 
 		createAndIndexPage(ts, svc, "Multi Tag", "multi", []string{"go", "testing", "backend"}, "body")
@@ -449,12 +450,20 @@ func newTagsTestRouter(cfg RoutesConfig, opts httpinternal.RouterOptions) http.H
 
 func mustNewTagsStore() *coretags.TagsStore {
 	ginkgo.GinkgoHelper()
-	store, err := coretags.NewTagsStore(ginkgo.GinkgoT().TempDir())
+	store, err := coretags.NewTagsStore(newTagsTempDir())
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
 		Expect(store.Close()).To(Succeed())
 	})
 	return store
+}
+
+func newTagsTempDir() string {
+	ginkgo.GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-tags-*")
+	Expect(err).NotTo(HaveOccurred())
+	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func dropTagTables(dataDir string, statements ...string) {
