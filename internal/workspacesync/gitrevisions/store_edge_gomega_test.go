@@ -26,16 +26,16 @@ var _ = Describe("git revision edge behavior", func() {
 	It("handles helper defaults and parser fallbacks", func() {
 		Expect(nonFilesystemInitStorage{}.Init()).To(Succeed())
 
-		target, ok := parseGitDirFile("not-a-gitdir", "/workspace")
-		Expect(ok).To(BeFalse())
+		target, err := gitDirFileTargetResult("not-a-gitdir", "/workspace")
+		Expect(err).To(MatchError(errGitDirTargetAbsent))
 		Expect(target).To(BeEmpty())
 
-		target, ok = parseGitDirFile("gitdir:   \n", "/workspace")
-		Expect(ok).To(BeFalse())
+		target, err = gitDirFileTargetResult("gitdir:   \n", "/workspace")
+		Expect(err).To(MatchError(errGitDirTargetAbsent))
 		Expect(target).To(BeEmpty())
 
-		target, ok = parseGitDirFile("gitdir: /tmp/repo/.git\n", "/workspace")
-		Expect(ok).To(BeTrue())
+		target, err = gitDirFileTargetResult("gitdir: /tmp/repo/.git\n", "/workspace")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(target).To(Equal(filepath.Clean("/tmp/repo/.git")))
 
 		Expect(mergeMarkdownPaths([]string{" a.md ", "", "nested/b.md"}, []string{"a.md"})).To(Equal([]string{"a.md", "nested/b.md"}))
@@ -1021,6 +1021,16 @@ func setGitRevisionSeam[T any](target *T, replacement T) func() {
 	}
 	DeferCleanup(restore)
 	return restore
+}
+
+var errGitDirTargetAbsent = errors.New("gitdir target absent")
+
+func gitDirFileTargetResult(raw string, rootDir string) (string, error) {
+	target, ok := parseGitDirFile(raw, rootDir)
+	if !ok {
+		return "", errGitDirTargetAbsent
+	}
+	return target, nil
 }
 
 func containsAll(haystack string, needles ...string) bool {
