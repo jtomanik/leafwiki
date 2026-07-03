@@ -1264,7 +1264,14 @@ func TestCLIBehavior() {
 		})
 
 		ginkgo.It("reports proxy boolean assertions that hide the semantic value", func() {
-			h := newRuleHarness("/repo/internal/projectdaemon/agent_presence_test.go", "github.com/perber/wiki/internal/projectdaemon", `package projectdaemon
+			h := newRuleHarnessWithFiles("/repo/internal/projectdaemon/agent_presence_test.go", "github.com/perber/wiki/internal/projectdaemon", map[string]string{
+				"/repo/internal/projectdaemon/frontmatter.go": `package projectdaemon
+
+type Frontmatter struct{}
+
+func ParseFrontmatter(raw string) (Frontmatter, string, bool, error) { return Frontmatter{}, "", true, nil }
+`,
+				"/repo/internal/projectdaemon/agent_presence_test.go": `package projectdaemon
 
 type assertion struct{}
 func Expect(actual any) assertion { return assertion{} }
@@ -1323,8 +1330,14 @@ func TestAgentPresence() {
 	Expect(fileRenamed).To(BeTrue())
 	userSetInContext := true
 	Expect(userSetInContext).To(BeTrue())
+	fm, body, has, err := ParseFrontmatter("raw")
+	_ = fm
+	_ = body
+	_ = err
+	Expect(has).To(BeTrue())
 }
-`)
+`,
+			})
 			calls := append(h.findCalls("To"), h.findCalls("foundState")...)
 			calls = append(calls, h.findCalls("boolState")...)
 			for _, call := range calls {
@@ -1332,6 +1345,7 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",

@@ -733,14 +733,14 @@ func assertionUsesCommaOKBoolean(ctx *analysisContext, assertion gomegaAssertion
 
 func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) bool {
 	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
-	if ok && isBooleanMatcher(assertion.matcher) && isProxyBooleanName(ident.Name) {
+	if ok && isBooleanMatcher(assertion.matcher) && (isProxyBooleanName(ident.Name) || identIsSemanticBooleanResult(ctx, ident)) {
 		if identIsCommaOKResult(ctx, ident) {
 			return false
 		}
 		return isBoolType(ctx.pass.TypesInfo.TypeOf(ident))
 	}
 	return compositeActualContainsIdent(assertion.actual, func(ident *ast.Ident) bool {
-		return isProxyBooleanName(ident.Name) &&
+		return (isProxyBooleanName(ident.Name) || identIsSemanticBooleanResult(ctx, ident)) &&
 			isBoolType(ctx.pass.TypesInfo.TypeOf(ident)) &&
 			!identIsCommaOKResult(ctx, ident)
 	})
@@ -860,6 +860,65 @@ func identIsCommaOKResult(ctx *analysisContext, ident *ast.Ident) bool {
 		return !found
 	})
 	return found
+}
+
+func identIsSemanticBooleanResult(ctx *analysisContext, ident *ast.Ident) bool {
+	body := enclosingFunctionBody(ctx, ident)
+	if body == nil {
+		return false
+	}
+	targetObject := ctx.pass.TypesInfo.ObjectOf(ident)
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		switch candidate := node.(type) {
+		case *ast.AssignStmt:
+			if candidate.Pos() > ident.Pos() || len(candidate.Rhs) != 1 {
+				return true
+			}
+			found = semanticBoolAssignmentNamesIdent(ctx, candidate.Lhs, candidate.Rhs[0], ident, targetObject)
+			return !found
+		case *ast.ValueSpec:
+			if candidate.Pos() > ident.Pos() || len(candidate.Values) != 1 {
+				return true
+			}
+			lhs := make([]ast.Expr, 0, len(candidate.Names))
+			for _, name := range candidate.Names {
+				lhs = append(lhs, name)
+			}
+			found = semanticBoolAssignmentNamesIdent(ctx, lhs, candidate.Values[0], ident, targetObject)
+			return !found
+		}
+		return true
+	})
+	return found
+}
+
+func semanticBoolAssignmentNamesIdent(ctx *analysisContext, lhs []ast.Expr, rhs ast.Expr, ident *ast.Ident, targetObject types.Object) bool {
+	call, ok := unparenExpr(rhs).(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	results, ok := ctx.pass.TypesInfo.TypeOf(call).(*types.Tuple)
+	if !ok {
+		return false
+	}
+	for i, lhsExpr := range lhs {
+		if i >= results.Len() || !isBoolType(results.At(i).Type()) {
+			continue
+		}
+		lhsIdent, ok := unparenExpr(lhsExpr).(*ast.Ident)
+		if !ok || !sameIdentifierObject(ctx, lhsIdent, ident, targetObject) {
+			continue
+		}
+		return callReturnsSemanticBoolean(ctx, call, results, i)
+	}
+	return false
 }
 
 func exprTreeContainsIdent(expr ast.Expr, predicate func(*ast.Ident) bool) bool {
