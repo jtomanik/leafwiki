@@ -16,9 +16,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("revision seam-driven edge coverage", func() {
-	It("covers content and manifest idempotency races and write failures", func() {
-		store := NewFSStore(GinkgoT().TempDir())
+var _ = Describe("revision seam-driven failure behavior", func() {
+	It("preserves idempotent content and manifest writes while propagating write failures", func() {
+		store := NewFSStore(revisionTempDir())
 
 		restore := setRevisionSeam(&revisionWriteFileAtomic, func(path string, data []byte, perm os.FileMode) error {
 			Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
@@ -64,8 +64,8 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(err).To(MatchError(manifestWriteFailedErr))
 	})
 
-	It("covers asset blob save failure and race paths", func() {
-		tmp := GinkgoT().TempDir()
+	It("propagates asset blob save failures and treats raced writes as idempotent", func() {
+		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		srcPath := filepath.Join(tmp, "live.txt")
 		Expect(os.WriteFile(srcPath, []byte("asset"), 0o644)).To(Succeed())
@@ -149,8 +149,8 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(err).To(MatchError(renameFailedErr))
 	})
 
-	It("covers asset restore copy failures", func() {
-		tmp := GinkgoT().TempDir()
+	It("propagates asset restore copy failures", func() {
+		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		hash, size := writeStoredAssetBlob(store, []byte("asset"))
 		restoreDir := filepath.Join(tmp, "restore")
@@ -178,8 +178,8 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreClose()
 	})
 
-	It("covers revision index, lookup, prune, and delete failure exits", func() {
-		store := NewFSStore(GinkgoT().TempDir())
+	It("propagates revision index, lookup, prune, and delete failures", func() {
+		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("store-failure-page")
 		createdAt := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
 
@@ -229,7 +229,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreRemoveAll()
 	})
 
-	It("covers service record failure branches through store seams", func() {
+	It("propagates service record failures from store seams", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		page, err := treeService.GetPage(pageID)
@@ -330,7 +330,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreSaveRevision()
 	})
 
-	It("covers service integrity, delete, parser, sort, and restore failure branches", func() {
+	It("reports integrity, delete, parser, sort, and restore failures", func() {
 		service, treeService, _ := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 
@@ -431,7 +431,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreMkdir()
 	})
 
-	It("covers restore rollback paths through orchestration seams", func() {
+	It("rolls back restore attempts when orchestration seams fail", func() {
 		service, treeService, _ := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "before")
 		contentHash, err := service.store.SaveContentBlob([]byte("after"))
@@ -528,7 +528,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreAssets()
 	})
 
-	It("covers restore-revision recording failures", func() {
+	It("propagates restore-revision recording failures", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
@@ -574,7 +574,7 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		restoreID()
 	})
 
-	It("covers remaining batch, manifest fallback, integrity, and restore failure branches", func() {
+	It("reports batch, manifest fallback, integrity, and restore failures", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		page, err := treeService.GetPage(pageID)
@@ -609,8 +609,8 @@ var _ = Describe("revision seam-driven edge coverage", func() {
 		Expect(issues).To(BeEmpty())
 		restoreList()
 
-		unloadedTree := tree.NewTreeService(GinkgoT().TempDir())
-		unloadedService := NewService(GinkgoT().TempDir(), unloadedTree, nil)
+		unloadedTree := tree.NewTreeService(revisionTempDir())
+		unloadedService := NewService(revisionTempDir(), unloadedTree, nil)
 		Expect(unloadedService.RestoreRevision(newFixturePageID("unloaded"), newFixtureRevisionID("rev"), newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 
 		contentHash, err := service.store.SaveContentBlob([]byte("body"))

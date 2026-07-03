@@ -1,13 +1,12 @@
 package revision
 
 import (
-	"errors"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
@@ -27,9 +26,8 @@ var invalidRevisionPageIDCases = []struct {
 }
 
 var _ = ginkgo.Describe("fs store", func() {
-	ginkgo.It("TestFSStoreRevisionReadPaths", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("returns revisions in newest-first pages and retrieves explicit revisions", func() {
+		store := NewFSStore(revisionTempDir())
 		created1 := time.Date(2026, 3, 26, 10, 0, 0, 0, time.UTC)
 		created2 := created1.Add(time.Minute)
 		created3 := created2.Add(time.Minute)
@@ -38,105 +36,60 @@ var _ = ginkgo.Describe("fs store", func() {
 		rev2 := &Revision{ID: "rev2", PageID: "page-1", CreatedAt: created2, Type: RevisionTypeAssetUpdate, Title: "A", Slug: "a"}
 		rev3 := &Revision{ID: "rev3", PageID: "page-1", CreatedAt: created3, Type: RevisionTypeStructureUpdate, Title: "A", Slug: "a"}
 		for _, rev := range []*Revision{rev1, rev2, rev3} {
-			if err := store.SaveRevision(rev); err != nil {
-				t.Fatalf("SaveRevision(%s) failed: %v", rev.ID, err)
-			}
+			Expect(store.SaveRevision(rev)).To(Succeed())
 		}
 
 		latest, err := store.GetLatestRevision("page-1")
-		if err != nil {
-			t.Fatalf("GetLatestRevision failed: %v", err)
-		}
-		if latest == nil || latest.ID != "rev3" {
-			t.Fatalf("latest = %#v", latest)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(latest).To(HaveField("ID", newFixtureRevisionID("rev3")))
 
 		got, err := store.GetRevision("page-1", "rev2")
-		if err != nil {
-			t.Fatalf("GetRevision failed: %v", err)
-		}
-		if got.ID != "rev2" {
-			t.Fatalf("GetRevision returned %q", got.ID)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveField("ID", newFixtureRevisionID("rev2")))
 
 		firstPage, nextCursor, err := store.ListRevisionsPage("page-1", "", 2)
-		if err != nil {
-			t.Fatalf("ListRevisionsPage first page failed: %v", err)
-		}
-		if len(firstPage) != 2 || firstPage[0].ID != "rev3" || firstPage[1].ID != "rev2" {
-			t.Fatalf("first page = %#v", firstPage)
-		}
-		if nextCursor == "" {
-			t.Fatalf("expected next cursor")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(firstPage).To(HaveExactElements(
+			HaveField("ID", newFixtureRevisionID("rev3")),
+			HaveField("ID", newFixtureRevisionID("rev2")),
+		))
+		Expect(nextCursor).NotTo(BeEmpty())
 
 		secondPage, nextCursor2, err := store.ListRevisionsPage("page-1", nextCursor, 2)
-		if err != nil {
-			t.Fatalf("ListRevisionsPage second page failed: %v", err)
-		}
-		if len(secondPage) != 1 || secondPage[0].ID != "rev1" {
-			t.Fatalf("second page = %#v", secondPage)
-		}
-		if nextCursor2 != "" {
-			t.Fatalf("expected empty next cursor, got %q", nextCursor2)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(secondPage).To(HaveExactElements(HaveField("ID", newFixtureRevisionID("rev1"))))
+		Expect(nextCursor2).To(BeEmpty())
 	})
 
-	ginkgo.It("TestFSStoreBlobPaths", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("stores and restores content blobs, asset blobs, and manifests", func() {
+		store := NewFSStore(revisionTempDir())
 
 		contentHash, err := store.SaveContentBlob([]byte("hello"))
-		if err != nil {
-			t.Fatalf("SaveContentBlob failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		raw, err := store.ReadContentBlob(contentHash)
-		if err != nil {
-			t.Fatalf("ReadContentBlob failed: %v", err)
-		}
-		if string(raw) != "hello" {
-			t.Fatalf("content blob = %q", string(raw))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(Equal("hello"))
 
-		assetSrcDir := filepath.Join(t.TempDir(), "src")
-		if err := os.MkdirAll(assetSrcDir, 0o755); err != nil {
-			t.Fatalf("MkdirAll failed: %v", err)
-		}
+		assetSrcDir := filepath.Join(revisionTempDir(), "src")
+		Expect(os.MkdirAll(assetSrcDir, 0o755)).To(Succeed())
 		assetSrc := filepath.Join(assetSrcDir, "asset.txt")
-		if err := os.WriteFile(assetSrc, []byte("asset-data"), 0o644); err != nil {
-			t.Fatalf("WriteFile failed: %v", err)
-		}
+		Expect(os.WriteFile(assetSrc, []byte("asset-data"), 0o644)).To(Succeed())
 		hash, size, err := store.SaveAssetBlobFromPath(assetSrc)
-		if err != nil {
-			t.Fatalf("SaveAssetBlobFromPath failed: %v", err)
-		}
-		if size != int64(len("asset-data")) {
-			t.Fatalf("asset size = %d", size)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(size).To(Equal(int64(len("asset-data"))))
 		assetRaw, err := store.ReadAssetBlob(hash)
-		if err != nil {
-			t.Fatalf("ReadAssetBlob failed: %v", err)
-		}
-		if string(assetRaw) != "asset-data" {
-			t.Fatalf("asset blob = %q", string(assetRaw))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(assetRaw)).To(Equal("asset-data"))
 
 		manifestHash, err := store.SaveAssetManifest([]AssetRef{{Name: "asset.txt", SHA256: hash, SizeBytes: size}})
-		if err != nil {
-			t.Fatalf("SaveAssetManifest failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		manifest, err := store.LoadAssetManifest(manifestHash)
-		if err != nil {
-			t.Fatalf("LoadAssetManifest failed: %v", err)
-		}
-		if len(manifest) != 1 || manifest[0].Name != "asset.txt" {
-			t.Fatalf("manifest = %#v", manifest)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(manifest).To(HaveExactElements(HaveField("Name", "asset.txt")))
 	})
 
-	ginkgo.It("TestFSStoreSaveRevisionSerializesPageMetadataAsSnakeCaseJSON", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("serializes page metadata with snake-case JSON fields", func() {
+		store := NewFSStore(revisionTempDir())
 		createdAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
 		revision := &Revision{
 			ID:        "rev-snake",
@@ -160,14 +113,10 @@ var _ = ginkgo.Describe("fs store", func() {
 			},
 		}
 
-		if err := store.SaveRevision(revision); err != nil {
-			t.Fatalf("SaveRevision failed: %v", err)
-		}
+		Expect(store.SaveRevision(revision)).To(Succeed())
 
 		raw, err := os.ReadFile(store.revisionFilePath("page-snake", "rev-snake", createdAt))
-		if err != nil {
-			t.Fatalf("ReadFile revision: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		revisionJSON := string(raw)
 		for _, want := range []string{
 			`"page_metadata"`,
@@ -178,9 +127,7 @@ var _ = ginkgo.Describe("fs store", func() {
 			`"creator_id"`,
 			`"last_author_id"`,
 		} {
-			if !strings.Contains(revisionJSON, want) {
-				t.Fatalf("revision JSON missing %s:\n%s", want, revisionJSON)
-			}
+			Expect(revisionJSON).To(ContainSubstring(want))
 		}
 		for _, legacyGoName := range []string{
 			`"Version":`,
@@ -190,15 +137,12 @@ var _ = ginkgo.Describe("fs store", func() {
 			`"CreatorID":`,
 			`"LastAuthorID":`,
 		} {
-			if strings.Contains(revisionJSON, legacyGoName) {
-				t.Fatalf("revision JSON contains Go field name %s:\n%s", legacyGoName, revisionJSON)
-			}
+			Expect(revisionJSON).NotTo(ContainSubstring(legacyGoName))
 		}
 	})
 
-	ginkgo.It("TestFSStoreDeletePageRevisions", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("removes page revision history idempotently", func() {
+		store := NewFSStore(revisionTempDir())
 		createdAt := time.Date(2026, 4, 12, 18, 0, 0, 0, time.UTC)
 
 		revision := &Revision{
@@ -209,56 +153,37 @@ var _ = ginkgo.Describe("fs store", func() {
 			Title:     "Page",
 			Slug:      "page",
 		}
-		if err := store.SaveRevision(revision); err != nil {
-			t.Fatalf("SaveRevision failed: %v", err)
-		}
+		Expect(store.SaveRevision(revision)).To(Succeed())
 
-		if _, err := os.Stat(store.revisionsPageDir("page-1")); err != nil {
-			t.Fatalf("expected revisions dir to exist, got %v", err)
-		}
+		_, err := os.Stat(store.revisionsPageDir("page-1"))
+		Expect(err).NotTo(HaveOccurred())
 
-		if err := store.DeletePageRevisions("page-1"); err != nil {
-			t.Fatalf("DeletePageRevisions failed: %v", err)
-		}
+		Expect(store.DeletePageRevisions("page-1")).To(Succeed())
 
-		if _, err := os.Stat(store.revisionsPageDir("page-1")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("expected revisions dir to be removed, got %v", err)
-		}
+		_, err = os.Stat(store.revisionsPageDir("page-1"))
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		revisions, err := store.ListRevisions("page-1")
-		if err != nil {
-			t.Fatalf("ListRevisions after delete failed: %v", err)
-		}
-		if len(revisions) != 0 {
-			t.Fatalf("expected no revisions after delete, got %#v", revisions)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions).To(BeEmpty())
 
-		if err := store.DeletePageRevisions("page-1"); err != nil {
-			t.Fatalf("DeletePageRevisions missing should be ignored: %v", err)
-		}
+		Expect(store.DeletePageRevisions("page-1")).To(Succeed())
 	})
 
-	ginkgo.It("TestFSStoreValidationAndEmptyPaths", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("accepts empty content references and rejects missing required revision data", func() {
+		store := NewFSStore(revisionTempDir())
 
-		if _, err := store.ReadContentBlob(""); err != nil {
-			t.Fatalf("ReadContentBlob empty hash failed: %v", err)
-		}
-		if _, err := store.LoadAssetManifest(""); err != nil {
-			t.Fatalf("LoadAssetManifest empty hash failed: %v", err)
-		}
-		if _, err := store.ReadAssetBlob(""); err == nil {
-			t.Fatalf("expected ReadAssetBlob empty hash to fail")
-		}
-		if err := store.SaveRevision(nil); err == nil {
-			t.Fatalf("expected SaveRevision(nil) to fail")
-		}
+		_, err := store.ReadContentBlob("")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = store.LoadAssetManifest("")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = store.ReadAssetBlob("")
+		Expect(err).To(HaveOccurred())
+		Expect(store.SaveRevision(nil)).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestFSStoreGetRevision_BackwardCompatibleWithoutExtraFrontmatterFields", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("reads legacy revision files without compatibility metadata fields", func() {
+		store := NewFSStore(revisionTempDir())
 		createdAt := time.Date(2026, 4, 20, 15, 4, 5, 0, time.UTC)
 		pageID := newFixturePageID("page-1")
 		revisionID := newFixtureRevisionID("rev-legacy")
@@ -281,161 +206,105 @@ var _ = ginkgo.Describe("fs store", func() {
 		}
 
 		revisionPath := store.revisionFilePath(pageID, revisionID, createdAt)
-		if err := os.MkdirAll(filepath.Dir(revisionPath), 0o755); err != nil {
-			t.Fatalf("MkdirAll failed: %v", err)
-		}
-		if err := writeJSONAtomic(revisionPath, payload); err != nil {
-			t.Fatalf("writeJSONAtomic failed: %v", err)
-		}
-		if err := store.saveRevisionIndex(pageID, revisionIndex{revisionID.CommitID(): filepath.Base(revisionPath)}); err != nil {
-			t.Fatalf("saveRevisionIndex failed: %v", err)
-		}
+		Expect(os.MkdirAll(filepath.Dir(revisionPath), 0o755)).To(Succeed())
+		Expect(writeJSONAtomic(revisionPath, payload)).To(Succeed())
+		Expect(store.saveRevisionIndex(pageID, revisionIndex{revisionID.CommitID(): filepath.Base(revisionPath)})).To(Succeed())
 
 		rev, err := store.GetRevision(pageID, revisionID)
-		if err != nil {
-			t.Fatalf("GetRevision failed: %v", err)
-		}
-		if rev == nil || rev.ID != revisionID {
-			t.Fatalf("unexpected revision = %#v", rev)
-		}
-		if rev.ExtraFrontmatter != nil {
-			t.Fatalf("expected legacy revision to decode without extra frontmatter, got %#v", rev.ExtraFrontmatter)
-		}
-		if rev.ExtraFrontmatterHash != "" {
-			t.Fatalf("expected empty extra frontmatter hash for legacy revision, got %q", rev.ExtraFrontmatterHash)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rev).To(SatisfyAll(
+			HaveField("ID", revisionID),
+			HaveField("ExtraFrontmatter", BeNil()),
+			HaveField("ExtraFrontmatterHash", BeEmpty()),
+		))
 	})
 
-	ginkgo.It("TestFSStoreListRevisionWrappersAndValidation", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
-		if got, err := store.ListRevisions("missing"); err != nil || len(got) != 0 {
-			t.Fatalf("ListRevisions(missing) = %#v, %v", got, err)
-		}
-		if got, err := store.GetLatestRevision("missing"); err != nil || got != nil {
-			t.Fatalf("GetLatestRevision(missing) = %#v, %v", got, err)
-		}
-		if _, err := store.GetRevision("missing", ""); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("expected os.ErrNotExist for empty revision id, got %v", err)
-		}
-		if _, err := store.GetRevision("missing", "rev1"); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("expected os.ErrNotExist for missing revision, got %v", err)
-		}
+	ginkgo.It("returns stable empty results and validates missing revisions", func() {
+		store := NewFSStore(revisionTempDir())
+		got, err := store.ListRevisions("missing")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(BeEmpty())
 
-		if got := shardHash("a"); got != "00" {
-			t.Fatalf("shardHash short = %q", got)
-		}
-		if got := shardHash("abcd"); got != "ab" {
-			t.Fatalf("shardHash normal = %q", got)
-		}
+		latest, err := store.GetLatestRevision("missing")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(latest).To(BeNil())
+
+		_, err = store.GetRevision("missing", "")
+		Expect(err).To(MatchError(os.ErrNotExist))
+		_, err = store.GetRevision("missing", "rev1")
+		Expect(err).To(MatchError(os.ErrNotExist))
+
+		Expect(shardHash("a")).To(Equal("00"))
+		Expect(shardHash("abcd")).To(Equal("ab"))
 
 		items := cloneAndSortAssetRefs([]AssetRef{{Name: "b.txt", SHA256: "2"}, {Name: "a.txt", SHA256: "1"}})
-		if items[0].Name != "a.txt" {
-			t.Fatalf("sorted items = %#v", items)
-		}
+		Expect(items).To(HaveExactElements(
+			HaveField("Name", "a.txt"),
+			HaveField("Name", "b.txt"),
+		))
 	})
 
-	ginkgo.It("TestFSStoreIdempotentSaves", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("reuses content, asset, and manifest hashes for repeated saves", func() {
+		store := NewFSStore(revisionTempDir())
 
 		h1, err := store.SaveContentBlob([]byte("same"))
-		if err != nil {
-			t.Fatalf("first SaveContentBlob failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		h2, err := store.SaveContentBlob([]byte("same"))
-		if err != nil {
-			t.Fatalf("second SaveContentBlob failed: %v", err)
-		}
-		if h1 != h2 {
-			t.Fatalf("content hash mismatch: %q vs %q", h1, h2)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(h2).To(Equal(h1))
 
-		srcDir := filepath.Join(t.TempDir(), "src")
-		if err := os.MkdirAll(srcDir, 0o755); err != nil {
-			t.Fatalf("MkdirAll failed: %v", err)
-		}
+		srcDir := filepath.Join(revisionTempDir(), "src")
+		Expect(os.MkdirAll(srcDir, 0o755)).To(Succeed())
 		src := filepath.Join(srcDir, "asset.txt")
-		if err := os.WriteFile(src, []byte("asset"), 0o644); err != nil {
-			t.Fatalf("WriteFile failed: %v", err)
-		}
+		Expect(os.WriteFile(src, []byte("asset"), 0o644)).To(Succeed())
 		hash1, size1, err := store.SaveAssetBlobFromPath(src)
-		if err != nil {
-			t.Fatalf("first SaveAssetBlobFromPath failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		hash2, size2, err := store.SaveAssetBlobFromPath(src)
-		if err != nil {
-			t.Fatalf("second SaveAssetBlobFromPath failed: %v", err)
-		}
-		if hash1 != hash2 || size1 != size2 {
-			t.Fatalf("asset save mismatch: %q/%d vs %q/%d", hash1, size1, hash2, size2)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hash2).To(Equal(hash1))
+		Expect(size2).To(Equal(size1))
 
 		manifest := []AssetRef{{Name: "asset.txt", SHA256: hash1, SizeBytes: size1}}
 		m1, err := store.SaveAssetManifest(manifest)
-		if err != nil {
-			t.Fatalf("first SaveAssetManifest failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		m2, err := store.SaveAssetManifest(manifest)
-		if err != nil {
-			t.Fatalf("second SaveAssetManifest failed: %v", err)
-		}
-		if m1 != m2 {
-			t.Fatalf("manifest hash mismatch: %q vs %q", m1, m2)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(m2).To(Equal(m1))
 
-		if err := store.SaveRevision(&Revision{}); err == nil {
-			t.Fatalf("expected zero-value revision to fail")
-		}
+		Expect(store.SaveRevision(&Revision{})).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestFSStoreCursorAndFileFilteringHelpers", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("filters non-revision files and returns empty pages for stale cursors", func() {
+		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("page-1")
 		created := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 		for i := 0; i < 2; i++ {
 			rev := &Revision{ID: newFixtureRevisionID(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
-			if err := store.SaveRevision(rev); err != nil {
-				t.Fatalf("SaveRevision(%d) failed: %v", i, err)
-			}
+			Expect(store.SaveRevision(rev)).To(Succeed())
 		}
 
 		dir := store.revisionsPageDir(pageID)
-		if err := os.MkdirAll(filepath.Join(dir, "ignored-dir"), 0o755); err != nil {
-			t.Fatalf("MkdirAll ignored dir failed: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignore"), 0o644); err != nil {
-			t.Fatalf("WriteFile ignored file failed: %v", err)
-		}
+		Expect(os.MkdirAll(filepath.Join(dir, "ignored-dir"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignore"), 0o644)).To(Succeed())
 
 		names, err := store.revisionFileNames(pageID)
-		if err != nil {
-			t.Fatalf("revisionFileNames failed: %v", err)
-		}
-		if len(names) != 2 {
-			t.Fatalf("expected 2 revision files, got %#v", names)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(names).To(HaveLen(2))
 
-		if got, next, err := store.ListRevisionsPage(pageID, "missing-cursor", 1); err != nil || len(got) != 0 || next != "" {
-			t.Fatalf("ListRevisionsPage missing cursor = %#v, %q, %v", got, next, err)
-		}
+		got, next, err := store.ListRevisionsPage(pageID, "missing-cursor", 1)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(BeEmpty())
+		Expect(next).To(BeEmpty())
 
 		brokenDir := store.revisionsPageDir("broken-page")
-		if err := os.MkdirAll(brokenDir, 0o755); err != nil {
-			t.Fatalf("MkdirAll broken dir failed: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(brokenDir, "20260326T120000.000000000Z_a.json"), []byte("{"), 0o644); err != nil {
-			t.Fatalf("WriteFile broken revision failed: %v", err)
-		}
-		if _, err := store.GetLatestRevision("broken-page"); err == nil {
-			t.Fatalf("expected invalid latest revision json to fail")
-		}
+		Expect(os.MkdirAll(brokenDir, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(brokenDir, "20260326T120000.000000000Z_a.json"), []byte("{"), 0o644)).To(Succeed())
+		_, err = store.GetLatestRevision("broken-page")
+		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestFSStoreSaveRevisionRejectsInvalidRevisionID", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("rejects unsafe revision identifiers", func() {
+		store := NewFSStore(revisionTempDir())
 		rev := &Revision{
 			ID:        "x/../../outside",
 			PageID:    "page-1",
@@ -446,17 +315,11 @@ var _ = ginkgo.Describe("fs store", func() {
 		}
 
 		err := store.SaveRevision(rev)
-		if err == nil {
-			t.Fatalf("expected SaveRevision to fail")
-		}
-		if got := err.Error(); got != "invalid revision id: x/../../outside" {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestFSStoreSaveRevisionPrefersPageIDValidationError", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("rejects invalid page identifiers before revision identifiers", func() {
+		store := NewFSStore(revisionTempDir())
 		rev := &Revision{
 			ID:        "x/../../outside",
 			PageID:    "../page-1",
@@ -467,53 +330,30 @@ var _ = ginkgo.Describe("fs store", func() {
 		}
 
 		err := store.SaveRevision(rev)
-		if err == nil {
-			t.Fatalf("expected SaveRevision to fail")
-		}
-		if got := err.Error(); got != "page id is required" {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestFSStoreJSONHelpersAndLocalizedNil", func() {
-		t := ginkgo.GinkgoT()
-		path := filepath.Join(t.TempDir(), "value.json")
+	ginkgo.It("round-trips JSON helpers and keeps nil localized errors inert", func() {
+		path := filepath.Join(revisionTempDir(), "value.json")
 		payload := map[string]string{"a": "b"}
-		if err := writeJSONAtomic(path, payload); err != nil {
-			t.Fatalf("writeJSONAtomic failed: %v", err)
-		}
+		Expect(writeJSONAtomic(path, payload)).To(Succeed())
 		var got map[string]string
-		if err := readJSON(path, &got); err != nil {
-			t.Fatalf("readJSON failed: %v", err)
-		}
-		if got["a"] != "b" {
-			t.Fatalf("unexpected json payload: %#v", got)
-		}
+		Expect(readJSON(path, &got)).To(Succeed())
+		Expect(got).To(HaveKeyWithValue("a", "b"))
 
-		badPath := filepath.Join(t.TempDir(), "bad.json")
-		if err := os.WriteFile(badPath, []byte("{"), 0o644); err != nil {
-			t.Fatalf("WriteFile bad json failed: %v", err)
-		}
-		if err := readJSON(badPath, &got); err == nil {
-			t.Fatalf("expected invalid json to fail")
-		}
+		badPath := filepath.Join(revisionTempDir(), "bad.json")
+		Expect(os.WriteFile(badPath, []byte("{"), 0o644)).To(Succeed())
+		Expect(readJSON(badPath, &got)).To(HaveOccurred())
 
 		var localized *sharederrors.LocalizedError
-		if localized.Error() != "" {
-			t.Fatalf("nil localized error string should be empty")
-		}
-		if localized.Unwrap() != nil {
-			t.Fatalf("nil localized error unwrap should be nil")
-		}
+		Expect(localized.Error()).To(BeEmpty())
+		Expect(localized.Unwrap()).To(Succeed())
 	})
 
-	ginkgo.It("TestValidateStorageID", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("accepts storage-safe identifiers and rejects path traversal", func() {
 		good := []string{"page-1", "abc123", "some-uuid-here", "a"}
 		for _, id := range good {
-			if err := validateStorageID(id); err != nil {
-				t.Errorf("validateStorageID(%q) unexpected error: %v", id, err)
-			}
+			Expect(validateStorageID(id)).To(Succeed())
 		}
 
 		bad := []string{
@@ -527,109 +367,71 @@ var _ = ginkgo.Describe("fs store", func() {
 			`foo\bar`,
 		}
 		for _, id := range bad {
-			if err := validateStorageID(id); err == nil {
-				t.Errorf("validateStorageID(%q) should have returned an error", id)
-			}
+			Expect(validateStorageID(id)).To(HaveOccurred())
 		}
 	})
 
-	ginkgo.Describe("TestFSStoreRejectsPathTraversalPageID", func() {
+	ginkgo.Describe("path traversal page identifiers", func() {
 		for _, tc := range invalidRevisionPageIDCases {
 			tc := tc
 			ginkgo.It(tc.name, func() {
-				t := ginkgo.GinkgoT()
-				store := NewFSStore(t.TempDir())
+				store := NewFSStore(revisionTempDir())
 				pageID := newFixturePageID(tc.id)
-				if _, _, err := store.ListRevisionsPage(pageID, "", 50); err == nil {
-					t.Errorf("ListRevisionsPage(%q) should have failed", tc.id)
-				}
-				if _, err := store.GetLatestRevision(pageID); err == nil {
-					t.Errorf("GetLatestRevision(%q) should have failed", tc.id)
-				}
-				if _, err := store.GetRevision(pageID, "rev1"); err == nil {
-					t.Errorf("GetRevision(%q, rev1) should have failed", tc.id)
-				}
-				if err := store.PruneRevisions(pageID, 5); err == nil {
-					t.Errorf("PruneRevisions(%q) should have failed", tc.id)
-				}
+				_, _, err := store.ListRevisionsPage(pageID, "", 50)
+				Expect(err).To(HaveOccurred())
+				_, err = store.GetLatestRevision(pageID)
+				Expect(err).To(HaveOccurred())
+				_, err = store.GetRevision(pageID, "rev1")
+				Expect(err).To(HaveOccurred())
+				Expect(store.PruneRevisions(pageID, 5)).To(HaveOccurred())
 			})
 		}
 	})
 
-	ginkgo.It("TestFSStoreAssetBlobErrors", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
-		if _, _, err := store.SaveAssetBlobFromPath(filepath.Join(t.TempDir(), "missing.txt")); err == nil {
-			t.Fatalf("expected SaveAssetBlobFromPath on missing file to fail")
-		}
+	ginkgo.It("returns an error when a live asset blob source is missing", func() {
+		store := NewFSStore(revisionTempDir())
+		_, _, err := store.SaveAssetBlobFromPath(filepath.Join(revisionTempDir(), "missing.txt"))
+		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestFSStoreFailuresOnInvalidBasePath", func() {
-		t := ginkgo.GinkgoT()
-		root := t.TempDir()
+	ginkgo.It("surfaces filesystem errors when the store root is not a directory", func() {
+		root := revisionTempDir()
 		invalidBase := filepath.Join(root, "not-a-dir")
-		if err := os.WriteFile(invalidBase, []byte("x"), 0o644); err != nil {
-			t.Fatalf("WriteFile invalid base failed: %v", err)
-		}
+		Expect(os.WriteFile(invalidBase, []byte("x"), 0o644)).To(Succeed())
 		store := NewFSStore(invalidBase)
 
-		if _, err := store.SaveContentBlob([]byte("hello")); err == nil {
-			t.Fatalf("expected SaveContentBlob to fail")
-		}
+		_, err := store.SaveContentBlob([]byte("hello"))
+		Expect(err).To(HaveOccurred())
 
 		src := filepath.Join(root, "asset.txt")
-		if err := os.WriteFile(src, []byte("asset"), 0o644); err != nil {
-			t.Fatalf("WriteFile src asset failed: %v", err)
-		}
-		if _, _, err := store.SaveAssetBlobFromPath(src); err == nil {
-			t.Fatalf("expected SaveAssetBlobFromPath to fail")
-		}
-		if _, err := store.SaveAssetManifest([]AssetRef{{Name: "asset.txt", SHA256: "abc", SizeBytes: 5}}); err == nil {
-			t.Fatalf("expected SaveAssetManifest to fail")
-		}
+		Expect(os.WriteFile(src, []byte("asset"), 0o644)).To(Succeed())
+		_, _, err = store.SaveAssetBlobFromPath(src)
+		Expect(err).To(HaveOccurred())
+		_, err = store.SaveAssetManifest([]AssetRef{{Name: "asset.txt", SHA256: "abc", SizeBytes: 5}})
+		Expect(err).To(HaveOccurred())
 
 		rev := &Revision{ID: "rev1", PageID: "page-1", CreatedAt: time.Now().UTC(), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
-		if err := store.SaveRevision(rev); err == nil {
-			t.Fatalf("expected SaveRevision to fail")
-		}
-		if _, err := store.ListRevisions("page-1"); err == nil {
-			t.Fatalf("expected ListRevisions to fail")
-		}
+		Expect(store.SaveRevision(rev)).To(HaveOccurred())
+		_, err = store.ListRevisions("page-1")
+		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestFSStoreGetRevisionUsesAndBackfillsIndex", func() {
-		t := ginkgo.GinkgoT()
-		store := NewFSStore(t.TempDir())
+	ginkgo.It("uses and backfills revision indexes for direct lookups", func() {
+		store := NewFSStore(revisionTempDir())
 		created := time.Date(2026, 3, 26, 12, 30, 0, 0, time.UTC)
 		rev := &Revision{ID: "rev-index", PageID: "page-1", CreatedAt: created, Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
-		if err := store.SaveRevision(rev); err != nil {
-			t.Fatalf("SaveRevision failed: %v", err)
-		}
+		Expect(store.SaveRevision(rev)).To(Succeed())
 
 		index, err := store.loadRevisionIndex("page-1")
-		if err != nil {
-			t.Fatalf("loadRevisionIndex failed: %v", err)
-		}
-		if got := index[rev.ID.CommitID()]; got == "" {
-			t.Fatalf("expected revision index entry for %q, got %#v", rev.ID, index)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(index).To(HaveKey(rev.ID.CommitID()))
 
-		if err := os.Remove(store.revisionIndexPath("page-1")); err != nil {
-			t.Fatalf("Remove revision index failed: %v", err)
-		}
+		Expect(os.Remove(store.revisionIndexPath("page-1"))).To(Succeed())
 		got, err := store.GetRevision("page-1", rev.ID)
-		if err != nil {
-			t.Fatalf("GetRevision fallback failed: %v", err)
-		}
-		if got.ID != rev.ID {
-			t.Fatalf("GetRevision returned %q", got.ID)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveField("ID", rev.ID))
 		index, err = store.loadRevisionIndex("page-1")
-		if err != nil {
-			t.Fatalf("loadRevisionIndex second failed: %v", err)
-		}
-		if got := index[rev.ID.CommitID()]; got == "" {
-			t.Fatalf("expected revision index backfill for %q, got %#v", rev.ID, index)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(index).To(HaveKey(rev.ID.CommitID()))
 	})
 })

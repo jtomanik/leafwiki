@@ -24,7 +24,7 @@ import (
 func newGomegaRevisionService() (*Service, *tree.TreeService, string) {
 	GinkgoHelper()
 
-	storageDir := GinkgoT().TempDir()
+	storageDir := revisionTempDir()
 	treeService := tree.NewTreeService(storageDir)
 	Expect(treeService.LoadTree()).To(Succeed())
 
@@ -96,9 +96,9 @@ func MatchJSONSyntaxError() types.GomegaMatcher {
 	}).WithMessage("match JSON syntax error")
 }
 
-var _ = Describe("revision Gomega edge coverage", func() {
+var _ = Describe("revision edge behavior", func() {
 	It("handles service option and no-op branches explicitly", func() {
-		service := NewService(GinkgoT().TempDir(), nil, nil, ServiceOptions{MaxRevisions: 1})
+		service := NewService(revisionTempDir(), nil, nil, ServiceOptions{MaxRevisions: 1})
 
 		Expect(service.maxRevisions).To(Equal(1))
 		Expect(service.RecordContentUpdates(nil, newFixtureUserID("tester"), "empty")).To(BeEmpty())
@@ -114,7 +114,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 
-	It("covers revision metadata helper fallbacks and marshal failures", func() {
+	It("prefers canonical metadata hashes and reports metadata marshal failures", func() {
 		Expect(revisionStoredMetadataHash(nil)).To(BeEmpty())
 		Expect(revisionStoredMetadataHash(&Revision{ExtraFrontmatterHash: "legacy-hash"})).To(Equal("legacy-hash"))
 		Expect(revisionStoredMetadataHash(&Revision{PageMetadataHash: "canonical-hash", ExtraFrontmatterHash: "legacy-hash"})).To(Equal("canonical-hash"))
@@ -147,7 +147,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(err).To(MatchJSONUnsupportedTypeError())
 	})
 
-	It("covers restored content helper fallbacks and validation errors", func() {
+	It("builds restored raw content and rejects invalid metadata inputs", func() {
 		raw, replaceMetadata, err := buildRestoredRawContent(newFixturePageID("page"), " Page ", nil, nil, "body")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(Equal("body"))
@@ -186,8 +186,8 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		}))
 	})
 
-	It("covers FSStore empty, invalid, and malformed helper paths", func() {
-		store := NewFSStore(GinkgoT().TempDir())
+	It("handles empty hashes and malformed store helper paths", func() {
+		store := NewFSStore(revisionTempDir())
 
 		Expect(store.ReadContentBlob(" ")).To(BeEmpty())
 		reader, err := store.OpenContentBlob(" ")
@@ -214,7 +214,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 			{Name: "b.txt", SHA256: "2"},
 		}))
 
-		Expect(writeJSONAtomic(filepath.Join(GinkgoT().TempDir(), "bad.json"), map[string]interface{}{"bad": func() {}})).To(HaveOccurred())
+		Expect(writeJSONAtomic(filepath.Join(revisionTempDir(), "bad.json"), map[string]interface{}{"bad": func() {}})).To(HaveOccurred())
 
 		Expect(store.saveRevisionIndex(newFixturePageID("indexed"), nil)).To(Succeed())
 		index, err := store.loadRevisionIndex(newFixturePageID("indexed"))
@@ -223,7 +223,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 	})
 
 	It("surfaces malformed revision files and indexes", func() {
-		store := NewFSStore(GinkgoT().TempDir())
+		store := NewFSStore(revisionTempDir())
 
 		badListPageID := newFixturePageID("bad-list")
 		Expect(os.MkdirAll(store.revisionsPageDir(badListPageID), 0o755)).To(Succeed())
@@ -263,7 +263,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 	})
 
 	It("validates SaveRevision required fields", func() {
-		store := NewFSStore(GinkgoT().TempDir())
+		store := NewFSStore(revisionTempDir())
 
 		err := store.SaveRevision(&Revision{
 			ID:     newFixtureRevisionID("rev-no-created-at"),
@@ -275,8 +275,8 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(err).To(MatchError(ErrRevisionCreatedAtRequired))
 	})
 
-	It("covers asset copy validation and destination errors", func() {
-		tmp := GinkgoT().TempDir()
+	It("validates restored asset copy destinations and blob integrity", func() {
+		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		hash, size := writeStoredAssetBlob(store, []byte("asset"))
 
@@ -335,7 +335,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		))
 	})
 
-	It("covers service error branches and manifest resolution fallbacks", func() {
+	It("returns service errors and rebuilds manifest hashes when caches are stale", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 
 		errs := service.RecordContentUpdates([]*tree.Page{{
@@ -376,9 +376,9 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(hash).To(Equal(rev.AssetManifestHash))
 	})
 
-	It("covers asset helper defaults and restore asset validation", func() {
+	It("defaults asset MIME types and rejects invalid restore asset names", func() {
 		service, _, _ := newGomegaRevisionService()
-		assetPath := filepath.Join(GinkgoT().TempDir(), "asset")
+		assetPath := filepath.Join(revisionTempDir(), "asset")
 		Expect(os.WriteFile(assetPath, []byte("asset"), 0o644)).To(Succeed())
 
 		ref, err := buildAssetRef(assetPath, "asset")
@@ -418,7 +418,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(page.Content).To(Equal("original"))
 	})
 
-	It("covers additional deterministic service and store edge paths", func() {
+	It("reports deterministic service and store failure paths", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
@@ -469,8 +469,8 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
-	It("covers additional deterministic FSStore edge paths", func() {
-		store := NewFSStore(GinkgoT().TempDir())
+	It("reports deterministic FSStore edge paths", func() {
+		store := NewFSStore(revisionTempDir())
 
 		fileBackedPageID := newFixturePageID("file-backed")
 		Expect(os.MkdirAll(store.revisionsDir(), 0o755)).To(Succeed())
@@ -521,7 +521,7 @@ var _ = Describe("revision Gomega edge coverage", func() {
 		})
 		Expect(err).To(MatchJSONSyntaxError())
 
-		invalidBase := filepath.Join(GinkgoT().TempDir(), "not-a-dir")
+		invalidBase := filepath.Join(revisionTempDir(), "not-a-dir")
 		Expect(os.WriteFile(invalidBase, []byte("x"), 0o644)).To(Succeed())
 		invalidStore := NewFSStore(invalidBase)
 		Expect(invalidStore.saveRevisionIndex(newFixturePageID("page"), nil)).To(MatchError(syscall.ENOTDIR))

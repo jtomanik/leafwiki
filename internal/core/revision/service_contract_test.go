@@ -7,7 +7,7 @@ import (
 )
 
 var _ = ginkgo.Describe("service contract", func() {
-	ginkgo.It("TestServiceRevisionMethodsUseSemanticIDs", func() {
+	ginkgo.It("keeps public revision service methods typed with semantic IDs", func() {
 		var _ RevisionID = Revision{}.ID
 		var _ func(*Service, tree.PageID, tree.UserID, string) (*Revision, bool, error) = (*Service).RecordContentUpdate
 		var _ func(*Service, []*tree.Page, tree.UserID, string) []error = (*Service).RecordContentUpdates

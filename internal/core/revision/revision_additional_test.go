@@ -9,7 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("revision store additional coverage", func() {
+var _ = ginkgo.Describe("revision store persistence behavior", func() {
 	ginkgo.It("NewRevisionIDUnchecked preserves the raw commit identifier", func() {
 		id := RevisionIDFromString(" rev-raw ")
 
@@ -17,7 +17,7 @@ var _ = ginkgo.Describe("revision store additional coverage", func() {
 	})
 
 	ginkgo.It("PruneRevisions keeps the newest revisions and removes pruned IDs from the index", func() {
-		store := NewFSStore(ginkgo.GinkgoT().TempDir())
+		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("page-prune")
 		createdAt := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
 
@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("revision store additional coverage", func() {
 	})
 
 	ginkgo.It("PruneRevisions keep count boundaries are no-ops for zero and already-small histories", func() {
-		store := NewFSStore(ginkgo.GinkgoT().TempDir())
+		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("page-prune-boundary")
 		revisionID := newFixtureRevisionID("rev-only")
 		Expect(store.SaveRevision(&Revision{
@@ -82,7 +82,7 @@ var _ = ginkgo.Describe("revision store additional coverage", func() {
 	})
 
 	ginkgo.It("CopyAssetBlobToPath restores a stored asset blob with matching hash and size", func() {
-		tmp := ginkgo.GinkgoT().TempDir()
+		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		sourcePath := filepath.Join(tmp, "asset.txt")
 		Expect(os.WriteFile(sourcePath, []byte("asset-data"), 0o644)).To(Succeed())

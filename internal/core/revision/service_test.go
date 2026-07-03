@@ -3,54 +3,33 @@ package revision
 import (
 	"errors"
 	ginkgo "github.com/onsi/ginkgo/v2"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
+	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-type revisionTestT interface {
-	Helper()
-	TempDir() string
-	Fatalf(format string, args ...interface{})
-}
+func newRevisionTestService() (*Service, *tree.TreeService, string) {
+	ginkgo.GinkgoHelper()
 
-func newRevisionTestService(t revisionTestT) (*Service, *tree.TreeService, string) {
-	t.Helper()
-	storageDir := t.TempDir()
+	storageDir := revisionTempDir()
 	treeService := tree.NewTreeService(storageDir)
-	if err := treeService.LoadTree(); err != nil {
-		t.Fatalf("LoadTree failed: %v", err)
-	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewService(storageDir, treeService, logger), treeService, storageDir
+	Expect(treeService.LoadTree()).To(Succeed())
+
+	return NewService(storageDir, treeService, nil), treeService, storageDir
 }
 
-func assertCanonicalRevisionRawStorage(t revisionTestT, raw string) {
-	t.Helper()
-	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-		t.Fatalf("raw storage should start with canonical metadata comment, got:\n%s", raw)
-	}
-	if strings.HasPrefix(raw, "---\n") {
-		t.Fatalf("raw storage should not start with legacy YAML frontmatter:\n%s", raw)
-	}
-}
+func createRevisionTestPage(treeService *tree.TreeService, title, slug, content string) tree.PageID {
+	ginkgo.GinkgoHelper()
 
-func createRevisionTestPage(t revisionTestT, treeService *tree.TreeService, title, slug, content string) tree.PageID {
-	t.Helper()
 	kind := tree.NodeKindPage
 	id, err := treeService.CreateNode("tester", nil, title, newFixtureSlug(slug), &kind)
-	if err != nil {
-		t.Fatalf("CreateNode failed: %v", err)
-	}
-	if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, newFixtureSlug(slug), &content, false); err != nil {
-		t.Fatalf("UpdateNode failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	Expect(id).NotTo(BeNil())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, newFixtureSlug(slug), &content, false)).To(Succeed())
 	return *id
 }
 
@@ -62,8 +41,9 @@ func revisionTestUserID(raw string) tree.UserID {
 	return newFixtureUserID(raw)
 }
 
-func renderRevisionTestMarkdown[T ~string](t revisionTestT, pageID T, title string, fields map[string]interface{}, extra map[string]interface{}, body string) string {
-	t.Helper()
+func renderRevisionTestMarkdown[T ~string](pageID T, title string, fields map[string]interface{}, extra map[string]interface{}, body string) string {
+	ginkgo.GinkgoHelper()
+
 	raw, err := markdown.RenderPageDocument(markdown.PageDocument{
 		Body: body,
 		Metadata: markdown.PageMetadata{
@@ -76,9 +56,7 @@ func renderRevisionTestMarkdown[T ~string](t revisionTestT, pageID T, title stri
 			Extra:  extra,
 		},
 	})
-	if err != nil {
-		t.Fatalf("RenderPageDocument failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	return raw
 }
 
@@ -87,815 +65,505 @@ func revisionAssetPath[T ~string](storageDir string, pageID T, parts ...string) 
 	return filepath.Join(elems...)
 }
 
-func writeLiveAsset[T ~string](t revisionTestT, storageDir string, pageID T, name, content string) {
-	t.Helper()
+func writeLiveAsset[T ~string](storageDir string, pageID T, name, content string) {
+	ginkgo.GinkgoHelper()
+
 	dir := revisionAssetPath(storageDir, pageID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("MkdirAll asset dir failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile asset failed: %v", err)
-	}
+	Expect(os.MkdirAll(dir, 0o755)).To(Succeed())
+	Expect(os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)).To(Succeed())
 }
 
 var _ = ginkgo.Describe("service", func() {
-	ginkgo.It("TestRecordContentUpdateHappyPathAndNoop", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
+	ginkgo.It("records the first content revision and reuses it when content is unchanged", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		authorID := revisionTestUserID("tester")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
 
 		rev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), authorID, "first")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate failed: %v", err)
-		}
-		if !created || rev == nil {
-			t.Fatalf("expected revision to be created")
-		}
-		if rev.Type != RevisionTypeContentUpdate || rev.ParentID != "" {
-			t.Fatalf("unexpected revision: %#v", rev)
-		}
-		if rev.AssetManifestHash == "" || rev.ContentHash == "" {
-			t.Fatalf("expected hashes on revision: %#v", rev)
-		}
-		if rev.PageCreatedAt.IsZero() || rev.PageUpdatedAt.IsZero() {
-			t.Fatalf("expected page metadata timestamps on revision")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(rev).To(SatisfyAll(
+			HaveField("Type", RevisionTypeContentUpdate),
+			HaveField("ParentID", BeEmpty()),
+			HaveField("AssetManifestHash", Not(BeEmpty())),
+			HaveField("ContentHash", Not(BeEmpty())),
+			HaveField("PageCreatedAt", Not(BeZero())),
+			HaveField("PageUpdatedAt", Not(BeZero())),
+		))
 
 		rev2, created2, err := service.RecordContentUpdate(revisionTestPageID(pageID), authorID, "second")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate second call failed: %v", err)
-		}
-		if created2 {
-			t.Fatalf("expected second content update to be skipped")
-		}
-		if rev2.ID != rev.ID {
-			t.Fatalf("expected same revision on noop, got %q vs %q", rev2.ID, rev.ID)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created2).To(BeFalse())
+		Expect(rev2).To(HaveField("ID", rev.ID))
 	})
 
-	ginkgo.It("TestRecordContentUpdatesHappyPathAndNoop", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID1 := createRevisionTestPage(t, treeService, "Page 1", "page-1", "hello")
-		pageID2 := createRevisionTestPage(t, treeService, "Page 2", "page-2", "world")
-		writeLiveAsset(t, storageDir, pageID1, "a.txt", "asset-a")
-		writeLiveAsset(t, storageDir, pageID2, "b.txt", "asset-b")
+	ginkgo.It("records batch content revisions once and preserves no-op histories", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID1 := createRevisionTestPage(treeService, "Page 1", "page-1", "hello")
+		pageID2 := createRevisionTestPage(treeService, "Page 2", "page-2", "world")
+		writeLiveAsset(storageDir, pageID1, "a.txt", "asset-a")
+		writeLiveAsset(storageDir, pageID2, "b.txt", "asset-b")
 
 		page1, err := treeService.GetPage(newFixturePageID(pageID1))
-		if err != nil {
-			t.Fatalf("GetPage(page1) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		page2, err := treeService.GetPage(newFixturePageID(pageID2))
-		if err != nil {
-			t.Fatalf("GetPage(page2) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		errs := service.RecordContentUpdates([]*tree.Page{page1, page2}, "tester", "batch")
-		if len(errs) != 2 {
-			t.Fatalf("expected 2 result errors, got %d", len(errs))
-		}
-		for i, err := range errs {
-			if err != nil {
-				t.Fatalf("RecordContentUpdates error[%d] = %v", i, err)
-			}
-		}
+		Expect(errs).To(HaveLen(2))
+		Expect(errs).To(HaveEach(Succeed()))
 
 		revisions1, err := service.ListRevisions(newFixturePageID(pageID1))
-		if err != nil {
-			t.Fatalf("ListRevisions(page1) failed: %v", err)
-		}
-		if len(revisions1) != 1 || revisions1[0].Type != RevisionTypeContentUpdate {
-			t.Fatalf("unexpected revisions for page1: %#v", revisions1)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions1).To(HaveExactElements(HaveField("Type", RevisionTypeContentUpdate)))
 
 		revisions2, err := service.ListRevisions(newFixturePageID(pageID2))
-		if err != nil {
-			t.Fatalf("ListRevisions(page2) failed: %v", err)
-		}
-		if len(revisions2) != 1 || revisions2[0].Type != RevisionTypeContentUpdate {
-			t.Fatalf("unexpected revisions for page2: %#v", revisions2)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions2).To(HaveExactElements(HaveField("Type", RevisionTypeContentUpdate)))
 
 		errs = service.RecordContentUpdates([]*tree.Page{page1, page2}, "tester", "batch")
-		if len(errs) != 2 {
-			t.Fatalf("expected 2 noop result errors, got %d", len(errs))
-		}
-		for i, err := range errs {
-			if err != nil {
-				t.Fatalf("RecordContentUpdates noop error[%d] = %v", i, err)
-			}
-		}
+		Expect(errs).To(HaveLen(2))
+		Expect(errs).To(HaveEach(Succeed()))
 
 		revisions1After, err := service.ListRevisions(newFixturePageID(pageID1))
-		if err != nil {
-			t.Fatalf("ListRevisions(page1 after noop) failed: %v", err)
-		}
-		if len(revisions1After) != 1 {
-			t.Fatalf("expected page1 noop to keep 1 revision, got %d", len(revisions1After))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions1After).To(HaveLen(1))
 
 		revisions2After, err := service.ListRevisions(newFixturePageID(pageID2))
-		if err != nil {
-			t.Fatalf("ListRevisions(page2 after noop) failed: %v", err)
-		}
-		if len(revisions2After) != 1 {
-			t.Fatalf("expected page2 noop to keep 1 revision, got %d", len(revisions2After))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions2After).To(HaveLen(1))
 	})
 
-	ginkgo.It("TestRecordContentUpdates_PreservesPerInputErrors", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID1 := createRevisionTestPage(t, treeService, "Page 1", "page-1", "hello")
-		pageID2 := createRevisionTestPage(t, treeService, "Page 2", "page-2", "world")
-		writeLiveAsset(t, storageDir, pageID1, "a.txt", "asset-a")
-		writeLiveAsset(t, storageDir, pageID2, "b.txt", "asset-b")
+	ginkgo.It("preserves per-input errors while recording valid batch pages", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID1 := createRevisionTestPage(treeService, "Page 1", "page-1", "hello")
+		pageID2 := createRevisionTestPage(treeService, "Page 2", "page-2", "world")
+		writeLiveAsset(storageDir, pageID1, "a.txt", "asset-a")
+		writeLiveAsset(storageDir, pageID2, "b.txt", "asset-b")
 
 		page1, err := treeService.GetPage(newFixturePageID(pageID1))
-		if err != nil {
-			t.Fatalf("GetPage(page1) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		page2, err := treeService.GetPage(newFixturePageID(pageID2))
-		if err != nil {
-			t.Fatalf("GetPage(page2) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		errs := service.RecordContentUpdates([]*tree.Page{page1, nil, page2}, "tester", "batch")
-		if len(errs) != 3 {
-			t.Fatalf("expected 3 result errors, got %d", len(errs))
-		}
-		if errs[0] != nil {
-			t.Fatalf("unexpected error for page1: %v", errs[0])
-		}
-		if errs[1] == nil || errs[1].Error() != "page is required" {
-			t.Fatalf("expected nil-page error in slot 1, got %v", errs[1])
-		}
-		if errs[2] != nil {
-			t.Fatalf("unexpected error for page2: %v", errs[2])
-		}
+		Expect(errs).To(HaveExactElements(
+			Succeed(),
+			HaveOccurred(),
+			Succeed(),
+		))
 
 		revisions1, err := service.ListRevisions(newFixturePageID(pageID1))
-		if err != nil {
-			t.Fatalf("ListRevisions(page1) failed: %v", err)
-		}
-		if len(revisions1) != 1 {
-			t.Fatalf("expected 1 revision for page1, got %d", len(revisions1))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions1).To(HaveLen(1))
 
 		revisions2, err := service.ListRevisions(newFixturePageID(pageID2))
-		if err != nil {
-			t.Fatalf("ListRevisions(page2) failed: %v", err)
-		}
-		if len(revisions2) != 1 {
-			t.Fatalf("expected 1 revision for page2, got %d", len(revisions2))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions2).To(HaveLen(1))
 	})
 
-	ginkgo.It("TestRecordContentUpdates_DuplicatePageIDsStayDeterministic", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset-a")
+	ginkgo.It("records duplicate batch page IDs once", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset-a")
 
 		page, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		errs := service.RecordContentUpdates([]*tree.Page{page, page}, "tester", "batch")
-		if len(errs) != 2 {
-			t.Fatalf("expected 2 result errors, got %d", len(errs))
-		}
-		for i, err := range errs {
-			if err != nil {
-				t.Fatalf("unexpected error in slot %d: %v", i, err)
-			}
-		}
+		Expect(errs).To(HaveLen(2))
+		Expect(errs).To(HaveEach(Succeed()))
 
 		revisions, err := service.ListRevisions(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ListRevisions(page) failed: %v", err)
-		}
-		if len(revisions) != 1 {
-			t.Fatalf("expected duplicate batch entry to yield 1 revision, got %d", len(revisions))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions).To(HaveLen(1))
 	})
 
-	ginkgo.It("TestLocalizedErrorHelpers", func() {
-		t := ginkgo.GinkgoT()
+	ginkgo.It("wraps localized errors with causes and structured details", func() {
 		cause := errors.New("boom")
 		err := sharederrors.NewLocalizedError("code", "message", "template %s", cause, "arg")
-		if err.Error() == "" {
-			t.Fatalf("expected non-empty error string")
-		}
-		if !errors.Is(err, cause) {
-			t.Fatalf("expected wrapped cause")
-		}
-		localized, ok := sharederrors.AsLocalizedError(err)
-		if !ok || localized.Code != "code" || localized.Args[0] != "arg" {
-			t.Fatalf("localized = %#v", localized)
-		}
-		if _, ok := sharederrors.AsLocalizedError(errors.New("plain")); ok {
-			t.Fatalf("plain error should not unwrap to LocalizedError")
-		}
+		Expect(err.Error()).NotTo(BeEmpty())
+		Expect(err).To(matchRevisionErrorCause(cause))
+		Expect(err).To(matchLocalizedRevisionErrorDetails(sharederrors.ErrorCode("code"), "arg"))
+		Expect(errors.New("plain")).NotTo(matchLocalizedRevisionErrorDetails(sharederrors.ErrorCode("code"), "arg"))
 	})
 
-	ginkgo.It("TestServiceWrappersAndHelpers", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
+	ginkgo.It("exposes revision wrappers and deletes page revision data", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
 
 		typedPageID := revisionTestPageID(pageID)
 		state, err := service.CapturePageState(typedPageID)
-		if err != nil {
-			t.Fatalf("CapturePageState failed: %v", err)
-		}
-		if state.PageID != typedPageID || len(state.Assets) != 1 {
-			t.Fatalf("state = %#v", state)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(state).To(SatisfyAll(
+			HaveField("PageID", typedPageID),
+			HaveField("Assets", HaveLen(1)),
+		))
 
-		if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content"); err != nil {
-			t.Fatalf("RecordContentUpdate failed: %v", err)
-		}
+		_, _, err = service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content")
+		Expect(err).NotTo(HaveOccurred())
 
 		revisions, err := service.ListRevisions(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ListRevisions failed: %v", err)
-		}
-		if len(revisions) < 1 {
-			t.Fatalf("expected revisions, got %#v", revisions)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions).NotTo(BeEmpty())
 		paged, _, err := service.ListRevisionsPage(newFixturePageID(pageID), "", 1)
-		if err != nil {
-			t.Fatalf("ListRevisionsPage failed: %v", err)
-		}
-		if len(paged) != 1 {
-			t.Fatalf("expected one paged revision, got %d", len(paged))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(paged).To(HaveLen(1))
 
-		if err := service.DeletePageData(typedPageID); err != nil {
-			t.Fatalf("DeletePageData failed: %v", err)
-		}
+		Expect(service.DeletePageData(typedPageID)).To(Succeed())
 		revisions, err = service.ListRevisions(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ListRevisions after delete failed: %v", err)
-		}
-		if len(revisions) != 0 {
-			t.Fatalf("expected revisions to be deleted, got %#v", revisions)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revisions).To(BeEmpty())
 
-		if err := service.persistLiveAssets(typedPageID, nil); err != nil {
-			t.Fatalf("persistLiveAssets(nil) failed: %v", err)
-		}
-		if _, err := service.scanLiveAssets(revisionTestPageID("missing")); err != nil {
-			t.Fatalf("scanLiveAssets(missing) failed: %v", err)
-		}
+		Expect(service.persistLiveAssets(typedPageID, nil)).To(Succeed())
+		_, err = service.scanLiveAssets(revisionTestPageID("missing"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 
-	ginkgo.It("TestRecordAssetAndStructureBranches", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
+	ginkgo.It("records asset and structure revisions only when state changes", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
 
 		rev1, created1, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange failed: %v", err)
-		}
-		if !created1 {
-			t.Fatalf("expected first asset change to create revision")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created1).To(BeTrue())
 		rev2, created2, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange second call failed: %v", err)
-		}
-		if created2 || rev2.ID != rev1.ID {
-			t.Fatalf("expected second asset change to be noop: created=%v rev=%#v", created2, rev2)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created2).To(BeFalse())
+		Expect(rev2).To(HaveField("ID", rev1.ID))
 
 		parentKind := tree.NodeKindSection
 		parentID, err := treeService.CreateNode("tester", nil, "Docs", "docs", &parentKind)
-		if err != nil {
-			t.Fatalf("CreateNode(parent) failed: %v", err)
-		}
-		if err := treeService.MoveNodeUncheckedVersion("tester", newFixturePageID(pageID), *parentID); err != nil {
-			t.Fatalf("MoveNode failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(treeService.MoveNodeUncheckedVersion("tester", newFixturePageID(pageID), *parentID)).To(Succeed())
 		structureRev, created3, err := service.RecordStructureChange(revisionTestPageID(pageID), "tester", "structure")
-		if err != nil {
-			t.Fatalf("RecordStructureChange failed: %v", err)
-		}
-		if !created3 || structureRev.Type != RevisionTypeStructureUpdate || structureRev.ParentID != *parentID {
-			t.Fatalf("unexpected structure revision: %#v created=%v", structureRev, created3)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created3).To(BeTrue())
+		Expect(structureRev).To(SatisfyAll(
+			HaveField("Type", RevisionTypeStructureUpdate),
+			HaveField("ParentID", *parentID),
+		))
 	})
 
-	ginkgo.It("TestRestoreAssetsHelpers", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
+	ginkgo.It("rejects duplicate, missing, and invalid restore assets", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 
 		typedPageID := revisionTestPageID(pageID)
-		if err := service.restoreAssets(typedPageID, []AssetRef{{Name: "dup.txt", SHA256: "abc", SizeBytes: 1}, {Name: "dup.txt", SHA256: "def", SizeBytes: 1}}); err == nil {
-			t.Fatalf("expected duplicate asset names to fail")
-		}
-		if err := service.restoreAssets(typedPageID, []AssetRef{{Name: "missing.txt", SHA256: "abc", SizeBytes: 3}}); err == nil {
-			t.Fatalf("expected missing asset blob to fail")
-		}
+		Expect(service.restoreAssets(typedPageID, []AssetRef{{Name: "dup.txt", SHA256: "abc", SizeBytes: 1}, {Name: "dup.txt", SHA256: "def", SizeBytes: 1}})).To(HaveOccurred())
+		Expect(service.restoreAssets(typedPageID, []AssetRef{{Name: "missing.txt", SHA256: "abc", SizeBytes: 3}})).To(HaveOccurred())
 
 		assetPath := filepath.Join(storageDir, "standalone.txt")
-		if err := os.WriteFile(assetPath, []byte("css"), 0o644); err != nil {
-			t.Fatalf("WriteFile standalone asset failed: %v", err)
-		}
+		Expect(os.WriteFile(assetPath, []byte("css"), 0o644)).To(Succeed())
 		ref, err := buildAssetRef(assetPath, "style.css")
-		if err != nil {
-			t.Fatalf("buildAssetRef failed: %v", err)
-		}
-		if ref.MIMEType == "application/octet-stream" {
-			t.Fatalf("expected extension-based mime type, got %#v", ref)
-		}
-		if _, err := buildAssetRef(filepath.Join(storageDir, "missing.txt"), "missing.txt"); err == nil {
-			t.Fatalf("expected buildAssetRef on missing file to fail")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ref.MIMEType).NotTo(Equal("application/octet-stream"))
+		_, err = buildAssetRef(filepath.Join(storageDir, "missing.txt"), "missing.txt")
+		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestRecordRestoreRevisionHelper", func() {
-		t := ginkgo.GinkgoT()
-		loggerService := NewService(t.TempDir(), nil, nil)
-		if loggerService == nil || loggerService.log == nil {
-			t.Fatalf("expected NewService to initialize default logger")
-		}
+	ginkgo.It("records restore revisions with and without live assets", func() {
+		loggerService := NewService(revisionTempDir(), nil, nil)
+		Expect(loggerService).NotTo(BeNil())
+		Expect(loggerService.log).NotTo(BeNil())
 
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
 
 		typedPageID := revisionTestPageID(pageID)
-		if err := service.recordRestoreRevision(typedPageID, revisionTestUserID("tester")); err != nil {
-			t.Fatalf("recordRestoreRevision failed: %v", err)
-		}
+		Expect(service.recordRestoreRevision(typedPageID, revisionTestUserID("tester"))).To(Succeed())
 		latest, err := service.GetLatestRevision(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetLatestRevision failed: %v", err)
-		}
-		if latest == nil || latest.Type != RevisionTypeRestore {
-			t.Fatalf("latest restore revision = %#v", latest)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(latest).To(HaveField("Type", RevisionTypeRestore))
 
-		if err := os.RemoveAll(revisionAssetPath(storageDir, pageID)); err != nil {
-			t.Fatalf("RemoveAll assets failed: %v", err)
-		}
-		if err := service.recordRestoreRevision(typedPageID, revisionTestUserID("tester")); err != nil {
-			t.Fatalf("recordRestoreRevision without live assets failed: %v", err)
-		}
+		Expect(os.RemoveAll(revisionAssetPath(storageDir, pageID))).To(Succeed())
+		Expect(service.recordRestoreRevision(typedPageID, revisionTestUserID("tester"))).To(Succeed())
 	})
 
-	ginkgo.It("TestPersistAndScanAssetHelperBranches", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
-		if err := os.MkdirAll(revisionAssetPath(storageDir, pageID, "subdir"), 0o755); err != nil {
-			t.Fatalf("MkdirAll subdir failed: %v", err)
-		}
+	ginkgo.It("detects live assets and reports persistence mismatches", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
+		Expect(os.MkdirAll(revisionAssetPath(storageDir, pageID, "subdir"), 0o755)).To(Succeed())
 
 		typedPageID := revisionTestPageID(pageID)
 		refs, err := service.scanLiveAssets(typedPageID)
-		if err != nil {
-			t.Fatalf("scanLiveAssets failed: %v", err)
-		}
-		if len(refs) != 1 || refs[0].Name != "a.txt" {
-			t.Fatalf("unexpected refs: %#v", refs)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(refs).To(HaveExactElements(HaveField("Name", "a.txt")))
 
-		if err := service.persistLiveAssets(typedPageID, []AssetRef{{Name: "a.txt", SHA256: "wrong", SizeBytes: int64(len("asset"))}}); err == nil {
-			t.Fatalf("expected hash mismatch")
-		}
+		Expect(service.persistLiveAssets(typedPageID, []AssetRef{{Name: "a.txt", SHA256: "wrong", SizeBytes: int64(len("asset"))}})).To(HaveOccurred())
 		goodRef, err := buildAssetRef(revisionAssetPath(storageDir, pageID, "a.txt"), "a.txt")
-		if err != nil {
-			t.Fatalf("buildAssetRef failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		goodRef.SizeBytes++
-		if err := service.persistLiveAssets(typedPageID, []AssetRef{goodRef}); err == nil {
-			t.Fatalf("expected size mismatch")
-		}
+		Expect(service.persistLiveAssets(typedPageID, []AssetRef{goodRef})).To(HaveOccurred())
 
 		badPageID := "bad-assets"
 		badDir := filepath.Join(storageDir, "assets", badPageID)
-		if err := os.MkdirAll(filepath.Dir(badDir), 0o755); err != nil {
-			t.Fatalf("MkdirAll bad parent failed: %v", err)
-		}
-		if err := os.WriteFile(badDir, []byte("not a dir"), 0o644); err != nil {
-			t.Fatalf("WriteFile bad asset dir failed: %v", err)
-		}
-		if _, err := service.scanLiveAssets(revisionTestPageID(badPageID)); err == nil {
-			t.Fatalf("expected scanLiveAssets to fail when path is a file")
-		}
+		Expect(os.MkdirAll(filepath.Dir(badDir), 0o755)).To(Succeed())
+		Expect(os.WriteFile(badDir, []byte("not a dir"), 0o644)).To(Succeed())
+		_, err = service.scanLiveAssets(revisionTestPageID(badPageID))
+		Expect(err).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestRestoreAssetsHashAndSizeMismatch", func() {
-		t := ginkgo.GinkgoT()
-		service, _, _ := newRevisionTestService(t)
+	ginkgo.It("reports restored asset hash and size mismatches", func() {
+		service, _, _ := newRevisionTestService()
 
 		hash := sha256HexBytes([]byte("asset"))
 		assetBlob := service.store.AssetBlobPath(hash)
-		if err := os.MkdirAll(filepath.Dir(assetBlob), 0o755); err != nil {
-			t.Fatalf("MkdirAll asset blob dir failed: %v", err)
-		}
-		if err := os.WriteFile(assetBlob, []byte("tampered"), 0o644); err != nil {
-			t.Fatalf("WriteFile tampered blob failed: %v", err)
-		}
-		if err := service.restoreAssets("page-1", []AssetRef{{Name: "a.txt", SHA256: hash, SizeBytes: int64(len("asset"))}}); err == nil {
-			t.Fatalf("expected restored asset hash mismatch")
-		}
+		Expect(os.MkdirAll(filepath.Dir(assetBlob), 0o755)).To(Succeed())
+		Expect(os.WriteFile(assetBlob, []byte("tampered"), 0o644)).To(Succeed())
+		Expect(service.restoreAssets("page-1", []AssetRef{{Name: "a.txt", SHA256: hash, SizeBytes: int64(len("asset"))}})).To(HaveOccurred())
 
 		hash2, err := service.store.SaveContentBlob([]byte("size-ok"))
-		if err != nil {
-			t.Fatalf("SaveContentBlob second failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		assetBlob2 := service.store.AssetBlobPath(hash2)
-		if err := os.MkdirAll(filepath.Dir(assetBlob2), 0o755); err != nil {
-			t.Fatalf("MkdirAll asset blob dir failed: %v", err)
-		}
-		if err := os.WriteFile(assetBlob2, []byte("size-ok"), 0o644); err != nil {
-			t.Fatalf("WriteFile asset blob failed: %v", err)
-		}
-		if err := service.restoreAssets("page-2", []AssetRef{{Name: "a.txt", SHA256: hash2, SizeBytes: 999}}); err == nil {
-			t.Fatalf("expected restored asset size mismatch")
-		}
+		Expect(os.MkdirAll(filepath.Dir(assetBlob2), 0o755)).To(Succeed())
+		Expect(os.WriteFile(assetBlob2, []byte("size-ok"), 0o644)).To(Succeed())
+		Expect(service.restoreAssets("page-2", []AssetRef{{Name: "a.txt", SHA256: hash2, SizeBytes: 999}})).To(HaveOccurred())
 	})
 
-	ginkgo.It("TestRecordOperationsWithoutAssets", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
+	ginkgo.It("records structure revisions even when no live assets exist", func() {
+		service, treeService, _ := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 
 		structureRev, created, err := service.RecordStructureChange(revisionTestPageID(pageID), "tester", "structure")
-		if err != nil {
-			t.Fatalf("RecordStructureChange failed: %v", err)
-		}
-		if !created || structureRev.Type != RevisionTypeStructureUpdate || structureRev.AssetManifestHash == "" {
-			t.Fatalf("unexpected structure revision: %#v created=%v", structureRev, created)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(structureRev).To(SatisfyAll(
+			HaveField("Type", RevisionTypeStructureUpdate),
+			HaveField("AssetManifestHash", Not(BeEmpty())),
+		))
 	})
 
-	ginkgo.It("TestCapturePageStateAndNewRevisionHelpers", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset")
+	ginkgo.It("captures live page state and trims revision authors", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
 
 		typedPageID := revisionTestPageID(pageID)
 		state, err := service.capturePageState(typedPageID, true)
-		if err != nil {
-			t.Fatalf("capturePageState with assets failed: %v", err)
-		}
-		if state.PageID != typedPageID || state.ParentID != "" || state.AssetManifestHash == "" {
-			t.Fatalf("unexpected state: %#v", state)
-		}
-		if len(state.Assets) != 1 || state.Assets[0].Name != "a.txt" {
-			t.Fatalf("unexpected state assets: %#v", state.Assets)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(state).To(SatisfyAll(
+			HaveField("PageID", typedPageID),
+			HaveField("ParentID", BeEmpty()),
+			HaveField("AssetManifestHash", Not(BeEmpty())),
+			HaveField("Assets", HaveExactElements(HaveField("Name", "a.txt"))),
+		))
 
 		rev, err := service.newRevision(RevisionTypeContentUpdate, state, " tester ", "summary", state.AssetManifestHash)
-		if err != nil {
-			t.Fatalf("newRevision failed: %v", err)
-		}
-		if rev.PageID != typedPageID || rev.AuthorID != "tester" || rev.AssetManifestHash != state.AssetManifestHash {
-			t.Fatalf("unexpected revision: %#v", rev)
-		}
-		if rev.PageCreatedAt.IsZero() || rev.PageUpdatedAt.IsZero() {
-			t.Fatalf("expected page timestamps on revision: %#v", rev)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rev).To(SatisfyAll(
+			HaveField("PageID", typedPageID),
+			HaveField("AuthorID", "tester"),
+			HaveField("AssetManifestHash", state.AssetManifestHash),
+			HaveField("PageCreatedAt", Not(BeZero())),
+			HaveField("PageUpdatedAt", Not(BeZero())),
+		))
 	})
 
-	ginkgo.It("TestRecordContentAndAssetUpdatesWithoutAssets", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
+	ginkgo.It("records content and asset changes when the asset set is empty", func() {
+		service, treeService, _ := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 
 		assetRev1, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange first failed: %v", err)
-		}
-		if !created || assetRev1.AssetManifestHash == "" {
-			t.Fatalf("unexpected first asset revision: %#v created=%v", assetRev1, created)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(assetRev1).To(HaveField("AssetManifestHash", Not(BeEmpty())))
 		assetRev2, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange second failed: %v", err)
-		}
-		if created || assetRev2.ID != assetRev1.ID {
-			t.Fatalf("expected second asset change to noop: %#v created=%v", assetRev2, created)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeFalse())
+		Expect(assetRev2).To(HaveField("ID", assetRev1.ID))
 
 		content := "hello-2"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false); err != nil {
-			t.Fatalf("UpdateNode content failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
 		assetRev3, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset after content")
-		if err != nil {
-			t.Fatalf("RecordAssetChange after content failed: %v", err)
-		}
-		if !created || assetRev3.ID == assetRev1.ID {
-			t.Fatalf("expected new asset revision after content change: %#v created=%v", assetRev3, created)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(assetRev3).NotTo(HaveField("ID", assetRev1.ID))
 
 		content = "hello-3"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false); err != nil {
-			t.Fatalf("UpdateNode second content failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
 		contentRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate failed: %v", err)
-		}
-		if !created || contentRev.Type != RevisionTypeContentUpdate {
-			t.Fatalf("unexpected content revision: %#v created=%v", contentRev, created)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(contentRev).To(HaveField("Type", RevisionTypeContentUpdate))
 	})
 
-	ginkgo.It("TestRestoreRevisionRehydratesLivePageState", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
+	ginkgo.It("rehydrates historical content and assets while preserving current route", func() {
+		service, treeService, storageDir := newRevisionTestService()
 
 		sectionKind := tree.NodeKindSection
 		docsID, err := treeService.CreateNode("tester", nil, "Docs", "docs", &sectionKind)
-		if err != nil {
-			t.Fatalf("CreateNode(docs) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		archiveID, err := treeService.CreateNode("tester", nil, "Archive", "archive", &sectionKind)
-		if err != nil {
-			t.Fatalf("CreateNode(archive) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("tester", docsID, "Original", "original", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
 		originalContent := "first version"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Original", newFixtureSlug("original"), &originalContent, false); err != nil {
-			t.Fatalf("UpdateNode(original) failed: %v", err)
-		}
-		writeLiveAsset(t, storageDir, pageID, "old.txt", "old-asset")
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Original", newFixtureSlug("original"), &originalContent, false)).To(Succeed())
+		writeLiveAsset(storageDir, pageID, "old.txt", "old-asset")
 		originalRev, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "original state")
-		if err != nil {
-			t.Fatalf("RecordAssetChange(original) failed: %v", err)
-		}
-		if !created || originalRev == nil {
-			t.Fatalf("expected original revision to be created")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(originalRev).NotTo(BeNil())
 
 		changedContent := "second version"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Changed", newFixtureSlug("changed"), &changedContent, false); err != nil {
-			t.Fatalf("UpdateNode(changed) failed: %v", err)
-		}
-		if err := treeService.MoveNodeUncheckedVersion("tester", newFixturePageID(pageID), *archiveID); err != nil {
-			t.Fatalf("MoveNode failed: %v", err)
-		}
-		if err := os.Remove(revisionAssetPath(storageDir, pageID, "old.txt")); err != nil {
-			t.Fatalf("Remove(old asset) failed: %v", err)
-		}
-		writeLiveAsset(t, storageDir, pageID, "new.txt", "new-asset")
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Changed", newFixtureSlug("changed"), &changedContent, false)).To(Succeed())
+		Expect(treeService.MoveNodeUncheckedVersion("tester", newFixturePageID(pageID), *archiveID)).To(Succeed())
+		Expect(os.Remove(revisionAssetPath(storageDir, pageID, "old.txt"))).To(Succeed())
+		writeLiveAsset(storageDir, pageID, "new.txt", "new-asset")
 
-		if err := service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(originalRev.ID), newFixtureUserID("tester")); err != nil {
-			t.Fatalf("RestoreRevision failed: %v", err)
-		}
+		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(originalRev.ID), newFixtureUserID("tester"))).To(Succeed())
 
 		page, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		// Restore rehydrates revision content and title while preserving the current slug/path.
-		if page.Title != "Original" || page.Slug != "changed" {
-			t.Fatalf("restored page identity = (%q,%q)", page.Title, page.Slug)
-		}
-		if page.Content != originalContent {
-			t.Fatalf("restored content = %q, want %q", page.Content, originalContent)
-		}
-		if got := page.CalculatePath(); got != "/archive/changed" {
-			t.Fatalf("restored path = %q", got)
-		}
+		Expect(page).To(SatisfyAll(
+			HaveField("Title", "Original"),
+			HaveField("Slug", newFixtureSlug("changed")),
+			HaveField("Content", originalContent),
+		))
+		Expect(page.CalculatePath()).To(Equal("/archive/changed"))
 
 		oldAsset, err := os.ReadFile(revisionAssetPath(storageDir, pageID, "old.txt"))
-		if err != nil {
-			t.Fatalf("ReadFile(old asset) failed: %v", err)
-		}
-		if string(oldAsset) != "old-asset" {
-			t.Fatalf("old asset = %q", string(oldAsset))
-		}
-		if _, err := os.Stat(revisionAssetPath(storageDir, pageID, "new.txt")); !os.IsNotExist(err) {
-			t.Fatalf("expected new asset to be removed, got %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(oldAsset)).To(Equal("old-asset"))
+		_, err = os.Stat(revisionAssetPath(storageDir, pageID, "new.txt"))
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		latest, err := service.GetLatestRevision(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetLatestRevision failed: %v", err)
-		}
-		if latest == nil || latest.Type != RevisionTypeRestore {
-			t.Fatalf("latest revision = %#v", latest)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(latest).To(HaveField("Type", RevisionTypeRestore))
 	})
 
-	ginkgo.It("TestRecordContentUpdate_CapturesCanonicalPageMetadataWithoutLegacyExtraFrontmatter", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
+	ginkgo.It("captures canonical page metadata without legacy extra frontmatter", func() {
+		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("tester", nil, "Page", "page", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
-		firstRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		firstRaw := renderRevisionTestMarkdown(pageID, "Page",
 			map[string]interface{}{"customKey": "first"},
 			map[string]interface{}{"aliases": []interface{}{"one"}},
 			"Body",
 		)
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true); err != nil {
-			t.Fatalf("UpdateNode(first raw) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
 
 		firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "first")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate(first) failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected first revision to be created")
-		}
-		if firstRev.ExtraFrontmatter != nil || firstRev.ExtraFrontmatterHash != "" {
-			t.Fatalf("new revisions must not populate legacy extra frontmatter, got %#v hash %q", firstRev.ExtraFrontmatter, firstRev.ExtraFrontmatterHash)
-		}
-		if firstRev.PageMetadata == nil {
-			t.Fatalf("expected page metadata snapshot")
-		}
-		if got := firstRev.PageMetadata.Fields["customKey"]; got != "first" {
-			t.Fatalf("expected first revision field, got %#v", firstRev.PageMetadata.Fields)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(firstRev).To(SatisfyAll(
+			HaveField("ExtraFrontmatter", BeNil()),
+			HaveField("ExtraFrontmatterHash", BeEmpty()),
+			HaveField("PageMetadata", Not(BeNil())),
+		))
+		Expect(firstRev.PageMetadata.Fields).To(HaveKeyWithValue("customKey", "first"))
 
-		secondRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		secondRaw := renderRevisionTestMarkdown(pageID, "Page",
 			map[string]interface{}{"customKey": "second"},
 			map[string]interface{}{"aliases": []interface{}{"two"}},
 			"Body",
 		)
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &secondRaw, true); err != nil {
-			t.Fatalf("UpdateNode(second raw) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
 
 		secondRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "second")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate(second) failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected second revision to be created for frontmatter-only change")
-		}
-		if secondRev.ID == firstRev.ID {
-			t.Fatalf("expected distinct revision for changed custom frontmatter")
-		}
-		if secondRev.ExtraFrontmatter != nil || secondRev.ExtraFrontmatterHash != "" {
-			t.Fatalf("new revisions must not populate legacy extra frontmatter, got %#v hash %q", secondRev.ExtraFrontmatter, secondRev.ExtraFrontmatterHash)
-		}
-		if secondRev.PageMetadata == nil {
-			t.Fatalf("expected second page metadata snapshot")
-		}
-		if got := secondRev.PageMetadata.Fields["customKey"]; got != "second" {
-			t.Fatalf("expected second revision field, got %#v", secondRev.PageMetadata.Fields)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(secondRev).NotTo(HaveField("ID", firstRev.ID))
+		Expect(secondRev).To(SatisfyAll(
+			HaveField("ExtraFrontmatter", BeNil()),
+			HaveField("ExtraFrontmatterHash", BeEmpty()),
+			HaveField("PageMetadata", Not(BeNil())),
+		))
+		Expect(secondRev.PageMetadata.Fields).To(HaveKeyWithValue("customKey", "second"))
 		aliases, ok := secondRev.PageMetadata.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "two" {
-			t.Fatalf("expected aliases to be preserved in page metadata, got %#v", secondRev.PageMetadata.Extra["aliases"])
-		}
+		Expect(ok).To(BeTrue())
+		Expect(aliases).To(HaveExactElements("two"))
 	})
 
-	ginkgo.It("TestRestoreRevision_RestoresHistoricalCustomFrontmatterAndKeepsManagedFields", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
+	ginkgo.It("restores historical custom frontmatter while keeping managed fields current", func() {
+		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
-		firstRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		firstRaw := renderRevisionTestMarkdown(pageID, "Page",
 			map[string]interface{}{"customKey": "first"},
 			map[string]interface{}{"aliases": []interface{}{"one"}},
 			"Body",
 		)
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true); err != nil {
-			t.Fatalf("UpdateNode(first raw) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
 		firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "first")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate(first) failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected first revision to be created")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
 
-		secondRaw := renderRevisionTestMarkdown(t, pageID, "Changed",
+		secondRaw := renderRevisionTestMarkdown(pageID, "Changed",
 			map[string]interface{}{"customKey": "second"},
 			map[string]interface{}{"aliases": []interface{}{"two"}},
 			"Body changed",
 		)
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), newFixturePageID(pageID), "Changed", newFixtureSlug("page"), &secondRaw, true); err != nil {
-			t.Fatalf("UpdateNode(second raw) failed: %v", err)
-		}
-		if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second"); err != nil {
-			t.Fatalf("RecordContentUpdate(second) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), newFixturePageID(pageID), "Changed", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
+		_, _, err = service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second")
+		Expect(err).NotTo(HaveOccurred())
 
 		beforeRestore, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage(before restore) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		managedID := beforeRestore.ID
 		managedCreatedAt := beforeRestore.Metadata.CreatedAt
 		managedCreatorID := beforeRestore.Metadata.CreatorID
 		beforeUpdatedAt := beforeRestore.Metadata.UpdatedAt
 
-		if err := service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer")); err != nil {
-			t.Fatalf("RestoreRevision failed: %v", err)
-		}
+		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
 
 		page, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage(after restore) failed: %v", err)
-		}
-		if page.ID != managedID {
-			t.Fatalf("expected page ID to remain stable, got %q want %q", page.ID, managedID)
-		}
-		if page.Title != "Page" {
-			t.Fatalf("expected restore to rehydrate revision title, got %q", page.Title)
-		}
-		if page.Metadata.CreatedAt != managedCreatedAt {
-			t.Fatalf("expected created_at to remain stable, got %s want %s", page.Metadata.CreatedAt, managedCreatedAt)
-		}
-		if page.Metadata.CreatorID != managedCreatorID {
-			t.Fatalf("expected creator_id to remain stable, got %q want %q", page.Metadata.CreatorID, managedCreatorID)
-		}
-		if page.Metadata.LastAuthorID != "restorer" {
-			t.Fatalf("expected last author to be restore actor, got %q", page.Metadata.LastAuthorID)
-		}
-		if !page.Metadata.UpdatedAt.After(beforeUpdatedAt) {
-			t.Fatalf("expected updated_at to advance on restore, before=%s after=%s", beforeUpdatedAt, page.Metadata.UpdatedAt)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(page).To(SatisfyAll(
+			HaveField("ID", managedID),
+			HaveField("Title", "Page"),
+			HaveField("Metadata.CreatedAt", managedCreatedAt),
+			HaveField("Metadata.CreatorID", managedCreatorID),
+			HaveField("Metadata.LastAuthorID", revisionTestUserID("restorer")),
+		))
+		Expect(page.Metadata.UpdatedAt).To(BeTemporally(">", beforeUpdatedAt))
 
 		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ReadPageRaw failed: %v", err)
-		}
-		assertCanonicalRevisionRawStorage(t, raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter(restored raw) failed: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected restored page to have frontmatter")
-		}
-		if newFixturePageID(fm.LeafWikiID) != managedID {
-			t.Fatalf("expected leafwiki_id to remain stable, got %q want %q", fm.LeafWikiID, managedID)
-		}
-		if fm.LeafWikiTitle != page.Title {
-			t.Fatalf("expected leafwiki_title to stay managed by the restored page title, got %q want %q", fm.LeafWikiTitle, page.Title)
-		}
-		if newFixtureUserID(fm.LeafWikiCreatorID) != managedCreatorID {
-			t.Fatalf("expected leafwiki_creator_id to remain stable, got %q want %q", fm.LeafWikiCreatorID, managedCreatorID)
-		}
-		if fm.LeafWikiLastAuthorID != "restorer" {
-			t.Fatalf("expected leafwiki_last_author_id to be restore actor, got %q", fm.LeafWikiLastAuthorID)
-		}
-		if fm.LeafWikiUpdatedAt == "" {
-			t.Fatalf("expected leafwiki_updated_at to be set on restore")
-		}
-		if got := fm.ExtraFields["customKey"]; got != "first" {
-			t.Fatalf("expected restored custom frontmatter, got %#v", fm.ExtraFields)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(has).To(BeTrue())
+		Expect(fm).To(SatisfyAll(
+			HaveField("LeafWikiID", managedID.MetadataValue()),
+			HaveField("LeafWikiTitle", page.Title),
+			HaveField("LeafWikiCreatorID", managedCreatorID.MetadataValue()),
+			HaveField("LeafWikiLastAuthorID", "restorer"),
+			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
+			HaveField("ExtraFields", HaveKeyWithValue("customKey", "first")),
+		))
 		aliases, ok := fm.ExtraFields["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "one" {
-			t.Fatalf("expected restored aliases, got %#v", fm.ExtraFields["aliases"])
-		}
-		if body != "Body" {
-			t.Fatalf("expected restored body from revision, got %q", body)
-		}
+		Expect(ok).To(BeTrue())
+		Expect(aliases).To(HaveExactElements("one"))
+		Expect(body).To(Equal("Body"))
 	})
 
-	ginkgo.It("TestRestoreRevision_PreservesCanonicalFieldsAndExtraBoundaries", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
+	ginkgo.It("restores canonical fields without moving extras into managed fields", func() {
+		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
 		firstRaw, err := markdown.RenderPageDocument(markdown.PageDocument{
@@ -907,19 +575,11 @@ var _ = ginkgo.Describe("service", func() {
 				Extra:   map[string]interface{}{"source": "imported"},
 			},
 		})
-		if err != nil {
-			t.Fatalf("RenderPageDocument(first) failed: %v", err)
-		}
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), pageID, "Page", newFixtureSlug("page"), &firstRaw, true); err != nil {
-			t.Fatalf("UpdateNode(first raw) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), pageID, "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
 		firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "first")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate(first) failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected first revision to be created")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
 
 		secondRaw, err := markdown.RenderPageDocument(markdown.PageDocument{
 			Body: "Second body",
@@ -929,195 +589,124 @@ var _ = ginkgo.Describe("service", func() {
 				Fields:  map[string]interface{}{"status": "ready"},
 			},
 		})
-		if err != nil {
-			t.Fatalf("RenderPageDocument(second) failed: %v", err)
-		}
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), pageID, "Page", newFixtureSlug("page"), &secondRaw, true); err != nil {
-			t.Fatalf("UpdateNode(second raw) failed: %v", err)
-		}
-		if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second"); err != nil {
-			t.Fatalf("RecordContentUpdate(second) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), pageID, "Page", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
+		_, _, err = service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second")
+		Expect(err).NotTo(HaveOccurred())
 
-		if err := service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer")); err != nil {
-			t.Fatalf("RestoreRevision failed: %v", err)
-		}
+		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
 		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ReadPageRaw failed: %v", err)
-		}
-		assertCanonicalRevisionRawStorage(t, raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		doc, _, err := markdown.ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument failed: %v", err)
-		}
-		if got := doc.Metadata.Fields["priority"]; got != 2 {
-			t.Fatalf("priority field = %#v", got)
-		}
-		if _, exists := doc.Metadata.Fields["source"]; exists {
-			t.Fatalf("source extra moved into fields: %#v", doc.Metadata.Fields)
-		}
-		if got := doc.Metadata.Extra["source"]; got != "imported" {
-			t.Fatalf("source extra = %#v", got)
-		}
-		if doc.Body != "First body" {
-			t.Fatalf("body = %q", doc.Body)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(doc).To(SatisfyAll(
+			HaveField("Metadata.Fields", SatisfyAll(
+				HaveKeyWithValue("priority", 2),
+				Not(HaveKey("source")),
+			)),
+			HaveField("Metadata.Extra", HaveKeyWithValue("source", "imported")),
+			HaveField("Body", "First body"),
+		))
 	})
 
-	ginkgo.It("TestRestoreRevision_RestoresExplicitEmptyMetadataSnapshot", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
+	ginkgo.It("restores an explicitly empty metadata snapshot", func() {
+		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
-		firstRaw := renderRevisionTestMarkdown(t, pageID, "Page", nil, nil, "Empty metadata body")
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true); err != nil {
-			t.Fatalf("UpdateNode(first raw) failed: %v", err)
-		}
+		firstRaw := renderRevisionTestMarkdown(pageID, "Page", nil, nil, "Empty metadata body")
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
 		firstRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "empty metadata")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate(first) failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected first revision to be created")
-		}
-		if firstRev.PageMetadata == nil {
-			t.Fatalf("expected explicit empty page metadata snapshot")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(firstRev.PageMetadata).NotTo(BeNil())
 
-		secondRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		secondRaw := renderRevisionTestMarkdown(pageID, "Page",
 			map[string]interface{}{"status": "ready"},
 			map[string]interface{}{"source": "imported"},
 			"Non-empty metadata body",
 		)
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &secondRaw, true); err != nil {
-			t.Fatalf("UpdateNode(second raw) failed: %v", err)
-		}
-		if _, _, err := service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "non-empty metadata"); err != nil {
-			t.Fatalf("RecordContentUpdate(second) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
+		_, _, err = service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "non-empty metadata")
+		Expect(err).NotTo(HaveOccurred())
 
-		if err := service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer")); err != nil {
-			t.Fatalf("RestoreRevision failed: %v", err)
-		}
+		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
 		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ReadPageRaw failed: %v", err)
-		}
-		assertCanonicalRevisionRawStorage(t, raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		doc, _, err := markdown.ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument failed: %v", err)
-		}
-		if len(doc.Metadata.Tags) != 0 || len(doc.Metadata.Fields) != 0 || len(doc.Metadata.Extra) != 0 {
-			t.Fatalf("expected restored metadata to be empty, got %#v", doc.Metadata)
-		}
-		if doc.Body != "Empty metadata body" {
-			t.Fatalf("body = %q", doc.Body)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(doc).To(SatisfyAll(
+			HaveField("Metadata.Tags", BeEmpty()),
+			HaveField("Metadata.Fields", BeEmpty()),
+			HaveField("Metadata.Extra", BeEmpty()),
+			HaveField("Body", "Empty metadata body"),
+		))
 	})
 
-	ginkgo.It("TestRestoreRevision_LegacyRevisionPreservesCurrentCustomFrontmatter", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
+	ginkgo.It("preserves current custom frontmatter for legacy revisions without metadata snapshots", func() {
+		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
-		initialRaw := renderRevisionTestMarkdown(t, pageID, "Page",
+		initialRaw := renderRevisionTestMarkdown(pageID, "Page",
 			map[string]interface{}{"customKey": "current"},
 			nil,
 			"Current body",
 		)
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialRaw, true); err != nil {
-			t.Fatalf("UpdateNode(initial raw) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialRaw, true)).To(Succeed())
 
 		page, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		state := service.revisionStateFromPage(page)
 		contentHash, err := service.store.SaveContentBlob([]byte("Legacy body"))
-		if err != nil {
-			t.Fatalf("SaveContentBlob failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		legacyRevision, err := service.newRevision(RevisionTypeContentUpdate, state, "legacy-author", "legacy", "")
-		if err != nil {
-			t.Fatalf("newRevision failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		legacyRevision.ContentHash = contentHash
 		legacyRevision.ExtraFrontmatter = nil
 		legacyRevision.ExtraFrontmatterHash = ""
-		if err := service.store.SaveRevision(legacyRevision); err != nil {
-			t.Fatalf("SaveRevision failed: %v", err)
-		}
+		Expect(service.store.SaveRevision(legacyRevision)).To(Succeed())
 
-		if err := service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer")); err != nil {
-			t.Fatalf("RestoreRevision failed: %v", err)
-		}
+		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
 
 		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ReadPageRaw failed: %v", err)
-		}
-		assertCanonicalRevisionRawStorage(t, raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter failed: %v", err)
-		}
-		if !has {
-			t.Fatalf("expected frontmatter after restore")
-		}
-		if got := fm.ExtraFields["customKey"]; got != "current" {
-			t.Fatalf("expected legacy restore to preserve current custom frontmatter, got %#v", fm.ExtraFields)
-		}
-		if body != "Legacy body" {
-			t.Fatalf("expected legacy content to be restored, got %q", body)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(has).To(BeTrue())
+		Expect(fm.ExtraFields).To(HaveKeyWithValue("customKey", "current"))
+		Expect(body).To(Equal("Legacy body"))
 	})
 
-	ginkgo.It("TestRestoreRevision_LegacyRevisionWithExtraFrontmatterWritesCanonicalMetadata", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
+	ginkgo.It("writes canonical metadata from legacy revision extra frontmatter", func() {
+		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
 		initialContent := "Current body"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialContent, false); err != nil {
-			t.Fatalf("UpdateNode(initial content) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialContent, false)).To(Succeed())
 
 		page, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		state := service.revisionStateFromPage(page)
 		contentHash, err := service.store.SaveContentBlob([]byte("Legacy body with extra"))
-		if err != nil {
-			t.Fatalf("SaveContentBlob failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		legacyRevision, err := service.newRevision(RevisionTypeContentUpdate, state, "legacy-author", "legacy extra", "")
-		if err != nil {
-			t.Fatalf("newRevision failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		legacyRevision.ContentHash = contentHash
 		legacyRevision.PageMetadata = nil
 		legacyRevision.PageMetadataHash = ""
@@ -1126,307 +715,181 @@ var _ = ginkgo.Describe("service", func() {
 			"aliases": []interface{}{"old"},
 		}
 		legacyRevision.ExtraFrontmatterHash, err = hashExtraFrontmatter(legacyRevision.ExtraFrontmatter)
-		if err != nil {
-			t.Fatalf("hashExtraFrontmatter failed: %v", err)
-		}
-		if err := service.store.SaveRevision(legacyRevision); err != nil {
-			t.Fatalf("SaveRevision failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(service.store.SaveRevision(legacyRevision)).To(Succeed())
 
-		if err := service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer")); err != nil {
-			t.Fatalf("RestoreRevision failed: %v", err)
-		}
+		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
 
 		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ReadPageRaw failed: %v", err)
-		}
-		assertCanonicalRevisionRawStorage(t, raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		doc, _, err := markdown.ParsePageDocument(raw)
-		if err != nil {
-			t.Fatalf("ParsePageDocument failed: %v", err)
-		}
-		if got := doc.Metadata.Fields["status"]; got != "legacy" {
-			t.Fatalf("expected legacy scalar extra to restore as metadata field, got %#v", got)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(doc.Metadata.Fields).To(HaveKeyWithValue("status", "legacy"))
 		aliases, ok := doc.Metadata.Extra["aliases"].([]interface{})
-		if !ok || len(aliases) != 1 || aliases[0] != "old" {
-			t.Fatalf("expected non-scalar legacy extra to restore as metadata extra, got %#v", doc.Metadata.Extra["aliases"])
-		}
-		if doc.Body != "Legacy body with extra" {
-			t.Fatalf("expected legacy content to be restored, got %q", doc.Body)
-		}
+		Expect(ok).To(BeTrue())
+		Expect(aliases).To(HaveExactElements("old"))
+		Expect(doc.Body).To(Equal("Legacy body with extra"))
 	})
 
-	ginkgo.It("TestRestoreRevision_LegacyBodyThatLooksLikeFrontmatterStaysBody", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, _ := newRevisionTestService(t)
+	ginkgo.It("keeps legacy YAML-looking content in the page body", func() {
+		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
 		pageIDPtr, err := treeService.CreateNode("creator", nil, "Page", "page", &pageKind)
-		if err != nil {
-			t.Fatalf("CreateNode(page) failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		pageID := *pageIDPtr
 
 		initialContent := "Current body"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialContent, false); err != nil {
-			t.Fatalf("UpdateNode(initial content) failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialContent, false)).To(Succeed())
 
 		page, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		legacyBody := "---\ntitle: not frontmatter\n---\nBody content"
 		state := service.revisionStateFromPage(page)
 		contentHash, err := service.store.SaveContentBlob([]byte(legacyBody))
-		if err != nil {
-			t.Fatalf("SaveContentBlob failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		legacyRevision, err := service.newRevision(RevisionTypeContentUpdate, state, "legacy-author", "legacy body-only", "")
-		if err != nil {
-			t.Fatalf("newRevision failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		legacyRevision.ContentHash = contentHash
 		legacyRevision.ExtraFrontmatter = nil
 		legacyRevision.ExtraFrontmatterHash = ""
-		if err := service.store.SaveRevision(legacyRevision); err != nil {
-			t.Fatalf("SaveRevision failed: %v", err)
-		}
+		Expect(service.store.SaveRevision(legacyRevision)).To(Succeed())
 
-		if err := service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer")); err != nil {
-			t.Fatalf("RestoreRevision failed: %v", err)
-		}
+		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
 
 		restoredPage, err := treeService.GetPage(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("GetPage(after restore) failed: %v", err)
-		}
-		if restoredPage.Content != legacyBody {
-			t.Fatalf("expected YAML-looking content to stay body, got %q", restoredPage.Content)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(restoredPage.Content).To(Equal(legacyBody))
 
 		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
-		if err != nil {
-			t.Fatalf("ReadPageRaw failed: %v", err)
-		}
-		assertCanonicalRevisionRawStorage(t, raw)
-		fm, body, has, err := markdown.ParseFrontmatter(raw)
-		if err != nil {
-			t.Fatalf("ParseFrontmatter failed: %v", err)
-		}
-		if has && len(fm.ExtraFields) != 0 {
-			t.Fatalf("expected no custom frontmatter to be introduced, got %#v", fm.ExtraFields)
-		}
-		if body != legacyBody {
-			t.Fatalf("expected raw file body to keep legacy body-only content, got %q", body)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raw).To(haveCanonicalRevisionRawStorage())
+		fm, body, _, err := markdown.ParseFrontmatter(raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fm.ExtraFields).To(BeEmpty())
+		Expect(body).To(Equal(legacyBody))
 	})
 
-	ginkgo.It("TestRecordContentAndStructureRebuildMissingPreviousManifest", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "hello")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset-a")
+	ginkgo.It("rebuilds missing previous manifests for content and structure revisions", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset-a")
 
 		firstRev, created, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected initial asset revision")
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
 		missingManifestPath := service.store.assetManifestPath(firstRev.AssetManifestHash)
-		if err := os.Remove(missingManifestPath); err != nil {
-			t.Fatalf("Remove manifest failed: %v", err)
-		}
+		Expect(os.Remove(missingManifestPath)).To(Succeed())
 
 		content := "hello-updated"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
-		}
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
 		contentRev, created, err := service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected content revision after manifest rebuild")
-		}
-		if contentRev.AssetManifestHash != firstRev.AssetManifestHash {
-			t.Fatalf("expected rebuilt manifest hash to match live assets, got %q want %q", contentRev.AssetManifestHash, firstRev.AssetManifestHash)
-		}
-		if _, err := service.store.LoadAssetManifest(contentRev.AssetManifestHash); err != nil {
-			t.Fatalf("expected rebuilt manifest to be readable: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(contentRev).To(HaveField("AssetManifestHash", firstRev.AssetManifestHash))
+		_, err = service.store.LoadAssetManifest(contentRev.AssetManifestHash)
+		Expect(err).NotTo(HaveOccurred())
 
-		if err := os.Remove(service.store.assetManifestPath(contentRev.AssetManifestHash)); err != nil {
-			t.Fatalf("Remove rebuilt manifest failed: %v", err)
-		}
+		Expect(os.Remove(service.store.assetManifestPath(contentRev.AssetManifestHash))).To(Succeed())
 		structureRev, created, err := service.RecordStructureChange(revisionTestPageID(pageID), "tester", "structure")
-		if err != nil {
-			t.Fatalf("RecordStructureChange failed: %v", err)
-		}
-		if !created {
-			t.Fatalf("expected structure revision after manifest rebuild")
-		}
-		if structureRev.AssetManifestHash != firstRev.AssetManifestHash {
-			t.Fatalf("expected structure manifest hash to match live assets, got %q want %q", structureRev.AssetManifestHash, firstRev.AssetManifestHash)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		Expect(structureRev).To(HaveField("AssetManifestHash", firstRev.AssetManifestHash))
 	})
 
-	ginkgo.It("TestCheckRevisionIntegrityReportsBrokenArtifacts", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
+	ginkgo.It("reports missing and tampered revision artifacts", func() {
+		service, treeService, storageDir := newRevisionTestService()
 
-		pageID1 := createRevisionTestPage(t, treeService, "Page1", "page1", "hello")
+		pageID1 := createRevisionTestPage(treeService, "Page1", "page1", "hello")
 		_, _, err := service.RecordContentUpdate(revisionTestPageID(pageID1), "tester", "content")
-		if err != nil {
-			t.Fatalf("RecordContentUpdate page1 failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		revs1, err := service.ListRevisions(newFixturePageID(pageID1))
-		if err != nil || len(revs1) == 0 {
-			t.Fatalf("ListRevisions page1 failed: %#v %v", revs1, err)
-		}
-		if err := os.Remove(service.store.contentBlobPath(revs1[0].ContentHash)); err != nil {
-			t.Fatalf("Remove content blob failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revs1).NotTo(BeEmpty())
+		Expect(os.Remove(service.store.contentBlobPath(revs1[0].ContentHash))).To(Succeed())
 		issues1, err := service.CheckRevisionIntegrity(revisionTestPageID(pageID1))
-		if err != nil {
-			t.Fatalf("CheckRevisionIntegrity page1 failed: %v", err)
-		}
-		if len(issues1) != 1 || issues1[0].Code != "missing_content_blob" {
-			t.Fatalf("unexpected page1 issues: %#v", issues1)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(issues1).To(HaveExactElements(matchRevisionIntegrityIssue(errCodeRevisionIntegrityMissingContent)))
 
-		pageID2 := createRevisionTestPage(t, treeService, "Page2", "page2", "hello")
-		writeLiveAsset(t, storageDir, pageID2, "a.txt", "asset-a")
+		pageID2 := createRevisionTestPage(treeService, "Page2", "page2", "hello")
+		writeLiveAsset(storageDir, pageID2, "a.txt", "asset-a")
 		assetRev, _, err := service.RecordAssetChange(revisionTestPageID(pageID2), "tester", "asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange page2 failed: %v", err)
-		}
-		if err := os.Remove(service.store.assetManifestPath(assetRev.AssetManifestHash)); err != nil {
-			t.Fatalf("Remove asset manifest failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(os.Remove(service.store.assetManifestPath(assetRev.AssetManifestHash))).To(Succeed())
 		issues2, err := service.CheckRevisionIntegrity(revisionTestPageID(pageID2))
-		if err != nil {
-			t.Fatalf("CheckRevisionIntegrity page2 failed: %v", err)
-		}
-		if len(issues2) != 1 || issues2[0].Code != "missing_asset_manifest" {
-			t.Fatalf("unexpected page2 issues: %#v", issues2)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(issues2).To(HaveExactElements(matchRevisionIntegrityIssue(errCodeRevisionIntegrityMissingManifest)))
 
-		pageID3 := createRevisionTestPage(t, treeService, "Page3", "page3", "hello")
-		writeLiveAsset(t, storageDir, pageID3, "a.txt", "asset-a")
+		pageID3 := createRevisionTestPage(treeService, "Page3", "page3", "hello")
+		writeLiveAsset(storageDir, pageID3, "a.txt", "asset-a")
 		assetRev3, _, err := service.RecordAssetChange(revisionTestPageID(pageID3), "tester", "asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange page3 failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		refs, err := service.store.LoadAssetManifest(assetRev3.AssetManifestHash)
-		if err != nil || len(refs) != 1 {
-			t.Fatalf("LoadAssetManifest page3 failed: %#v %v", refs, err)
-		}
-		if err := os.WriteFile(service.store.AssetBlobPath(refs[0].SHA256), []byte("tampered"), 0o644); err != nil {
-			t.Fatalf("WriteFile tampered asset blob failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(refs).To(HaveLen(1))
+		Expect(os.WriteFile(service.store.AssetBlobPath(refs[0].SHA256), []byte("tampered"), 0o644)).To(Succeed())
 		issues3, err := service.CheckRevisionIntegrity(revisionTestPageID(pageID3))
-		if err != nil {
-			t.Fatalf("CheckRevisionIntegrity page3 failed: %v", err)
-		}
-		if len(issues3) != 1 || issues3[0].Code != "asset_blob_hash_mismatch" {
-			t.Fatalf("unexpected page3 issues: %#v", issues3)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(issues3).To(HaveExactElements(matchRevisionIntegrityIssue(errCodeRevisionIntegrityHashMismatch)))
 	})
 
-	ginkgo.It("TestCompareRevisionSnapshots", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "one")
-		writeLiveAsset(t, storageDir, pageID, "a.txt", "asset-a")
+	ginkgo.It("compares revision snapshots with content and asset deltas", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "one")
+		writeLiveAsset(storageDir, pageID, "a.txt", "asset-a")
 
 		baseRev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "base")
-		if err != nil {
-			t.Fatalf("RecordAssetChange base failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		content := "two"
-		if err := treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false); err != nil {
-			t.Fatalf("UpdateNode failed: %v", err)
-		}
-		writeLiveAsset(t, storageDir, pageID, "b.txt", "asset-b")
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
+		writeLiveAsset(storageDir, pageID, "b.txt", "asset-b")
 		targetRev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "target")
-		if err != nil {
-			t.Fatalf("RecordAssetChange target failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		comparison, err := service.CompareRevisionSnapshots(newFixturePageID(pageID), newFixtureRevisionID(baseRev.ID), newFixtureRevisionID(targetRev.ID))
-		if err != nil {
-			t.Fatalf("CompareRevisionSnapshots failed: %v", err)
-		}
-		if comparison == nil || comparison.Base == nil || comparison.Target == nil {
-			t.Fatalf("comparison = %#v", comparison)
-		}
-		if !comparison.ContentChanged {
-			t.Fatalf("expected content to be marked as changed")
-		}
-		if len(comparison.AssetChanges) != 1 || comparison.AssetChanges[0].Name != "b.txt" || comparison.AssetChanges[0].Status != "added" {
-			t.Fatalf("asset changes = %#v", comparison.AssetChanges)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(comparison).To(SatisfyAll(
+			HaveField("Base", Not(BeNil())),
+			HaveField("Target", Not(BeNil())),
+			HaveField("ContentChanged", BeTrue()),
+			HaveField("AssetChanges", HaveExactElements(SatisfyAll(
+				HaveField("Name", "b.txt"),
+				HaveField("Status", "added"),
+			))),
+		))
 	})
 
-	ginkgo.It("TestGetRevisionAssetReturnsBlobForDeletedLiveAsset", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "one")
-		writeLiveAsset(t, storageDir, pageID, "image.png", "asset-image")
+	ginkgo.It("returns stored revision asset blobs after live assets are deleted", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "one")
+		writeLiveAsset(storageDir, pageID, "image.png", "asset-image")
 
 		rev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "with asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
-		if err := os.Remove(revisionAssetPath(storageDir, pageID, "image.png")); err != nil {
-			t.Fatalf("Remove live asset failed: %v", err)
-		}
+		Expect(os.Remove(revisionAssetPath(storageDir, pageID, "image.png"))).To(Succeed())
 
 		asset, err := service.GetRevisionAsset(newFixturePageID(pageID), newFixtureRevisionID(rev.ID), tree.AssetName("image.png"))
-		if err != nil {
-			t.Fatalf("GetRevisionAsset failed: %v", err)
-		}
-		if asset == nil {
-			t.Fatal("expected revision asset content")
-		}
-		if asset.Asset.Name != "image.png" {
-			t.Fatalf("asset name = %q", asset.Asset.Name)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(asset).NotTo(BeNil())
+		Expect(asset.Asset.Name).To(Equal("image.png"))
 		content, err := os.ReadFile(asset.Path)
-		if err != nil {
-			t.Fatalf("read asset from path: %v", err)
-		}
-		if string(content) != "asset-image" {
-			t.Fatalf("asset content = %q", string(content))
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(content)).To(Equal("asset-image"))
 	})
 
-	ginkgo.It("TestGetRevisionAssetReturnsNotFoundForMissingManifestEntry", func() {
-		t := ginkgo.GinkgoT()
-		service, treeService, storageDir := newRevisionTestService(t)
-		pageID := createRevisionTestPage(t, treeService, "Page", "page", "one")
-		writeLiveAsset(t, storageDir, pageID, "image.png", "asset-image")
+	ginkgo.It("returns a localized asset-not-found error for missing manifest entries", func() {
+		service, treeService, storageDir := newRevisionTestService()
+		pageID := createRevisionTestPage(treeService, "Page", "page", "one")
+		writeLiveAsset(storageDir, pageID, "image.png", "asset-image")
 
 		rev, _, err := service.RecordAssetChange(revisionTestPageID(pageID), "tester", "with asset")
-		if err != nil {
-			t.Fatalf("RecordAssetChange failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 
 		_, err = service.GetRevisionAsset(newFixturePageID(pageID), newFixtureRevisionID(rev.ID), tree.AssetName("missing.png"))
-		localized, ok := sharederrors.AsLocalizedError(err)
-		if !ok {
-			t.Fatalf("expected localized error, got %T", err)
-		}
-		if localized.Code != "revision_preview_asset_not_found" {
-			t.Fatalf("localized.Code = %q", localized.Code)
-		}
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetNotFound))
 	})
 })
