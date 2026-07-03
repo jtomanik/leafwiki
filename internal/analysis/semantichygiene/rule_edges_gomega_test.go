@@ -1375,6 +1375,33 @@ func TestRouterResponse() {
 			))
 		})
 
+		ginkgo.It("reports map index aliases asserted as local values", func() {
+			h := newRuleHarness("/repo/internal/http/router_test.go", "github.com/perber/wiki/internal/http", `package http
+
+type assertion struct{}
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) To(matcher any, extra ...any) {}
+func Equal(actual any) any { return nil }
+func ContainSubstring(needle string) any { return nil }
+
+func TestRouterResponse() {
+	resp := map[string]any{"content": "Root README", "prefix": "/docs"}
+	got := resp["prefix"]
+	Expect(got).To(Equal("/docs"))
+	content, _ := resp["content"].(string)
+	Expect(content).To(ContainSubstring("Root"))
+}
+`)
+			for _, call := range h.findCalls("To") {
+				checkGomegaSemanticMatcher(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.map-index: use HaveKeyWithValue matcher instead of asserting a direct map index value",
+				"semh:gomega.map-index: use HaveKeyWithValue matcher instead of asserting a direct map index value",
+			))
+		})
+
 		ginkgo.It("reports discarded semantic boolean returns in specs", func() {
 			h := newRuleHarnessWithFiles("/repo/internal/agenthooks/agenthooks_test.go", "github.com/perber/wiki/internal/agenthooks", map[string]string{
 				"/repo/internal/agenthooks/agenthooks.go": `package agenthooks

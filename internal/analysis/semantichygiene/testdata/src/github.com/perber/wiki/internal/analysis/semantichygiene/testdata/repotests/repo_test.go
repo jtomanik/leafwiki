@@ -278,7 +278,7 @@ var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", func
 	ginkgo.It("checks derived git revision trailer values as stable protocol data", func() {
 		trailers := map[string]string{}
 		changed := trailers["LeafWiki-Changed-Markdown"] // want "raw stable contract literal \"LeafWiki-Changed-Markdown\" used in test assertion code; use the typed constant or semantic helper"
-		Expect(changed).To(Equal("1"))
+		Expect(changed).To(Equal("1"))                   // want "use HaveKeyWithValue matcher instead of asserting a direct map index value"
 	})
 })
 

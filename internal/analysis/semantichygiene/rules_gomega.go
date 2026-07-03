@@ -920,11 +920,16 @@ func isBooleanProducingBinaryOp(op token.Token) bool {
 }
 
 func assertionUsesMapIndexEqual(ctx *analysisContext, assertion gomegaAssertion) bool {
-	index, ok := mapIndexAssertionActual(assertion.actual)
-	if !ok {
-		return false
+	if mapIndexAssertionActualIsMap(ctx, assertion.actual) {
+		return true
 	}
-	return typeIsMap(ctx.pass.TypesInfo.TypeOf(index.X))
+	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
+	return ok && identAliasesMapIndex(ctx, ident)
+}
+
+func mapIndexAssertionActualIsMap(ctx *analysisContext, expr ast.Expr) bool {
+	index, ok := mapIndexAssertionActual(expr)
+	return ok && typeIsMap(ctx.pass.TypesInfo.TypeOf(index.X))
 }
 
 func mapIndexAssertionActual(expr ast.Expr) (*ast.IndexExpr, bool) {
@@ -936,6 +941,58 @@ func mapIndexAssertionActual(expr ast.Expr) (*ast.IndexExpr, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func identAliasesMapIndex(ctx *analysisContext, ident *ast.Ident) bool {
+	body := enclosingFunctionBody(ctx, ident)
+	if body == nil {
+		return false
+	}
+	targetObject := ctx.pass.TypesInfo.ObjectOf(ident)
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		switch candidate := node.(type) {
+		case *ast.AssignStmt:
+			if candidate.Pos() > ident.Pos() {
+				return false
+			}
+			for i, lhs := range candidate.Lhs {
+				lhsIdent, ok := unparenExpr(lhs).(*ast.Ident)
+				if !ok || !sameIdentifierObject(ctx, lhsIdent, ident, targetObject) {
+					continue
+				}
+				if len(candidate.Rhs) == 1 {
+					found = i == 0 && mapIndexAssertionActualIsMap(ctx, candidate.Rhs[0])
+				} else if i < len(candidate.Rhs) {
+					found = mapIndexAssertionActualIsMap(ctx, candidate.Rhs[i])
+				}
+				if found {
+					return false
+				}
+			}
+		case *ast.ValueSpec:
+			if candidate.Pos() > ident.Pos() {
+				return false
+			}
+			for i, name := range candidate.Names {
+				if name == nil || !sameIdentifierObject(ctx, name, ident, targetObject) || i >= len(candidate.Values) {
+					continue
+				}
+				found = mapIndexAssertionActualIsMap(ctx, candidate.Values[i])
+				if found {
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return found
 }
 
 func typeIsMap(typ types.Type) bool {
