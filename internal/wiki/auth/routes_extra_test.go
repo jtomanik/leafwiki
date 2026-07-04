@@ -70,6 +70,30 @@ func matchAuthValidationResponse() types.GomegaMatcher {
 	}))
 }
 
+func matchAuthJSONBodyField(field string, value any) types.GomegaMatcher {
+	return WithTransform(authJSONBodyFields, HaveKeyWithValue(field, value))
+}
+
+func matchAuthJSONArrayElement(elementMatcher types.GomegaMatcher) types.GomegaMatcher {
+	return WithTransform(authJSONArrayBodyFields, ContainElement(elementMatcher))
+}
+
+func authJSONBodyFields(rec *httptest.ResponseRecorder) (map[string]any, error) {
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func authJSONArrayBodyFields(rec *httptest.ResponseRecorder) ([]map[string]any, error) {
+	var body []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
 func matchAuthUseCaseValidationError(fields ...authFieldErrorExpectation) types.GomegaMatcher {
 	matchers := make([]types.GomegaMatcher, 0, len(fields))
 	for _, field := range fields {
@@ -91,8 +115,8 @@ func expectAuthFieldError(
 	return authFieldErrorExpectation{Field: field, Code: code, MessageID: messageID}
 }
 
-var _ = ginkgo.Describe("auth routes", func() {
-	ginkgo.It("RegisterRoutes wires auth endpoints for both refresh-token limiter modes", func() {
+var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
+	ginkgo.It("exposes auth endpoints for both refresh-token limiter modes", func() {
 		gin.SetMode(gin.TestMode)
 		original := DisableRefreshTokenRateLimit
 		ginkgo.DeferCleanup(func() {
@@ -192,7 +216,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 		Expect(rec).To(HaveHTTPHeaderWithValue("X-CSRF-Token", Not(BeEmpty())))
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"authDisabled":false`)))
+		Expect(rec).To(matchAuthJSONBodyField("authDisabled", false))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleConfig(fixture.routerContext(false)),
@@ -212,7 +236,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 
 		rec = performAuthHandlerRequest(fixture.routes.handleMe, http.MethodGet, "/api/auth/me", nil, nil, fixture.admin, false)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"username":"admin"`)))
+		Expect(rec).To(matchAuthJSONBodyField("username", "admin"))
 	})
 
 	ginkgo.It("handles login, logout, and refresh-token requests", func() {
@@ -429,7 +453,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 		)
 		Expect(rec).To(HaveHTTPStatus(http.StatusCreated))
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"username":"new-user"`)))
+		Expect(rec).To(matchAuthJSONBodyField("username", "new-user"))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUser,
@@ -444,7 +468,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 
 		rec = performAuthHandlerRequest(fixture.routes.handleGetUsers, http.MethodGet, "/api/users", nil, nil, fixture.admin, false)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"username":"admin"`)))
+		Expect(rec).To(matchAuthJSONArrayElement(HaveKeyWithValue("username", "admin")))
 
 		errorRoutes := *fixture.routes
 		errorRoutes.getUsers = NewGetUsersUseCase(setupUserServiceWithUnusableStorageDir())
@@ -483,7 +507,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 			false,
 		)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"role":"admin"`)))
+		Expect(rec).To(matchAuthJSONBodyField("role", string(coreauth.RoleAdmin)))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,

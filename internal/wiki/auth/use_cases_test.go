@@ -84,7 +84,7 @@ func authPasswordMatchesUser(userSvc *coreauth.UserService, userID coreauth.User
 }
 
 var _ = ginkgo.Describe("auth use cases", func() {
-	ginkgo.It("lets administrators assign a different role to a user", func() {
+	ginkgo.It("lets administrators assign a different role to a user", ginkgo.Label("integration"), func() {
 		uc, svc := setupUpdateUserUseCase()
 
 		viewer, err := svc.CreateUser("viewer", "viewer@example.com", "pass", coreauth.RoleViewer)
@@ -101,7 +101,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(out.User.Role).To(Equal(coreauth.RoleAdmin))
 	})
 
-	ginkgo.It("updates profile details without changing role when administrators omit role", func() {
+	ginkgo.It("updates profile details without changing role when administrators omit role", ginkgo.Label("integration"), func() {
 		uc, svc := setupUpdateUserUseCase()
 
 		editor, err := svc.CreateUser("ed", "ed@example.com", "pass", coreauth.RoleEditor)
@@ -122,7 +122,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		}))
 	})
 
-	ginkgo.It("preserves the current role when a non-admin requester asks for escalation", func() {
+	ginkgo.It("preserves the current role when a non-admin requester asks for escalation", ginkgo.Label("integration"), func() {
 		uc, svc := setupUpdateUserUseCase()
 
 		viewer, err := svc.CreateUser("viewer", "viewer@example.com", "pass", coreauth.RoleViewer)
@@ -139,7 +139,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(out.User.Role).To(Equal(coreauth.RoleViewer))
 	})
 
-	ginkgo.It("lets non-admin users update their profile without escalating role", func() {
+	ginkgo.It("lets non-admin users update their profile without escalating role", ginkgo.Label("integration"), func() {
 		uc, svc := setupUpdateUserUseCase()
 
 		editor, err := svc.CreateUser("ed", "ed@example.com", "pass", coreauth.RoleEditor)
@@ -160,7 +160,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		}))
 	})
 
-	ginkgo.It("rejects demoting the only administrator", func() {
+	ginkgo.It("rejects demoting the only administrator", ginkgo.Label("integration"), func() {
 		uc, svc := setupUpdateUserUseCase()
 
 		admin, err := svc.CreateUser("admin", "admin@example.com", "pass", coreauth.RoleAdmin)
@@ -176,7 +176,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).To(MatchError(coreauth.ErrLastAdminCannotBeDemoted))
 	})
 
-	ginkgo.It("demotes an administrator when another administrator remains", func() {
+	ginkgo.It("demotes an administrator when another administrator remains", ginkgo.Label("integration"), func() {
 		uc, svc := setupUpdateUserUseCase()
 
 		admin1, err := svc.CreateUser("admin1", "admin1@example.com", "pass", coreauth.RoleAdmin)
@@ -195,7 +195,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(out.User.Role).To(Equal(coreauth.RoleViewer))
 	})
 
-	ginkgo.It("rejects unsupported roles before updating a user", func() {
+	ginkgo.It("rejects unsupported roles before updating a user", ginkgo.Label("integration"), func() {
 		uc, svc := setupUpdateUserUseCase()
 
 		user, err := svc.CreateUser("alice", "alice@example.com", "pass", coreauth.RoleViewer)
@@ -211,7 +211,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).To(HaveAuthFieldErrorCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid))
 	})
 
-	ginkgo.It("returns stable localized field codes for invalid user creation input", func() {
+	ginkgo.It("returns stable localized field codes for invalid user creation input", ginkgo.Label("unit"), func() {
 		uc := NewCreateUserUseCase(nil, nil, slog.Default())
 
 		_, err := uc.Execute(context.Background(), CreateUserInput{
@@ -228,7 +228,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		))
 	})
 
-	ginkgo.It("returns stable localized field codes for missing API key names", func() {
+	ginkgo.It("returns stable localized field codes for missing API key names", ginkgo.Label("unit"), func() {
 		uc := NewCreateAPIKeyUseCase(nil, nil)
 
 		_, err := uc.Execute(context.Background(), CreateAPIKeyInput{Name: ""})
@@ -236,7 +236,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).To(HaveAuthFieldErrorCode("name", FieldCodeAuthAPIKeyNameRequired, MessageIDAuthAPIKeyNameRequired))
 	})
 
-	ginkgo.It("requires semantic user and API key identifiers in use-case inputs", func() {
+	ginkgo.It("requires semantic user and API key identifiers in use-case inputs", ginkgo.Label("unit"), func() {
 		_ = GetUserByIDInput{ID: newFixtureUserID("user-1")}
 		_ = CreateAPIKeyInput{
 			UserID:          newFixtureUserID("user-1"),
@@ -246,7 +246,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: coreauth.APIKeyID("key-1")}
 	})
 
-	ginkgo.It("returns auth-disabled errors for login, logout, and refresh when no auth service is configured", func() {
+	ginkgo.It("returns auth-disabled errors for login, logout, and refresh when no auth service is configured", ginkgo.Label("unit"), func() {
 		_, err := NewLoginUseCase(nil).Execute(context.Background(), LoginInput{Identifier: "admin", Password: "password"})
 		Expect(err).To(MatchError(ErrAuthDisabled))
 
@@ -257,7 +257,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).To(MatchError(ErrAuthDisabled))
 	})
 
-	ginkgo.It("GetUsersUseCase and GetUserByIDUseCase return public users", func() {
+	ginkgo.It("listing and lookup return public user views", ginkgo.Label("integration"), func() {
 		userSvc := setupUserService()
 		admin, err := userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
 		Expect(err).NotTo(HaveOccurred())
@@ -279,7 +279,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		}))
 	})
 
-	ginkgo.It("GetUsersUseCase returns storage errors", func() {
+	ginkgo.It("listing users reports storage failures", ginkgo.Label("integration"), func() {
 		userSvc := setupUserServiceWithUnusableStorageDir()
 
 		_, err := NewGetUsersUseCase(userSvc).Execute(context.Background())
@@ -287,7 +287,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).To(matchAuthUseCaseSQLitePrimaryError(sqlite3.SQLITE_CANTOPEN))
 	})
 
-	ginkgo.It("ChangeOwnPasswordUseCase validates the old password and updates a matching user password", func() {
+	ginkgo.It("password changes require the current password before updating credentials", ginkgo.Label("integration"), func() {
 		userSvc := setupUserService()
 		user, err := userSvc.CreateUser("alice", "alice@example.com", "old-password", coreauth.RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
@@ -310,7 +310,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(authPasswordMatchesUser(userSvc, coreauth.UserIDFromString(user.ID), "new-password")).To(Succeed())
 	})
 
-	ginkgo.It("user mutation use cases continue when resolver reload only logs a warning", func() {
+	ginkgo.It("user mutation use cases continue when resolver reload only logs a warning", ginkgo.Label("integration"), func() {
 		userSvc := setupUserService()
 		resolver := failingUserResolverReloader{err: errors.New("reload failed")}
 
@@ -354,7 +354,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).To(MatchError(coreauth.ErrUserNotFound))
 	})
 
-	ginkgo.It("CreateAPIKeyUseCase validates current password when required", func() {
+	ginkgo.It("API key creation requires the current password when policy demands it", ginkgo.Label("integration"), func() {
 		userSvc := setupUserService()
 		apiKeys := setupAPIKeyService(userSvc)
 		user, err := userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
@@ -382,7 +382,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(out.Key.Name).To(Equal("key"))
 	})
 
-	ginkgo.It("ListAPIKeysUseCase and RevokeAPIKeyUseCase round-trip active keys", func() {
+	ginkgo.It("active API keys can be listed and revoked", ginkgo.Label("integration"), func() {
 		userSvc := setupUserService()
 		apiKeys := setupAPIKeyService(userSvc)
 		user, err := userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
@@ -404,14 +404,14 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(listed.Keys).To(BeEmpty())
 	})
 
-	ginkgo.It("auth error helpers map localized codes and success messages", func() {
+	ginkgo.It("auth error helpers map localized codes and success messages", ginkgo.Label("unit"), func() {
 		Expect(authErrorStatus(ErrCodeAuthUserNotFound)).To(Equal(404))
 		Expect(authErrorStatus(ErrCodeAuthForbidden)).To(Equal(403))
 		Expect(authErrorStatus("unknown")).To(Equal(500))
 		Expect(apiSuccessMessage(MessageIDAuthLoginSuccess)).NotTo(BeEmpty())
 	})
 
-	ginkgo.It("delegates login, refresh, and logout operations to the configured auth service", func() {
+	ginkgo.It("delegates login, refresh, and logout operations to the configured auth service", ginkgo.Label("integration"), func() {
 		userSvc := setupUserService()
 		sessionStore, err := coreauth.NewSessionStore(tempAuthStorageDir())
 		Expect(err).NotTo(HaveOccurred())
