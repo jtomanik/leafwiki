@@ -14,7 +14,7 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 )
 
-var _ = Describe("node store filesystem and validation failure behavior", func() {
+var _ = Describe("node store filesystem and validation failure behavior", Label("unit"), func() {
 	var (
 		store  *NodeStore
 		base   string

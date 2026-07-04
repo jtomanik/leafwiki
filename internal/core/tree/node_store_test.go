@@ -40,7 +40,7 @@ func haveCanonicalNodeStoreRawStorage() types.GomegaMatcher {
 	)
 }
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree missing file returns default root", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -54,7 +54,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("save tree then load tree assigns parents", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -97,7 +97,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create page rejects traversal slug", func() {
 		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
@@ -115,7 +115,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node rejects traversal slug", func() {
 		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
@@ -140,7 +140,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content rejects parentless non root page", func() {
 		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
@@ -157,7 +157,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create page rejects symlinked parent escaping root", func() {
 		if runtime.GOOS == "windows" {
 			ginkgo.Skip("symlink creation requires privileges on Windows")
@@ -202,7 +202,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content rejects symlinked parent escaping root", func() {
 		if runtime.GOOS == "windows" {
 			ginkgo.Skip("symlink creation requires privileges on Windows")
@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("save child order root writes order file", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -281,7 +281,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("save child order page returns an error without creating directory", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -308,7 +308,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create section creates folder and index with frontmatter", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -359,7 +359,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create section kind guards", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -382,7 +382,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create page creates markdown with frontmatter", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -426,7 +426,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create page sets LeafWiki title initially", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -452,7 +452,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create page rejects existing page file but allows sibling section directory", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -495,7 +495,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create section rejects existing section directory but allows sibling page file", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -537,7 +537,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content page creates or updates preserves mode", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -585,7 +585,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content preserves existing custom frontmatter", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -639,7 +639,7 @@ leafwiki_title: Old Title
 
 // UpsertContent must treat incoming content that looks like frontmatter as plain
 // body text — matching the UI behaviour where the editor sends raw markdown.
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content raw frontmatter treated as plain body", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -696,7 +696,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 // Regression test for #942: content typed in the UI that looks like frontmatter
 // must be stored as plain body text, not extracted and merged into system frontmatter.
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content treats leading frontmatter as plain body", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -749,7 +749,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 // UpsertContentPreservingFrontmatter is the legacy-named importer path: it parses
 // incoming metadata/frontmatter and writes the canonical metadata comment.
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content preserving frontmatter merges extras into written metadata", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -808,7 +808,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("upsert content section writes index and creates directory", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -834,7 +834,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node page moves file strict", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -877,7 +877,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node page uses workspace source path", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -930,7 +930,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node drift when missing source", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -950,7 +950,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("create page uses workspace source parent directory", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -989,7 +989,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page removes file or drift if missing", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1025,7 +1025,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page uses workspace source path", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1064,7 +1064,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete section removes folder recursive or drift if missing", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1101,7 +1101,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("save child order uses workspace source section directory", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1147,7 +1147,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node page and section", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1189,7 +1189,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node page uses workspace source path and clears default source", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1238,7 +1238,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node rejects empty slug and root", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1259,7 +1259,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node returns nil when slug unchanged", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1287,7 +1287,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node rejects destination collision", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1307,7 +1307,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node page drift when source is folder", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1327,7 +1327,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node section drift when source is file", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1347,7 +1347,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("rename node rejects unknown kind", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1367,7 +1367,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("read page raw section no index returns empty nil", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1396,7 +1396,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("read page raw page missing is drift", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1411,7 +1411,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("read page content strips frontmatter and preserves body", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1442,7 +1442,7 @@ Hello
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("read page content invalid frontmatter returns raw", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1469,7 +1469,7 @@ Hello
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("sync frontmatter if exists page updates or adds frontmatter", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1545,7 +1545,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("sync frontmatter if exists preserves existing custom frontmatter", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1597,7 +1597,7 @@ Hello`), "body changed unexpectedly: %q",
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("sync frontmatter if exists section no index no side effects", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1622,7 +1622,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolve node file vs folder", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1662,7 +1662,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node page to section moves to index", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1702,7 +1702,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node page to section preserves existing metadata and body", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1762,7 +1762,7 @@ leafwiki_title: Legacy Title
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node section to page rejects non empty folder", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1787,7 +1787,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node section to page with index moves and removes folder", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1828,7 +1828,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node section to page no index creates empty page with frontmatter", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1868,7 +1868,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node section to page with order metadata preserves index content", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1913,7 +1913,7 @@ custom: keep
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node section moves folder strict", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1950,7 +1950,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node page drift when source is folder", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1972,7 +1972,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node section drift when source is file", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1994,7 +1994,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node rejects destination collision", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -2019,7 +2019,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node page to section creates index when page missing", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -2045,7 +2045,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node rejects unknown target", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -2065,7 +2065,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store persistence", func() {
+var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node section to page drift when path is file", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)

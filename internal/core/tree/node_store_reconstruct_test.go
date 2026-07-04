@@ -48,7 +48,7 @@ func slugs(children []*PageNode) []string {
 
 // --- tests ---
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("empty storage returns root", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -62,7 +62,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("builds sections and pages skips index markdown as page", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -129,7 +129,7 @@ leafwiki_title: Readme
 })
 
 // - Uppercase INDEX.MD does not become a second child page when accepted by current index lookup rules
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses uppercase section index", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -216,7 +216,7 @@ leafwiki_title: Introduction
 })
 
 // - README.md is fallback section default
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("README fallback section when no index exists", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -272,7 +272,7 @@ leafwiki_title: Documentation
 })
 
 // - index.md has precedence over README.md
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("index beats README and README is separate page", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -318,7 +318,7 @@ leafwiki_title: Readme Page
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("allows page and section with same basename", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -381,7 +381,7 @@ leafwiki_title: Sync Section
 })
 
 // - root README.md is fallback only without root index.md
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("root README fallback section when no index exists", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -419,7 +419,7 @@ leafwiki_title: Root Readme
 })
 
 // - root index.md has precedence over root README.md
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("root index beats root README", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -462,7 +462,7 @@ leafwiki_title: Root Readme Page
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("section without index uses directory name as title and materializes index", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -500,7 +500,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("page without frontmatter falls back to headline title", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -527,7 +527,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("positions are contiguous", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -555,7 +555,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("order file overrides default order", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -601,7 +601,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("order file ignores unknown IDs and keeps remaining stable", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -638,7 +638,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns an error on duplicate LeafWiki IDs", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -662,7 +662,7 @@ leafwiki_title: B
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns an error on duplicate canonical and legacy LeafWiki IDs", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -694,7 +694,7 @@ type malformedCanonicalMetadataCase struct {
 	raw  string
 }
 
-var _ = ginkgo.DescribeTable("node store filesystem reconstruction returns an error on malformed canonical metadata",
+var _ = ginkgo.DescribeTable("node store filesystem reconstruction returns an error on malformed canonical metadata", ginkgo.Label("unit"),
 	func(tt malformedCanonicalMetadataCase) {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -743,7 +743,7 @@ page:
 	}),
 )
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns an error on case insensitive duplicate slugs", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -769,7 +769,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("allows directory file slug pair", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -813,7 +813,7 @@ leafwiki_title: Notes Page
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("imports normalizable workspace routes", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -873,7 +873,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns an error on normalized duplicate page routes", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -890,7 +890,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("skips top level static assets", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -914,7 +914,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("writes IDs back to files", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -985,7 +985,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("normalizes importable slugs and skips empty normalized slugs", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1019,7 +1019,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("preserves mixed case slug names", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1035,7 +1035,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 
 	})
 })
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("reads metadata from frontmatter", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1067,7 +1067,7 @@ leafwiki_last_author_id: bob
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("canonicalizes complete legacy metadata", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1156,7 +1156,7 @@ leafwiki_last_author_id: page-editor
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("missing metadata falls back to mtime and system", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
@@ -1225,7 +1225,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
+var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("unit"), func() {
 	ginkgo.It("invalid metadata timestamp falls back to mtime", func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)

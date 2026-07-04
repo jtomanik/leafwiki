@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("semantic path helpers", func() {
+var _ = ginkgo.Describe("semantic path helpers", ginkgo.Label("unit"), func() {
 	ginkgo.It("normalizes markdown paths and derives route/source semantics", func() {
 		path := MarkdownPathFromString(" /docs//guide/index.md ")
 
@@ -97,7 +97,7 @@ var _ = ginkgo.Describe("semantic path helpers", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree route paths and section content resolution", func() {
+var _ = ginkgo.Describe("tree route paths and section content resolution", ginkgo.Label("unit"), func() {
 	ginkgo.It("generates a filesystem-style path from page node ancestry", func() {
 		root := &PageNode{ID: RootPageID, Slug: "root", Kind: NodeKindSection}
 		docs := &PageNode{ID: "docs", Slug: "docs", Kind: NodeKindSection, Parent: root}
@@ -132,7 +132,7 @@ var _ = ginkgo.Describe("tree route paths and section content resolution", func(
 	})
 })
 
-var _ = ginkgo.Describe("tree error wrappers", func() {
+var _ = ginkgo.Describe("tree error wrappers", ginkgo.Label("unit"), func() {
 	ginkgo.It("wraps sentinel errors with stable details", func() {
 		drift := &DriftError{NodeID: "page-1", Kind: NodeKindPage, Path: "docs/page.md", Reason: "missing"}
 		Expect(drift).To(MatchError(ErrDrift))

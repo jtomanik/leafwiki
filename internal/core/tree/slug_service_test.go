@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("unique child slug generation", func() {
+var _ = ginkgo.Describe("unique child slug generation", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses the normalized title when no sibling conflicts", func() {
 		parent := &PageNode{
 			Children: []*PageNode{},
@@ -83,7 +83,7 @@ var _ = ginkgo.Describe("unique child slug generation", func() {
 	})
 })
 
-var _ = ginkgo.Describe("path normalization", func() {
+var _ = ginkgo.Describe("path normalization", ginkgo.Label("unit"), func() {
 	ginkgo.It("normalizes each path segment into a route-safe slug", func() {
 		s := NewSlugService()
 
@@ -109,7 +109,7 @@ var _ = ginkgo.Describe("path normalization", func() {
 	})
 })
 
-var _ = ginkgo.Describe("slug validation", func() {
+var _ = ginkgo.Describe("slug validation", ginkgo.Label("unit"), func() {
 	ginkgo.It("accepts uppercase letters", func() {
 		s := NewSlugService()
 
@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("slug validation", func() {
 	})
 })
 
-var _ = ginkgo.Describe("reserved slug normalization", func() {
+var _ = ginkgo.Describe("reserved slug normalization", ginkgo.Label("unit"), func() {
 	ginkgo.It("adds a suffix when generating a valid slug for a reserved segment", func() {
 		s := NewSlugService()
 

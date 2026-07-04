@@ -10,7 +10,7 @@ import (
 	"github.com/perber/wiki/internal/core/treemigration"
 )
 
-var _ = Describe("tree semantic value and service wrapper edge behavior", func() {
+var _ = Describe("tree semantic value and service wrapper edge behavior", Label("unit"), func() {
 	It("asserts semantic value edge methods and slug filename helpers", func() {
 		Expect(RevisionIDFromString("rev-1")).To(Equal(newFixtureRevisionID("rev-1")))
 		Expect(CleanMarkdownPath(".")).To(BeEmpty())

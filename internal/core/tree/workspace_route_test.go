@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("workspace markdown route mapping", func() {
+var _ = ginkgo.Describe("workspace markdown route mapping", ginkgo.Label("unit"), func() {
 	for _, tt := range []struct {
 		name        string
 		relPath     string
@@ -102,7 +102,7 @@ var _ = ginkgo.Describe("workspace markdown route mapping", func() {
 	}
 })
 
-var _ = ginkgo.Describe("workspace markdown route mapping", func() {
+var _ = ginkgo.Describe("workspace markdown route mapping", ginkgo.Label("unit"), func() {
 	ginkgo.It("map workspace markdown route rejects empty normalized segments", func() {
 		root := tempTreeDir()
 
@@ -113,7 +113,7 @@ var _ = ginkgo.Describe("workspace markdown route mapping", func() {
 	})
 })
 
-var _ = ginkgo.Describe("workspace route conflict tracking", func() {
+var _ = ginkgo.Describe("workspace route conflict tracking", ginkgo.Label("unit"), func() {
 	ginkgo.It("workspace route conflict tracker reports normalized collisions", func() {
 		tracker := newWorkspaceRouteConflictTracker()
 		first := WorkspaceMarkdownRoute{SourcePath: "plans/foo_bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
@@ -142,7 +142,7 @@ var _ = ginkgo.Describe("workspace route conflict tracking", func() {
 	})
 })
 
-var _ = ginkgo.Describe("workspace route conflict tracking", func() {
+var _ = ginkgo.Describe("workspace route conflict tracking", ginkgo.Label("unit"), func() {
 	ginkgo.It("workspace route conflict tracker allows page and section twin routes", func() {
 		tracker := newWorkspaceRouteConflictTracker()
 		{

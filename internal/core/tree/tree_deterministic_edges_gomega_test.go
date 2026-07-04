@@ -12,7 +12,7 @@ import (
 	"github.com/onsi/gomega/gstruct"
 )
 
-var _ = Describe("deterministic tree edge behavior", func() {
+var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 	It("records workspace route conflicts only for distinct sources of the same route and kind", func() {
 		var nilTracker *workspaceRouteConflictTracker
 		Expect(nilTracker.Record(WorkspaceMarkdownRoute{RoutePath: "docs", Kind: NodeKindPage})).To(BeNil())

@@ -9,7 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("route path generation from page nodes", func() {
+var _ = ginkgo.Describe("route path generation from page nodes", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses an empty route for the root and appends ancestor slugs for descendants", func() {
 		root := &PageNode{ID: "root", Slug: "root", Title: "root"}
 		docs := &PageNode{ID: "docs", Slug: "docs", Title: "Docs", Parent: root}
@@ -21,7 +21,7 @@ var _ = ginkgo.Describe("route path generation from page nodes", func() {
 	})
 })
 
-var _ = ginkgo.Describe("page folder materialization", func() {
+var _ = ginkgo.Describe("page folder materialization", ginkgo.Label("unit"), func() {
 	ginkgo.It("converts a flat markdown file into a folder with index content", func() {
 		tmp := tempTreeDir()
 		pagePath := "docs/guide"
@@ -37,7 +37,7 @@ var _ = ginkgo.Describe("page folder materialization", func() {
 	})
 })
 
-var _ = ginkgo.Describe("empty page folder folding", func() {
+var _ = ginkgo.Describe("empty page folder folding", ginkgo.Label("unit"), func() {
 	ginkgo.It("folds an index-only folder back into a flat markdown file", func() {
 		tmp := tempTreeDir()
 		dir := filepath.Join(tmp, "docs", "guide")
@@ -52,7 +52,7 @@ var _ = ginkgo.Describe("empty page folder folding", func() {
 	})
 })
 
-var _ = ginkgo.Describe("page disk path construction", func() {
+var _ = ginkgo.Describe("page disk path construction", ginkgo.Label("unit"), func() {
 	ginkgo.It("joins Windows-style roots with route paths", func() {
 		storageDir := `C:\wiki\data\root`
 		pagePath := "docs/guide"

@@ -14,7 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("tree filesystem seam failure behavior", func() {
+var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() {
 	var (
 		base   string
 		root   string

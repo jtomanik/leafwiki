@@ -109,7 +109,7 @@ func matchPageIDOrder(want ...PageID) types.GomegaMatcher {
 
 // --- A) Load/Save basics ---
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree default root when missing", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -140,7 +140,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service construction with explicit roots", func() {
+var _ = ginkgo.Describe("tree service construction with explicit roots", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses separate root directory for content and data directory for schema", func() {
 		svc, dataDir, rootDir := newLoadedServiceWithDirs()
 
@@ -188,7 +188,7 @@ var _ = ginkgo.Describe("tree service construction with explicit roots", func() 
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("migrates legacy tree from data directory into root directory", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -239,7 +239,7 @@ leafwiki_title: Legacy
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("allows legacy section without index when page content moved", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -304,7 +304,7 @@ leafwiki_title: Legacy
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails safely when current schema content still in default root", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -340,7 +340,7 @@ leafwiki_title: Current
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails safely when legacy content still in default root", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -383,7 +383,7 @@ leafwiki_title: Legacy
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails safely when legacy tree snapshot is corrupt and default root has content", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -420,7 +420,7 @@ leafwiki_title: Legacy
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails safely when configured root has unrelated content", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -465,7 +465,7 @@ leafwiki_title: Legacy
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails safely when legacy default root has extra file", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -520,7 +520,7 @@ leafwiki_title: Orphan
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails safely when configured root has same path different legacy identity", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -568,7 +568,7 @@ leafwiki_title: Other
 	})
 })
 
-var _ = ginkgo.Describe("tree service configured root loading", func() {
+var _ = ginkgo.Describe("tree service configured root loading", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails safely when configured root has same identity but different content", func() {
 		dataDir := filepath.Join(tempTreeDir(), "data")
 		rootDir := filepath.Join(tempTreeDir(), "content")
@@ -620,7 +620,7 @@ old content`, 0o644)
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates legacy tree order into order files", func() {
 		tmpDir := tempTreeDir()
 
@@ -691,7 +691,7 @@ leafwiki_title: C
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree removes legacy tree snapshot after successful migration", func() {
 		tmpDir := tempTreeDir()
 
@@ -737,7 +737,7 @@ leafwiki_title: B
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("save and load roundtrip parents", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -789,7 +789,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("tree hash is stable across repeated calls", func() {
 		svc, _ := newLoadedService()
 
@@ -816,7 +816,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("tree hash changes when tree changes", func() {
 		svc, _ := newLoadedService()
 
@@ -843,7 +843,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("tree hash changes when order changes", func() {
 		svc, _ := newLoadedService()
 
@@ -873,7 +873,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // --- B) Create/Update/Delete disk sync ---
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node reloads from filesystem", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -896,7 +896,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create child rolls back parent auto convert when tree save fails", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -936,7 +936,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node rolls back when tree save fails", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -973,7 +973,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node rolls back when order write fails", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1008,7 +1008,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node page root creates file and frontmatter", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1041,7 +1041,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node rejects case insensitive slug conflict", func() {
 		svc, _ := newLoadedService()
 		{
@@ -1062,7 +1062,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node allows same basename page and section twins", func() {
 		svc, dataDir := newLoadedService()
 
@@ -1104,7 +1104,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("content path for node uses core read rules", func() {
 		svc, dataDir := newLoadedService()
 
@@ -1166,7 +1166,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node rejects traversal slug", func() {
 		svc, dataDir := newLoadedService()
 
@@ -1181,7 +1181,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node persists root order file", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1201,7 +1201,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 })
 
 // - New section creates index.md
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node section creates index with frontmatter", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1241,7 +1241,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create child under page auto converts parent to section", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1286,7 +1286,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node title only syncs frontmatter if file exists", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1323,7 +1323,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node slug rename renames on disk", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1350,7 +1350,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node allows rename to same basename page section twin", func() {
 		svc, tmpDir := newLoadedService()
 		{
@@ -1389,7 +1389,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node rejects case insensitive slug conflict", func() {
 		svc, _ := newLoadedService()
 
@@ -1421,7 +1421,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node rejects traversal slug", func() {
 		svc, dataDir := newLoadedService()
 		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
@@ -1443,7 +1443,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 /*
 Disable this test for now as we are not enforcing to pass the kinds yet.
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node section to page disallowed with children", func() {
 	svc, _ := newLoadedService()
 
@@ -1461,7 +1461,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 })
 */
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node non recursive errors when has children", func() {
 		svc, _ := newLoadedService()
 
@@ -1477,7 +1477,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node recursive deletes disk and tree", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1505,7 +1505,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page LeafWiki success removes file and tree and reindexes", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1599,7 +1599,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node updates root order file", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1630,7 +1630,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page with children non recursive returns err page has children", func() {
 		svc, _ := newLoadedService()
 
@@ -1653,7 +1653,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page with children recursive deletes folder", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1704,7 +1704,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page invalid ID returns err page not found", func() {
 		svc, _ := newLoadedService()
 
@@ -1718,7 +1718,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page drift file missing returns an error", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1752,7 +1752,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // --- C) Move semantics ---
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node target page auto converts to section", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1779,7 +1779,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node updates source and destination order files", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1817,7 +1817,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node allows move to same basename page section twin", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1859,7 +1859,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node persists moved node metadata to frontmatter", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1936,7 +1936,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node returns an error and rolls back when order persistence fails", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -1996,7 +1996,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node prevents circular reference", func() {
 		svc, _ := newLoadedService()
 
@@ -2013,7 +2013,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node prevents self parent", func() {
 		svc, _ := newLoadedService()
 
@@ -2027,7 +2027,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node rejects case insensitive slug conflict", func() {
 		svc, _ := newLoadedService()
 
@@ -2060,7 +2060,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // --- D) SortPages ---
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("sort pages valid order", func() {
 		svc, _ := newLoadedService()
 
@@ -2080,7 +2080,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("sort pages persists order file without changing metadata", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -2145,7 +2145,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("sort pages rolls back when order persistence fails", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -2192,7 +2192,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("sort pages invalid length", func() {
 		svc, _ := newLoadedService()
 
@@ -2208,7 +2208,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("sort pages duplicate ID", func() {
 		svc, _ := newLoadedService()
 
@@ -2223,7 +2223,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // --- E) Routing, Lookup, Ensure ---
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get page section without index does not materialize index", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -2258,7 +2258,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node page to section materializes index with node metadata", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -2311,7 +2311,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("find page by route path returns content", func() {
 		svc, _ := newLoadedService()
 
@@ -2344,7 +2344,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("find page by route path returns not found for missing path", func() {
 		svc, _ := newLoadedService()
 
@@ -2370,7 +2370,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("find page by route path is case sensitive", func() {
 		svc, _ := newLoadedService()
 
@@ -2405,7 +2405,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("find page by route path and kind distinguishes same basename page and section", func() {
 		svc, _, rootDir := newLoadedServiceWithDirs()
 		writeTreeTestFile(filepath.Join(rootDir, "docs", "index.md"), `---
@@ -2471,7 +2471,7 @@ leafwiki_title: Sync Child
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("find page by route path prefers section for same basename twin", func() {
 		svc, _ := newLoadedService()
 
@@ -2498,7 +2498,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path segments", func() {
 		svc, _ := newLoadedService()
 
@@ -2519,7 +2519,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path is case insensitive", func() {
 		svc, _ := newLoadedService()
 
@@ -2548,7 +2548,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path prefers section for same basename twin", func() {
 		svc, _ := newLoadedService()
 
@@ -2579,7 +2579,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path reflects slug rename", func() {
 		svc, _ := newLoadedService()
 
@@ -2634,7 +2634,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path can create for missing valid path", func() {
 		svc, _ := newLoadedService()
 
@@ -2649,7 +2649,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path cannot create reserved missing path", func() {
 		svc, _ := newLoadedService()
 
@@ -2664,7 +2664,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolve permalink target reflects rename and move", func() {
 		svc, _ := newLoadedService()
 
@@ -2712,7 +2712,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolve permalink target returns not found for missing page", func() {
 		svc, _ := newLoadedService()
 
@@ -2726,7 +2726,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path persists order files for created path", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -2758,7 +2758,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path creates intermediate sections and final page", func() {
 		svc, _ := newLoadedService()
 
@@ -2787,7 +2787,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path returns existing page without creating nodes", func() {
 		svc, _ := newLoadedService()
 
@@ -2807,7 +2807,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path creates page twin when section route exists", func() {
 		svc, _ := newLoadedService()
 
@@ -2858,7 +2858,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path creates section twin when page route exists", func() {
 		svc, _ := newLoadedService()
 
@@ -2907,7 +2907,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node updates path lookup", func() {
 		svc, _ := newLoadedService()
 
@@ -2956,7 +2956,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 })
 
 // --- F) Migration V3 (metadata frontmatter backfill) ---
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V5 backfills child order files", func() {
 		if CurrentSchemaVersion < 5 {
 			ginkgo.Skip("requires schema v5+")
@@ -3041,7 +3041,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V4 materializes missing section index", func() {
 		if CurrentSchemaVersion < 4 {
 			ginkgo.Skip("requires schema v4+")
@@ -3130,7 +3130,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree resumes interrupted migration with persisted legacy snapshot", func() {
 		if CurrentSchemaVersion < 3 {
 			ginkgo.Skip("requires schema v3+")
@@ -3253,7 +3253,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V3 backfills metadata frontmatter", func() {
 		if CurrentSchemaVersion < 3 {
 			ginkgo.Skip("requires schema v3+")
@@ -3345,7 +3345,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 })
 
 // --- F) Migration V2 (frontmatter backfill) ---
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V2 adds frontmatter and preserves body", func() {
 		if CurrentSchemaVersion < 2 {
 			ginkgo.Skip("requires schema v2+")
@@ -3428,7 +3428,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V2 preserves existing custom frontmatter", func() {
 		if CurrentSchemaVersion < 2 {
 			ginkgo.Skip("requires schema v2+")
@@ -3533,7 +3533,7 @@ Hello World
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V2 preserves existing LeafWiki title", func() {
 		if CurrentSchemaVersion < 2 {
 			ginkgo.Skip("requires schema v2+")
@@ -3624,7 +3624,7 @@ Hello World
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V2 preserves title alias", func() {
 		if CurrentSchemaVersion < 2 {
 			ginkgo.Skip("requires schema v2+")
@@ -3730,7 +3730,7 @@ Hello World
 
 // TestTreeService_ReconstructTreeFromFS_UpdatesSchemaVersion verifies that
 // ReconstructTreeFromFS writes the current schema version to prevent unnecessary migrations
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem updates schema version", func() {
 		tmpDir := tempTreeDir()
 
@@ -3767,7 +3767,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // --- G) ReconstructTreeFromFS ---
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem backfills metadata", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -3840,7 +3840,7 @@ leafwiki_title: Page Two
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem reloads from filesystem", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -3892,7 +3892,7 @@ leafwiki_title: README
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem reloads metadata from frontmatter", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -3942,7 +3942,7 @@ leafwiki_last_author_id: bob
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem reloads metadata fallbacks when missing", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -4005,7 +4005,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem complex tree preserves structure", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -4122,7 +4122,7 @@ leafwiki_title: Basic Guide
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem empty directory creates root and persists", func() {
 		svc, tmpDir := newLoadedService()
 
@@ -4159,7 +4159,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("reconstruct tree from filesystem reverts on metadata backfill error", func() {
 		// This test is harder to trigger without mocking, but we can at least verify
 		// that if the tree state is preserved if we can cause a failure scenario.
@@ -4215,7 +4215,7 @@ leafwiki_title: New Page
 
 func ptrKind(k NodeKind) *NodeKind { return &k }
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V5 returns an error when order file cannot be written", func() {
 		if CurrentSchemaVersion < 5 {
 			ginkgo.Skip("requires schema v5+")
@@ -4276,7 +4276,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("load tree migrates to V4 returns an error when section index cannot be written", func() {
 		if CurrentSchemaVersion < 4 {
 			ginkgo.Skip("requires schema v4+")
@@ -4360,7 +4360,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // ─── IsLoaded ─────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("is loaded returns false before load", func() {
 		svc := NewTreeService(tempTreeDir())
 		Expect(svc.IsLoaded()).To(BeFalse(),
@@ -4370,7 +4370,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("is loaded returns true after load", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -4394,7 +4394,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // ─── HasPages ─────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("has pages returns false before load", func() {
 		svc := NewTreeService(tempTreeDir())
 		Expect(svc.HasPages()).To(BeFalse(),
@@ -4404,7 +4404,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("has pages returns false for empty tree", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -4428,7 +4428,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("has pages returns true when pages exist", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -4459,7 +4459,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // ─── WalkNodes ────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("walk nodes does nothing when not loaded", func() {
 		svc := NewTreeService(tempTreeDir())
 		var visitedIDs []PageID
@@ -4475,7 +4475,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("walk nodes visits all non root nodes", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -4535,7 +4535,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("walk nodes skips root node", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -4566,7 +4566,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("walk nodes stops on error", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -4611,7 +4611,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("walk nodes visits nested nodes", func() {
 		tmpDir := tempTreeDir()
 		{
@@ -4663,7 +4663,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get pages preserves order and aligns errors", func() {
 		svc, _ := newLoadedService()
 
@@ -4703,7 +4703,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("bulk update content treats frontmatter like input as body", func() {
 		svc, _ := newLoadedService()
 
@@ -4777,7 +4777,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 // Optimistic locking: version check is enforced inside the write lock
 // ─────────────────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
@@ -4802,7 +4802,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
@@ -4815,7 +4815,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
@@ -4839,7 +4839,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
@@ -4852,7 +4852,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
 		destID, _ := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindPage))
@@ -4877,7 +4877,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
 		destID, _ := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindPage))
@@ -4891,7 +4891,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
@@ -4915,7 +4915,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
@@ -4928,7 +4928,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("version unchecked bypasses version check", func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
@@ -4954,7 +4954,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 // ─── RawContent ───────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get page raw content contains canonical metadata and body", func() {
 		svc, _ := newLoadedService()
 
@@ -4997,7 +4997,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get pages raw content populated for all", func() {
 		svc, _ := newLoadedService()
 
@@ -5031,7 +5031,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service behavior", func() {
+var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get page raw content not serialized to JSON", func() {
 		svc, _ := newLoadedService()
 

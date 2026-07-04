@@ -32,7 +32,7 @@ func HaveEmptyTreeIndexState() OmegaMatcher {
 	})
 }
 
-var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", func() {
+var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Label("unit"), func() {
 	It("unloaded services return errors without disk state", func() {
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: tempTreeDir(), RootDir: filepath.Join(tempTreeDir(), "root")})
 

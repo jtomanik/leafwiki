@@ -15,7 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("tree service migration and store seam failure behavior", func() {
+var _ = Describe("tree service migration and store seam failure behavior", Label("unit"), func() {
 	It("LoadTree reports migration and reconstruction seam failures", func() {
 		svc := NewTreeService(tempTreeDir())
 		schemaErr := errors.New("schema failed")
