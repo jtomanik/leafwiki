@@ -137,6 +137,8 @@ func Not(matcher any) any { return nil }
 
 func SatisfyAll(matchers ...any) any { return nil }
 
+func SatisfyAny(matchers ...any) any { return nil }
+
 func HaveLen(want int) any { return nil }
 
 func HavePrefix(want any) any { return nil }
@@ -264,7 +266,7 @@ var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", func
 	ginkgo.It("allows ordinary content assertions but checks error prose", func() {
 		body := "Bold link"
 		Expect(FromBody(body)).To(Equal("Bold link"))
-		Expect(errorMessage()).To(ContainSubstring("Page not found")) // want "raw localized prose \"Page not found\" used in test assertion code; assert a semantic code/message ID instead"
+		Expect(errorMessage()).To(ContainSubstring("Page not found")) // want "raw localized prose \"Page not found\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
 	})
 	ginkgo.DescribeTable("allows table descriptions but still checks row data",
 		func(code string) {},
@@ -475,6 +477,8 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(err).To(MatchError("boom"))                                 // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 	Expect(err).To(MatchError(ContainSubstring("boom")))               // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 	Expect(err).To(MatchError(ContainSubstring(messageFixture)))       // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+	typeErr := renderedToolError()
+	Expect(strings.ToLower(typeErr)).To(SatisfyAny(ContainSubstring("validating"), ContainSubstring("string"))) // want "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
 	_ = hiddenRawStringErrorMatcher()
 	Expect(len(items)).To(Equal(1))               // want "use HaveLen or a collection matcher instead of asserting len\\(\\) directly"
 	Expect(len(items)).To(BeNumerically(">=", 1)) // want "use HaveLen or a collection matcher instead of asserting len\\(\\) directly"
@@ -497,7 +501,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(now).To(Equal(now))                                                                                 // want "use BeTemporally for time.Time equality assertions"
 	Expect(payload.Code).To(Equal("page_not_found"))                                                           // want "assert structured error semantics with a typed domain matcher/helper instead of matching Code directly" "raw stable contract literal \"page_not_found\" used in test assertion code; use the typed constant or semantic helper"
 	Expect(payload.MessageID).To(Equal("errors.page.not_found"))                                               // want "assert structured error semantics with a typed domain matcher/helper instead of matching MessageID directly" "raw stable contract literal \"errors.page.not_found\" used in test assertion code; use the typed constant or semantic helper"
-	Expect(commitMessage()).To(HavePrefix("LeafWiki initial workspace snapshot"))                              // want "raw localized prose \"LeafWiki initial workspace snapshot\" used in test assertion code; assert a semantic code/message ID instead"
+	Expect(commitMessage()).To(HavePrefix("LeafWiki initial workspace snapshot"))                              // want "raw localized prose \"LeafWiki initial workspace snapshot\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
 	Expect(payload).To(MatchFields(nil, Fields{
 		"Message": Equal("LeafWiki workspace sync"), // want "raw localized prose \"LeafWiki workspace sync\" used in test assertion code; assert a semantic code/message ID instead"
 	}))
@@ -627,6 +631,10 @@ func RejectRevisionValidation() GomegaMatcher {
 
 func hiddenRawStringErrorMatcher() any {
 	return MatchError(ContainSubstring("Scan error")) // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
+}
+
+func renderedToolError() string {
+	return ""
 }
 
 func hiddenConstructedErrorMatcher() any {

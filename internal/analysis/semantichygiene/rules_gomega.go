@@ -76,6 +76,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesStringsContains(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaStringsContains, assertion.actual, gomegaStringsContainsMatcherDiagnostic())
 	}
+	if assertionUsesRenderedMessageStringMatcher(ctx, assertion) {
+		ctx.report(ruleGomegaStringsContains, assertion.actual, gomegaRenderedMessageStringsContainsDiagnostic())
+	}
 	if assertionUsesLastErrorNotEmpty(assertion) {
 		ctx.report(ruleGomegaLastErrorNotEmpty, assertion.actual, gomegaLastErrorNotEmptyDiagnostic())
 	}
@@ -1187,6 +1190,49 @@ func callResultTuple(ctx *analysisContext, call *ast.CallExpr) *types.Tuple {
 
 func assertionUsesStringsContains(ctx *analysisContext, assertion gomegaAssertion) bool {
 	return assertionUsesStringsPredicate(ctx, assertion, "Contains")
+}
+
+func assertionUsesRenderedMessageStringMatcher(ctx *analysisContext, assertion gomegaAssertion) bool {
+	if assertionUsesErrError(ctx, assertion) || matcherTreeUsesErrError(ctx, assertion.matcher) || assertionTargetsLastError(assertion.actual) {
+		return false
+	}
+	if !isStringType(ctx.pass, assertion.actual) {
+		return false
+	}
+	if selector, ok := unparenExpr(assertion.actual).(*ast.SelectorExpr); ok &&
+		structuredErrorFieldName(selector.Sel.Name) &&
+		exprSuggestsStructuredErrorValue(ctx, selector.X) {
+		return false
+	}
+	if !exprSuggestsTestRenderedProseContract(assertion.actual) {
+		return false
+	}
+	return matcherTreeContainsStringContentMatcher(ctx, assertion.matcher)
+}
+
+func matcherTreeContainsStringContentMatcher(ctx *analysisContext, expr ast.Expr) bool {
+	switch current := unparenExpr(expr).(type) {
+	case *ast.CallExpr:
+		if isMatcherNamed(current, "Equal", "ContainSubstring", "HavePrefix", "HaveSuffix", "MatchRegexp") {
+			return callHasStringArg(ctx, current)
+		}
+		for _, arg := range current.Args {
+			if matcherTreeContainsStringContentMatcher(ctx, arg) {
+				return true
+			}
+		}
+	case *ast.CompositeLit:
+		for _, elt := range current.Elts {
+			if matcherTreeContainsStringContentMatcher(ctx, elt) {
+				return true
+			}
+		}
+	case *ast.KeyValueExpr:
+		return matcherTreeContainsStringContentMatcher(ctx, current.Value)
+	case *ast.TypeAssertExpr:
+		return matcherTreeContainsStringContentMatcher(ctx, current.X)
+	}
+	return false
 }
 
 func assertionUsesLastErrorNotEmpty(assertion gomegaAssertion) bool {
