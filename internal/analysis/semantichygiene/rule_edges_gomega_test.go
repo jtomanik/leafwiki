@@ -1543,6 +1543,12 @@ import (
 type GomegaMatcher interface{}
 type matcherBuilder struct{}
 type gcustomPackage struct{}
+type workspaceRecord struct {
+	ID string
+}
+type descriptor struct {
+	SchemaVersion int
+}
 
 var gcustom gcustomPackage
 
@@ -1562,19 +1568,33 @@ func matchLeafwikiHelperStopError(ready bool) GomegaMatcher {
 	})
 }
 
+func MatchHomeFederatedFirstContact(home bool) GomegaMatcher {
+	return gcustom.MakeMatcher(func(workspace workspaceRecord) (bool, error) {
+		return home && workspace.ID != "", nil
+	}).WithMessage("match home federated workspace")
+}
+
+func MatchStaleProjectDaemonHealth(healthy bool) GomegaMatcher {
+	return gcustom.MakeMatcher(func(desc *descriptor) (bool, error) {
+		return desc != nil && desc.SchemaVersion == 0 && !healthy, nil
+	}).WithMessage("match stale project daemon health")
+}
+
 func matchIssuedCSRFCookie(secure bool) GomegaMatcher {
 	return gcustom.MakeMatcher(func(cookie http.Cookie) (bool, error) {
 		return cookie.Secure == secure, nil
 	}).WithMessage("match CSRF cookie security")
 }
 `)
-			for _, name := range []string{"MatchProjectDaemonHealthError", "matchLeafwikiHelperStopError", "matchIssuedCSRFCookie"} {
+			for _, name := range []string{"MatchProjectDaemonHealthError", "matchLeafwikiHelperStopError", "MatchHomeFederatedFirstContact", "MatchStaleProjectDaemonHealth", "matchIssuedCSRFCookie"} {
 				checkGomegaMatcherFactorySignature(h.ctx, h.findFunc(name))
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
-				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching error semantics; assert the semantic result directly or split into explicit domain matchers",
-				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching error semantics; assert the semantic result directly or split into explicit domain matchers",
+				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers",
+				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers",
+				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers",
+				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers",
 			))
 		})
 

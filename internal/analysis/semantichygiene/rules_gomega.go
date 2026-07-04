@@ -391,7 +391,10 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 
 func checkGomegaMatcherFactoryBooleanErrorGate(ctx *analysisContext, fn *ast.FuncDecl) {
 	boolParams := matcherFactoryBoolParams(ctx, fn)
-	if len(boolParams) == 0 || !matcherFactoryCombinesBoolParamWithErrorPredicate(ctx, fn.Body, boolParams) {
+	proxyBoolParams := matcherFactoryProxyBoolParams(ctx, fn)
+	if len(boolParams) == 0 ||
+		!matcherFactoryCombinesBoolParamWithErrorPredicate(ctx, fn.Body, boolParams) &&
+			!matcherFactoryUsesProxyBoolParam(ctx, fn.Body, proxyBoolParams) {
 		return
 	}
 	ctx.report(ruleGomegaProxyBoolean, fn.Name, gomegaMatcherFactoryBooleanErrorGateDiagnostic())
@@ -416,6 +419,53 @@ func matcherFactoryBoolParams(ctx *analysisContext, fn *ast.FuncDecl) map[types.
 		}
 	}
 	return params
+}
+
+func matcherFactoryProxyBoolParams(ctx *analysisContext, fn *ast.FuncDecl) map[types.Object]bool {
+	if fn.Type.Params == nil {
+		return nil
+	}
+	params := map[types.Object]bool{}
+	for _, field := range fn.Type.Params.List {
+		if !isBoolType(ctx.pass.TypesInfo.TypeOf(field.Type)) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name == nil || !isProxyBooleanName(name.Name) {
+				continue
+			}
+			if object := ctx.pass.TypesInfo.Defs[name]; object != nil {
+				params[object] = true
+			}
+		}
+	}
+	return params
+}
+
+func matcherFactoryUsesProxyBoolParam(ctx *analysisContext, body *ast.BlockStmt, proxyBoolParams map[types.Object]bool) bool {
+	if len(proxyBoolParams) == 0 {
+		return false
+	}
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		ident, ok := node.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		object := ctx.pass.TypesInfo.Uses[ident]
+		if object == nil {
+			object = ctx.pass.TypesInfo.Defs[ident]
+		}
+		if proxyBoolParams[object] {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func matcherFactoryCombinesBoolParamWithErrorPredicate(ctx *analysisContext, body *ast.BlockStmt, boolParams map[types.Object]bool) bool {
@@ -1245,14 +1295,14 @@ func isProxyBooleanName(name string) bool {
 	case "ok", "found", "exists", "present", "matched", "valid", "success", "done", "called",
 		"changed", "created", "updated", "modified", "deleted", "removed", "rewritten", "applied",
 		"accepted", "rejected", "renamed", "enabled", "disabled", "ready", "started", "stopped", "invoked",
-		"canceled", "cancelled":
+		"canceled", "cancelled", "healthy", "home":
 		return true
 	}
 	for _, suffix := range []string{
 		"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done", "Called",
 		"Changed", "Created", "Updated", "Modified", "Deleted", "Removed", "Rewritten", "Applied",
 		"Accepted", "Rejected", "Renamed", "Enabled", "Disabled", "Ready", "Started", "Stopped", "Invoked",
-		"Canceled", "Cancelled",
+		"Canceled", "Cancelled", "Healthy", "Home",
 	} {
 		if strings.HasSuffix(name, suffix) {
 			return true

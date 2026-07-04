@@ -179,7 +179,7 @@ func gomegaBooleanStateStringDiagnostic() string {
 }
 
 func gomegaMatcherFactoryBooleanErrorGateDiagnostic() string {
-	return "matcher factory captures boolean state while matching error semantics; assert the semantic result directly or split into explicit domain matchers"
+	return "matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers"
 }
 
 func gomegaControlStatusMatcherDiagnostic() string {
