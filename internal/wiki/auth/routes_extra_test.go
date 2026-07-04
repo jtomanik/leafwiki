@@ -597,7 +597,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		)
 		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidRequest), rec.Body.String())
 
-		created, err := fixture.apiKeys.CreateAPIKey(newFixtureUserID(fixture.editor.ID), "to-revoke", newFixtureUserID(fixture.admin.ID))
+		created, err := fixture.apiKeys.CreateAPIKey(coreauth.UserIDFromString(fixture.editor.ID), "to-revoke", coreauth.UserIDFromString(fixture.admin.ID))
 		Expect(err).NotTo(HaveOccurred())
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleRevokeUserAPIKey,
@@ -656,7 +656,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusCreated))
 		Expect(rec).To(HaveHTTPHeaderWithValue("Cache-Control", "no-store"))
 
-		ownKey, err := fixture.apiKeys.CreateAPIKey(newFixtureUserID(fixture.editor.ID), "own-revoke", newFixtureUserID(fixture.editor.ID))
+		ownKey, err := fixture.apiKeys.CreateAPIKey(coreauth.UserIDFromString(fixture.editor.ID), "own-revoke", coreauth.UserIDFromString(fixture.editor.ID))
 		Expect(err).NotTo(HaveOccurred())
 		rec = performAuthHandlerRequest(fixture.routes.handleRevokeOwnAPIKey, http.MethodDelete, authOwnAPIKeyPath(ownKey.Key.ID), nil, authOwnAPIKeyParams(ownKey.Key.ID), nil, false)
 		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
@@ -707,7 +707,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		))
 
 		_, err = fixture.routes.updateUser.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(fixture.editor.ID),
+			ID:               coreauth.UserIDFromString(fixture.editor.ID),
 			Email:            "not-email",
 			Role:             coreauth.RoleViewer,
 			RequesterIsAdmin: true,
@@ -718,7 +718,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		))
 
 		_, err = fixture.routes.updateUser.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(fixture.editor.ID),
+			ID:               coreauth.UserIDFromString(fixture.editor.ID),
 			Username:         "editor-missing-email",
 			RequesterIsAdmin: true,
 		})
@@ -727,7 +727,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		))
 
 		err = fixture.routes.changeOwnPassword.Execute(context.Background(), ChangeOwnPasswordInput{
-			UserID:      newFixtureUserID(fixture.editor.ID),
+			UserID:      coreauth.UserIDFromString(fixture.editor.ID),
 			OldPassword: "password123",
 		})
 		Expect(err).To(matchAuthUseCaseValidationError(
@@ -735,7 +735,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		))
 
 		err = fixture.routes.changeOwnPassword.Execute(context.Background(), ChangeOwnPasswordInput{
-			UserID:      newFixtureUserID(fixture.editor.ID),
+			UserID:      coreauth.UserIDFromString(fixture.editor.ID),
 			OldPassword: "password123",
 			NewPassword: "short",
 		})
@@ -747,9 +747,9 @@ var _ = ginkgo.Describe("auth routes", func() {
 		Expect(err).To(MatchError(coreauth.ErrUserNotFound))
 
 		_, err = fixture.routes.createAPIKey.Execute(context.Background(), CreateAPIKeyInput{
-			UserID:          newFixtureUserID(fixture.editor.ID),
+			UserID:          coreauth.UserIDFromString(fixture.editor.ID),
 			Name:            strings.Repeat("x", maxAPIKeyNameLength+1),
-			CreatedByUserID: newFixtureUserID(fixture.admin.ID),
+			CreatedByUserID: coreauth.UserIDFromString(fixture.admin.ID),
 		})
 		Expect(err).To(matchAuthUseCaseValidationError(
 			expectAuthFieldError(authValidationFieldName, FieldCodeAuthAPIKeyNameTooLong, MessageIDAuthAPIKeyNameTooLong),

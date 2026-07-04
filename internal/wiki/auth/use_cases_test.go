@@ -91,7 +91,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		out, err := uc.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(viewer.ID),
+			ID:               coreauth.UserIDFromString(viewer.ID),
 			Username:         viewer.Username,
 			Email:            viewer.Email,
 			Role:             coreauth.RoleAdmin,
@@ -108,7 +108,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		out, err := uc.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(editor.ID),
+			ID:               coreauth.UserIDFromString(editor.ID),
 			Username:         "ed-admin-updated",
 			Email:            "ed-admin-updated@example.com",
 			Role:             "",
@@ -129,7 +129,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		out, err := uc.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(viewer.ID),
+			ID:               coreauth.UserIDFromString(viewer.ID),
 			Username:         viewer.Username,
 			Email:            viewer.Email,
 			Role:             coreauth.RoleAdmin,
@@ -146,7 +146,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		out, err := uc.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(editor.ID),
+			ID:               coreauth.UserIDFromString(editor.ID),
 			Username:         "ed-updated",
 			Email:            "ed-updated@example.com",
 			Role:             coreauth.RoleAdmin,
@@ -167,7 +167,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = uc.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(admin.ID),
+			ID:               coreauth.UserIDFromString(admin.ID),
 			Username:         admin.Username,
 			Email:            admin.Email,
 			Role:             coreauth.RoleViewer,
@@ -185,7 +185,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		out, err := uc.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(admin1.ID),
+			ID:               coreauth.UserIDFromString(admin1.ID),
 			Username:         admin1.Username,
 			Email:            admin1.Email,
 			Role:             coreauth.RoleViewer,
@@ -202,7 +202,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = uc.Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(user.ID),
+			ID:               coreauth.UserIDFromString(user.ID),
 			Username:         user.Username,
 			Email:            user.Email,
 			Role:             "superuser",
@@ -271,7 +271,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			SatisfyAll(HaveField("ID", viewer.ID), HaveField("Username", "viewer"), HaveField("Role", coreauth.RoleViewer)),
 		))
 
-		userOut, err := NewGetUserByIDUseCase(userSvc).Execute(context.Background(), GetUserByIDInput{ID: newFixtureUserID(viewer.ID)})
+		userOut, err := NewGetUserByIDUseCase(userSvc).Execute(context.Background(), GetUserByIDInput{ID: coreauth.UserIDFromString(viewer.ID)})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(userOut.User).To(MatchAuthPublicUser(gstruct.Fields{
 			"ID":       Equal(viewer.ID),
@@ -294,20 +294,20 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		uc := NewChangeOwnPasswordUseCase(userSvc)
 
 		err = uc.Execute(context.Background(), ChangeOwnPasswordInput{
-			UserID:      newFixtureUserID(user.ID),
+			UserID:      coreauth.UserIDFromString(user.ID),
 			OldPassword: "wrong-password",
 			NewPassword: "new-password",
 		})
 		Expect(err).To(HaveAuthFieldErrorCode("oldPassword", FieldCodeAuthOldPasswordIncorrect, MessageIDAuthOldPasswordIncorrect))
 
 		err = uc.Execute(context.Background(), ChangeOwnPasswordInput{
-			UserID:      newFixtureUserID(user.ID),
+			UserID:      coreauth.UserIDFromString(user.ID),
 			OldPassword: "old-password",
 			NewPassword: "new-password",
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(authPasswordMatchesUser(userSvc, newFixtureUserID(user.ID), "old-password")).To(MatchError(coreauth.ErrUserInvalidCredentials))
-		Expect(authPasswordMatchesUser(userSvc, newFixtureUserID(user.ID), "new-password")).To(Succeed())
+		Expect(authPasswordMatchesUser(userSvc, coreauth.UserIDFromString(user.ID), "old-password")).To(MatchError(coreauth.ErrUserInvalidCredentials))
+		Expect(authPasswordMatchesUser(userSvc, coreauth.UserIDFromString(user.ID), "new-password")).To(Succeed())
 	})
 
 	ginkgo.It("user mutation use cases continue when resolver reload only logs a warning", func() {
@@ -332,7 +332,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			resolver: resolver,
 			log:      slog.Default(),
 		}).Execute(context.Background(), UpdateUserInput{
-			ID:               newFixtureUserID(createOut.User.ID),
+			ID:               coreauth.UserIDFromString(createOut.User.ID),
 			Username:         "reload-user-updated",
 			Email:            "reload-updated@example.com",
 			Role:             coreauth.RoleViewer,
@@ -348,9 +348,9 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			user:     userSvc,
 			resolver: resolver,
 			log:      slog.Default(),
-		}).Execute(context.Background(), DeleteUserInput{ID: newFixtureUserID(createOut.User.ID)})
+		}).Execute(context.Background(), DeleteUserInput{ID: coreauth.UserIDFromString(createOut.User.ID)})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = userSvc.GetUserByID(newFixtureUserID(createOut.User.ID))
+		_, err = userSvc.GetUserByID(coreauth.UserIDFromString(createOut.User.ID))
 		Expect(err).To(MatchError(coreauth.ErrUserNotFound))
 	})
 
@@ -362,18 +362,18 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		uc := NewCreateAPIKeyUseCase(apiKeys, userSvc)
 
 		_, err = uc.Execute(context.Background(), CreateAPIKeyInput{
-			UserID:                 newFixtureUserID(user.ID),
+			UserID:                 coreauth.UserIDFromString(user.ID),
 			Name:                   "key",
-			CreatedByUserID:        newFixtureUserID(user.ID),
+			CreatedByUserID:        coreauth.UserIDFromString(user.ID),
 			CurrentPassword:        "wrong",
 			RequireCurrentPassword: true,
 		})
 		Expect(err).To(HaveAuthFieldErrorCode("currentPassword", FieldCodeAuthCurrentPasswordIncorrect, MessageIDAuthCurrentPasswordIncorrect))
 
 		out, err := uc.Execute(context.Background(), CreateAPIKeyInput{
-			UserID:                 newFixtureUserID(user.ID),
+			UserID:                 coreauth.UserIDFromString(user.ID),
 			Name:                   " key ",
-			CreatedByUserID:        newFixtureUserID(user.ID),
+			CreatedByUserID:        coreauth.UserIDFromString(user.ID),
 			CurrentPassword:        "password123",
 			RequireCurrentPassword: true,
 		})
@@ -387,19 +387,19 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		apiKeys := setupAPIKeyService(userSvc)
 		user, err := userSvc.CreateUser("admin", "admin@example.com", "password123", coreauth.RoleAdmin)
 		Expect(err).NotTo(HaveOccurred())
-		created, err := apiKeys.CreateAPIKey(newFixtureUserID(user.ID), "key", newFixtureUserID(user.ID))
+		created, err := apiKeys.CreateAPIKey(coreauth.UserIDFromString(user.ID), "key", coreauth.UserIDFromString(user.ID))
 		Expect(err).NotTo(HaveOccurred())
 
-		listed, err := NewListAPIKeysUseCase(apiKeys).Execute(context.Background(), ListAPIKeysInput{UserID: newFixtureUserID(user.ID)})
+		listed, err := NewListAPIKeysUseCase(apiKeys).Execute(context.Background(), ListAPIKeysInput{UserID: coreauth.UserIDFromString(user.ID)})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(listed.Keys).To(ConsistOf(HaveField("ID", Equal(created.Key.ID))))
 
 		err = NewRevokeAPIKeyUseCase(apiKeys).Execute(context.Background(), RevokeAPIKeyInput{
-			UserID: newFixtureUserID(user.ID),
+			UserID: coreauth.UserIDFromString(user.ID),
 			KeyID:  created.Key.ID,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		listed, err = NewListAPIKeysUseCase(apiKeys).Execute(context.Background(), ListAPIKeysInput{UserID: newFixtureUserID(user.ID)})
+		listed, err = NewListAPIKeysUseCase(apiKeys).Execute(context.Background(), ListAPIKeysInput{UserID: coreauth.UserIDFromString(user.ID)})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(listed.Keys).To(BeEmpty())
 	})
