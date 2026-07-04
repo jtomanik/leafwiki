@@ -28,7 +28,6 @@ var _ = Describe("workspace ID parsing", func() {
 			return stderrors.As(err, &validationErr) && validationErr != nil
 		}))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDWhitespace, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDWhitespace)))
-		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDWhitespace))
 	})
 })
 
@@ -59,14 +58,12 @@ var _ = Describe("workspace ID validation errors", func() {
 	It("returns the required code for empty input", func() {
 		_, err := ParseWorkspaceID("")
 
-		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDRequired))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDRequired, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDRequired)))
 	})
 
 	It("returns the invalid code for pattern-invalid input", func() {
 		_, err := ParseWorkspaceID("Docs")
 
-		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDInvalid))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid)))
 	})
 
@@ -93,7 +90,6 @@ var _ = Describe("workspace ID SQL conversion", func() {
 		value, err := WorkspaceID("Docs").Value()
 
 		Expect(value).To(BeNil())
-		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDInvalid))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid)))
 	})
 
@@ -116,7 +112,6 @@ var _ = Describe("workspace ID SQL conversion", func() {
 
 		err := id.Scan(nil)
 
-		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDRequired))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDRequired, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDRequired)))
 	})
 
