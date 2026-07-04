@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("route path parsing", func() {
+var _ = ginkgo.Describe("route path parsing", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns semantic route path values", func() {
 		routePath, err := ParseRoutePath("docs/guide")
 		Expect(err).NotTo(HaveOccurred())
@@ -16,7 +16,7 @@ var _ = ginkgo.Describe("route path parsing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("semantic page value wrappers", func() {
+var _ = ginkgo.Describe("semantic page value wrappers", ginkgo.Label("unit"), func() {
 	ginkgo.It("keep page identity, versions, slugs, and markdown paths distinct", func() {
 		pageID := PageID("page-1")
 		version := PageVersion("v2")
@@ -31,7 +31,7 @@ var _ = ginkgo.Describe("semantic page value wrappers", func() {
 	})
 })
 
-var _ = ginkgo.Describe("page version bypass sentinel", func() {
+var _ = ginkgo.Describe("page version bypass sentinel", ginkgo.Label("unit"), func() {
 	ginkgo.It("stays internal to tree operations", func() {
 		Expect(pageVersionUnchecked.IsUnchecked()).To(BeTrue())
 		got := newFixturePageVersion(versionUnchecked)
@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("page version bypass sentinel", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service unchecked-version boundaries", func() {
+var _ = ginkgo.Describe("tree service unchecked-version boundaries", ginkgo.Label("unit"), func() {
 	ginkgo.It("exposes constrained operations for internal version bypasses", func() {
 		var _ func(*TreeService, UserID, PageID, bool) error = (*TreeService).DeleteNodeUncheckedVersion
 		var _ func(*TreeService, UserID, PageID, string, Slug, *string, bool) error = (*TreeService).UpdateNodeUncheckedVersion
@@ -52,7 +52,7 @@ var _ = ginkgo.Describe("tree service unchecked-version boundaries", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree identity aliases", func() {
+var _ = ginkgo.Describe("tree identity aliases", ginkgo.Label("unit"), func() {
 	ginkgo.It("remain assignable to neutral identity types", func() {
 		var _ identity.UserID = newFixtureUserID("user-1")
 		var _ identity.RevisionID = newFixtureRevisionID("rev-1")
@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("tree identity aliases", func() {
 	})
 })
 
-var _ = ginkgo.Describe("workspace source paths", func() {
+var _ = ginkgo.Describe("workspace source paths", ginkgo.Label("unit"), func() {
 	ginkgo.It("use semantic path values on nodes and markdown routes", func() {
 		sourcePath := WorkspaceSourcePath("Plans/Agent Hooks.PLAN.md")
 		Expect(sourcePath).To(Equal(WorkspaceSourcePath("Plans/Agent Hooks.PLAN.md")))
@@ -75,7 +75,7 @@ var _ = ginkgo.Describe("workspace source paths", func() {
 	})
 })
 
-var _ = ginkgo.Describe("core page identity fields", func() {
+var _ = ginkgo.Describe("core page identity fields", ginkgo.Label("unit"), func() {
 	ginkgo.It("use semantic page and user identity types", func() {
 		node := PageNode{
 			ID: PageID("page-1"),
@@ -93,7 +93,7 @@ var _ = ginkgo.Describe("core page identity fields", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service write boundaries", func() {
+var _ = ginkgo.Describe("tree service write boundaries", ginkgo.Label("unit"), func() {
 	ginkgo.It("accept semantic identity values at mutation boundaries", func() {
 		var _ func(*TreeService, UserID, *PageID, string, Slug, *NodeKind) (*PageID, error) = (*TreeService).CreateNode
 		var _ func(*TreeService, UserID, PageID, *PageID, string, Slug, NodeKind, string, PageMetadata) (*Page, error) = (*TreeService).RestoreNode
@@ -105,7 +105,7 @@ var _ = ginkgo.Describe("tree service write boundaries", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree service read boundaries", func() {
+var _ = ginkgo.Describe("tree service read boundaries", ginkgo.Label("unit"), func() {
 	ginkgo.It("return and accept semantic identity values at lookup boundaries", func() {
 		var _ func(*TreeService, PageID) (*Page, error) = (*TreeService).GetPage
 		var _ func(*TreeService, PageID) (string, error) = (*TreeService).ReadPageRaw
