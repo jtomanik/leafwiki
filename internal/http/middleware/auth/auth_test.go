@@ -75,7 +75,7 @@ func matchAuthMiddlewareError(code sharederrors.ErrorCode) OmegaMatcher {
 	}, testmatchers.HaveStructuredError(code, sharederrors.MessageIDForCode(code)))
 }
 
-var _ = Describe("required authentication middleware", func() {
+var _ = Describe("required authentication middleware", Label("integration"), func() {
 	It("allows an injected public editor when authentication is disabled", func() {
 		gin.SetMode(gin.TestMode)
 
@@ -496,7 +496,7 @@ var _ = Describe("required authentication middleware", func() {
 
 })
 
-var _ = Describe("optional authentication middleware", func() {
+var _ = Describe("optional authentication middleware", Label("integration"), func() {
 	It("passes through requests without a token and leaves user context empty", func() {
 		gin.SetMode(gin.TestMode)
 		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)

@@ -18,7 +18,7 @@ type injectPublicEditorScenario struct {
 	expectRole     string
 }
 
-var _ = Describe("public editor injection", func() {
+var _ = Describe("public editor injection", Label("integration"), func() {
 	DescribeTable("authentication disabled behavior",
 		func(tc injectPublicEditorScenario) {
 			gin.SetMode(gin.TestMode)

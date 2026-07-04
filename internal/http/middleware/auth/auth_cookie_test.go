@@ -12,7 +12,7 @@ import (
 	"github.com/perber/wiki/internal/http/middleware/utils"
 )
 
-var _ = Describe("secure request detection", func() {
+var _ = Describe("secure request detection", Label("unit"), func() {
 	It("detects secure requests from TLS", func() {
 		rec := performSecureDetectionRequest(false, func(req *http.Request) {
 			req.TLS = &tls.ConnectionState{}
@@ -78,7 +78,7 @@ var _ = Describe("secure request detection", func() {
 	})
 })
 
-var _ = Describe("auth cookie lifecycle", func() {
+var _ = Describe("auth cookie lifecycle", Label("unit"), func() {
 	It("uses host-prefixed cookie names for secure responses", func() {
 		auth := NewAuthCookies(false, time.Hour, 24*time.Hour)
 
@@ -301,17 +301,37 @@ func performAuthCookieRequestWithCookie(secure bool, name string, value string, 
 	return rec
 }
 
+type authCookieContract struct {
+	Name     string
+	Value    string
+	HttpOnly bool
+	Secure   bool
+	Path     string
+	SameSite http.SameSite
+	MaxAge   int
+}
+
 func matchAuthCookie(name string, value string, secure bool, maxAge int) OmegaMatcher {
 	GinkgoHelper()
-	return SatisfyAll(
-		HaveField("Name", Equal(name)),
-		HaveField("Value", Equal(value)),
-		HaveField("HttpOnly", BeTrue()),
-		HaveField("Secure", Equal(secure)),
-		HaveField("Path", Equal("/")),
-		HaveField("SameSite", Equal(http.SameSiteLaxMode)),
-		HaveField("MaxAge", Equal(maxAge)),
-	)
+	return WithTransform(func(cookie *http.Cookie) authCookieContract {
+		return authCookieContract{
+			Name:     cookie.Name,
+			Value:    cookie.Value,
+			HttpOnly: cookie.HttpOnly,
+			Secure:   cookie.Secure,
+			Path:     cookie.Path,
+			SameSite: cookie.SameSite,
+			MaxAge:   cookie.MaxAge,
+		}
+	}, Equal(authCookieContract{
+		Name:     name,
+		Value:    value,
+		HttpOnly: true,
+		Secure:   secure,
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	}))
 }
 
 func matchExpiredAuthCookie(name string) OmegaMatcher {

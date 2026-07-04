@@ -66,7 +66,7 @@ func proxyRouter(cfg authmw.RemoteUserConfig) *gin.Engine {
 	return r
 }
 
-var _ = Describe("reverse proxy user injection", func() {
+var _ = Describe("reverse proxy user injection", Label("integration"), func() {
 	It("does not inject remote users when the feature is disabled", func() {
 		f := createProxyFixture()
 		cleanupWithErrorCheck("proxy fixture", f.close)

@@ -7,7 +7,7 @@ import (
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 )
 
-var _ = Describe("trusted proxy parsing", func() {
+var _ = Describe("trusted proxy parsing", Label("unit"), func() {
 	It("trusts nobody when the configured proxy list is empty", func() {
 		tp, err := authmw.ParseTrustedProxies("")
 		Expect(err).To(Succeed())

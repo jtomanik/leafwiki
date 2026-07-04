@@ -12,7 +12,7 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
-var _ = Describe("required authentication error mapping", func() {
+var _ = Describe("required authentication error mapping", Label("unit"), func() {
 	It("maps unexpected middleware errors to a generic token failure", func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()

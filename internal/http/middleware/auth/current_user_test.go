@@ -11,7 +11,7 @@ import (
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 )
 
-var _ = Describe("current user lookup", func() {
+var _ = Describe("current user lookup", Label("unit"), func() {
 	It("returns a structured unauthenticated error when the user context is missing", func() {
 		gin.SetMode(gin.TestMode)
 		router := gin.New()

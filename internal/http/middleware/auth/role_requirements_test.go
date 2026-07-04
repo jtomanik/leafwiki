@@ -50,6 +50,7 @@ func testUser(id string, role string) *coreauth.User {
 }
 
 var _ = DescribeTable("admin-only route authorization",
+	Label("integration"),
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireAdmin(scenario.authDisabled), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
@@ -96,6 +97,7 @@ var _ = DescribeTable("admin-only route authorization",
 )
 
 var _ = DescribeTable("self-or-admin route authorization",
+	Label("integration"),
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireSelfOrAdmin(scenario.authDisabled), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
@@ -149,6 +151,7 @@ var _ = DescribeTable("self-or-admin route authorization",
 )
 
 var _ = DescribeTable("editor-or-admin route authorization",
+	Label("integration"),
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireEditorOrAdmin(), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
@@ -195,6 +198,7 @@ var _ = DescribeTable("editor-or-admin route authorization",
 )
 
 var _ = DescribeTable("self-only route authorization",
+	Label("integration"),
 	func(scenario roleRequirementScenario) {
 		rec := performRoleRequirementRequest(authmw.RequireSelf(), scenario)
 		Expect(rec).To(HaveHTTPStatus(scenario.expectedStatus))
@@ -234,6 +238,7 @@ var _ = DescribeTable("self-only route authorization",
 )
 
 var _ = DescribeTable("optional user context lookup",
+	Label("unit"),
 	func(userValue any, setUser bool, expected *coreauth.User) {
 		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -248,6 +253,7 @@ var _ = DescribeTable("optional user context lookup",
 )
 
 var _ = DescribeTable("remote-user auth source detection",
+	Label("unit"),
 	func(source any, setSource bool, expected bool) {
 		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
