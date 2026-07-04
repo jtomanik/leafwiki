@@ -785,7 +785,7 @@ func assertionUsesGenericHaveOccurred(ctx *analysisContext, assertion gomegaAsse
 	if !isMatcherNamed(assertion.matcher, "HaveOccurred") || isNegativeAssertionMethod(assertion.method) {
 		return false
 	}
-	return typeImplementsError(ctx.pass.TypesInfo.TypeOf(assertion.actual))
+	return assertionTargetsError(ctx, assertion)
 }
 
 func assertionMatcherTreeUsesGenericHaveOccurred(assertion gomegaAssertion) bool {

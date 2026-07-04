@@ -570,6 +570,7 @@ func TestRepoTestGomegaInlineErrorShortcutsAreRejected(t *testing.T) {
 	Expect(returnValueAndError()).To(Succeed())       // want "use Error\\(\\) or a captured error variable when asserting multi-return functions with HaveOccurred/Succeed"
 	Expect(returnValueAndError()).To(HaveOccurred())  // want "use Error\\(\\) or a captured error variable when asserting multi-return functions with HaveOccurred/Succeed"
 	Expect(returnValueAndError()).Error().To(BeNil()) // want "use HaveOccurred matcher instead of nil assertions on error values"
+	Expect(returnValueAndError()).Error().To(HaveOccurred()) // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
 
 	err := returnError()
 	Expect(err).NotTo(HaveOccurred())
