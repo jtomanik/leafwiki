@@ -1401,6 +1401,17 @@ func daemonReadyStateFor(raw string) daemonState {
 	}
 	return daemonStopped
 }
+type routingScope string
+const (
+	routingHome routingScope = "home routing"
+	routingWorkspace routingScope = "workspace routing"
+)
+func routingScopeFor(home bool) routingScope {
+	if home {
+		return routingHome
+	}
+	return routingWorkspace
+}
 
 func TestAgentPresence() {
 	_, ok := normalize()
@@ -1424,6 +1435,7 @@ func TestAgentPresence() {
 	parsedState := boolState(parsed)
 	Expect(parsedState).To(Equal("true"))
 	Expect(daemonReadyStateFor("raw")).To(Equal(daemonReady))
+	Expect(routingScopeFor(ok)).To(Equal(routingHome))
 
 	agentEnabled := true
 	Expect(agentEnabled).To(BeTrue())
@@ -1449,6 +1461,7 @@ func TestAgentPresence() {
 			calls := append(h.findCalls("To"), h.findCalls("foundState")...)
 			calls = append(calls, h.findCalls("boolState")...)
 			calls = append(calls, h.findCalls("daemonReadyStateFor")...)
+			calls = append(calls, h.findCalls("routingScopeFor")...)
 			for _, call := range calls {
 				checkGomegaSemanticMatcher(h.ctx, call)
 			}
@@ -1467,6 +1480,7 @@ func TestAgentPresence() {
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",

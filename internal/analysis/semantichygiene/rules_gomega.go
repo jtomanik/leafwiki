@@ -1205,7 +1205,7 @@ func callLaundersBooleanToStringState(ctx *analysisContext, call *ast.CallExpr) 
 
 func testLocalBooleanStateHelperCall(ctx *analysisContext, call *ast.CallExpr) bool {
 	name := strings.ToLower(callName(call))
-	if !strings.Contains(name, "state") && !strings.Contains(name, "status") && !strings.Contains(name, "label") {
+	if !strings.Contains(name, "state") && !strings.Contains(name, "status") && !strings.Contains(name, "label") && !strings.Contains(name, "scope") {
 		return false
 	}
 	ident, ok := unparenExpr(call.Fun).(*ast.Ident)
