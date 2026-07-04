@@ -127,8 +127,9 @@ var _ = ginkgo.Describe("search use cases", func() {
 		out := uc.Execute(context.Background())
 		status.Fail()
 
+		Expect(out.Status).NotTo(BeNil())
+		Expect(out.Status.IsActive()).To(BeTrue())
 		Expect(out.Status).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Active":  BeTrue(),
 			"Indexed": Equal(1),
 			"Failed":  BeZero(),
 		})))
