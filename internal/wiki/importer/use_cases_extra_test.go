@@ -104,8 +104,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		seedImporterPlan(store, coreimporter.ExecutionStatusPlanned)
 		out, err = uc.Execute(context.Background(), ExecuteImportInput{UserID: tree.UserIDFromString("system")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Started).To(BeTrue())
-		Expect(out.State.ExecutionStatus).To(Equal(coreimporter.ExecutionStatusRunning))
+		Expect(out).To(haveStartedImporterExecution(coreimporter.ExecutionStatusRunning))
 
 		unavailable := NewExecuteImportUseCase(newImporterServiceWithStore(importerUnavailablePlanStore()))
 		out, err = unavailable.Execute(context.Background(), ExecuteImportInput{UserID: tree.UserIDFromString("system")})
@@ -323,7 +322,7 @@ var _ = ginkgo.Describe("importer route handlers", func() {
 		Expect(canceling).To(HaveHTTPStatus(http.StatusAccepted), canceling.Body.String())
 		var state coreimporter.CurrentPlanState
 		Expect(jsonUnmarshalImporterResponse(canceling, &state)).To(Succeed())
-		Expect(state.CancelRequested).To(BeTrue())
+		Expect(&state).To(haveImporterPlanWithCancellation(coreimporter.ExecutionStatusRunning))
 	})
 
 	ginkgo.It("returns structured clear-plan errors", func() {
@@ -563,10 +562,72 @@ func haveImporterPlanWithItemCount(status coreimporter.ExecutionStatus, count in
 
 func haveImporterPlanWithCancellation(status coreimporter.ExecutionStatus) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return HaveValue(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"ExecutionStatus": Equal(status),
-		"CancelRequested": BeTrue(),
+	return WithTransform(importerPlanCancellationStateFromCurrentPlan, Equal(importerPlanCancellationState{
+		status:       status,
+		cancellation: importerPlanCancellationRequested,
 	}))
+}
+
+func haveStartedImporterExecution(status coreimporter.ExecutionStatus) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(importerExecutionStartStateFromOutput, Equal(importerExecutionStartState{
+		status:  status,
+		outcome: importerExecutionStarted,
+	}))
+}
+
+type importerExecutionStartOutcome string
+
+const (
+	importerExecutionMissing    importerExecutionStartOutcome = "missing"
+	importerExecutionStarted    importerExecutionStartOutcome = "started"
+	importerExecutionNotStarted importerExecutionStartOutcome = "not-started"
+)
+
+type importerExecutionStartState struct {
+	status  coreimporter.ExecutionStatus
+	outcome importerExecutionStartOutcome
+}
+
+func importerExecutionStartStateFromOutput(out *ExecuteImportOutput) importerExecutionStartState {
+	if out == nil || out.State == nil {
+		return importerExecutionStartState{outcome: importerExecutionMissing}
+	}
+	outcome := importerExecutionNotStarted
+	if out.Started {
+		outcome = importerExecutionStarted
+	}
+	return importerExecutionStartState{
+		status:  out.State.ExecutionStatus,
+		outcome: outcome,
+	}
+}
+
+type importerPlanCancellationOutcome string
+
+const (
+	importerPlanCancellationMissing   importerPlanCancellationOutcome = "missing"
+	importerPlanCancellationRequested importerPlanCancellationOutcome = "requested"
+	importerPlanCancellationIdle      importerPlanCancellationOutcome = "idle"
+)
+
+type importerPlanCancellationState struct {
+	status       coreimporter.ExecutionStatus
+	cancellation importerPlanCancellationOutcome
+}
+
+func importerPlanCancellationStateFromCurrentPlan(plan *coreimporter.CurrentPlanState) importerPlanCancellationState {
+	if plan == nil {
+		return importerPlanCancellationState{cancellation: importerPlanCancellationMissing}
+	}
+	cancellation := importerPlanCancellationIdle
+	if plan.CancelRequested {
+		cancellation = importerPlanCancellationRequested
+	}
+	return importerPlanCancellationState{
+		status:       plan.ExecutionStatus,
+		cancellation: cancellation,
+	}
 }
 
 func haveImporterPlan(status coreimporter.ExecutionStatus, items types.GomegaMatcher) types.GomegaMatcher {
