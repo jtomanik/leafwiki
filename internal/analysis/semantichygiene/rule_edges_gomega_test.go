@@ -1770,6 +1770,34 @@ func matchIssuedCSRFCookie(secure bool) GomegaMatcher {
 			))
 		})
 
+		ginkgo.It("reports matcher factories that feed raw boolean parameters into transformed expected contracts", func() {
+			h := newRuleHarness("/repo/internal/http/middleware/security/csrf_cookie_test.go", "github.com/perber/wiki/internal/http/middleware/security", `package security
+
+import "net/http"
+
+type GomegaMatcher interface{}
+type cookieContract struct {
+	Name   string
+	Secure bool
+}
+
+func Equal(expected any) GomegaMatcher { return nil }
+func WithTransform(transform any, matcher GomegaMatcher) GomegaMatcher { return nil }
+
+func matchIssuedCSRFCookie(name string, secure bool) GomegaMatcher {
+	expected := cookieContract{Name: name, Secure: secure}
+	return WithTransform(func(cookie *http.Cookie) cookieContract {
+		return cookieContract{Name: cookie.Name, Secure: cookie.Secure}
+	}, Equal(expected))
+}
+`)
+			checkGomegaMatcherFactorySignature(h.ctx, h.findFunc("matchIssuedCSRFCookie"))
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: matcher factory feeds raw boolean parameters into transformed expected contracts; expose semantic matcher variants or typed outcome values instead",
+			))
+		})
+
 		ginkgo.It("reports matcher factories that return proxy boolean field predicates", func() {
 			h := newRuleHarness("/repo/internal/workspacesync/semantic_fixture_workspacesync_test.go", "github.com/perber/wiki/internal/workspacesync", `package workspacesync
 

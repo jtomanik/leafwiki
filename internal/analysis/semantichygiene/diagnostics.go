@@ -193,6 +193,10 @@ func gomegaMatcherFactoryBooleanErrorGateDiagnostic() string {
 	return "matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers"
 }
 
+func gomegaMatcherFactoryTransformedBooleanContractDiagnostic() string {
+	return "matcher factory feeds raw boolean parameters into transformed expected contracts; expose semantic matcher variants or typed outcome values instead"
+}
+
 func gomegaMatcherFactoryProxyBooleanPredicateDiagnostic() string {
 	return "matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher"
 }

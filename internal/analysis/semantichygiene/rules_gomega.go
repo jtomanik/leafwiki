@@ -379,6 +379,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
 	checkGomegaMatcherFactoryGenericToolErrorArgs(ctx, fn)
 	checkGomegaMatcherFactoryBooleanErrorGate(ctx, fn)
+	checkGomegaMatcherFactoryTransformedBooleanContract(ctx, fn)
 	checkGomegaMatcherFactoryProxyBooleanPredicate(ctx, fn)
 	checkGomegaMatcherFactoryLastErrorRenderedText(ctx, fn)
 	checkGomegaMatcherFactoryStructuredProtocolStatus(ctx, fn)
@@ -424,6 +425,16 @@ func checkGomegaMatcherFactoryBooleanErrorGate(ctx *analysisContext, fn *ast.Fun
 		return
 	}
 	ctx.report(ruleGomegaProxyBoolean, fn.Name, gomegaMatcherFactoryBooleanErrorGateDiagnostic())
+}
+
+func checkGomegaMatcherFactoryTransformedBooleanContract(ctx *analysisContext, fn *ast.FuncDecl) {
+	boolParams := matcherFactoryBoolParams(ctx, fn)
+	if len(boolParams) == 0 ||
+		!matcherFactoryContainsWithTransform(fn.Body) ||
+		!matcherFactoryUsesBoolParam(ctx, fn.Body, boolParams) {
+		return
+	}
+	ctx.report(ruleGomegaProxyBoolean, fn.Name, gomegaMatcherFactoryTransformedBooleanContractDiagnostic())
 }
 
 func checkGomegaMatcherFactoryProxyBooleanPredicate(ctx *analysisContext, fn *ast.FuncDecl) {
@@ -547,6 +558,13 @@ func matcherFactoryUsesProxyBoolParam(ctx *analysisContext, body *ast.BlockStmt,
 	if len(proxyBoolParams) == 0 {
 		return false
 	}
+	return matcherFactoryUsesBoolParam(ctx, body, proxyBoolParams)
+}
+
+func matcherFactoryUsesBoolParam(ctx *analysisContext, body *ast.BlockStmt, boolParams map[types.Object]bool) bool {
+	if len(boolParams) == 0 {
+		return false
+	}
 	found := false
 	ast.Inspect(body, func(node ast.Node) bool {
 		if found || node == nil {
@@ -560,7 +578,26 @@ func matcherFactoryUsesProxyBoolParam(ctx *analysisContext, body *ast.BlockStmt,
 		if object == nil {
 			object = ctx.pass.TypesInfo.Defs[ident]
 		}
-		if proxyBoolParams[object] {
+		if boolParams[object] {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func matcherFactoryContainsWithTransform(body *ast.BlockStmt) bool {
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if callName(call) == "WithTransform" {
 			found = true
 			return false
 		}
