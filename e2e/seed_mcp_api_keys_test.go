@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -27,7 +28,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 		services, err := openSeedServices(blockedPath)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 		Expect(services.users).To(BeNil())
 	})
 
@@ -61,7 +62,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(apiKeys.revokedKeyID).To(Equal(apiKeys.created["E2E STDIO revoked"].Key.ID))
 	})
 
-	ginkgo.DescribeTable("runSeedMCPAPIKeys reports command line and output errors",
+	ginkgo.DescribeTable("seed command failures",
 		func(tc runSeedErrorCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -77,9 +78,9 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 			Expect(code).To(Equal(1))
 			Expect(stderr.String()).To(ContainSubstring(tc.want))
 		},
-		ginkgo.Entry("parse", runSeedErrorCase{args: []string{"--unknown"}, want: "parse flags:"}),
-		ginkgo.Entry("missing required", runSeedErrorCase{want: "--data-dir and --output are required"}),
-		ginkgo.Entry("write output", runSeedErrorCase{
+		ginkgo.Entry("rejects unknown command flags", runSeedErrorCase{args: []string{"--unknown"}, want: "parse flags:"}),
+		ginkgo.Entry("requires data directory and output path arguments", runSeedErrorCase{want: "--data-dir and --output are required"}),
+		ginkgo.Entry("reports output file write failures", runSeedErrorCase{
 			args: []string{"--data-dir", "/tmp/data", "--output", "/tmp/seeds.json"},
 			configure: func() {
 				_, _, services := newFakeSeedServices()
@@ -112,11 +113,10 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 			setEnvForTest(name, "legacy")
 
 			_, err := seedMCPAPIKeys(seedTempDir())
-			Expect(err).To(HaveOccurred())
 			Expect(err).To(MatchError(removedEnvironmentVariableError{Name: name}))
 		},
-		ginkgo.Entry("rejects LEAFWIKI_RUNTIME_STACK when it still configures the runtime stack", "LEAFWIKI_RUNTIME_STACK"),
-		ginkgo.Entry("rejects LEAFWIKI_RUN_MCP_RUNTIME_STACK when it still configures the runtime stack", "LEAFWIKI_RUN_MCP_RUNTIME_STACK"),
+		ginkgo.Entry("rejects the legacy runtime stack variable", "LEAFWIKI_RUNTIME_STACK"),
+		ginkgo.Entry("rejects the legacy MCP runtime stack variable", "LEAFWIKI_RUN_MCP_RUNTIME_STACK"),
 	)
 
 	ginkgo.It("writes Wikid auth stores for seeded API key principals", func() {
@@ -128,7 +128,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(seeds).To(HaveWikidSeededAPIKey(dataDir))
 	})
 
-	ginkgo.It("rejectRemovedRuntimeStackEnv succeeds when removed variables are unset", func() {
+	ginkgo.It("accepts the environment when removed runtime stack variables are absent", func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 
@@ -195,7 +195,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(seeds.Admin.APIKey).NotTo(Equal(seeds.Editor.APIKey))
 	})
 
-	ginkgo.DescribeTable("writeSeedMCPAPIKeysOutput wraps failures",
+	ginkgo.DescribeTable("seed output failures",
 		func(tc seedOutputFailureCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -207,7 +207,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 			Expect(err).To(MatchError(tc.cause))
 		},
-		ginkgo.Entry("seed", seedOutputFailureCase{
+		ginkgo.Entry("reports service opening failures before writing seeds", seedOutputFailureCase{
 			configure: func(cause error) {
 				openSeedServices = func(string) (seedServices, error) {
 					return seedServices{}, cause
@@ -215,7 +215,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 			},
 			cause: errors.New("open failed"),
 		}),
-		ginkgo.Entry("marshal", seedOutputFailureCase{
+		ginkgo.Entry("reports JSON encoding failures before writing seeds", seedOutputFailureCase{
 			configure: func(cause error) {
 				_, _, services := newFakeSeedServices()
 				openSeedServices = func(string) (seedServices, error) {
@@ -227,7 +227,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 			},
 			cause: errors.New("marshal failed"),
 		}),
-		ginkgo.Entry("write", seedOutputFailureCase{
+		ginkgo.Entry("reports seed file write failures", seedOutputFailureCase{
 			configure: func(cause error) {
 				_, _, services := newFakeSeedServices()
 				openSeedServices = func(string) (seedServices, error) {
@@ -241,7 +241,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		}),
 	)
 
-	ginkgo.DescribeTable("seedMCPAPIKeys reports service setup and user mutation failures",
+	ginkgo.DescribeTable("seeded user setup failures",
 		func(tc seedServiceFailureCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -305,7 +305,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		}),
 	)
 
-	ginkgo.DescribeTable("seedMCPAPIKeys reports every seeded API key creation failure",
+	ginkgo.DescribeTable("seeded API key creation failures",
 		func(tc seedAPIKeyCreationFailureCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
