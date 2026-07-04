@@ -2245,7 +2245,7 @@ var _ = Describe("document restore from workspace revisions", func() {
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.RestoreDocument(context.Background(), page, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor())
+		_, err = service.RestoreDocument(context.Background(), page, oldCommit.Hash, PublicEditorActor())
 		Expect(err).To(Succeed())
 
 		Expect(readFileStringGinkgo(filepath.Join(rootDir, "new-page.md"))).To(ContainSubstring("old content"))
@@ -2280,7 +2280,7 @@ var _ = Describe("document restore from workspace revisions", func() {
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.RestoreDocument(context.Background(), page, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor())
+		_, err = service.RestoreDocument(context.Background(), page, oldCommit.Hash, PublicEditorActor())
 		Expect(err).To(Succeed())
 
 		Expect(readFileStringGinkgo(filepath.Join(rootDir, "Page.MD"))).To(ContainSubstring("old content"))
@@ -2316,7 +2316,7 @@ var _ = Describe("document restore from workspace revisions", func() {
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.RestoreDocument(context.Background(), section, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor())
+		_, err = service.RestoreDocument(context.Background(), section, oldCommit.Hash, PublicEditorActor())
 		Expect(err).To(Succeed())
 
 		Expect(readFileStringGinkgo(filepath.Join(rootDir, "docs", "index.md"))).To(ContainSubstring("old section content"))
@@ -2351,7 +2351,7 @@ var _ = Describe("document restore from workspace revisions", func() {
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.RestoreDocument(context.Background(), section, newFixtureCommitHash(oldCommit.Hash), PublicEditorActor())
+		_, err = service.RestoreDocument(context.Background(), section, oldCommit.Hash, PublicEditorActor())
 		Expect(err).To(Succeed())
 
 		Expect(readFileStringGinkgo(filepath.Join(rootDir, "docs", "README.md"))).To(ContainSubstring("old readme section content"))
@@ -2485,7 +2485,7 @@ var _ = Describe("workspace restore revision capture and validation", func() {
 		})
 		Expect(err).To(Succeed())
 
-		status, err := service.RestoreWorkspace(context.Background(), newFixtureCommitHash(rawCommit.Hash), PublicEditorActor())
+		status, err := service.RestoreWorkspace(context.Background(), rawCommit.Hash, PublicEditorActor())
 		Expect(err).To(Succeed())
 
 		files, err := store.FilesAt(context.Background(), status.LastCommitHash)
@@ -2535,7 +2535,7 @@ current body`)
 		})
 		Expect(err).To(Succeed())
 
-		status, err := service.RestoreDocument(context.Background(), page, newFixtureCommitHash(rawCommit.Hash), PublicEditorActor())
+		status, err := service.RestoreDocument(context.Background(), page, rawCommit.Hash, PublicEditorActor())
 		Expect(err).To(Succeed())
 
 		files, err := store.FilesAt(context.Background(), status.LastCommitHash)
@@ -2610,7 +2610,7 @@ var _ = Describe("workspace sync writeback and validation", func() {
 		snapshots, err := service.ListSnapshots(context.Background(), 10)
 		Expect(err).To(Succeed())
 
-		Expect(status.LastCommitHash).NotTo(Equal(newFixtureCommitHash(firstCommit.Hash)))
+		Expect(status.LastCommitHash).NotTo(Equal(firstCommit.Hash))
 		Expect(snapshots).To(HaveLen(2))
 	})
 
