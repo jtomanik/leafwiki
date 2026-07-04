@@ -197,6 +197,12 @@ func (asyncAssertion) WithTimeout(timeout any) asyncAssertion { return asyncAsse
 
 type GomegaMatcher interface{}
 
+type customMatcher struct{}
+
+func MakeMatcher(matchFunc any) customMatcher { return customMatcher{} }
+
+func (customMatcher) WithMessage(message string) GomegaMatcher { return nil }
+
 type gomegaFormatConfig struct {
 	MaxLength int
 }
@@ -576,6 +582,12 @@ func HaveReadMethodErrors() GomegaMatcher {
 	return MatchFields(nil, Fields{ // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
 		"TableColumns": HaveOccurred(),
 	}).(GomegaMatcher)
+}
+
+func RejectRevisionValidation() GomegaMatcher {
+	return MakeMatcher(func(err error) (bool, error) {
+		return err != nil, nil // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+	}).WithMessage("reject revision validation")
 }
 
 func hiddenRawStringErrorMatcher() any {

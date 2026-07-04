@@ -351,8 +351,6 @@ func checkGomegaAssertionHelperOffset(ctx *analysisContext, fn *ast.FuncDecl) {
 
 func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) {
 	if fn.Body == nil ||
-		fn.Type.Params == nil ||
-		!gomegaMatcherFactoryName(fn.Name.Name) ||
 		!funcReturnsGomegaMatcher(fn) {
 		return
 	}
@@ -361,6 +359,9 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 		return
 	}
 	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
+	if fn.Type.Params == nil || !gomegaMatcherFactoryName(fn.Name.Name) {
+		return
+	}
 	for _, field := range fn.Type.Params.List {
 		if !isRawStringCarrier(ctx.pass.TypesInfo.TypeOf(field.Type)) {
 			continue
@@ -391,8 +392,16 @@ func checkGomegaMatcherFactoryGenericHaveOccurred(ctx *analysisContext, fn *ast.
 			return false
 		case *ast.FuncLit:
 			return false
+		case *ast.CallExpr:
+			if predicate := gomegaGenericErrorPredicateMatcher(ctx, current); predicate != nil {
+				ctx.report(ruleGomegaGenericHaveOccurred, predicate, gomegaGenericHaveOccurredDiagnostic())
+				return false
+			}
 		case *ast.ReturnStmt:
 			for _, result := range current.Results {
+				if predicate := gomegaGenericErrorPredicateMatcherInExpr(ctx, result); predicate != nil {
+					ctx.report(ruleGomegaGenericHaveOccurred, predicate, gomegaGenericHaveOccurredDiagnostic())
+				}
 				if matcherTreeContainsPositiveHaveOccurred(result) {
 					ctx.report(ruleGomegaGenericHaveOccurred, result, gomegaGenericHaveOccurredDiagnostic())
 				}
@@ -401,6 +410,99 @@ func checkGomegaMatcherFactoryGenericHaveOccurred(ctx *analysisContext, fn *ast.
 		}
 		return true
 	})
+}
+
+func gomegaGenericErrorPredicateMatcherInExpr(ctx *analysisContext, expr ast.Expr) ast.Expr {
+	var predicate ast.Expr
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if predicate != nil || node == nil {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		predicate = gomegaGenericErrorPredicateMatcher(ctx, call)
+		return predicate == nil
+	})
+	return predicate
+}
+
+func gomegaGenericErrorPredicateMatcher(ctx *analysisContext, call *ast.CallExpr) ast.Expr {
+	if callName(call) != "MakeMatcher" || len(call.Args) == 0 {
+		return nil
+	}
+	fn, ok := call.Args[0].(*ast.FuncLit)
+	if !ok {
+		return nil
+	}
+	errorParams := gomegaMatcherErrorParams(ctx, fn)
+	if len(errorParams) == 0 {
+		return nil
+	}
+	return genericErrorPredicateReturn(ctx, fn.Body, errorParams)
+}
+
+func gomegaMatcherErrorParams(ctx *analysisContext, fn *ast.FuncLit) map[types.Object]bool {
+	if fn.Type.Params == nil {
+		return nil
+	}
+	errorParams := map[types.Object]bool{}
+	for _, field := range fn.Type.Params.List {
+		if !typeImplementsError(ctx.pass.TypesInfo.TypeOf(field.Type)) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			if object := ctx.pass.TypesInfo.Defs[name]; object != nil {
+				errorParams[object] = true
+			}
+		}
+	}
+	return errorParams
+}
+
+func genericErrorPredicateReturn(ctx *analysisContext, body *ast.BlockStmt, errorParams map[types.Object]bool) ast.Expr {
+	var predicate ast.Expr
+	ast.Inspect(body, func(node ast.Node) bool {
+		if predicate != nil || node == nil {
+			return false
+		}
+		switch current := node.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ReturnStmt:
+			if len(current.Results) > 0 && isErrorParamNotNilCheck(ctx, current.Results[0], errorParams) {
+				predicate = current.Results[0]
+			}
+			return false
+		}
+		return true
+	})
+	return predicate
+}
+
+func isErrorParamNotNilCheck(ctx *analysisContext, expr ast.Expr, errorParams map[types.Object]bool) bool {
+	binary, ok := unparenExpr(expr).(*ast.BinaryExpr)
+	if !ok || binary.Op != token.NEQ {
+		return false
+	}
+	return isErrorParamIdent(ctx, binary.X, errorParams) && isNilExpr(binary.Y) ||
+		isNilExpr(binary.X) && isErrorParamIdent(ctx, binary.Y, errorParams)
+}
+
+func isErrorParamIdent(ctx *analysisContext, expr ast.Expr, errorParams map[types.Object]bool) bool {
+	ident, ok := unparenExpr(expr).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	object := ctx.pass.TypesInfo.Uses[ident]
+	if object == nil {
+		object = ctx.pass.TypesInfo.Defs[ident]
+	}
+	return errorParams[object]
 }
 
 func gomegaAssertionFromCall(ctx *analysisContext, call *ast.CallExpr) (gomegaAssertion, bool) {
