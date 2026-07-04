@@ -151,7 +151,7 @@ func (s authFakeScanner) Scan(dest ...any) error {
 	return nil
 }
 
-var _ = ginkgo.Describe("auth SQL store failure behavior", func() {
+var _ = ginkgo.Describe("auth SQL store failure behavior", ginkgo.Label("integration"), func() {
 	ginkgo.Describe("API key store", func() {
 		ginkgo.It("reports API key store connection construction close and scanner failures", func() {
 			openErr := errors.New("api key open failed")

@@ -6,7 +6,7 @@ import (
 	"github.com/perber/wiki/internal/core/identity"
 )
 
-var _ = ginkgo.Describe("semantic types", func() {
+var _ = ginkgo.Describe("semantic types", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses the neutral identity type for auth user IDs", func() {
 		var _ identity.UserID = newFixtureUserID("user-1")
 	})

@@ -24,7 +24,7 @@ func setupTestAuthService() *AuthService {
 	return authService
 }
 
-var _ = ginkgo.Describe("auth service", func() {
+var _ = ginkgo.Describe("auth service", ginkgo.Label("integration"), func() {
 	ginkgo.It("issues access and refresh tokens that validate to the authenticated user", func() {
 		authService := setupTestAuthService()
 

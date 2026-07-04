@@ -206,7 +206,7 @@ func (m apiKeyVerificationMatcher) NegatedFailureMessage(actual interface{}) str
 	return fmt.Sprintf("Expected\n\t%#v\nnot to describe a verified API key for user %q with role %q", actual, m.userID, m.role)
 }
 
-var _ = ginkgo.Describe("api key service", func() {
+var _ = ginkgo.Describe("api key service", ginkgo.Label("integration"), func() {
 	ginkgo.It("stores only the API key hash and lists the public key metadata", func() {
 		_, _, store, service, user := setupTestAPIKeyService()
 		userID := UserIDFromString(user.ID)

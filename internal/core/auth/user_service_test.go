@@ -12,7 +12,7 @@ func setupTestUserService() *UserService {
 	return NewUserService(store)
 }
 
-var _ = ginkgo.Describe("user service", func() {
+var _ = ginkgo.Describe("user service", ginkgo.Label("integration"), func() {
 	ginkgo.It("creates users with persisted profile and role fields", func() {
 		service := setupTestUserService()
 

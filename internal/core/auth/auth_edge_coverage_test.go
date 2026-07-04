@@ -19,7 +19,7 @@ func signAuthClaims(service *AuthService, claims jwt.MapClaims) string {
 }
 
 var _ = ginkgo.Describe("auth boundary behavior", func() {
-	ginkgo.Describe("login attempts", func() {
+	ginkgo.Describe("login attempts", ginkgo.Label("unit"), func() {
 		ginkgo.It("locks an account after repeated failed attempts and resets after the lock expires", func() {
 			tracker := newLoginAttemptTracker()
 			userID := newFixtureUserID("lockable-user")
@@ -37,7 +37,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 		})
 	})
 
-	ginkgo.Describe("semantic auth types", func() {
+	ginkgo.Describe("semantic auth types", ginkgo.Label("unit"), func() {
 		ginkgo.It("parses semantic auth identifiers", func() {
 			Expect(UserIDFromString("user-1")).To(Equal(newFixtureUserID("user-1")))
 			Expect(UserIDFromString("user-2")).To(Equal(newFixtureUserID("user-2")))
@@ -49,7 +49,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 	})
 
 	ginkgo.Describe("API key service validation", func() {
-		ginkgo.It("handles nil services, bearer prefixes, and malformed raw keys", func() {
+		ginkgo.It("handles nil services, bearer prefixes, and malformed raw keys", ginkgo.Label("unit"), func() {
 			var nilService *APIKeyService
 			Expect(nilService.Close()).To(Succeed())
 			Expect((&APIKeyService{}).Close()).To(Succeed())
@@ -76,7 +76,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			}
 		})
 
-		ginkgo.It("closes a backing store through the service", func() {
+		ginkgo.It("closes a backing store through the service", ginkgo.Label("integration"), func() {
 			store, err := NewAPIKeyStore(authTempDir())
 			Expect(err).NotTo(HaveOccurred())
 			service := NewAPIKeyService(store, nil)
@@ -85,7 +85,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			Expect(store.db).To(BeNil())
 		})
 
-		ginkgo.It("rejects empty names and missing referenced users before storing a key", func() {
+		ginkgo.It("rejects empty names and missing referenced users before storing a key", ginkgo.Label("integration"), func() {
 			_, _, _, service, user := setupTestAPIKeyService()
 			userID := UserIDFromString(user.ID)
 
@@ -104,7 +104,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 		})
 	})
 
-	ginkgo.Describe("JWT claim validation", func() {
+	ginkgo.Describe("JWT claim validation", ginkgo.Label("integration"), func() {
 		var service *AuthService
 
 		ginkgo.BeforeEach(func() {
@@ -217,7 +217,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 		})
 	})
 
-	ginkgo.Describe("session store state transitions", func() {
+	ginkgo.Describe("session store state transitions", ginkgo.Label("integration"), func() {
 		ginkgo.It("treats expired, revoked, and missing sessions as inactive", func() {
 			store, err := NewSessionStore(authTempDir())
 			Expect(err).NotTo(HaveOccurred())
@@ -260,7 +260,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 		})
 	})
 
-	ginkgo.Describe("user service guardrails", func() {
+	ginkgo.Describe("user service guardrails", ginkgo.Label("integration"), func() {
 		var service *UserService
 
 		ginkgo.BeforeEach(func() {

@@ -11,7 +11,7 @@ import (
 	"github.com/onsi/gomega/gbytes"
 )
 
-var _ = ginkgo.Describe("auth seam failure behavior", func() {
+var _ = ginkgo.Describe("auth seam failure behavior", ginkgo.Label("integration"), func() {
 	ginkgo.Describe("API key service branches", func() {
 		ginkgo.It("propagates random and store failures while creating API keys", func() {
 			_, _, _, service, user := setupTestAPIKeyService()
