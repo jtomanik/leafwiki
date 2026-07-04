@@ -1275,7 +1275,7 @@ var _ = Describe("workspace sync status under snapshot listing", func() {
 			statusDone <- service.Status()
 		}()
 
-		Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(HaveField("Enabled", BeTrue())))
+		Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(matchEnabledWorkspaceSyncStatus()))
 
 		unblockChangedPaths()
 		Eventually(listDone).Should(Receive(Succeed()))
@@ -2132,7 +2132,7 @@ var _ = Describe("page revision store access", func() {
 			statusDone <- service.Status()
 		}()
 
-		Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(HaveField("Enabled", BeTrue())))
+		Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(matchEnabledWorkspaceSyncStatus()))
 		unblockChangedContents()
 		Eventually(done).Should(Receive(Succeed()))
 	})
@@ -2210,7 +2210,7 @@ var _ = Describe("page revision store access", func() {
 			statusDone <- service.Status()
 		}()
 
-		Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(HaveField("Enabled", BeTrue())))
+		Eventually(statusDone).WithTimeout(200 * time.Millisecond).Should(Receive(matchEnabledWorkspaceSyncStatus()))
 		unblockChangedContents()
 		Eventually(done).Should(Receive(Succeed()))
 	})
@@ -2695,12 +2695,7 @@ var _ = Describe("workspace sync file watcher", func() {
 		fakeWatcher.events <- watcherEvent{Path: "/workspace/docs/a.md"}
 
 		Eventually(fakeTree.reconstructCount).Should(Equal(1))
-		Expect(service.Status()).To(SatisfyAll(
-			HaveField("WatcherEnabled", BeTrue()),
-			HaveField("WatcherRunning", BeTrue()),
-			HaveField("PendingEventCount", BeZero()),
-			HaveField("RecentChangedMarkdownPaths", Equal([]string{"docs/a.md"})),
-		))
+		Expect(service.Status()).To(matchRunningWatcherWithRecentMarkdownPaths("docs/a.md"))
 		Expect(fakeStore.captureCalls).To(Equal(1))
 	})
 
@@ -2809,10 +2804,7 @@ var _ = Describe("workspace sync file watcher", func() {
 		Expect(service.StartWatcher(ctx)).To(Succeed())
 
 		Eventually(fakeTree.reconstructCount).Should(Equal(1))
-		Expect(service.Status()).To(SatisfyAll(
-			HaveField("WatcherRunning", BeFalse()),
-			HaveField("LastError", ContainSubstring("watcher platform error")),
-		))
+		Expect(service.Status()).To(matchStoppedWatcherStatus())
 		Expect(fakeStore.captureCalls).To(Equal(1))
 	})
 

@@ -44,10 +44,8 @@ var _ = Describe("workspace sync deterministic service behavior", func() {
 
 		Expect(service.StartWatcher(ctx)).To(Succeed())
 
-		Eventually(func() SyncStatus { return service.Status() }).Should(SatisfyAll(
-			WithTransform(func(status SyncStatus) bool { return status.WatcherRunning }, BeFalse()),
-			WithTransform(func(status SyncStatus) string { return status.LastError }, Equal("watcher failed: sync after watcher failed")),
-		))
+		Eventually(func() SyncStatus { return service.Status() }).Should(matchStoppedWatcherStatus())
+		Eventually(func() int { return store.captureCalls }).Should(Equal(1))
 	})
 
 	It("flushes queued watcher events when event channels close", func() {
@@ -436,9 +434,7 @@ var _ = Describe("workspace sync deterministic service behavior", func() {
 		)
 
 		Expect(service.StartWatcher(ctx)).To(Succeed())
-		Eventually(func() SyncStatus { return service.Status() }).Should(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"WatcherRunning": BeTrue(),
-		}))
+		Eventually(func() SyncStatus { return service.Status() }).Should(matchRunningWatcherStatus())
 		service.StopWatcher()
 		Expect(wrapped.closeCount).To(Equal(1))
 

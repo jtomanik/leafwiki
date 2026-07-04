@@ -46,7 +46,7 @@ var _ = Describe("workspace sync service edges", func() {
 		Expect(err).To(MatchError(ErrTreeServiceRequired))
 	})
 
-	It("records watcher factory failures in status", func() {
+	It("reports the watcher as stopped when the factory fails", func() {
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
 			RootDir: "/workspace",
@@ -61,11 +61,7 @@ var _ = Describe("workspace sync service edges", func() {
 		err = service.StartWatcher(context.Background())
 		Expect(err).To(MatchError(errWatcherFactoryFailed))
 		status := service.Status()
-		Expect(status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"WatcherEnabled": BeTrue(),
-			"WatcherRunning": BeFalse(),
-			"LastError":      Not(BeEmpty()),
-		}))
+		Expect(status).To(matchWatcherFactoryFailureStatus())
 	})
 
 	It("aggregates sync errors without adding blank fragments", func() {
