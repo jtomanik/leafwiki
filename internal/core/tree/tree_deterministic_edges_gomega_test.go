@@ -52,10 +52,7 @@ var _ = Describe("deterministic tree edge behavior", func() {
 
 		route, err = MapWorkspaceMarkdownRoute(root, "docs/image.png", false)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Skip":       BeTrue(),
-			"SkipReason": Equal("non_markdown"),
-		}))
+		Expect(route).To(matchSkippedWorkspaceMarkdownRoute("non_markdown"))
 
 		route, err = MapWorkspaceMarkdownRoute(root, "docs/README.md", false)
 		Expect(err).NotTo(HaveOccurred())

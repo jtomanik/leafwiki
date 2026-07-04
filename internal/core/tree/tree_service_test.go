@@ -2509,14 +2509,12 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
-		Expect(lookup).To(SatisfyAll(
-			HaveField("Exists", BeFalse()),
-			HaveField("Segments", HaveExactElements(
-				matchExistingPathSegment(*homeID),
-				matchExistingPathSegment(*aboutID),
-				matchMissingPathSegment(),
-			)),
-		), "expected lookup to resolve existing ancestors and report the missing leaf, got %#v", lookup)
+		Expect(lookup).To(matchMissingPathLookup(HaveExactElements(
+			matchExistingPathSegment(*homeID),
+			matchExistingPathSegment(*aboutID),
+			matchMissingPathSegment(),
+		)),
+			"expected lookup to resolve existing ancestors and report the missing leaf, got %#v", lookup)
 
 	})
 })
@@ -2568,13 +2566,11 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
-		Expect(lookup).To(SatisfyAll(
-			HaveField("Exists", BeTrue()),
-			HaveField("Segments", HaveExactElements(SatisfyAll(
-				matchExistingPathSegment(*sectionID),
-				HaveField("Kind", pointToValue[NodeKind](Equal(NodeKindSection))),
-			))),
-		), "lookup = %#v, want existing section segment", lookup)
+		Expect(lookup).To(matchExistingPathLookup(HaveExactElements(SatisfyAll(
+			matchExistingPathSegment(*sectionID),
+			HaveField("Kind", pointToValue[NodeKind](Equal(NodeKindSection))),
+		))),
+			"lookup = %#v, want existing section segment", lookup)
 
 	})
 })
@@ -2793,11 +2789,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "EnsurePagePath existing failed: %v",
 
 			err)
-		Expect(existing).To(SatisfyAll(
-			HaveField("Exists", BeTrue()),
-			HaveField("Page", matchTreeNodePointer(NodeKindPage, Equal(res.Page.ID))),
-			HaveField("Created", BeEmpty()),
-		), "expected EnsurePagePath to return the existing page without creating nodes, got %#v", existing)
+		Expect(existing).To(matchExistingEnsurePathResult(matchTreeNodePointer(NodeKindPage, Equal(res.Page.ID))),
+			"expected EnsurePagePath to return the existing page without creating nodes, got %#v", existing)
 
 	})
 })
@@ -2847,11 +2840,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "EnsurePagePath existing page twin failed: %v",
 
 			err)
-		Expect(second).To(SatisfyAll(
-			HaveField("Exists", BeTrue()),
-			HaveField("Page", matchTreeNodePointer(NodeKindPage, Equal(res.Page.ID))),
-			HaveField("Created", BeEmpty()),
-		), "expected second ensure to return the existing page twin, got %#v", second)
+		Expect(second).To(matchExistingEnsurePathResult(matchTreeNodePointer(NodeKindPage, Equal(res.Page.ID))),
+			"expected second ensure to return the existing page twin, got %#v", second)
 
 	})
 })
@@ -2899,11 +2889,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "EnsurePagePath existing section twin failed: %v",
 
 			err)
-		Expect(second).To(SatisfyAll(
-			HaveField("Exists", BeTrue()),
-			HaveField("Page", matchTreeNodePointer(NodeKindSection, Equal(res.Page.ID))),
-			HaveField("Created", BeEmpty()),
-		), "expected second ensure to return the existing section twin, got %#v", second)
+		Expect(second).To(matchExistingEnsurePathResult(matchTreeNodePointer(NodeKindSection, Equal(res.Page.ID))),
+			"expected second ensure to return the existing section twin, got %#v", second)
 
 	})
 })

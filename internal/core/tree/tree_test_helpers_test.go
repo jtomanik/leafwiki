@@ -9,6 +9,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdown"
 )
@@ -229,15 +230,15 @@ func pointToValue[T any](matcher types.GomegaMatcher) types.GomegaMatcher {
 }
 
 func matchErrorAs(target any) types.GomegaMatcher {
-	return WithTransform(func(err error) bool {
-		return errors.As(err, target)
-	}, BeTrue())
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		return errors.As(err, target), nil
+	}).WithMessage("match error type")
 }
 
 func matchErrorIs(target error) types.GomegaMatcher {
-	return WithTransform(func(err error) bool {
-		return errors.Is(err, target)
-	}, BeTrue())
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		return errors.Is(err, target), nil
+	}).WithMessage("match error sentinel")
 }
 
 func matchPathError() types.GomegaMatcher {
@@ -253,33 +254,43 @@ func matchSymlinkLoopError() types.GomegaMatcher {
 }
 
 func matchExistingSectionIndexPath(path string) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Path", Equal(path)),
-		HaveField("Exists", BeTrue()),
-	)
+	return gcustom.MakeMatcher(func(actual sectionIndexPathLookup) (bool, error) {
+		return actual.Path == path && actual.Exists, nil
+	}).WithMessage("resolve an existing section index path")
 }
 
 func matchMissingSectionIndexPath(path string) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Path", Equal(path)),
-		HaveField("Exists", BeFalse()),
-	)
+	return gcustom.MakeMatcher(func(actual sectionIndexPathLookup) (bool, error) {
+		return actual.Path == path && !actual.Exists, nil
+	}).WithMessage("resolve a missing section index path")
 }
 
 func matchExistingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Path", path),
-		HaveField("Exists", BeTrue()),
-		HaveField("Err", err),
-	)
+	return gcustom.MakeMatcher(func(actual workspaceContentPathLookup) (bool, error) {
+		pathOK, pathErr := path.Match(actual.Path)
+		if pathErr != nil || !pathOK {
+			return false, pathErr
+		}
+		errOK, matchErr := err.Match(actual.Err)
+		if matchErr != nil || !errOK {
+			return false, matchErr
+		}
+		return actual.Exists, nil
+	}).WithMessage("resolve an existing workspace content path")
 }
 
 func matchMissingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Path", path),
-		HaveField("Exists", BeFalse()),
-		HaveField("Err", err),
-	)
+	return gcustom.MakeMatcher(func(actual workspaceContentPathLookup) (bool, error) {
+		pathOK, pathErr := path.Match(actual.Path)
+		if pathErr != nil || !pathOK {
+			return false, pathErr
+		}
+		errOK, matchErr := err.Match(actual.Err)
+		if matchErr != nil || !errOK {
+			return false, matchErr
+		}
+		return !actual.Exists, nil
+	}).WithMessage("resolve a missing workspace content path")
 }
 
 func matchContentComparison(matches types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
@@ -372,12 +383,49 @@ func matchPageMetadataTimestamps(createdAt string, updatedAt string) types.Gomeg
 	)
 }
 
-func matchResolvedNode(kind NodeKind, hasContent types.GomegaMatcher, filePath types.GomegaMatcher) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Kind", Equal(kind)),
-		HaveField("HasContent", hasContent),
-		HaveField("FilePath", filePath),
-	)
+func matchResolvedNode(kind NodeKind, hasContent bool, filePath types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual *ResolvedNode) (bool, error) {
+		if actual == nil || actual.Kind != kind || actual.HasContent != hasContent {
+			return false, nil
+		}
+		if filePath == nil {
+			return true, nil
+		}
+		return filePath.Match(actual.FilePath)
+	}).WithMessage("describe resolved tree node storage")
+}
+
+func matchSkippedWorkspaceMarkdownRoute(reason string) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual WorkspaceMarkdownRoute) (bool, error) {
+		return actual.Skip && actual.SkipReason == reason, nil
+	}).WithMessage("skip workspace markdown route")
+}
+
+func matchMissingPathLookup(segments types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual *PathLookup) (bool, error) {
+		if actual == nil || actual.Exists {
+			return false, nil
+		}
+		return segments.Match(actual.Segments)
+	}).WithMessage("describe missing path lookup")
+}
+
+func matchExistingPathLookup(segments types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual *PathLookup) (bool, error) {
+		if actual == nil || !actual.Exists {
+			return false, nil
+		}
+		return segments.Match(actual.Segments)
+	}).WithMessage("describe existing path lookup")
+}
+
+func matchExistingEnsurePathResult(page types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(actual *EnsurePathResult) (bool, error) {
+		if actual == nil || !actual.Exists || len(actual.Created) != 0 {
+			return false, nil
+		}
+		return page.Match(actual.Page)
+	}).WithMessage("return an existing ensured path without creating nodes")
 }
 
 func haveChildPageIDs(ids ...PageID) types.GomegaMatcher {
@@ -401,22 +449,17 @@ func haveChildPositions(positions ...int) types.GomegaMatcher {
 }
 
 func matchExistingPathSegment(id PageID) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Exists", BeTrue()),
-		HaveField("ID", WithTransform(func(actual *PageID) PageID {
-			if actual == nil {
-				return ""
-			}
-			return *actual
-		}, Equal(id))),
-	)
+	return gcustom.MakeMatcher(func(segment PathSegment) (bool, error) {
+		return segment.Exists &&
+			segment.ID != nil &&
+			*segment.ID == id, nil
+	}).WithMessage("describe an existing path segment")
 }
 
 func matchMissingPathSegment() types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Exists", BeFalse()),
-		HaveField("ID", BeNil()),
-	)
+	return gcustom.MakeMatcher(func(segment PathSegment) (bool, error) {
+		return !segment.Exists && segment.ID == nil, nil
+	}).WithMessage("describe a missing path segment")
 }
 
 func matchRootSection() types.GomegaMatcher {

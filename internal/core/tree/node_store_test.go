@@ -1636,7 +1636,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		Expect(err).To(Succeed(), "resolveNode(page): %v",
 
 			err)
-		Expect(r1).To(matchResolvedNode(NodeKindPage, BeTrue(), HaveSuffix("p.md")),
+		Expect(r1).To(matchResolvedNode(NodeKindPage, true, HaveSuffix("p.md")),
 			"unexpected resolved: %#v", r1)
 
 		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
@@ -1648,17 +1648,15 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			err,
 		)
-		Expect(r2).To(SatisfyAll(
-			HaveField("Kind", Equal(NodeKindSection)),
-			HaveField("HasContent", BeFalse()),
-		), "expected section without content: %#v", r2)
+		Expect(r2).To(matchResolvedNode(NodeKindSection, false, nil),
+			"expected section without content: %#v", r2)
 
 		writeTreeFile(filepath.Join(secDir, "index.md"), "# idx", 0o644)
 		r3, err := store.resolveNode(sec)
 		Expect(err).To(Succeed(), "resolveNode(sec with index): %v",
 
 			err)
-		Expect(r3).To(matchResolvedNode(NodeKindSection, BeTrue(), HaveSuffix("index.md")),
+		Expect(r3).To(matchResolvedNode(NodeKindSection, true, HaveSuffix("index.md")),
 			"unexpected resolved: %#v", r3)
 
 	})
