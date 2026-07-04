@@ -155,6 +155,28 @@ type leafwikiRuntimeLock interface {
 	Release() error
 }
 
+func closeBestEffort(closer io.Closer) {
+	if closer == nil {
+		return
+	}
+	_ = closer.Close()
+}
+
+func releaseRuntimeLockBestEffort(lock leafwikiRuntimeLock) {
+	if lock == nil {
+		return
+	}
+	_ = lock.Release()
+}
+
+func removePathBestEffort(path string) {
+	_ = os.Remove(path)
+}
+
+func removeProjectDaemonDescriptorBestEffort(path string) {
+	_ = projectdaemon.RemoveDescriptor(path)
+}
+
 func defaultDaemonStdin() io.ReadCloser {
 	return os.Stdin
 }
@@ -833,7 +855,7 @@ func newNativeStdioJSONFilter(stdin io.ReadCloser, stdout io.Writer) (io.ReadClo
 }
 
 func filterNativeStdioJSON(stdin io.Reader, forward *io.PipeWriter, stdout io.Writer) error {
-	defer forward.Close()
+	defer closeBestEffort(forward)
 
 	reader := bufio.NewReader(stdin)
 	for {
@@ -1103,7 +1125,7 @@ func logStartupValidationFailure(cfg leaflogging.Config, msg string) {
 	if err != nil {
 		return
 	}
-	defer closer.Close()
+	defer closeBestEffort(closer)
 	logger.Error(msg)
 }
 
@@ -1300,7 +1322,7 @@ func ensureFederatedWorkspace(ctx context.Context, desc *projectdaemon.Descripto
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("ensure workspace %q: %w", workspaceID.String(), newWikidPrivateEndpointError(path, resp.StatusCode, raw))
@@ -1399,7 +1421,7 @@ func workspacedPrivateMCPEndpointReachable(ctx context.Context, desc *projectdae
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return false
@@ -1443,7 +1465,7 @@ var projectDaemonWaitTimeout = 30 * time.Second
 func waitForProjectDaemon(ctx context.Context, descriptorPath string, errorPath string, ownerCfg projectdaemon.Config, requestTransports mcpTransports) (*projectdaemon.Descriptor, error) {
 	deadlineCtx, cancel := context.WithTimeout(ctx, projectDaemonWaitTimeout)
 	defer cancel()
-	defer os.Remove(errorPath)
+	defer removePathBestEffort(errorPath)
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	var lastErr error
@@ -1605,7 +1627,7 @@ func projectDaemonLocksFree(dataDir string, rootDir string) (bool, error) {
 		}
 		return false, err
 	}
-	defer dataLock.Release()
+	defer releaseRuntimeLockBestEffort(dataLock)
 
 	rootLock, err := acquireRootDirLockForRuntime(rootDir)
 	if err != nil {
@@ -1741,14 +1763,14 @@ func stdioAPIKeyUserFromStorage(dataDir string, apiKey string) (*coreauth.User, 
 	if err != nil {
 		return nil, err
 	}
-	defer userStore.Close()
+	defer closeBestEffort(userStore)
 	userService := coreauth.NewUserService(userStore)
 	apiKeyStore, err := coreauth.NewAPIKeyStore(dataDir)
 	if err != nil {
 		return nil, err
 	}
 	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
-	defer apiKeyService.Close()
+	defer closeBestEffort(apiKeyService)
 	verified, err := apiKeyService.VerifyAPIKey(apiKey)
 	if err != nil {
 		return nil, err
@@ -2252,12 +2274,12 @@ func bridgeTransports(ctx context.Context, left sdkmcp.Transport, right sdkmcp.T
 	if err != nil {
 		return err
 	}
-	defer leftConn.Close()
+	defer closeBestEffort(leftConn)
 	rightConn, err := right.Connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer rightConn.Close()
+	defer closeBestEffort(rightConn)
 
 	type pumpResult struct {
 		fromLeft  bool
@@ -3162,7 +3184,7 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 	if err != nil {
 		return fmt.Errorf("invalid logging configuration: %w", err)
 	}
-	defer logCloser.Close()
+	defer closeBestEffort(logCloser)
 
 	opts, err := routerOptionsForRuntimeWithUserService(cfg, nil, cfg.BasePath, false, cfg.Host)
 	if err != nil {
@@ -3234,7 +3256,7 @@ func runFrontdRole(parent context.Context, startup internalRuntimeRoleStartupCon
 	if err != nil {
 		return fmt.Errorf("start frontd listener: %w", err)
 	}
-	defer listener.Close()
+	defer closeBestEffort(listener)
 	ready := internalRuntimeRoleReady{
 		Role: projectdaemon.RoleFrontd,
 		PID:  os.Getpid(),
@@ -3314,13 +3336,13 @@ func runWorkspacedRole(parent context.Context, startup internalRuntimeRoleStartu
 	if err != nil {
 		return fmt.Errorf("invalid logging configuration: %w", err)
 	}
-	defer logCloser.Close()
+	defer closeBestEffort(logCloser)
 
 	w, err := newRuntimeWikiForRuntime(cfg, ownerCfg, runtimeWikiWorkspaceOnly)
 	if err != nil {
 		return err
 	}
-	defer w.Close()
+	defer closeBestEffort(w)
 
 	opts, err := routerOptionsForRuntime(cfg, w, "", false, "127.0.0.1")
 	if err != nil {
@@ -3351,7 +3373,7 @@ func runWorkspacedRole(parent context.Context, startup internalRuntimeRoleStartu
 	if err != nil {
 		return fmt.Errorf("start workspaced listener: %w", err)
 	}
-	defer listener.Close()
+	defer closeBestEffort(listener)
 	ready := internalRuntimeRoleReady{
 		Role:    projectdaemon.RoleWorkspaced,
 		PID:     os.Getpid(),
@@ -3664,7 +3686,7 @@ func callWikidPrivateEndpoint(ctx context.Context, wikidURL string, daemonToken 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return newWikidPrivateEndpointError(path, resp.StatusCode, raw)
@@ -4074,7 +4096,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	if err != nil {
 		return fmt.Errorf("start control listener: %w", err)
 	}
-	defer controlListener.Close()
+	defer closeBestEffort(controlListener)
 
 	controlToken, err := randomTokenForRuntime()
 	if err != nil {
@@ -4090,7 +4112,7 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	if err != nil {
 		return err
 	}
-	defer controlPlaneWiki.Close()
+	defer closeBestEffort(controlPlaneWiki)
 	controlPlaneOpts, err := controlPlaneRouterOptionsForOwner(cfg, controlPlaneWiki)
 	if err != nil {
 		return err
@@ -4239,8 +4261,8 @@ func runWikidFrontdOwner(parent context.Context, cfg leafwikiRuntimeConfig, owne
 	runtime.setRoleChangeCallback(func(roles []projectdaemon.RoleHealth) {
 		updateRuntimeRoleDescriptors(&descriptorMu, desc, workspaceSupervisor, descriptorPath, globalDescriptorPath, roles)
 	})
-	defer projectdaemon.RemoveDescriptor(descriptorPath)
-	defer projectdaemon.RemoveDescriptor(globalDescriptorPath)
+	defer removeProjectDaemonDescriptorBestEffort(descriptorPath)
+	defer removeProjectDaemonDescriptorBestEffort(globalDescriptorPath)
 	if !cfg.DisableIdleShutdown {
 		go cancelIfNoActivityAfterStartupGrace(ctx, cancel, sessions, agentPresence, projectdaemon.DefaultHeartbeatTTL)
 	}
@@ -4433,13 +4455,13 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	if err != nil {
 		return fmt.Errorf("acquire data directory lock: %w", err)
 	}
-	defer dataLock.Release()
+	defer releaseRuntimeLockBestEffort(dataLock)
 
 	logCloser, err := setupLogger(cfg.Logging, os.Stdout, os.Stderr)
 	if err != nil {
 		return fmt.Errorf("invalid logging configuration: %w", err)
 	}
-	defer logCloser.Close()
+	defer closeBestEffort(logCloser)
 
 	if cfg.DisableAuth {
 		slog.Default().Warn("Authentication disabled. Wiki is publicly accessible without authentication.")
@@ -4470,7 +4492,7 @@ func runProjectDaemonOwner(parent context.Context, cfg leafwikiRuntimeConfig) er
 	if err != nil {
 		return fmt.Errorf("acquire root directory lock: %w", err)
 	}
-	defer rootLock.Release()
+	defer releaseRuntimeLockBestEffort(rootLock)
 
 	if err := wikid.CleanupLegacyAuthDBs(ownerCfg.DataDir); err != nil {
 		return fmt.Errorf("cleanup legacy auth DBs: %w", err)

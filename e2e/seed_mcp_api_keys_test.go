@@ -441,7 +441,9 @@ func observeWikidSeededAPIKey(dataDir string, seeds seedOutput) wikidSeededAPIKe
 		observed.AuthStores = wikidAuthStoreOpenFailed
 		return observed
 	}
-	defer stores.Close()
+	defer func() {
+		Expect(stores.Close()).To(Succeed())
+	}()
 	observed.AuthStores = wikidAuthStoresUseCurrentLayout
 	users := coreauth.NewUserService(stores.Users)
 	apiKeys := coreauth.NewAPIKeyService(stores.APIKeys, users)

@@ -51,6 +51,18 @@ const (
 	leafwikiFixtureFrontdExited        = "frontd exited"
 )
 
+type leafwikiFakeFileInfo struct {
+	name string
+	mode os.FileMode
+}
+
+func (info leafwikiFakeFileInfo) Name() string       { return info.name }
+func (info leafwikiFakeFileInfo) Size() int64        { return 0 }
+func (info leafwikiFakeFileInfo) Mode() os.FileMode  { return info.mode }
+func (info leafwikiFakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (info leafwikiFakeFileInfo) IsDir() bool        { return info.mode.IsDir() }
+func (info leafwikiFakeFileInfo) Sys() any           { return nil }
+
 func MatchProjectDaemonConfigMismatch(mismatches ...projectdaemon.Mismatch) types.GomegaMatcher {
 	expected := append([]projectdaemon.Mismatch(nil), mismatches...)
 	return gcustom.MakeMatcher(func(err error) (bool, error) {
@@ -923,7 +935,10 @@ func MatchFederatedRegisteredWorkspace(fields gstruct.Fields) types.GomegaMatche
 	ginkgo.GinkgoHelper()
 
 	return gcustom.MakeMatcher(func(result federatedFirstContactResult) (bool, error) {
-		if result.Err != nil || result.Home {
+		if result.Err != nil {
+			return false, result.Err
+		}
+		if result.Home {
 			return false, nil
 		}
 		return gstruct.MatchFields(gstruct.IgnoreExtras, fields).Match(result.Workspace)
@@ -3894,7 +3909,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			if path == ownerDaemonCfg.DataDir {
 				return nil, os.ErrNotExist
 			}
-			return nil, nil
+			return leafwikiFakeFileInfo{name: filepath.Base(path), mode: os.ModeDir | 0o755}, nil
 		}
 		mkdirDataErr := errors.New("mkdir data failed")
 		mkdirAllForRuntime = func(string, os.FileMode) error { return mkdirDataErr }
@@ -3904,7 +3919,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			if path == ownerDaemonCfg.RootDir {
 				return nil, os.ErrNotExist
 			}
-			return nil, nil
+			return leafwikiFakeFileInfo{name: filepath.Base(path), mode: os.ModeDir | 0o755}, nil
 		}
 		mkdirRootErr := errors.New("mkdir root failed")
 		mkdirAllForRuntime = func(string, os.FileMode) error { return mkdirRootErr }

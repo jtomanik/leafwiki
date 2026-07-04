@@ -76,6 +76,6 @@ func runGrantWorkspaces(args []string, stdin io.Reader, stderr io.Writer) int {
 }
 
 func fatalf(stderr io.Writer, format string, args ...any) int {
-	fmt.Fprintf(stderr, format+"\n", args...)
+	_, _ = fmt.Fprintf(stderr, format+"\n", args...)
 	return 1
 }

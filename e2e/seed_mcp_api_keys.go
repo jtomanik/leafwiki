@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -105,7 +106,7 @@ func writeSeedMCPAPIKeysOutput(dataDir string, outputPath string) error {
 	return nil
 }
 
-func seedMCPAPIKeys(dataDir string) (seedOutput, error) {
+func seedMCPAPIKeys(dataDir string) (out seedOutput, retErr error) {
 	if err := rejectRemovedRuntimeStackEnv(); err != nil {
 		return seedOutput{}, err
 	}
@@ -114,7 +115,11 @@ func seedMCPAPIKeys(dataDir string) (seedOutput, error) {
 	if err != nil {
 		return seedOutput{}, err
 	}
-	defer services.close()
+	defer func() {
+		if err := services.close(); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close seed services: %w", err))
+		}
+	}()
 	users := services.users
 	if err := users.InitDefaultAdmin("admin"); err != nil {
 		return seedOutput{}, fmt.Errorf("init admin: %w", err)
@@ -147,7 +152,6 @@ func seedMCPAPIKeys(dataDir string) (seedOutput, error) {
 		return seedOutput{}, err
 	}
 
-	out := seedOutput{}
 	if out.Admin, err = createKey(apiKeys, admin, "E2E STDIO admin"); err != nil {
 		return seedOutput{}, err
 	}
@@ -220,6 +224,6 @@ func createKey(apiKeys seedAPIKeyService, user *coreauth.User, name string) (see
 }
 
 func fatalf(stderr io.Writer, format string, args ...any) int {
-	fmt.Fprintf(stderr, format+"\n", args...)
+	_, _ = fmt.Fprintf(stderr, format+"\n", args...)
 	return 1
 }
