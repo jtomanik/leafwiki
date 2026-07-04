@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -24,8 +25,48 @@ func actorIDStrings(ids []ActorID) []string {
 	return out
 }
 
+type managedMarkdownPathClass string
+
+const (
+	managedMarkdownRevisionPath          managedMarkdownPathClass = "managed markdown revision path"
+	ignoredHiddenDirectoryMarkdownPath   managedMarkdownPathClass = "ignored hidden-directory markdown path"
+	ignoredHiddenFilenameMarkdownPath    managedMarkdownPathClass = "ignored hidden-filename markdown path"
+	ignoredSwapMarkdownPath              managedMarkdownPathClass = "ignored markdown swap path"
+	ignoredNonMarkdownRevisionPath       managedMarkdownPathClass = "ignored non-markdown revision path"
+	ignoredUnexpectedManagedPathDecision managedMarkdownPathClass = "unexpected managed markdown path decision"
+)
+
+func managedMarkdownPathClassFor(relPath string) managedMarkdownPathClass {
+	if IsManagedMarkdownRelPath(relPath) {
+		return managedMarkdownRevisionPath
+	}
+
+	slashPath := filepath.ToSlash(relPath)
+	for _, segment := range strings.Split(slashPath, "/") {
+		if strings.HasPrefix(segment, ".") {
+			if strings.EqualFold(filepath.Ext(segment), ".md") {
+				return ignoredHiddenFilenameMarkdownPath
+			}
+			return ignoredHiddenDirectoryMarkdownPath
+		}
+	}
+
+	base := filepath.Base(slashPath)
+	if strings.EqualFold(filepath.Ext(base), ".swp") && strings.EqualFold(filepath.Ext(strings.TrimSuffix(base, filepath.Ext(base))), ".md") {
+		return ignoredSwapMarkdownPath
+	}
+	if !strings.EqualFold(filepath.Ext(base), ".md") {
+		return ignoredNonMarkdownRevisionPath
+	}
+	return ignoredUnexpectedManagedPathDecision
+}
+
+func matchManagedMarkdownPathClass(expected managedMarkdownPathClass) OmegaMatcher {
+	return WithTransform(managedMarkdownPathClassFor, Equal(expected))
+}
+
 var _ = Describe("git revision store", func() {
-	It("captures an initial snapshot with only managed markdown files", func() {
+	It("captures an initial snapshot with only managed markdown files", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		Expect(os.MkdirAll(filepath.Join(rootDir, "nested"), 0o755)).To(Succeed())
@@ -63,7 +104,7 @@ var _ = Describe("git revision store", func() {
 		}
 	})
 
-	It("tracks markdown files with uppercase extensions", func() {
+	It("tracks markdown files with uppercase extensions", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "Page.MD"), "# Page\n")
@@ -84,7 +125,7 @@ var _ = Describe("git revision store", func() {
 		Expect(files).To(HaveKeyWithValue("Page.MD", "# Page\n"))
 	})
 
-	It("writes synchronization trailers and changed markdown paths into commits", func() {
+	It("writes synchronization trailers and changed markdown paths into commits", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "a.md"), "# A\n")
@@ -117,7 +158,7 @@ var _ = Describe("git revision store", func() {
 		}))
 	})
 
-	It("keeps original changed markdown paths when amending metadata writeback commits", func() {
+	It("keeps original changed markdown paths when amending metadata writeback commits", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "a.md"), "# A\n")
@@ -155,7 +196,7 @@ var _ = Describe("git revision store", func() {
 		}))
 	})
 
-	It("resumes commit listing after the cursor hash", func() {
+	It("resumes commit listing after the cursor hash", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -190,7 +231,7 @@ var _ = Describe("git revision store", func() {
 		})))
 	})
 
-	It("returns workspace metadata for listed commits", func() {
+	It("returns workspace metadata for listed commits", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "a.md"), "# A\n")
@@ -216,7 +257,7 @@ var _ = Describe("git revision store", func() {
 		})))
 	})
 
-	It("records additional actors once while preserving the primary author", func() {
+	It("records additional actors once while preserving the primary author", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "a.md"), "# A\n")
@@ -251,7 +292,7 @@ var _ = Describe("git revision store", func() {
 		})))
 	})
 
-	It("stops commit iteration when the visitor declines to continue", func() {
+	It("stops commit iteration when the visitor declines to continue", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -275,7 +316,7 @@ var _ = Describe("git revision store", func() {
 		Expect(visited).To(Equal(1))
 	})
 
-	It("returns current content only for changed markdown files that still exist", func() {
+	It("returns current content only for changed markdown files that still exist", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
@@ -309,7 +350,7 @@ var _ = Describe("git revision store", func() {
 		Expect(contents).NotTo(HaveKey("unchanged.md"))
 	})
 
-	It("stores internal revisions without mutating a containing user git repository", func() {
+	It("stores internal revisions without mutating a containing user git repository", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		userRepoDir := filepath.Join(gitRevisionTempDir(), "user-repo")
 		rootDir := filepath.Join(userRepoDir, "wiki")
@@ -333,7 +374,7 @@ var _ = Describe("git revision store", func() {
 		Expect(os.Stat(filepath.Join(dataDir, ".leafwiki", "git"))).Error().NotTo(HaveOccurred())
 	})
 
-	It("preserves unrelated root gitdir files", func() {
+	It("preserves unrelated root gitdir files", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "page.md"), "# Page\n")
@@ -353,7 +394,7 @@ var _ = Describe("git revision store", func() {
 		Expect(os.ReadFile(gitFile)).To(Equal([]byte(gitFileContent)))
 	})
 
-	It("prunes legacy dot-directory markdown from new revision snapshots", func() {
+	It("prunes legacy dot-directory markdown from new revision snapshots", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "page.md"), "# Page\n")
@@ -399,7 +440,7 @@ var _ = Describe("git revision store", func() {
 		Expect(os.ReadFile(filepath.Join(rootDir, ".obsidian", "local.md"))).To(Equal([]byte("# Local\n")))
 	})
 
-	It("records deleted markdown files as removals in the revision snapshot", func() {
+	It("records deleted markdown files as removals in the revision snapshot", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "keep.md"), "# Keep\n")
@@ -428,7 +469,7 @@ var _ = Describe("git revision store", func() {
 		Expect(files).To(HaveKeyWithValue("keep.md", "# Keep\n"))
 	})
 
-	It("replaces the startup commit when metadata writeback is amended", func() {
+	It("replaces the startup commit when metadata writeback is amended", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "page.md"), "# Page\n")
@@ -461,7 +502,7 @@ var _ = Describe("git revision store", func() {
 		Expect(files).To(HaveKeyWithValue("page.md", "---\nleafwiki_id: page\n---\n# Page\n"))
 	})
 
-	It("restores managed markdown from a snapshot while preserving unmanaged files", func() {
+	It("restores managed markdown from a snapshot while preserving unmanaged files", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "one.md"), "# One A\n")
@@ -497,7 +538,7 @@ var _ = Describe("git revision store", func() {
 		Expect(files).To(HaveKeyWithValue("two.md", "# Two A\n"))
 	})
 
-	It("restores a document by writing historical content to its current path", func() {
+	It("restores a document by writing historical content to its current path", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "docs", "page.md"), "# Previous\n")
@@ -532,16 +573,16 @@ var _ = Describe("git revision store", func() {
 		Expect(files).To(HaveKeyWithValue("docs/page.md", "# Previous\n"))
 	})
 
-	It("classifies managed markdown paths by extension and hidden-name rules", func() {
-		Expect(IsManagedMarkdownRelPath("docs/page.md")).To(BeTrue())
-		Expect(IsManagedMarkdownRelPath("docs/Page.MD")).To(BeTrue())
-		Expect(IsManagedMarkdownRelPath(".obsidian/page.md")).To(BeFalse())
-		Expect(IsManagedMarkdownRelPath("docs/.draft.md")).To(BeFalse())
-		Expect(IsManagedMarkdownRelPath("docs/page.md.swp")).To(BeFalse())
-		Expect(IsManagedMarkdownRelPath("docs/image.png")).To(BeFalse())
+	It("classifies managed markdown paths by extension and hidden-name rules", Label("unit"), func() {
+		Expect("docs/page.md").To(matchManagedMarkdownPathClass(managedMarkdownRevisionPath))
+		Expect("docs/Page.MD").To(matchManagedMarkdownPathClass(managedMarkdownRevisionPath))
+		Expect(".obsidian/page.md").To(matchManagedMarkdownPathClass(ignoredHiddenDirectoryMarkdownPath))
+		Expect("docs/.draft.md").To(matchManagedMarkdownPathClass(ignoredHiddenFilenameMarkdownPath))
+		Expect("docs/page.md.swp").To(matchManagedMarkdownPathClass(ignoredSwapMarkdownPath))
+		Expect("docs/image.png").To(matchManagedMarkdownPathClass(ignoredNonMarkdownRevisionPath))
 	})
 
-	It("returns captured commit metadata and reports missing commits", func() {
+	It("returns captured commit metadata and reports missing commits", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
 		writeFile(filepath.Join(rootDir, "docs", "page.md"), "# Page\n")

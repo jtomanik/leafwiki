@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/go-git/go-billy/v6"
@@ -17,7 +18,6 @@ import (
 	gitstorage "github.com/go-git/go-git/v6/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -25,32 +25,83 @@ import (
 )
 
 func matchCreatedRevisionCommit(hash identity.CommitHash) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(commit *Commit) (bool, error) {
-		return commit != nil &&
-			commit.Created &&
-			commit.Hash == hash, nil
-	}).WithMessage("create a revision commit")
+	return WithTransform(commitRevisionOutcomeFor, Equal(commitRevisionOutcome{
+		State: revisionCommitCreated,
+		Hash:  hash,
+	}))
 }
 
 func matchCreatedRevisionCommitWithMarkdownPaths(paths ...string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(commit *Commit) (bool, error) {
-		if commit == nil || !commit.Created || commit.ChangedMarkdownCount != len(paths) {
-			return false, nil
-		}
-		return ConsistOf(paths).Match(commit.ChangedMarkdownPaths)
-	}).WithMessage("create a revision commit for changed markdown paths")
+	return WithTransform(commitRevisionPathOutcomeFor, Equal(commitRevisionPathOutcome{
+		State:                revisionCommitCreated,
+		ChangedMarkdownCount: len(paths),
+		ChangedMarkdownPaths: sortedGitRevisionStrings(paths),
+	}))
 }
 
 func matchReusedRevisionHead(hash identity.CommitHash) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(commit *Commit) (bool, error) {
-		return commit != nil &&
-			!commit.Created &&
-			commit.Hash == hash, nil
-	}).WithMessage("reuse the current revision HEAD")
+	return WithTransform(commitRevisionOutcomeFor, Equal(commitRevisionOutcome{
+		State: revisionCommitReusedHead,
+		Hash:  hash,
+	}))
+}
+
+type revisionCommitState string
+
+const (
+	revisionCommitMissing    revisionCommitState = "missing revision commit"
+	revisionCommitCreated    revisionCommitState = "created revision commit"
+	revisionCommitReusedHead revisionCommitState = "reused revision HEAD"
+)
+
+type commitRevisionOutcome struct {
+	State                revisionCommitState
+	Hash                 identity.CommitHash
+	ChangedMarkdownCount int
+	ChangedMarkdownPaths []string
+}
+
+type commitRevisionPathOutcome struct {
+	State                revisionCommitState
+	ChangedMarkdownCount int
+	ChangedMarkdownPaths []string
+}
+
+func commitRevisionOutcomeFor(commit *Commit) commitRevisionOutcome {
+	if commit == nil {
+		return commitRevisionOutcome{State: revisionCommitMissing}
+	}
+
+	state := revisionCommitReusedHead
+	if commit.Created {
+		state = revisionCommitCreated
+	}
+
+	return commitRevisionOutcome{
+		State:                state,
+		Hash:                 commit.Hash,
+		ChangedMarkdownCount: commit.ChangedMarkdownCount,
+		ChangedMarkdownPaths: sortedGitRevisionStrings(commit.ChangedMarkdownPaths),
+	}
+}
+
+func commitRevisionPathOutcomeFor(commit *Commit) commitRevisionPathOutcome {
+	outcome := commitRevisionOutcomeFor(commit)
+	return commitRevisionPathOutcome{
+		State:                outcome.State,
+		ChangedMarkdownCount: outcome.ChangedMarkdownCount,
+		ChangedMarkdownPaths: outcome.ChangedMarkdownPaths,
+	}
+}
+
+func sortedGitRevisionStrings(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
 }
 
 var _ = Describe("git revision edge behavior", func() {
-	It("handles helper defaults and parser fallbacks", func() {
+	It("handles helper defaults and parser fallbacks", Label("unit"), func() {
 		Expect(nonFilesystemInitStorage{}.Init()).To(Succeed())
 
 		target, err := gitDirFileTargetResult("not-a-gitdir", "/workspace")
@@ -93,7 +144,7 @@ var _ = Describe("git revision edge behavior", func() {
 		Expect(actors).To(Equal([]ActorID{"alice"}))
 	})
 
-	It("reports Open validation and dependency failures", func() {
+	It("reports Open validation and dependency failures", Label("unit"), func() {
 		_, err := Open(StoreOptions{})
 		Expect(err).To(MatchError(ErrDataDirRequired))
 
@@ -159,7 +210,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreCleanup()
 	})
 
-	It("cleans up only the internal root git file", func() {
+	It("cleans up only the internal root git file", Label("unit"), func() {
 		errStatFailed := errors.New("stat failed")
 		restoreLstat := setGitRevisionSeam(&gitRevisionLstat, func(string) (os.FileInfo, error) {
 			return nil, errStatFailed
@@ -203,7 +254,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreRemove()
 	})
 
-	It("reports commit fallback and dependency errors through seams", func() {
+	It("reports commit fallback and dependency errors through seams", Label("unit"), func() {
 		store := &Store{}
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -318,7 +369,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreWorktree()
 	})
 
-	It("reports index and tracked-file store errors", func() {
+	It("reports index and tracked-file store errors", Label("unit"), func() {
 		store := &Store{}
 		indexErr := errors.New("index failed")
 		restoreIndex := setGitRevisionSeam(&gitRevisionRepositoryIndex, func(*git.Repository) (*index.Index, error) {
@@ -423,7 +474,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreHead()
 	})
 
-	It("reports staging errors through markdown change seams", func() {
+	It("reports staging errors through markdown change seams", Label("unit"), func() {
 		store := &Store{rootDir: "/workspace"}
 
 		errCollectFailed := errors.New("collect failed")
@@ -504,7 +555,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreRead()
 	})
 
-	It("reports markdown path collection walk and relative-path errors", func() {
+	It("reports markdown path collection walk and relative-path errors", Label("unit"), func() {
 		walkErr := errors.New("walk failed")
 		restoreWalk := setGitRevisionSeam(&gitRevisionWalkDir, func(root string, fn fs.WalkDirFunc) error {
 			return fn(filepath.Join(root, "bad.md"), fakeDirEntry{name: "bad.md"}, walkErr)
@@ -527,7 +578,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreWalk()
 	})
 
-	It("reports canceled list, get, restore, and file read operations", func() {
+	It("reports canceled list, get, restore, and file read operations", Label("unit"), func() {
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()
 
@@ -589,7 +640,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreWrite()
 	})
 
-	It("reports commit iteration, changed-entry, restore, and file-content seam errors", func() {
+	It("reports commit iteration, changed-entry, restore, and file-content seam errors", Label("integration"), func() {
 		store := &Store{rootDir: gitRevisionTempDir()}
 
 		errLogFailed := errors.New("log failed")
@@ -941,7 +992,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreCommitObject()
 	})
 
-	It("reports parent lookup and file-content cancellation failures", func() {
+	It("reports parent lookup and file-content cancellation failures", Label("unit"), func() {
 		store := &Store{}
 		hash := identity.CommitHashFromString("1111111111111111111111111111111111111111")
 
