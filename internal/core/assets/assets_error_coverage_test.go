@@ -14,7 +14,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = Describe("asset service failure behavior", func() {
+var _ = Describe("asset service failure behavior", Label("unit"), func() {
 	It("panics when storage or assets directories cannot be created", func() {
 		storageBlocker := filepath.Join(tempAssetDir(), "storage-blocker")
 		Expect(os.WriteFile(storageBlocker, []byte("not a directory"), 0o600)).To(Succeed())

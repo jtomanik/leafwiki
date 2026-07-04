@@ -20,7 +20,7 @@ import (
 
 const testAssetMaxBytes shared.MaxBytes = 1024
 
-var _ = Describe("asset service behavior", func() {
+var _ = Describe("asset service behavior", Label("unit"), func() {
 	It("stores uploaded page assets and returns public asset paths", func() {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "lonely-page", ID: "a7b3"}
@@ -135,7 +135,7 @@ type invalidSaveNameCase struct {
 	wantCode     sharederrors.ErrorCode
 }
 
-var _ = DescribeTable("asset uploads reject invalid normalized filenames",
+var _ = DescribeTable("asset uploads reject invalid normalized filenames", Label("unit"),
 	func(tc invalidSaveNameCase) {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "upload-page", ID: "upload-page-id"}
@@ -156,7 +156,7 @@ var _ = DescribeTable("asset uploads reject invalid normalized filenames",
 	Entry("rejects parent-directory names", invalidSaveNameCase{originalName: "..", wantCode: ErrCodeAssetInvalidName}),
 )
 
-var _ = Describe("asset name validation guards", func() {
+var _ = Describe("asset name validation guards", Label("unit"), func() {
 	It("rejects read filenames that escape the page asset directory", func() {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
@@ -206,7 +206,7 @@ type assetNameCase struct {
 	filename tree.AssetName
 }
 
-var _ = DescribeTable("asset reads reject dot-component filenames",
+var _ = DescribeTable("asset reads reject dot-component filenames", Label("unit"),
 	func(tc assetNameCase) {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
@@ -221,7 +221,7 @@ var _ = DescribeTable("asset reads reject dot-component filenames",
 	Entry("rejects parent-directory names", assetNameCase{filename: assetName("..")}),
 )
 
-var _ = DescribeTable("asset deletes reject dot-component filenames",
+var _ = DescribeTable("asset deletes reject dot-component filenames", Label("unit"),
 	func(tc assetNameCase) {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
@@ -243,7 +243,7 @@ type renameDotNameCase struct {
 	newFilename string
 }
 
-var _ = DescribeTable("asset renames reject dot-component filenames",
+var _ = DescribeTable("asset renames reject dot-component filenames", Label("unit"),
 	func(tc renameDotNameCase) {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
@@ -261,7 +261,7 @@ var _ = DescribeTable("asset renames reject dot-component filenames",
 	Entry("rejects parent-directory target names", renameDotNameCase{oldFilename: "note.txt", newFilename: ".."}),
 )
 
-var _ = Describe("asset path and filename helpers", func() {
+var _ = Describe("asset path and filename helpers", Label("unit"), func() {
 	It("builds disk paths from Windows-style asset roots", func() {
 		Expect(strings.ReplaceAll(assetPageDiskPath(`C:\wiki\data\assets`, "a7b3"), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3`))
 		Expect(strings.ReplaceAll(assetFileDiskPath(`C:\wiki\data\assets\a7b3`, "my-image.png"), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3/my-image.png`))
@@ -275,7 +275,7 @@ var _ = Describe("asset path and filename helpers", func() {
 	})
 })
 
-var _ = DescribeTable("filename validation accepts safe asset names",
+var _ = DescribeTable("filename validation accepts safe asset names", Label("unit"),
 	func(tc assetNameCase) {
 		Expect(validateFilename(tc.filename)).To(Succeed())
 	},
@@ -285,7 +285,7 @@ var _ = DescribeTable("filename validation accepts safe asset names",
 	Entry("foo-bar.webp", assetNameCase{filename: assetName("foo-bar.webp")}),
 )
 
-var _ = DescribeTable("asset filename validation returns localized errors for empty, dot, and path names",
+var _ = DescribeTable("asset filename validation returns localized errors for empty, dot, and path names", Label("unit"),
 	func(tc invalidAssetOperationCase) {
 		_, err := validateAssetFilename(tc.filename)
 		Expect(err).To(matchLocalizedAssetCode(tc.wantCode))
@@ -299,7 +299,7 @@ var _ = DescribeTable("asset filename validation returns localized errors for em
 	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: assetName(`foo\bar.png`), wantCode: ErrCodeAssetInvalidName}),
 )
 
-var _ = DescribeTable("asset deletes reject path traversal filenames",
+var _ = DescribeTable("asset deletes reject path traversal filenames", Label("unit"),
 	func(tc invalidAssetOperationCase) {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "test-page", ID: "traversal-delete"}
@@ -319,7 +319,7 @@ var _ = DescribeTable("asset deletes reject path traversal filenames",
 	Entry("empty", invalidAssetOperationCase{filename: assetName(""), wantCode: ErrCodeAssetMissingName}),
 )
 
-var _ = DescribeTable("asset renames reject path traversal source filenames",
+var _ = DescribeTable("asset renames reject path traversal source filenames", Label("unit"),
 	func(tc invalidAssetOperationCase) {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: "test-page", ID: "traversal-rename"}
@@ -344,7 +344,7 @@ type invalidAssetOperationCase struct {
 	wantCode sharederrors.ErrorCode
 }
 
-var _ = Describe("asset service storage boundary behavior", func() {
+var _ = Describe("asset service storage boundary behavior", Label("unit"), func() {
 	It("copies regular files while skipping nested directories", func() {
 		tmp := tempAssetDir()
 		source := &tree.PageNode{Slug: "source", ID: "source-id"}
