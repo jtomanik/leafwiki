@@ -44,7 +44,7 @@ func gitRevisionActorIDStrings(ids []gitrevisions.ActorID) []string {
 // - Migration writeback is captured in revision history
 // - Migration write failure reports sync validation state without losing raw content
 
-var _ = Describe("workspace synchronization from markdown files", func() {
+var _ = Describe("workspace synchronization from markdown files", Label("integration"), func() {
 	It("imports direct markdown pages and reconstructs the tree", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -260,7 +260,7 @@ leafwiki_title: Page B
 	})
 })
 
-var _ = Describe("canonical markdown link migration", func() {
+var _ = Describe("canonical markdown link migration", Label("integration"), func() {
 	It("adds the configured root prefix to absolute markdown links without repeat revisions", func() {
 		dataDir := workspaceSyncTempDir()
 		repoRoot := workspaceSyncTempDir()
@@ -532,7 +532,7 @@ Fully populated legacy metadata.
 	})
 })
 
-var _ = Describe("canonical markdown migration rollback", func() {
+var _ = Describe("canonical markdown migration rollback", Label("integration"), func() {
 	It("restores earlier rewrites when a later file cannot be written", func() {
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
 		service := &Service{rootDir: rootDir}
@@ -671,7 +671,7 @@ leafwiki_title: Page B
 	})
 })
 
-var _ = Describe("workspace sync failure during canonical writeback", func() {
+var _ = Describe("workspace sync failure during canonical writeback", Label("integration"), func() {
 	It("reports rewrite failure before derived indexes rebuild", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -789,7 +789,7 @@ body
 	})
 })
 
-var _ = Describe("canonical link validation during workspace sync", func() {
+var _ = Describe("canonical link validation during workspace sync", Label("integration"), func() {
 	It("does not create another migration revision after links are canonical", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -918,7 +918,7 @@ leafwiki_title: Page A
 	})
 })
 
-var _ = Describe("ambiguous legacy markdown links during workspace sync", func() {
+var _ = Describe("ambiguous legacy markdown links during workspace sync", Label("integration"), func() {
 	It("keeps ambiguous extensionless links unchanged and reports an ambiguity issue", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -1033,7 +1033,7 @@ leafwiki_title: Sync Section
 	})
 })
 
-var _ = Describe("workspace sync changed markdown tracking", func() {
+var _ = Describe("workspace sync changed markdown tracking", Label("integration"), func() {
 	It("canonicalizes section trailing slashes without repeat revisions", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -1148,7 +1148,7 @@ page:
 	})
 })
 
-var _ = Describe("workspace sync startup and snapshot listing", func() {
+var _ = Describe("workspace sync startup and snapshot listing", Label("integration"), func() {
 	It("logs each startup phase as it runs", func() {
 		var logs bytes.Buffer
 		service, err := NewService(ServiceOptions{
@@ -1230,7 +1230,7 @@ var _ = Describe("workspace sync startup and snapshot listing", func() {
 	})
 })
 
-var _ = Describe("workspace sync status under snapshot listing", func() {
+var _ = Describe("workspace sync status under snapshot listing", Label("integration"), func() {
 	It("serves status while changed-path snapshot listing is blocked", func() {
 		store := &fakeRevisionStore{
 			capture: &gitrevisions.Commit{Hash: "sync-commit"},
@@ -1343,7 +1343,7 @@ leafwiki_title: Valid Page
 	})
 })
 
-var _ = Describe("workspace sync validation and revision metadata", func() {
+var _ = Describe("workspace sync validation and revision metadata", Label("integration"), func() {
 	It("reports duplicate canonical page IDs as structured validation issues", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -1482,7 +1482,7 @@ page:
 	})
 })
 
-var _ = Describe("page revision listing", func() {
+var _ = Describe("page revision listing", Label("integration"), func() {
 	It("paginates page commits and returns the next cursor for the following page", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
 			ID:    "page-a",
@@ -1693,7 +1693,7 @@ var _ = Describe("page revision listing", func() {
 	})
 })
 
-var _ = Describe("page revision historical matching", func() {
+var _ = Describe("page revision historical matching", Label("integration"), func() {
 	It("uses historical markdown metadata when current page metadata has changed", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
 			ID:    "page-1",
@@ -2050,7 +2050,7 @@ var _ = Describe("page revision historical matching", func() {
 	})
 })
 
-var _ = Describe("page revision store access", func() {
+var _ = Describe("page revision store access", Label("integration"), func() {
 	It("scans document history without loading full trees", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
 			ID:    "page-a",
@@ -2216,7 +2216,7 @@ var _ = Describe("page revision store access", func() {
 	})
 })
 
-var _ = Describe("document restore from workspace revisions", func() {
+var _ = Describe("document restore from workspace revisions", Label("integration"), func() {
 	It("restores pre-rename content to the current markdown path", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -2427,7 +2427,7 @@ var _ = Describe("document restore from workspace revisions", func() {
 	})
 })
 
-var _ = Describe("workspace restore revision capture and validation", func() {
+var _ = Describe("workspace restore revision capture and validation", Label("integration"), func() {
 	It("returns reconstruction errors with path-specific validation state", func() {
 		reconstructErr := errors.New(`duplicate leafwiki_id "page-a" in /workspace/page-a.md and /workspace/other.md`)
 		page := &tree.Page{PageNode: &tree.PageNode{
@@ -2578,7 +2578,7 @@ current body`)
 	})
 })
 
-var _ = Describe("workspace sync writeback and validation", func() {
+var _ = Describe("workspace sync writeback and validation", Label("integration"), func() {
 	It("captures metadata writeback as a new snapshot after the raw import commit", func() {
 		dataDir := workspaceSyncTempDir()
 		rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
@@ -2668,7 +2668,7 @@ var _ = Describe("workspace sync writeback and validation", func() {
 	})
 })
 
-var _ = Describe("workspace sync file watcher", func() {
+var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 	It("syncs markdown events and reports the processed path", func() {
 		fakeTree := &fakeTreeReconstructor{}
 		fakeStore := &fakeRevisionStore{
@@ -2851,7 +2851,7 @@ var _ = Describe("workspace sync file watcher", func() {
 	})
 })
 
-var _ = Describe("workspace sync path normalization", func() {
+var _ = Describe("workspace sync path normalization", Label("unit"), func() {
 	It("cleans and joins markdown paths without losing section filenames", func() {
 		Expect(cleanWorkspaceMarkdownPath(" /docs/section/index.md ")).To(Equal("docs/section/index.md"))
 		Expect(cleanWorkspaceMarkdownPath("./docs/page.md")).To(Equal("./docs/page.md"))

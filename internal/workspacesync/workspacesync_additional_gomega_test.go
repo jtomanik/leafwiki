@@ -35,7 +35,7 @@ var (
 
 var _ = Describe("workspace sync filesystem watcher and helper contracts", func() {
 	Describe("watcher adapter", func() {
-		It("constructs and closes a real filesystem watcher", func() {
+		It("constructs and closes a real filesystem watcher", Label("integration"), func() {
 			watcher, err := newFileWatcher(workspaceSyncTempDir())
 			Expect(err).To(Succeed())
 			Expect(watcher).NotTo(BeNil())
@@ -45,7 +45,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			closer.Close()
 		})
 
-		It("surfaces fswatcher construction failures", func() {
+		It("surfaces fswatcher construction failures", Label("integration"), func() {
 			previous := workspacesyncNewFSWatcher
 			DeferCleanup(func() { workspacesyncNewFSWatcher = previous })
 			workspacesyncNewFSWatcher = func(...fswatcher.WatcherOpt) (fswatcher.Watcher, error) {
@@ -58,7 +58,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(err).To(MatchError(errAdditionalFSWatcherFailed))
 		})
 
-		It("pumps events and dropped events until the wrapped watcher returns", func() {
+		It("pumps events and dropped events until the wrapped watcher returns", Label("unit"), func() {
 			wrapped := newFakeFSWatcher()
 			adapter := &fsWatcherAdapter{
 				watcher: wrapped,
@@ -92,7 +92,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(wrapped.closeCount).To(Equal(1))
 		})
 
-		It("stops pumping when the context is canceled", func() {
+		It("stops pumping when the context is canceled", Label("unit"), func() {
 			wrapped := newFakeFSWatcher()
 			adapter := &fsWatcherAdapter{
 				watcher: wrapped,
@@ -116,13 +116,13 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 	})
 
 	Describe("service helpers", func() {
-		It("returns disabled status and keeps startup logging disabled as a no-op", func() {
+		It("returns disabled status and keeps startup logging disabled as a no-op", Label("unit"), func() {
 			service, err := NewService(ServiceOptions{Enabled: false})
 			Expect(err).To(Succeed())
 
 			status, err := service.SyncNow(context.Background(), SyncRequest{})
 			Expect(err).To(Succeed())
-			Expect(status.Enabled).To(BeFalse())
+			Expect(status).To(matchDisabledWorkspaceSyncStatus())
 			Expect(service.StartWatcher(context.Background())).To(Succeed())
 			service.StopWatcher()
 			Expect(service.logStartupSyncStarted(false, SyncRequest{})).To(BeZero())
@@ -133,7 +133,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			service.logStartupPhaseFailed(false, "phase", time.Now(), errors.New("ignored"))
 		})
 
-		It("reports store construction failures when no store is injected", func() {
+		It("reports store construction failures when no store is injected", Label("integration"), func() {
 			blocker := filepath.Join(workspaceSyncTempDir(), "not-a-dir")
 			Expect(os.WriteFile(blocker, []byte("x"), 0o644)).To(Succeed())
 
@@ -153,7 +153,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			})))
 		})
 
-		It("updates watcher batch status for dropped events and sync errors", func() {
+		It("updates watcher batch status for dropped events and sync errors", Label("unit"), func() {
 			service := &Service{
 				enabled: true,
 				tree:    &fakeTreeReconstructor{},
@@ -180,7 +180,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(service.status.PendingEventCount).To(BeZero())
 		})
 
-		It("records changed markdown paths with trimming, dedupe, and history bounds", func() {
+		It("records changed markdown paths with trimming, dedupe, and history bounds", Label("unit"), func() {
 			service := &Service{}
 			paths := []string{" ", "a.md", "a.md"}
 			for i := 0; i < 25; i++ {
@@ -194,7 +194,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(service.status.RecentChangedMarkdownPaths).NotTo(ContainElement("a.md"))
 		})
 
-		It("merges validation errors without aliasing or duplicates", func() {
+		It("merges validation errors without aliasing or duplicates", Label("unit"), func() {
 			existing := []ValidationError{{Code: wikivalidation.IssueCodeBrokenLink, Path: "a", Message: "same"}}
 			next := []ValidationError{
 				{Code: wikivalidation.IssueCodeBrokenLink, Path: "a", Message: "same"},
@@ -209,7 +209,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			}))
 		})
 
-		It("detects metadata writeback requirements in captured markdown", func() {
+		It("detects metadata writeback requirements in captured markdown", Label("unit"), func() {
 			store := &fakeRevisionStore{changedContents: map[CommitHash]map[string]string{
 				"metadata": {
 					"notes.txt": "not markdown",
@@ -236,7 +236,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(err).To(MatchError(markdown.ErrMetadataParse))
 		})
 
-		It("derives current and historical markdown paths from source metadata and route fallbacks", func() {
+		It("derives current and historical markdown paths from source metadata and route fallbacks", Label("unit"), func() {
 			rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
 			Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(rootDir, "docs", "README.md"), []byte("# Readme\n"), 0o644)).To(Succeed())
@@ -283,7 +283,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			})))
 		})
 
-		It("extracts markdown paths from quoted error tokens without duplicates", func() {
+		It("extracts markdown paths from quoted error tokens without duplicates", Label("unit"), func() {
 			rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
 			message := "open path=" + filepath.Join(rootDir, "docs", "a.md") + ": failed file='docs/a.md' file=../outside.md bad=nope.txt"
 
@@ -291,7 +291,7 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(markdownPathsInError(rootDir, "no markdown here")).To(BeEmpty())
 		})
 
-		It("uses route path when validation issue source path is absent", func() {
+		It("uses route path when validation issue source path is absent", Label("unit"), func() {
 			issue := wikivalidationIssueForRoute("docs/page")
 
 			Expect(markdownValidationIssuePath(issue)).To(Equal("docs/page"))

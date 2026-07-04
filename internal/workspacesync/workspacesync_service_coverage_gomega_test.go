@@ -25,7 +25,7 @@ import (
 
 var errCanonicalMarkdownMigrationUnchanged = errors.New("canonical markdown migration did not change files")
 
-var _ = Describe("workspace sync deterministic service behavior", func() {
+var _ = Describe("workspace sync deterministic service behavior", Label("unit"), func() {
 	var ctx context.Context
 
 	BeforeEach(func() {

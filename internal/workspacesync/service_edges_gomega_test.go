@@ -28,7 +28,7 @@ var (
 	errWatcherFactoryFailed        = errors.New("watcher factory failed")
 )
 
-var _ = Describe("workspace sync service edges", func() {
+var _ = Describe("workspace sync service edges", Label("unit"), func() {
 	It("passes through actor IDs and validates enabled service dependencies", func() {
 		actorID := ActorIDFromUserID(tree.UserIDFromString(" actor-1 "))
 		expectedActorID := ActorIDFromUserID(tree.UserIDFromString("actor-1"))

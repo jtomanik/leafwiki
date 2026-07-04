@@ -1,9 +1,7 @@
 package workspacesync
 
 import (
-	"reflect"
-
-	"github.com/onsi/gomega/gcustom"
+	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/tree"
 )
@@ -16,36 +14,80 @@ func newFixturePageID[T ~string](raw T) tree.PageID {
 	return tree.NewPageIDUnchecked(raw)
 }
 
+type workspaceSyncMode string
+
+const (
+	workspaceSyncModeDisabled workspaceSyncMode = "disabled"
+	workspaceSyncModeEnabled  workspaceSyncMode = "enabled"
+)
+
+type workspaceWatcherOutcome string
+
+const (
+	workspaceWatcherUnavailable workspaceWatcherOutcome = "unavailable"
+	workspaceWatcherRunning     workspaceWatcherOutcome = "running"
+	workspaceWatcherStopped     workspaceWatcherOutcome = "stopped"
+)
+
+type workspaceSyncStatusObservation struct {
+	Mode                       workspaceSyncMode
+	Watcher                    workspaceWatcherOutcome
+	PendingEventCount          int
+	LastError                  string
+	RecentChangedMarkdownPaths []string
+}
+
+func observeWorkspaceSyncStatus(status SyncStatus) workspaceSyncStatusObservation {
+	mode := workspaceSyncModeDisabled
+	if status.Enabled {
+		mode = workspaceSyncModeEnabled
+	}
+
+	watcher := workspaceWatcherUnavailable
+	if status.WatcherEnabled {
+		watcher = workspaceWatcherStopped
+		if status.WatcherRunning {
+			watcher = workspaceWatcherRunning
+		}
+	}
+
+	return workspaceSyncStatusObservation{
+		Mode:                       mode,
+		Watcher:                    watcher,
+		PendingEventCount:          status.PendingEventCount,
+		LastError:                  status.LastError,
+		RecentChangedMarkdownPaths: status.RecentChangedMarkdownPaths,
+	}
+}
+
 func matchEnabledWorkspaceSyncStatus() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
-		return status.Enabled, nil
-	}).WithMessage("report enabled workspace sync status")
+	return WithTransform(observeWorkspaceSyncStatus, HaveField("Mode", Equal(workspaceSyncModeEnabled)))
+}
+
+func matchDisabledWorkspaceSyncStatus() types.GomegaMatcher {
+	return WithTransform(observeWorkspaceSyncStatus, HaveField("Mode", Equal(workspaceSyncModeDisabled)))
 }
 
 func matchWatcherFactoryFailureStatus() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
-		return status.WatcherEnabled &&
-			!status.WatcherRunning, nil
-	}).WithMessage("report watcher factory failure status")
+	return WithTransform(observeWorkspaceSyncStatus, SatisfyAll(
+		HaveField("Mode", Equal(workspaceSyncModeEnabled)),
+		HaveField("Watcher", Equal(workspaceWatcherStopped)),
+		HaveField("LastError", Equal(errWatcherFactoryFailed.Error())),
+	))
 }
 
 func matchRunningWatcherStatus() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
-		return status.WatcherEnabled && status.WatcherRunning, nil
-	}).WithMessage("report running workspace watcher")
+	return WithTransform(observeWorkspaceSyncStatus, HaveField("Watcher", Equal(workspaceWatcherRunning)))
 }
 
 func matchRunningWatcherWithRecentMarkdownPaths(paths ...string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
-		return status.WatcherEnabled &&
-			status.WatcherRunning &&
-			status.PendingEventCount == 0 &&
-			reflect.DeepEqual(status.RecentChangedMarkdownPaths, paths), nil
-	}).WithMessage("report running watcher after syncing markdown events")
+	return WithTransform(observeWorkspaceSyncStatus, SatisfyAll(
+		HaveField("Watcher", Equal(workspaceWatcherRunning)),
+		HaveField("PendingEventCount", BeZero()),
+		HaveField("RecentChangedMarkdownPaths", Equal(paths)),
+	))
 }
 
 func matchStoppedWatcherStatus() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
-		return status.WatcherEnabled && !status.WatcherRunning, nil
-	}).WithMessage("report stopped workspace watcher")
+	return WithTransform(observeWorkspaceSyncStatus, HaveField("Watcher", Equal(workspaceWatcherStopped)))
 }

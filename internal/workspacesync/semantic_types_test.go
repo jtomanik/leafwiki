@@ -6,7 +6,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 )
 
-var _ = Describe("workspace sync commit hash contracts", func() {
+var _ = Describe("workspace sync commit hash contracts", Label("unit"), func() {
 	It("keeps status snapshots and restore APIs typed by commit hash", func() {
 		var _ CommitHash = SyncStatus{}.LastCommitHash
 		var _ CommitHash = Snapshot{}.ID
