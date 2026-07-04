@@ -19,7 +19,7 @@ const (
 	insecureTransportRejected secureTransportOutcome = "insecure transport rejected"
 )
 
-var _ = Describe("RequireSecure", func() {
+var _ = Describe("secure transport requirement", Label("integration"), func() {
 	BeforeEach(func() {
 		gin.SetMode(gin.TestMode)
 	})
@@ -43,10 +43,10 @@ var _ = Describe("RequireSecure", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(outcome).To(Equal(secureTransportAccepted))
 		},
-		Entry("X-Forwarded-Proto HTTPS", http.Header{"X-Forwarded-Proto": []string{"HTTPS"}}),
-		Entry("X-Forwarded-Proto chain containing HTTPS", http.Header{"X-Forwarded-Proto": []string{"http, https"}}),
-		Entry("X-Forwarded-Ssl on", http.Header{"X-Forwarded-Ssl": []string{"on"}}),
-		Entry("Front-End-Https on", http.Header{"Front-End-Https": []string{"ON"}}),
+		Entry("accepts HTTPS from X-Forwarded-Proto", http.Header{"X-Forwarded-Proto": []string{"HTTPS"}}),
+		Entry("accepts HTTPS from an X-Forwarded-Proto chain", http.Header{"X-Forwarded-Proto": []string{"http, https"}}),
+		Entry("accepts HTTPS from X-Forwarded-Ssl", http.Header{"X-Forwarded-Ssl": []string{"on"}}),
+		Entry("accepts HTTPS from Front-End-Https", http.Header{"Front-End-Https": []string{"ON"}}),
 	)
 
 	It("allows insecure requests when configured", func() {
