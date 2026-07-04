@@ -29,6 +29,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	"github.com/perber/wiki/internal/importer"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
@@ -177,6 +178,71 @@ func createRouterTestInstanceWithAllowInsecure(w *wiki.Wiki, allowInsecure bool)
 	})
 }
 
+type csrfTokenTransport string
+
+const (
+	csrfTokenTransportHeader csrfTokenTransport = "header"
+	csrfTokenTransportCookie csrfTokenTransport = "cookie"
+)
+
+type authenticatedSessionCredentials struct {
+	Cookies       []*http.Cookie
+	CSRFToken     string
+	CSRFTransport csrfTokenTransport
+}
+
+func readAuthenticatedSessionCredentials(rec *httptest.ResponseRecorder) authenticatedSessionCredentials {
+	GinkgoHelper()
+
+	res := rec.Result()
+	wrapCloseWithErrorCheck(res.Body.Close)
+
+	credentials := authenticatedSessionCredentials{
+		Cookies: res.Cookies(),
+	}
+	if csrfToken := rec.Header().Get("X-CSRF-Token"); csrfToken != "" {
+		credentials.CSRFToken = csrfToken
+		credentials.CSRFTransport = csrfTokenTransportHeader
+		return credentials
+	}
+
+	for _, c := range credentials.Cookies {
+		if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
+			credentials.CSRFToken = c.Value
+			credentials.CSRFTransport = csrfTokenTransportCookie
+			return credentials
+		}
+	}
+
+	return credentials
+}
+
+func haveCookieNamed(names ...string) types.GomegaMatcher {
+	matchers := make([]types.GomegaMatcher, 0, len(names))
+	for _, name := range names {
+		matchers = append(matchers, Equal(name))
+	}
+	return ContainElement(HaveField("Name", SatisfyAny(matchers...)))
+}
+
+func haveAuthSessionCookies() types.GomegaMatcher {
+	return SatisfyAll(
+		haveCookieNamed("leafwiki_at", "__Host-leafwiki_at"),
+		haveCookieNamed("leafwiki_rt", "__Host-leafwiki_rt"),
+	)
+}
+
+func haveAuthenticatedSessionCredentials() types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("Cookies", haveAuthSessionCookies()),
+		HaveField("CSRFToken", Not(BeEmpty())),
+		HaveField("CSRFTransport", SatisfyAny(
+			Equal(csrfTokenTransportHeader),
+			Equal(csrfTokenTransportCookie),
+		)),
+	)
+}
+
 func authenticatedRequest(router http.Handler, method, url string, body *strings.Reader) *httptest.ResponseRecorder {
 	GinkgoHelper()
 
@@ -187,22 +253,8 @@ func authenticatedRequest(router http.Handler, method, url string, body *strings
 	router.ServeHTTP(loginRec, loginReq)
 	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
 
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close)
-
-	cookies := loginRes.Cookies()
-	Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
-
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
-			}
-		}
-	}
-	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+	credentials := readAuthenticatedSessionCredentials(loginRec)
+	Expect(credentials).To(haveAuthenticatedSessionCredentials())
 
 	// Perform authenticated request
 	if body == nil {
@@ -210,12 +262,12 @@ func authenticatedRequest(router http.Handler, method, url string, body *strings
 	}
 	req := httptest.NewRequest(method, url, body)
 	req.Header.Set("Content-Type", "application/json")
-	for _, cookie := range cookies {
+	for _, cookie := range credentials.Cookies {
 		req.AddCookie(cookie)
 	}
 
 	if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
-		req.Header.Set("X-CSRF-Token", csrfToken)
+		req.Header.Set("X-CSRF-Token", credentials.CSRFToken)
 	}
 
 	rec := httptest.NewRecorder()
@@ -237,22 +289,8 @@ func authenticatedRequestAs(router http.Handler, username, password, method, url
 	router.ServeHTTP(loginRec, loginReq)
 	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login as %s: %d - %s", username, loginRec.Code, loginRec.Body.String())
 
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close)
-
-	cookies := loginRes.Cookies()
-	Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
-
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
-			}
-		}
-	}
-	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+	credentials := readAuthenticatedSessionCredentials(loginRec)
+	Expect(credentials).To(haveAuthenticatedSessionCredentials())
 
 	// Perform authenticated request
 	var reqBody io.Reader
@@ -261,12 +299,12 @@ func authenticatedRequestAs(router http.Handler, username, password, method, url
 	}
 	req := httptest.NewRequest(method, url, reqBody)
 	req.Header.Set("Content-Type", "application/json")
-	for _, cookie := range cookies {
+	for _, cookie := range credentials.Cookies {
 		req.AddCookie(cookie)
 	}
 
 	if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
-		req.Header.Set("X-CSRF-Token", csrfToken)
+		req.Header.Set("X-CSRF-Token", credentials.CSRFToken)
 	}
 
 	rec := httptest.NewRecorder()
@@ -2045,27 +2083,13 @@ var _ = Describe("HTTP router", func() {
 		router.ServeHTTP(loginRec, loginReq)
 		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
 
-		loginRes := loginRec.Result()
-		wrapCloseWithErrorCheck(loginRes.Body.Close)
-
-		cookies := loginRes.Cookies()
-		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
-
-		csrfToken := loginRec.Header().Get("X-CSRF-Token")
-		if csrfToken == "" {
-			for _, c := range cookies {
-				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-					csrfToken = c.Value
-					break
-				}
-			}
-		}
-		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+		credentials := readAuthenticatedSessionCredentials(loginRec)
+		Expect(credentials).To(haveAuthenticatedSessionCredentials())
 
 		createReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &body)
 		createReq.Header.Set("Content-Type", writer.FormDataContentType())
-		createReq.Header.Set("X-CSRF-Token", csrfToken)
-		for _, cookie := range cookies {
+		createReq.Header.Set("X-CSRF-Token", credentials.CSRFToken)
+		for _, cookie := range credentials.Cookies {
 			createReq.AddCookie(cookie)
 		}
 
@@ -2075,8 +2099,8 @@ var _ = Describe("HTTP router", func() {
 
 		cancelReq := httptest.NewRequest(http.MethodDelete, "/api/import/plan", nil)
 		cancelReq.Header.Set("Content-Type", "application/json")
-		cancelReq.Header.Set("X-CSRF-Token", csrfToken)
-		for _, cookie := range cookies {
+		cancelReq.Header.Set("X-CSRF-Token", credentials.CSRFToken)
+		for _, cookie := range credentials.Cookies {
 			cancelReq.AddCookie(cookie)
 		}
 
@@ -2120,22 +2144,8 @@ var _ = Describe("HTTP router", func() {
 		router.ServeHTTP(loginRec, loginReq)
 		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
 
-		loginRes := loginRec.Result()
-		wrapCloseWithErrorCheck(loginRes.Body.Close)
-
-		cookies := loginRes.Cookies()
-		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
-
-		csrfToken := loginRec.Header().Get("X-CSRF-Token")
-		if csrfToken == "" {
-			for _, c := range cookies {
-				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-					csrfToken = c.Value
-					break
-				}
-			}
-		}
-		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+		credentials := readAuthenticatedSessionCredentials(loginRec)
+		Expect(credentials).To(haveAuthenticatedSessionCredentials())
 
 		var planBody bytes.Buffer
 		planWriter := multipart.NewWriter(&planBody)
@@ -2154,8 +2164,8 @@ var _ = Describe("HTTP router", func() {
 
 		planReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &planBody)
 		planReq.Header.Set("Content-Type", planWriter.FormDataContentType())
-		planReq.Header.Set("X-CSRF-Token", csrfToken)
-		for _, cookie := range cookies {
+		planReq.Header.Set("X-CSRF-Token", credentials.CSRFToken)
+		for _, cookie := range credentials.Cookies {
 			planReq.AddCookie(cookie)
 		}
 
@@ -2174,8 +2184,8 @@ var _ = Describe("HTTP router", func() {
 
 		execReq := httptest.NewRequest(http.MethodPost, "/api/import/execute", strings.NewReader(""))
 		execReq.Header.Set("Content-Type", "application/json")
-		execReq.Header.Set("X-CSRF-Token", csrfToken)
-		for _, cookie := range cookies {
+		execReq.Header.Set("X-CSRF-Token", credentials.CSRFToken)
+		for _, cookie := range credentials.Cookies {
 			execReq.AddCookie(cookie)
 		}
 
@@ -2208,7 +2218,7 @@ var _ = Describe("HTTP router", func() {
 
 		Eventually(func(g Gomega) {
 			statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
-			for _, cookie := range cookies {
+			for _, cookie := range credentials.Cookies {
 				statusReq.AddCookie(cookie)
 			}
 
@@ -2283,22 +2293,8 @@ var _ = Describe("HTTP router", func() {
 		router.ServeHTTP(loginRec, loginReq)
 		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Failed to login: %d - %s", loginRec.Code, loginRec.Body.String())
 
-		loginRes := loginRec.Result()
-		wrapCloseWithErrorCheck(loginRes.Body.Close)
-
-		cookies := loginRes.Cookies()
-		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
-
-		csrfToken := loginRec.Header().Get("X-CSRF-Token")
-		if csrfToken == "" {
-			for _, c := range cookies {
-				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-					csrfToken = c.Value
-					break
-				}
-			}
-		}
-		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+		credentials := readAuthenticatedSessionCredentials(loginRec)
+		Expect(credentials).To(haveAuthenticatedSessionCredentials())
 
 		var planBody bytes.Buffer
 		planWriter := multipart.NewWriter(&planBody)
@@ -2317,8 +2313,8 @@ var _ = Describe("HTTP router", func() {
 
 		planReq := httptest.NewRequest(http.MethodPost, "/api/import/plan", &planBody)
 		planReq.Header.Set("Content-Type", planWriter.FormDataContentType())
-		planReq.Header.Set("X-CSRF-Token", csrfToken)
-		for _, cookie := range cookies {
+		planReq.Header.Set("X-CSRF-Token", credentials.CSRFToken)
+		for _, cookie := range credentials.Cookies {
 			planReq.AddCookie(cookie)
 		}
 
@@ -2328,8 +2324,8 @@ var _ = Describe("HTTP router", func() {
 
 		execReq := httptest.NewRequest(http.MethodPost, "/api/import/execute", strings.NewReader(""))
 		execReq.Header.Set("Content-Type", "application/json")
-		execReq.Header.Set("X-CSRF-Token", csrfToken)
-		for _, cookie := range cookies {
+		execReq.Header.Set("X-CSRF-Token", credentials.CSRFToken)
+		for _, cookie := range credentials.Cookies {
 			execReq.AddCookie(cookie)
 		}
 
@@ -2352,14 +2348,15 @@ var _ = Describe("HTTP router", func() {
 				ImportedCount int `json:"imported_count"`
 				SkippedCount  int `json:"skipped_count"`
 				Items         []struct {
-					Error *string `json:"error"`
+					Action    importer.ExecutionAction `json:"action"`
+					ErrorCode importer.ImportErrorCode `json:"error_code"`
 				} `json:"items"`
 			} `json:"execution_result"`
 		}
 
 		Eventually(func(g Gomega) {
 			statusReq := httptest.NewRequest(http.MethodGet, "/api/import/plan", nil)
-			for _, cookie := range cookies {
+			for _, cookie := range credentials.Cookies {
 				statusReq.AddCookie(cookie)
 			}
 
@@ -2378,7 +2375,10 @@ var _ = Describe("HTTP router", func() {
 		Expect(completedResp.ExecutionResult).To(HaveValue(SatisfyAll(
 			HaveField("ImportedCount", BeZero()),
 			HaveField("SkippedCount", 1),
-			HaveField("Items", HaveExactElements(HaveField("Error", Not(BeNil())))),
+			HaveField("Items", HaveExactElements(SatisfyAll(
+				HaveField("Action", Equal(importer.ExecutionActionSkipped)),
+				HaveField("ErrorCode", Equal(importer.ImportErrorCodeTransformContentFailed)),
+			))),
 		)), "unexpected execution result: %#v", completedResp.ExecutionResult)
 
 	})
@@ -4038,12 +4038,7 @@ var _ = Describe("HTTP router", func() {
 		router.ServeHTTP(rec, req)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK for valid login, got %d", rec.Code)
 
-		res := rec.Result()
-		wrapCloseWithErrorCheck(res.Body.Close)
-
-		// Prüfen, ob Cookies gesetzt wurden
-		cookies := res.Cookies()
-		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies to be set on login")
+		Expect(readAuthenticatedSessionCredentials(rec)).To(haveAuthenticatedSessionCredentials())
 
 	})
 })
@@ -4092,28 +4087,15 @@ var _ = Describe("HTTP router", func() {
 		}
 		Expect(loginPayload.AccessTokenExpiresAt).To(BeNumerically(">", time.Now().Unix()), "Expected login response to include a future access token expiry, got %d", loginPayload.AccessTokenExpiresAt)
 
-		loginRes := loginRec.Result()
-		wrapCloseWithErrorCheck(loginRes.Body.Close)
-		cookies := loginRes.Cookies()
-		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies on login response, got none")
-
-		csrfToken := loginRec.Header().Get("X-CSRF-Token")
-		if csrfToken == "" {
-			for _, c := range cookies {
-				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-					csrfToken = c.Value
-					break
-				}
-			}
-		}
-		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+		credentials := readAuthenticatedSessionCredentials(loginRec)
+		Expect(credentials).To(haveAuthenticatedSessionCredentials())
 
 		// call refresh token endpoint with cookies from login
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh-token", nil)
-		for _, c := range cookies {
+		for _, c := range credentials.Cookies {
 			req.AddCookie(c)
 		}
-		req.Header.Set("X-CSRF-Token", csrfToken)
+		req.Header.Set("X-CSRF-Token", credentials.CSRFToken)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on refresh, got %d - %s", rec.Code, rec.Body.String())
@@ -4125,11 +4107,10 @@ var _ = Describe("HTTP router", func() {
 		}
 		Expect(refreshPayload.AccessTokenExpiresAt).To(BeNumerically(">", time.Now().Unix()), "Expected refresh response to include a future access token expiry, got %d", refreshPayload.AccessTokenExpiresAt)
 
-		// optional: check if new cookies are set
 		refreshRes := rec.Result()
 		wrapCloseWithErrorCheck(refreshRes.Body.Close)
 		newCookies := refreshRes.Cookies()
-		Expect(newCookies).NotTo(BeEmpty(), "Expected new auth cookies on refresh")
+		Expect(newCookies).To(haveAuthSessionCookies())
 
 	})
 })
@@ -4336,7 +4317,10 @@ var _ = Describe("HTTP router", func() {
 			err := json.Unmarshal(rec.Body.Bytes(), &users)
 			Expect(err).NotTo(HaveOccurred(), "Failed to decode response: %v", err)
 		}
-		Expect(users).NotTo(BeEmpty(), "Expected at least one user (admin), got none")
+		Expect(users).To(ContainElement(SatisfyAll(
+			HaveKeyWithValue("username", "admin"),
+			HaveKeyWithValue("role", "admin"),
+		)))
 
 	})
 })
@@ -4914,30 +4898,16 @@ var _ = Describe("HTTP router", func() {
 		router.ServeHTTP(loginRec, loginReq)
 		Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
 
-		loginRes := loginRec.Result()
-		wrapCloseWithErrorCheck(loginRes.Body.Close)
-
-		cookies := loginRes.Cookies()
-		Expect(cookies).NotTo(BeEmpty(), "Expected auth cookies after login, got none")
-
-		csrfToken := loginRec.Header().Get("X-CSRF-Token")
-		if csrfToken == "" {
-			for _, c := range cookies {
-				if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-					csrfToken = c.Value
-					break
-				}
-			}
-		}
-		Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
+		credentials := readAuthenticatedSessionCredentials(loginRec)
+		Expect(credentials).To(haveAuthenticatedSessionCredentials())
 
 		addCookies := func(req *http.Request) {
-			for _, c := range cookies {
+			for _, c := range credentials.Cookies {
 				req.AddCookie(c)
 			}
 
 			if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions {
-				req.Header.Set("X-CSRF-Token", csrfToken)
+				req.Header.Set("X-CSRF-Token", credentials.CSRFToken)
 			}
 		}
 
