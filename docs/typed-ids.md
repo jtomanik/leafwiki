@@ -122,14 +122,25 @@ of the API error contract while preserving typed validation in service code.
 
 ## Semantic Hygiene Checker
 
-Run the Go semantic-boundary checker before review:
+Run the local source-policy gate before review:
 
 ```sh
-rtk bash scripts/check-semantic-hygiene.sh
+rtk make lint
 ```
 
-The script runs `cmd/leafwiki-vet`, which currently contains the
-`internal/analysis/semantichygiene` analyzer. The analyzer checks for:
+The `make lint` target delegates to `scripts/golangci-lint.sh`, which builds or
+reuses the pinned custom `leafwiki-golangci-lint` binary and runs the root Go
+module plus `e2e-proxy`. The custom binary registers the
+`internal/analysis/semantichygiene` analyzer through the LeafWiki module plugin.
+
+`scripts/check-semantic-hygiene.sh` remains as a compatibility gate for review
+flows that need the full historical semantic policy surface. It runs the
+golangci-lint source-policy gate and then preserves the sibling
+`scripts/check-i18n-catalog.sh` catalog/non-Go policy checks until those can
+move into analyzer-backed checks without editing the analyzer tree in this
+slice.
+
+The semantic hygiene analyzer checks for:
 
 - Semantic values converted with `.String()` before internal calls,
   comparisons, or domain assignments.
@@ -256,9 +267,11 @@ Existing `data-testid` attributes remain for locating stable widgets. Semantic a
 
 ## Scan Guidance
 
-Use `rtk bash scripts/check-semantic-hygiene.sh` as the only semantic hygiene
-review command. The older `scripts/check-typed-id-oracles.sh` entrypoint exists
-only as a compatibility wrapper for this command.
+Use `rtk make lint` or `rtk bash scripts/golangci-lint.sh` as the authoritative
+local static source-policy command. `scripts/check-semantic-hygiene.sh` remains
+a compatibility wrapper for review flows that need the historical semantic
+hygiene plus i18n/catalog gate shape, and `scripts/check-typed-id-oracles.sh`
+continues to exist only as a compatibility wrapper for that path.
 
 When a machine-facing contract assertion is too dependent on visible copy,
 prefer a stable code, message ID, typed helper value, or semantic `data-*`

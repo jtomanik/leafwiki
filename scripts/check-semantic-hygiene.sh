@@ -4,19 +4,11 @@ set -euo pipefail
 echo "Running LeafWiki semantic hygiene analyzer..."
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
 
-(
-  cd "$tmpdir"
-  rtk go work init "$repo_root" "$repo_root/e2e-proxy"
-  GOWORK="$tmpdir/go.work" rtk go run "$repo_root/cmd/leafwiki-vet" \
-    "$repo_root/internal/..." \
-    "$repo_root/cmd/..." \
-    "$repo_root/e2e/..." \
-    "$repo_root/e2e-proxy/..."
-)
+rtk bash "$repo_root/scripts/golangci-lint.sh"
 
+# The catalog and non-Go i18n policy still live in this sibling gate until the
+# analyzer migration can happen without editing internal/analysis in this slice.
 rtk bash "$repo_root/scripts/check-i18n-catalog.sh"
 
 echo "Semantic hygiene analyzer passed."

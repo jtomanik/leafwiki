@@ -1,0 +1,26 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - ginkgolinter
+    - govet
+    - leafwiki
+  settings:
+    custom:
+      leafwiki:
+        type: module
+        description: LeafWiki semantic hygiene analyzer.
+        settings: {}
+    ginkgolinter:
+      allow-havelen-zero: true
+      forbid-focus-container: true
+      suppress-len-assertion: true
+      validate-async-intervals: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

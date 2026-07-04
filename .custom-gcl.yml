@@ -1,0 +1,7 @@
+version: v2.12.2
+name: leafwiki-golangci-lint
+destination: ./.cache/tools
+plugins:
+  - module: github.com/perber/wiki
+    import: github.com/perber/wiki/tools/golangci/leafwiki
+    path: .

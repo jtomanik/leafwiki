@@ -6,6 +6,26 @@ When in doubt, run the relevant script with `--help` or `--dry-run` first.
 
 ## Common Flows
 
+### Run The Local Static Source-Policy Gate
+
+Use this before review when you need the local Go/static source-policy gate.
+
+```bash
+make lint
+./scripts/golangci-lint.sh
+```
+
+The wrapper builds or reuses `.cache/tools/leafwiki-golangci-lint`, a pinned
+custom golangci-lint binary with the LeafWiki semantic-hygiene module plugin.
+It runs the root Go module and `e2e-proxy` as separate module targets using
+`.golangci.yml`.
+
+`scripts/check-semantic-hygiene.sh` is retained as a compatibility gate: it
+delegates the Go semantic-hygiene pass to `scripts/golangci-lint.sh`, then runs
+`scripts/check-i18n-catalog.sh`. The i18n/catalog script remains authoritative
+for catalog drift and non-Go i18n policy until that policy can move into an
+analyzer without weakening coverage.
+
 ### Install Local macOS Helpers
 
 Use this when you want the main LeafWiki server and MCP wrapper in the same local bin directory.
@@ -58,6 +78,7 @@ The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-leve
 | `install-all-macos.sh` | Build and install `leafwiki` plus `run.sh`. | `./scripts/install-all-macos.sh --install-dir "$HOME/.local/bin"` | Delegates to `install-macos.sh`, then installs the wrapper script. |
 | `install-macos.sh` | Build and install the main `leafwiki` executable from this checkout on macOS. | `./scripts/install-macos.sh` | Builds the UI, updates ignored frontend build output, builds the server with production embedding, and installs to `/usr/local/bin` by default. |
 | `run.sh` | Run native MCP STDIO or one agent hook invocation. | `./scripts/run.sh mcp --root-dir ./wiki` | Intended as an MCP client or user-managed hook command. Supports disabled-auth and API-key native STDIO. |
+| `golangci-lint.sh` | Run the local LeafWiki golangci-lint source-policy gate. | `./scripts/golangci-lint.sh` | Builds or reuses the pinned custom binary, then runs root and `e2e-proxy` modules. |
 | `changelog.sh` | Generate categorized release notes from commits between two tags. | `./scripts/changelog.sh v0.10.0 v0.11.0` | Writes `current_release_changelog.md` in the current working directory. Used by the release workflow. |
 | `test-install.sh` | Validate root `install.sh` configuration handling without performing a real system install. | `./scripts/test-install.sh` | Uses fake `systemctl`/`wget` and `LEAFWIKI_INSTALL_VALIDATE_ONLY=1`. This tests the Linux installer at repo root, not the macOS installer. |
 | `test-install-macos.sh` | Lightweight checks for `install-macos.sh`. | `./scripts/test-install-macos.sh` | Checks syntax, help text, and dry-run planning without installing. |
@@ -205,13 +226,14 @@ The script smoke tests are intentionally lightweight and do not require real ins
 ./scripts/test-install-macos.sh
 ./scripts/test-install-all-macos.sh
 ./scripts/test-run.sh
+./scripts/test-golangci-lint.sh
 ```
 
 Focused shell checks:
 
 ```bash
-bash -n scripts/install-macos.sh scripts/install-all-macos.sh scripts/run.sh
-bash -n scripts/test-install-macos.sh scripts/test-install-all-macos.sh scripts/test-run.sh
+bash -n scripts/install-macos.sh scripts/install-all-macos.sh scripts/run.sh scripts/golangci-lint.sh
+bash -n scripts/test-install-macos.sh scripts/test-install-all-macos.sh scripts/test-run.sh scripts/test-golangci-lint.sh
 ```
 
 Related Go and E2E checks:

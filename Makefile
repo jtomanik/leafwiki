@@ -26,6 +26,9 @@ clean:
 test:
 	go test ./...
 
+lint:
+	./scripts/golangci-lint.sh
+
 bench:
 	go test -bench=. -benchmem -benchtime=3s ./internal/links/... ./internal/core/revision/...
 
@@ -129,6 +132,7 @@ help:
 	@echo "  make release              – Cross-compile binaries for all platforms (via Docker)"
 	@echo "  make clean                – Clean all generated files"
 	@echo "  make test                 – Run all Go tests"
+	@echo "  make lint                 – Run the local LeafWiki golangci-lint gate"
 	@echo "  make bench                – Run Go benchmarks for links and revision"
 	@echo "  make run-e2e              – Run end-to-end tests (using Docker)"
 	@echo "  make run-proxy-e2e        – Run reverse-proxy auth E2E tests (Docker + nginx)"
