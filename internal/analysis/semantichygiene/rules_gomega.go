@@ -1200,7 +1200,7 @@ func callLaundersBooleanToStringState(ctx *analysisContext, call *ast.CallExpr) 
 			return true
 		}
 	}
-	return false
+	return testLocalBooleanStateHelperBranchesOnPredicate(ctx, call)
 }
 
 func testLocalBooleanStateHelperCall(ctx *analysisContext, call *ast.CallExpr) bool {
@@ -1218,6 +1218,86 @@ func testLocalBooleanStateHelperCall(ctx *analysisContext, call *ast.CallExpr) b
 	}
 	filename := ctx.filename(obj.Pos())
 	return isTestFile(filename) || isTestSupportFile(filename)
+}
+
+func testLocalBooleanStateHelperBranchesOnPredicate(ctx *analysisContext, call *ast.CallExpr) bool {
+	fn := testLocalBooleanStateHelperDecl(ctx, call)
+	if fn == nil || fn.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		ifStmt, ok := node.(*ast.IfStmt)
+		if !ok {
+			return true
+		}
+		if exprTreeContainsBoolCall(ctx, ifStmt.Cond) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func testLocalBooleanStateHelperDecl(ctx *analysisContext, call *ast.CallExpr) *ast.FuncDecl {
+	if !testLocalBooleanStateHelperCall(ctx, call) {
+		return nil
+	}
+	ident, ok := unparenExpr(call.Fun).(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	target := ctx.pass.TypesInfo.ObjectOf(ident)
+	if target == nil {
+		return nil
+	}
+	for _, file := range ctx.pass.Files {
+		var found *ast.FuncDecl
+		ast.Inspect(file, func(node ast.Node) bool {
+			if found != nil || node == nil {
+				return false
+			}
+			fn, ok := node.(*ast.FuncDecl)
+			if !ok || fn.Name == nil {
+				return true
+			}
+			if ctx.pass.TypesInfo.ObjectOf(fn.Name) == target {
+				found = fn
+				return false
+			}
+			return true
+		})
+		if found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func exprTreeContainsBoolCall(ctx *analysisContext, expr ast.Expr) bool {
+	found := false
+	ast.Inspect(unparenExpr(expr), func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if ok && isBoolType(ctx.pass.TypesInfo.TypeOf(call)) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func identIsCommaOKResult(ctx *analysisContext, ident *ast.Ident) bool {

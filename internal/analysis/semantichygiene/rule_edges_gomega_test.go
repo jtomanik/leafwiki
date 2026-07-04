@@ -1389,6 +1389,18 @@ func boolState(value bool) string {
 	}
 	return "false"
 }
+type daemonState string
+const (
+	daemonReady daemonState = "ready"
+	daemonStopped daemonState = "stopped"
+)
+func isDaemonReady(raw string) bool { return raw != "" }
+func daemonReadyStateFor(raw string) daemonState {
+	if isDaemonReady(raw) {
+		return daemonReady
+	}
+	return daemonStopped
+}
 
 func TestAgentPresence() {
 	_, ok := normalize()
@@ -1411,6 +1423,7 @@ func TestAgentPresence() {
 	parsed := true
 	parsedState := boolState(parsed)
 	Expect(parsedState).To(Equal("true"))
+	Expect(daemonReadyStateFor("raw")).To(Equal(daemonReady))
 
 	agentEnabled := true
 	Expect(agentEnabled).To(BeTrue())
@@ -1435,6 +1448,7 @@ func TestAgentPresence() {
 			})
 			calls := append(h.findCalls("To"), h.findCalls("foundState")...)
 			calls = append(calls, h.findCalls("boolState")...)
+			calls = append(calls, h.findCalls("daemonReadyStateFor")...)
 			for _, call := range calls {
 				checkGomegaSemanticMatcher(h.ctx, call)
 			}
@@ -1453,6 +1467,7 @@ func TestAgentPresence() {
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
