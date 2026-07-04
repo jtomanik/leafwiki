@@ -3,6 +3,7 @@ package localization
 import (
 	"embed"
 	"errors"
+	"fmt"
 	"io/fs"
 	"sync"
 	"testing/fstest"
@@ -57,11 +58,12 @@ var _ = Describe("English renderer", func() {
 	})
 
 	It("uses the fallback template when catalog data cannot render safely", func() {
-		rendered := English.Render("errors.page.version_conflict", safeFallbackTemplate, "page.md")
+		rendered := English.Render(messageIDPageVersionConflict, safeFallbackTemplate, "page.md")
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
 			"Message": Equal(safeFallbackRendered),
-			"Err":     HaveOccurred(),
+			"Missing": BeFalse(),
+			"Err":     matchTemplateDataMismatch(messageIDPageVersionConflict),
 		}))
 	})
 
@@ -149,7 +151,7 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
 			"Message": Equal(genericFallbackRendered),
 			"Missing": BeTrue(),
-			"Err":     HaveOccurred(),
+			"Err":     matchMissingCatalogMessage(fmt.Sprint(123)),
 		}))
 	})
 
@@ -171,19 +173,19 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 		}))
 	})
 
-	It("validateDefinitions rejects empty IDs", func() {
+	It("rejects registry definitions without a message ID", func() {
 		err := validateDefinitions([]Definition{{ID: " ", Default: registryDefaultValue}})
 
 		Expect(err).To(MatchError(ErrMessageDefinitionIDRequired))
 	})
 
-	It("validateDefinitions rejects empty defaults", func() {
+	It("rejects registry definitions without an English default", func() {
 		err := validateDefinitions([]Definition{{ID: "cli.test", Default: " "}})
 
 		Expect(err).To(MatchError(ErrMessageDefinitionDefaultMissing))
 	})
 
-	It("validateDefinitions accepts duplicate IDs with identical defaults", func() {
+	It("allows repeated message IDs when their English defaults match", func() {
 		err := validateDefinitions([]Definition{
 			{ID: "cli.test", Default: "Same"},
 			{ID: "cli.test", Default: "Same"},
@@ -368,6 +370,31 @@ func (fsys *sequentialCatalogFS) Open(name string) (fs.File, error) {
 func matchRenderResult(fields gstruct.Fields) types.GomegaMatcher {
 	GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchMissingCatalogMessage(id string) types.GomegaMatcher {
+	GinkgoHelper()
+	return WithTransform(func(err error) string {
+		var missingErr *i18n.MessageNotFoundErr
+		if !errors.As(err, &missingErr) {
+			return ""
+		}
+		return missingErr.MessageID
+	}, Equal(id))
+}
+
+func matchTemplateDataMismatch(id CatalogMessageID) types.GomegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		MatchError(ErrLocalizationTemplateDataMismatch),
+		WithTransform(func(err error) CatalogMessageID {
+			var mismatchErr *TemplateDataMismatchError
+			if !errors.As(err, &mismatchErr) {
+				return ""
+			}
+			return mismatchErr.MessageID
+		}, Equal(id)),
+	)
 }
 
 func matchCommittedCatalogMissingMessage(id CatalogMessageID) types.GomegaMatcher {

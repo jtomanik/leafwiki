@@ -16,6 +16,23 @@ type Result struct {
 	Err     error
 }
 
+var ErrLocalizationTemplateDataMismatch = errors.New("localization template data mismatch")
+
+type TemplateDataMismatchError struct {
+	MessageID CatalogMessageID
+}
+
+func (e *TemplateDataMismatchError) Error() string {
+	if e == nil {
+		return ErrLocalizationTemplateDataMismatch.Error()
+	}
+	return fmt.Sprintf("%s for %s", ErrLocalizationTemplateDataMismatch, e.MessageID)
+}
+
+func (e *TemplateDataMismatchError) Unwrap() error {
+	return ErrLocalizationTemplateDataMismatch
+}
+
 func (r *Renderer) Render(id any, defaultEnglish string, args ...string) Result {
 	messageID := messageIDString(id)
 	data := positionalTemplateData(args)
@@ -30,7 +47,7 @@ func (r *Renderer) Render(id any, defaultEnglish string, args ...string) Result 
 		return Result{Message: result}
 	}
 	if err == nil && strings.Contains(result, "<no value>") {
-		err = fmt.Errorf("localization template data mismatch for %s", messageID)
+		err = &TemplateDataMismatchError{MessageID: CatalogMessageID(messageID)}
 	}
 	var missingErr *i18n.MessageNotFoundErr
 	fallback := renderFallback(defaultEnglish, data)
