@@ -119,20 +119,573 @@ func MatchNativeStdioParseErrorFrame() types.GomegaMatcher {
 	}, ContainElement(-32700))
 }
 
+type cliErrorKind uint8
+
+const (
+	cliErrorUnknown cliErrorKind = iota
+	cliErrorPath
+	cliErrorJSONSyntax
+	cliErrorCleanNativeStdioClose
+	cliErrorInvalidWorkspacedUpstream
+	cliErrorInvalidWikidUpstream
+	cliErrorHeldRuntimeLock
+	cliErrorNetOp
+	cliErrorURL
+	cliErrorProcessExit
+)
+
+type cliErrorObservation struct {
+	Kind   cliErrorKind
+	Target error
+}
+
+func classifyCLIError(err error) cliErrorKind {
+	var pathErr *os.PathError
+	var syntaxErr *json.SyntaxError
+	var exitErr *exec.ExitError
+	switch {
+	case errors.As(err, &pathErr):
+		return cliErrorPath
+	case errors.As(err, &syntaxErr):
+		return cliErrorJSONSyntax
+	case isCleanNativeStdioClose(err):
+		return cliErrorCleanNativeStdioClose
+	case frontd.IsInvalidWorkspacedUpstream(err):
+		return cliErrorInvalidWorkspacedUpstream
+	case frontd.IsInvalidWikidUpstream(err):
+		return cliErrorInvalidWikidUpstream
+	case locking.IsLockHeld(err):
+		return cliErrorHeldRuntimeLock
+	case errors.As(err, &exitErr):
+		return cliErrorProcessExit
+	default:
+		return cliErrorUnknown
+	}
+}
+
+func classifyNetOpError(err error) cliErrorKind {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return cliErrorNetOp
+	}
+	return cliErrorUnknown
+}
+
+func classifyURLError(err error) cliErrorKind {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return cliErrorURL
+	}
+	return cliErrorUnknown
+}
+
+func observeCLIErrorTarget(err error, target error) cliErrorObservation {
+	observed := cliErrorObservation{Kind: classifyCLIError(err)}
+	if errors.Is(err, target) {
+		observed.Target = target
+	}
+	return observed
+}
+
+type daemonControlURLState uint8
+
+const (
+	daemonControlURLUntrusted daemonControlURLState = iota
+	daemonControlURLTrusted
+)
+
+func classifyDaemonControlURL(raw string) daemonControlURLState {
+	if isTrustedDaemonControlURL(raw) {
+		return daemonControlURLTrusted
+	}
+	return daemonControlURLUntrusted
+}
+
+type startupWorkspaceResolutionState uint8
+
+const (
+	startupWorkspaceResolutionOther startupWorkspaceResolutionState = iota
+	startupWorkspaceResolutionSubcommandSkip
+)
+
+func classifyStartupWorkspaceResolution(result startupWorkspaceResolution) startupWorkspaceResolutionState {
+	if result.Err == nil && result.Workspace == (wiki.Workspace{}) && !result.StartsRuntime {
+		return startupWorkspaceResolutionSubcommandSkip
+	}
+	return startupWorkspaceResolutionOther
+}
+
+type projectDaemonDescriptorReadState uint8
+
+const (
+	projectDaemonDescriptorReadOther projectDaemonDescriptorReadState = iota
+	projectDaemonDescriptorReadPreservedByLock
+	projectDaemonDescriptorReadAbsentHealth
+	projectDaemonDescriptorReadStaleHealth
+	projectDaemonDescriptorReadError
+	projectDaemonDescriptorHealthError
+	projectDaemonDescriptorReadUnhealthy
+)
+
+type projectDaemonDescriptorReadObservation struct {
+	State  projectDaemonDescriptorReadState
+	Target error
+}
+
+func classifyProjectDaemonDescriptorRead(result projectDaemonDescriptorReadResult) projectDaemonDescriptorReadObservation {
+	var syntaxErr *json.SyntaxError
+	switch {
+	case result.Descriptor == nil && !result.Healthy && errors.As(result.Err, &syntaxErr):
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadPreservedByLock}
+	case result.Descriptor == nil && !result.Healthy && result.Err == nil:
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadAbsentHealth}
+	case result.Descriptor != nil && result.Descriptor.SchemaVersion == 0 && !result.Healthy:
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadStaleHealth}
+	case result.Descriptor == nil && !result.Healthy && result.Err != nil:
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadError, Target: result.Err}
+	case result.Descriptor != nil && !result.Healthy && result.Err != nil:
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorHealthError, Target: result.Err}
+	case result.Descriptor != nil && !result.Healthy:
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadUnhealthy}
+	default:
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadOther}
+	}
+}
+
+func classifyProjectDaemonDescriptorReadTarget(result projectDaemonDescriptorReadResult, target error) projectDaemonDescriptorReadObservation {
+	observed := classifyProjectDaemonDescriptorRead(result)
+	if errors.Is(observed.Target, target) {
+		observed.Target = target
+	}
+	return observed
+}
+
+func observeAbsentProjectDaemonHealth(result projectDaemonDescriptorReadResult) projectDaemonDescriptorReadObservation {
+	if result.Descriptor == nil && !result.Healthy {
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadAbsentHealth}
+	}
+	return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadOther}
+}
+
+func observeStaleProjectDaemonHealth(result projectDaemonDescriptorReadResult) projectDaemonDescriptorReadObservation {
+	if result.Descriptor != nil && result.Descriptor.SchemaVersion == 0 && !result.Healthy {
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadStaleHealth}
+	}
+	return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadOther}
+}
+
+func observeUnhealthyProjectDaemonDescriptor(result projectDaemonDescriptorReadResult) projectDaemonDescriptorReadObservation {
+	if result.Descriptor != nil && !result.Healthy {
+		return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadUnhealthy}
+	}
+	return projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadOther}
+}
+
+type projectDaemonDescriptorHealthState uint8
+
+const (
+	projectDaemonDescriptorHealthUnknown projectDaemonDescriptorHealthState = iota
+	projectDaemonDescriptorHealthyState
+	projectDaemonDescriptorUnhealthyState
+)
+
+func classifyProjectDaemonDescriptorHealth(ctx context.Context, desc *projectdaemon.Descriptor) projectDaemonDescriptorHealthState {
+	healthy, err := projectDaemonDescriptorHealthy(ctx, desc)
+	switch {
+	case err == nil && healthy:
+		return projectDaemonDescriptorHealthyState
+	case err == nil && !healthy:
+		return projectDaemonDescriptorUnhealthyState
+	default:
+		return projectDaemonDescriptorHealthUnknown
+	}
+}
+
+type daemonHealthDescriptorState uint8
+
+const (
+	daemonHealthDescriptorUnknown daemonHealthDescriptorState = iota
+	daemonHealthMatchesExpectedDescriptor
+)
+
+func classifyDaemonHealthDescriptor(desc *projectdaemon.Descriptor, health *projectdaemon.DaemonHealth) daemonHealthDescriptorState {
+	if daemonHealthMatchesDescriptor(desc, health) {
+		return daemonHealthMatchesExpectedDescriptor
+	}
+	return daemonHealthDescriptorUnknown
+}
+
+type projectDaemonLockState uint8
+
+const (
+	projectDaemonLockUnknown projectDaemonLockState = iota
+	projectDaemonLocksAvailable
+	projectDaemonLocksHeldState
+	projectDaemonDataLockFreeRootLockHeldState
+	projectDaemonLockAvailabilityError
+	projectDaemonHeldLockProbeError
+	projectDaemonDataRootLockProbeError
+)
+
+type projectDaemonLockObservation struct {
+	State  projectDaemonLockState
+	Target error
+}
+
+func observeProjectDaemonLockAvailability(probe projectDaemonLockProbe) projectDaemonLockObservation {
+	available, err := projectDaemonLocksFree(probe.DataDir, probe.RootDir)
+	if available && err == nil {
+		return projectDaemonLockObservation{State: projectDaemonLocksAvailable}
+	}
+	if err != nil {
+		return projectDaemonLockObservation{State: projectDaemonLockAvailabilityError, Target: err}
+	}
+	return projectDaemonLockObservation{State: projectDaemonLockUnknown}
+}
+
+func observeProjectDaemonLockAvailabilityTarget(probe projectDaemonLockProbe, target error) projectDaemonLockObservation {
+	observed := observeProjectDaemonLockAvailability(probe)
+	if errors.Is(observed.Target, target) {
+		observed.Target = target
+	}
+	return observed
+}
+
+func observeProjectDaemonHeldLocks(probe projectDaemonLockProbe) projectDaemonLockObservation {
+	held, err := projectDaemonLocksHeld(probe.DataDir, probe.RootDir)
+	if held && err == nil {
+		return projectDaemonLockObservation{State: projectDaemonLocksHeldState}
+	}
+	if err != nil {
+		return projectDaemonLockObservation{State: projectDaemonHeldLockProbeError, Target: err}
+	}
+	return projectDaemonLockObservation{State: projectDaemonLockUnknown}
+}
+
+func observeProjectDaemonHeldLocksTarget(probe projectDaemonLockProbe, target error) projectDaemonLockObservation {
+	observed := observeProjectDaemonHeldLocks(probe)
+	if errors.Is(observed.Target, target) {
+		observed.Target = target
+	}
+	return observed
+}
+
+func observeProjectDaemonDataRootLocks(probe projectDaemonLockProbe) projectDaemonLockObservation {
+	disjoint, err := projectDaemonDataLockFreeRootLockHeld(probe.DataDir, probe.RootDir)
+	if disjoint && err == nil {
+		return projectDaemonLockObservation{State: projectDaemonDataLockFreeRootLockHeldState}
+	}
+	if err != nil {
+		return projectDaemonLockObservation{State: projectDaemonDataRootLockProbeError, Target: err}
+	}
+	return projectDaemonLockObservation{State: projectDaemonLockUnknown}
+}
+
+func observeProjectDaemonDataRootLocksTarget(probe projectDaemonLockProbe, target error) projectDaemonLockObservation {
+	observed := observeProjectDaemonDataRootLocks(probe)
+	if errors.Is(observed.Target, target) {
+		observed.Target = target
+	}
+	return observed
+}
+
+type wikidPrivateEndpointObservation struct {
+	Status int
+	Code   sharederrors.ErrorCode
+}
+
+type wikidPrivateEndpointStatusObservation struct {
+	Status int
+}
+
+func observeWikidPrivateEndpoint(err error) wikidPrivateEndpointObservation {
+	var endpointErr *wikidPrivateEndpointError
+	if !errors.As(err, &endpointErr) {
+		return wikidPrivateEndpointObservation{}
+	}
+	return wikidPrivateEndpointObservation{Status: endpointErr.StatusCode, Code: endpointErr.Code}
+}
+
+func observeWikidPrivateEndpointStatus(err error) wikidPrivateEndpointStatusObservation {
+	endpoint := observeWikidPrivateEndpoint(err)
+	return wikidPrivateEndpointStatusObservation{Status: endpoint.Status}
+}
+
+type federatedFirstContactState uint8
+
+const (
+	federatedFirstContactOther federatedFirstContactState = iota
+	federatedFirstContactHomeWorkspace
+	federatedFirstContactError
+)
+
+type federatedFirstContactObservation struct {
+	State  federatedFirstContactState
+	Target error
+}
+
+func classifyFederatedFirstContact(result federatedFirstContactResult) federatedFirstContactObservation {
+	switch {
+	case result.Err == nil &&
+		result.Home &&
+		result.Workspace.ID == wikid.HomeWorkspaceID &&
+		result.Workspace.DataDir != "" &&
+		result.Workspace.RootDir != "":
+		return federatedFirstContactObservation{State: federatedFirstContactHomeWorkspace}
+	case result.Workspace == (wikid.WorkspaceRecord{}) && !result.Home && result.Err != nil:
+		return federatedFirstContactObservation{State: federatedFirstContactError, Target: result.Err}
+	default:
+		return federatedFirstContactObservation{State: federatedFirstContactOther}
+	}
+}
+
+func classifyFederatedFirstContactTarget(result federatedFirstContactResult, target error) federatedFirstContactObservation {
+	observed := classifyFederatedFirstContact(result)
+	if errors.Is(observed.Target, target) {
+		observed.Target = target
+	}
+	return observed
+}
+
+type workspacePathState uint8
+
+const (
+	workspacePathMissing workspacePathState = iota
+	workspacePathDifferent
+	workspacePathSameFile
+)
+
+type workspacePathIdentity struct {
+	DataDir workspacePathState
+	RootDir workspacePathState
+}
+
+func observeFederatedWorkspacePathIdentity(workspace wikid.WorkspaceRecord, dataDir string, rootDir string) workspacePathIdentity {
+	return workspacePathIdentity{
+		DataDir: classifySameFilePath(workspace.DataDir, dataDir),
+		RootDir: classifySameFilePath(workspace.RootDir, rootDir),
+	}
+}
+
+func classifySameFilePath(got string, want string) workspacePathState {
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		return workspacePathMissing
+	}
+	wantInfo, err := os.Stat(want)
+	if err != nil {
+		return workspacePathMissing
+	}
+	if os.SameFile(gotInfo, wantInfo) {
+		return workspacePathSameFile
+	}
+	return workspacePathDifferent
+}
+
+type projectDaemonRoleVisibility uint8
+
+const (
+	projectDaemonRolePublic projectDaemonRoleVisibility = iota
+	projectDaemonRolePrivate
+)
+
+func classifyProjectDaemonRoleVisibility(role projectdaemon.RoleHealth) projectDaemonRoleVisibility {
+	if role.Private {
+		return projectDaemonRolePrivate
+	}
+	return projectDaemonRolePublic
+}
+
+type workspaceSyncConfigState uint8
+
+const (
+	workspaceSyncConfigDisabled workspaceSyncConfigState = iota
+	workspaceSyncConfigEnabled
+)
+
+func classifyWorkspaceSyncConfig(cfg projectdaemon.Config) workspaceSyncConfigState {
+	if cfg.EnableWorkspaceSync {
+		return workspaceSyncConfigEnabled
+	}
+	return workspaceSyncConfigDisabled
+}
+
+type federatedEnsureUnexpectedResultObservation struct {
+	WorkspaceID workspaceid.WorkspaceID
+	ResultType  string
+}
+
+func observeFederatedEnsureUnexpectedResult(err error) federatedEnsureUnexpectedResultObservation {
+	var unexpectedErr *federatedEnsureUnexpectedResultError
+	if !errors.As(err, &unexpectedErr) {
+		return federatedEnsureUnexpectedResultObservation{}
+	}
+	return federatedEnsureUnexpectedResultObservation{
+		WorkspaceID: unexpectedErr.WorkspaceID,
+		ResultType:  unexpectedErr.ResultType,
+	}
+}
+
+type projectDaemonControlStatusObservation struct {
+	Status int
+}
+
+func observeProjectDaemonControlStatus(err error) projectDaemonControlStatusObservation {
+	for _, status := range []int{
+		http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+	} {
+		if projectdaemon.IsControlStatus(err, status) {
+			return projectDaemonControlStatusObservation{Status: status}
+		}
+	}
+	return projectDaemonControlStatusObservation{}
+}
+
+type usageDispatchState uint8
+
+const (
+	usageDispatchContinuesStartup usageDispatchState = iota
+	usageDispatchPrintsUsage
+)
+
+func classifyUsageDispatch(args []string) usageDispatchState {
+	if shouldPrintUsage(args) {
+		return usageDispatchPrintsUsage
+	}
+	return usageDispatchContinuesStartup
+}
+
+type startupPositionalCommandState uint8
+
+const (
+	startupPositionalCommandContinues startupPositionalCommandState = iota
+	startupPositionalCommandHandledUsage
+)
+
+func classifyStartupPositionalCommand(args []string, daemon bool, command string) startupPositionalCommandState {
+	if handleStartupPositionalCommand(args, daemon, command) {
+		return startupPositionalCommandHandledUsage
+	}
+	return startupPositionalCommandContinues
+}
+
+type daemonLogFileState uint8
+
+const (
+	daemonLogFileAbsent daemonLogFileState = iota
+	daemonLogFileResolvedAbsolute
+	daemonLogFileRelativeFallback
+)
+
+type daemonLogFileObservation struct {
+	State daemonLogFileState
+	Path  string
+}
+
+func observeDaemonLogFileForConfig(cfg leafwikiRuntimeConfig, canonicalDataDir string) daemonLogFileObservation {
+	path := daemonLogFileForConfig(cfg, canonicalDataDir)
+	switch {
+	case path == "":
+		return daemonLogFileObservation{State: daemonLogFileAbsent}
+	case filepath.IsAbs(path):
+		return daemonLogFileObservation{State: daemonLogFileResolvedAbsolute, Path: path}
+	default:
+		return daemonLogFileObservation{State: daemonLogFileRelativeFallback, Path: path}
+	}
+}
+
+type loggingTargetState uint8
+
+const (
+	loggingTargetOther loggingTargetState = iota
+	loggingTargetFile
+)
+
+func classifyLoggingTarget(raw string) loggingTargetState {
+	if leaflogging.Target(raw) == leaflogging.TargetFile {
+		return loggingTargetFile
+	}
+	return loggingTargetOther
+}
+
+type wikidPrivateAuthFailureState uint8
+
+const (
+	wikidPrivateAuthFailureOther wikidPrivateAuthFailureState = iota
+	wikidPrivateAuthFailureRejected
+)
+
+func classifyWikidPrivateAuthFailure(err error) wikidPrivateAuthFailureState {
+	var endpointErr *wikidPrivateEndpointError
+	if !errors.As(err, &endpointErr) {
+		return wikidPrivateAuthFailureOther
+	}
+	if endpointErr.StatusCode == http.StatusUnauthorized ||
+		endpointErr.Code == errCodeStdioAuthAPIKeyInvalid ||
+		endpointErr.Code == errCodeMCPActorContextInvalid {
+		return wikidPrivateAuthFailureRejected
+	}
+	return wikidPrivateAuthFailureOther
+}
+
+type runtimeRoleProcessDoneState uint8
+
+const (
+	runtimeRoleProcessRunning runtimeRoleProcessDoneState = iota
+	runtimeRoleProcessDone
+)
+
+func classifyRuntimeRoleProcessDone(proc *internalRuntimeRoleProcess) runtimeRoleProcessDoneState {
+	if proc.isDone() {
+		return runtimeRoleProcessDone
+	}
+	return runtimeRoleProcessRunning
+}
+
+type sysProcAttrMutationState uint8
+
+const (
+	sysProcAttrMutationUnsupported sysProcAttrMutationState = iota
+	sysProcAttrMutationApplied
+)
+
+func observeSysProcAttrBool(attr *syscall.SysProcAttr, field string, value bool) sysProcAttrMutationState {
+	if setSysProcAttrBool(attr, field, value) {
+		return sysProcAttrMutationApplied
+	}
+	return sysProcAttrMutationUnsupported
+}
+
+type processLivenessState uint8
+
+const (
+	processNotRunning processLivenessState = iota
+	processRunning
+)
+
+func classifyProcessExists(pid int) processLivenessState {
+	if processExists(pid) {
+		return processRunning
+	}
+	return processNotRunning
+}
+
 func MatchPathError() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var pathErr *os.PathError
-		return errors.As(err, &pathErr), nil
-	}).WithMessage("match path error")
+	return WithTransform(classifyCLIError, Equal(cliErrorPath))
 }
 
 func MatchPathErrorIs(target error) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var pathErr *os.PathError
-		return errors.As(err, &pathErr) && errors.Is(err, target), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match path error\n{{format .Data 1}}", target)
+	return WithTransform(func(err error) cliErrorObservation {
+		return observeCLIErrorTarget(err, target)
+	}, Equal(cliErrorObservation{Kind: cliErrorPath, Target: target}))
 }
 
 func MatchSQLitePrimaryError(code int) types.GomegaMatcher {
@@ -170,9 +723,7 @@ func resolveStartupWorkspaceResult(flags *cliFlags, visited map[string]bool, arg
 func MatchStartupSubcommandWorkspaceSkip() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result startupWorkspaceResolution) (bool, error) {
-		return result.Err == nil && result.Workspace == (wiki.Workspace{}) && !result.StartsRuntime, nil
-	}).WithMessage("match startup subcommand workspace skip")
+	return WithTransform(classifyStartupWorkspaceResolution, Equal(startupWorkspaceResolutionSubcommandSkip))
 }
 
 type projectDaemonDescriptorReadResult struct {
@@ -189,177 +740,137 @@ func readHealthyProjectDaemonLockResult(ctx context.Context, descriptorPath stri
 func MatchProjectDaemonDescriptorPreservedByLock() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result projectDaemonDescriptorReadResult) (bool, error) {
-		var syntaxErr *json.SyntaxError
-		return result.Descriptor == nil && !result.Healthy && errors.As(result.Err, &syntaxErr), nil
-	}).WithMessage("match unreadable project daemon descriptor preserved by a held project lock")
+	return WithTransform(classifyProjectDaemonDescriptorRead, Equal(projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadPreservedByLock}))
 }
 
 func MatchWikidPrivateEndpointStatus(statusCode int) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var endpointErr *wikidPrivateEndpointError
-		return errors.As(err, &endpointErr) && endpointErr.StatusCode == statusCode, nil
-	}).WithMessage("match wikid private endpoint status")
+	return WithTransform(observeWikidPrivateEndpointStatus, Equal(wikidPrivateEndpointStatusObservation{Status: statusCode}))
 }
 
 func MatchJSONSyntaxError() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var syntaxErr *json.SyntaxError
-		return errors.As(err, &syntaxErr), nil
-	}).WithMessage("match JSON syntax error")
+	return WithTransform(classifyCLIError, Equal(cliErrorJSONSyntax))
 }
 
 func BeCleanNativeStdioClose() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return isCleanNativeStdioClose(err), nil
-	}).WithMessage("match clean native STDIO close")
+	return WithTransform(classifyCLIError, Equal(cliErrorCleanNativeStdioClose))
 }
 
 func BeTrustedDaemonControlURL() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(raw string) (bool, error) {
-		return isTrustedDaemonControlURL(raw), nil
-	}).WithMessage("match trusted daemon control URL")
+	return WithTransform(classifyDaemonControlURL, Equal(daemonControlURLTrusted))
 }
 
 func MatchDaemonHealthDescriptor(desc *projectdaemon.Descriptor) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(health *projectdaemon.DaemonHealth) (bool, error) {
-		return daemonHealthMatchesDescriptor(desc, health), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match daemon health descriptor\n{{format .Data 1}}", desc)
+	return WithTransform(func(health *projectdaemon.DaemonHealth) daemonHealthDescriptorState {
+		return classifyDaemonHealthDescriptor(desc, health)
+	}, Equal(daemonHealthMatchesExpectedDescriptor))
 }
 
 func BeHealthyProjectDaemonDescriptor(ctx context.Context) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(desc *projectdaemon.Descriptor) (bool, error) {
-		healthy, err := projectDaemonDescriptorHealthy(ctx, desc)
-		return err == nil && healthy, nil
-	}).WithMessage("match healthy project daemon descriptor")
+	return WithTransform(func(desc *projectdaemon.Descriptor) projectDaemonDescriptorHealthState {
+		return classifyProjectDaemonDescriptorHealth(ctx, desc)
+	}, Equal(projectDaemonDescriptorHealthyState))
 }
 
 func BeUnhealthyProjectDaemonDescriptor(ctx context.Context) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(desc *projectdaemon.Descriptor) (bool, error) {
-		healthy, err := projectDaemonDescriptorHealthy(ctx, desc)
-		return err == nil && !healthy, nil
-	}).WithMessage("match unhealthy project daemon descriptor")
+	return WithTransform(func(desc *projectdaemon.Descriptor) projectDaemonDescriptorHealthState {
+		return classifyProjectDaemonDescriptorHealth(ctx, desc)
+	}, Equal(projectDaemonDescriptorUnhealthyState))
 }
 
 func MatchInvalidWorkspacedUpstream() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return frontd.IsInvalidWorkspacedUpstream(err), nil
-	}).WithMessage("match invalid workspaced upstream")
+	return WithTransform(classifyCLIError, Equal(cliErrorInvalidWorkspacedUpstream))
 }
 
 func MatchInvalidWikidUpstream() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return frontd.IsInvalidWikidUpstream(err), nil
-	}).WithMessage("match invalid wikid upstream")
+	return WithTransform(classifyCLIError, Equal(cliErrorInvalidWikidUpstream))
 }
 
 func MatchHeldRuntimeLockError() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return locking.IsLockHeld(err), nil
-	}).WithMessage("match held runtime lock error")
+	return WithTransform(classifyCLIError, Equal(cliErrorHeldRuntimeLock))
 }
 
 func HaveAvailableProjectDaemonLocks() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(probe projectDaemonLockProbe) (bool, error) {
-		return projectDaemonLocksFree(probe.DataDir, probe.RootDir)
-	}).WithMessage("match available project daemon locks")
+	return WithTransform(observeProjectDaemonLockAvailability, Equal(projectDaemonLockObservation{State: projectDaemonLocksAvailable}))
 }
 
 func HaveHeldProjectDaemonLocks() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(probe projectDaemonLockProbe) (bool, error) {
-		return projectDaemonLocksHeld(probe.DataDir, probe.RootDir)
-	}).WithMessage("match held project daemon locks")
+	return WithTransform(observeProjectDaemonHeldLocks, Equal(projectDaemonLockObservation{State: projectDaemonLocksHeldState}))
 }
 
 func HaveFreeDataLockWithHeldRootLock() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(probe projectDaemonLockProbe) (bool, error) {
-		return projectDaemonDataLockFreeRootLockHeld(probe.DataDir, probe.RootDir)
-	}).WithMessage("match free data lock with held root lock")
+	return WithTransform(observeProjectDaemonDataRootLocks, Equal(projectDaemonLockObservation{State: projectDaemonDataLockFreeRootLockHeldState}))
 }
 
 func MatchProjectDaemonLockAvailabilityError(target error) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(probe projectDaemonLockProbe) (bool, error) {
-		available, err := projectDaemonLocksFree(probe.DataDir, probe.RootDir)
-		return !available && errors.Is(err, target), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon lock availability error\n{{format .Data 1}}", target)
+	return WithTransform(func(probe projectDaemonLockProbe) projectDaemonLockObservation {
+		return observeProjectDaemonLockAvailabilityTarget(probe, target)
+	}, Equal(projectDaemonLockObservation{State: projectDaemonLockAvailabilityError, Target: target}))
 }
 
 func MatchProjectDaemonHeldLockProbeError(target error) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(probe projectDaemonLockProbe) (bool, error) {
-		held, err := projectDaemonLocksHeld(probe.DataDir, probe.RootDir)
-		return !held && errors.Is(err, target), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon held-lock error\n{{format .Data 1}}", target)
+	return WithTransform(func(probe projectDaemonLockProbe) projectDaemonLockObservation {
+		return observeProjectDaemonHeldLocksTarget(probe, target)
+	}, Equal(projectDaemonLockObservation{State: projectDaemonHeldLockProbeError, Target: target}))
 }
 
 func MatchProjectDaemonDataRootLockProbeError(target error) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(probe projectDaemonLockProbe) (bool, error) {
-		disjoint, err := projectDaemonDataLockFreeRootLockHeld(probe.DataDir, probe.RootDir)
-		return !disjoint && errors.Is(err, target), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon data/root lock error\n{{format .Data 1}}", target)
+	return WithTransform(func(probe projectDaemonLockProbe) projectDaemonLockObservation {
+		return observeProjectDaemonDataRootLocksTarget(probe, target)
+	}, Equal(projectDaemonLockObservation{State: projectDaemonDataRootLockProbeError, Target: target}))
 }
 
 func MatchHomeFederatedFirstContact() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result federatedFirstContactResult) (bool, error) {
-		return result.Err == nil &&
-			result.Home &&
-			result.Workspace.ID == wikid.HomeWorkspaceID &&
-			result.Workspace.DataDir != "" &&
-			result.Workspace.RootDir != "", nil
-	}).WithMessage("match home workspace federated first contact")
+	return WithTransform(classifyFederatedFirstContact, Equal(federatedFirstContactObservation{State: federatedFirstContactHomeWorkspace}))
 }
 
 func MatchAbsentProjectDaemonHealth() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result projectDaemonDescriptorReadResult) (bool, error) {
-		return result.Descriptor == nil && !result.Healthy, nil
-	}).WithMessage("match absent project daemon health")
+	return WithTransform(observeAbsentProjectDaemonHealth, Equal(projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadAbsentHealth}))
 }
 
 func MatchStaleProjectDaemonHealth() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result projectDaemonDescriptorReadResult) (bool, error) {
-		return result.Descriptor != nil && result.Descriptor.SchemaVersion == 0 && !result.Healthy, nil
-	}).WithMessage("match stale project daemon health")
+	return WithTransform(observeStaleProjectDaemonHealth, Equal(projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadStaleHealth}))
 }
 
 func MatchProjectDaemonDescriptorReadError(target error) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result projectDaemonDescriptorReadResult) (bool, error) {
-		return result.Descriptor == nil && !result.Healthy && errors.Is(result.Err, target), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon health error\n{{format .Data 1}}", target)
+	return WithTransform(func(result projectDaemonDescriptorReadResult) projectDaemonDescriptorReadObservation {
+		return classifyProjectDaemonDescriptorReadTarget(result, target)
+	}, Equal(projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadError, Target: target}))
 }
 
 func projectDaemonDescriptorHealthResult(ctx context.Context, desc *projectdaemon.Descriptor) projectDaemonDescriptorReadResult {
@@ -370,26 +881,23 @@ func projectDaemonDescriptorHealthResult(ctx context.Context, desc *projectdaemo
 func MatchProjectDaemonDescriptorHealthError(target error) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result projectDaemonDescriptorReadResult) (bool, error) {
-		return result.Descriptor != nil && !result.Healthy && errors.Is(result.Err, target), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon descriptor health error\n{{format .Data 1}}", target)
+	return WithTransform(func(result projectDaemonDescriptorReadResult) projectDaemonDescriptorReadObservation {
+		return classifyProjectDaemonDescriptorReadTarget(result, target)
+	}, Equal(projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorHealthError, Target: target}))
 }
 
 func MatchUnreachableWorkspacedPrivateMCP() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(desc *projectdaemon.Descriptor) (bool, error) {
-		healthy, err := projectDaemonDescriptorHealthy(context.Background(), desc)
-		return !healthy && err == nil, nil
-	}).WithMessage("match unreachable workspaced private MCP descriptor")
+	return WithTransform(func(desc *projectdaemon.Descriptor) projectDaemonDescriptorHealthState {
+		return classifyProjectDaemonDescriptorHealth(context.Background(), desc)
+	}, Equal(projectDaemonDescriptorUnhealthyState))
 }
 
 func MatchUnhealthyProjectDaemonDescriptor() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result projectDaemonDescriptorReadResult) (bool, error) {
-		return result.Descriptor != nil && !result.Healthy, nil
-	}).WithMessage("match unhealthy project daemon descriptor")
+	return WithTransform(observeUnhealthyProjectDaemonDescriptor, Equal(projectDaemonDescriptorReadObservation{State: projectDaemonDescriptorReadUnhealthy}))
 }
 
 type federatedFirstContactResult struct {
@@ -406,9 +914,9 @@ func registerFederatedFirstContactResult(layout wikid.Layout, cfg projectdaemon.
 func MatchFederatedFirstContactError(target error) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(result federatedFirstContactResult) (bool, error) {
-		return result.Workspace == (wikid.WorkspaceRecord{}) && !result.Home && errors.Is(result.Err, target), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match federated first-contact error\n{{format .Data 1}}", target)
+	return WithTransform(func(result federatedFirstContactResult) federatedFirstContactObservation {
+		return classifyFederatedFirstContactTarget(result, target)
+	}, Equal(federatedFirstContactObservation{State: federatedFirstContactError, Target: target}))
 }
 
 func MatchFederatedRegisteredWorkspace(fields gstruct.Fields) types.GomegaMatcher {
@@ -425,29 +933,9 @@ func MatchFederatedRegisteredWorkspace(fields gstruct.Fields) types.GomegaMatche
 func MatchFederatedWorkspacePathIdentity(dataDir string, rootDir string) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	expected := struct {
-		DataDir string
-		RootDir string
-	}{DataDir: dataDir, RootDir: rootDir}
-	return gcustom.MakeMatcher(func(workspace wikid.WorkspaceRecord) (bool, error) {
-		dataInfo, err := os.Stat(workspace.DataDir)
-		if err != nil {
-			return false, nil
-		}
-		wantDataInfo, err := os.Stat(dataDir)
-		if err != nil {
-			return false, nil
-		}
-		rootInfo, err := os.Stat(workspace.RootDir)
-		if err != nil {
-			return false, nil
-		}
-		wantRootInfo, err := os.Stat(rootDir)
-		if err != nil {
-			return false, nil
-		}
-		return os.SameFile(dataInfo, wantDataInfo) && os.SameFile(rootInfo, wantRootInfo), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match federated workspace path identity\n{{format .Data 1}}", expected)
+	return WithTransform(func(workspace wikid.WorkspaceRecord) workspacePathIdentity {
+		return observeFederatedWorkspacePathIdentity(workspace, dataDir, rootDir)
+	}, Equal(workspacePathIdentity{DataDir: workspacePathSameFile, RootDir: workspacePathSameFile}))
 }
 
 func MatchProjectDaemonRoleHealth(name projectdaemon.RoleName, state projectdaemon.RoleState, fields gstruct.Fields) types.GomegaMatcher {
@@ -464,84 +952,53 @@ func MatchProjectDaemonRoleHealth(name projectdaemon.RoleName, state projectdaem
 func MatchPrivateProjectDaemonRoleHealth(name projectdaemon.RoleName, state projectdaemon.RoleState, fields gstruct.Fields) types.GomegaMatcher {
 	return SatisfyAll(
 		MatchProjectDaemonRoleHealth(name, state, fields),
-		gcustom.MakeMatcher(func(role projectdaemon.RoleHealth) (bool, error) {
-			return role.Private, nil
-		}).WithMessage("mark project daemon role as private"),
+		WithTransform(classifyProjectDaemonRoleVisibility, Equal(projectDaemonRolePrivate)),
 	)
 }
 
 func MatchWorkspaceSyncEnabledDaemonConfig(fields gstruct.Fields) types.GomegaMatcher {
 	return SatisfyAll(
 		gstruct.MatchFields(gstruct.IgnoreExtras, fields),
-		gcustom.MakeMatcher(func(cfg projectdaemon.Config) (bool, error) {
-			return cfg.EnableWorkspaceSync, nil
-		}).WithMessage("enable workspace sync in daemon config"),
+		WithTransform(classifyWorkspaceSyncConfig, Equal(workspaceSyncConfigEnabled)),
 	)
 }
 
 func MatchFederatedEnsureUnexpectedResult(workspaceID workspaceid.WorkspaceID, resultType string) types.GomegaMatcher {
-	expected := struct {
-		WorkspaceID workspaceid.WorkspaceID
-		ResultType  string
-	}{WorkspaceID: workspaceID, ResultType: resultType}
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var unexpectedErr *federatedEnsureUnexpectedResultError
-		if !errors.As(err, &unexpectedErr) {
-			return false, nil
-		}
-		return unexpectedErr.WorkspaceID == workspaceID && unexpectedErr.ResultType == resultType, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match federated ensure unexpected result\n{{format .Data 1}}", expected)
+	expected := federatedEnsureUnexpectedResultObservation{
+		WorkspaceID: workspaceID,
+		ResultType:  resultType,
+	}
+	return WithTransform(observeFederatedEnsureUnexpectedResult, Equal(expected))
 }
 
 func MatchProjectDaemonControlStatus(status int) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return projectdaemon.IsControlStatus(err, status), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon control status\n{{format .Data 1}}", status)
+	return WithTransform(observeProjectDaemonControlStatus, Equal(projectDaemonControlStatusObservation{Status: status}))
 }
 
 func MatchNetOpError() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var opErr *net.OpError
-		return errors.As(err, &opErr), nil
-	}).WithMessage("match net operation error")
+	return WithTransform(classifyNetOpError, Equal(cliErrorNetOp))
 }
 
 func MatchURLError() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var urlErr *url.Error
-		return errors.As(err, &urlErr), nil
-	}).WithMessage("match URL error")
+	return WithTransform(classifyURLError, Equal(cliErrorURL))
 }
 
 func MatchProcessExitError() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var exitErr *exec.ExitError
-		return errors.As(err, &exitErr), nil
-	}).WithMessage("match helper process exit error")
+	return WithTransform(classifyCLIError, Equal(cliErrorProcessExit))
 }
 
 func MatchWikidPrivateEndpoint(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	expected := struct {
-		Status int
-		Code   sharederrors.ErrorCode
-	}{Status: status, Code: code}
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var endpointErr *wikidPrivateEndpointError
-		if !errors.As(err, &endpointErr) {
-			return false, nil
-		}
-		return endpointErr.StatusCode == status && endpointErr.Code == code, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match wikid private endpoint\n{{format .Data 1}}", expected)
+	return WithTransform(observeWikidPrivateEndpoint, Equal(wikidPrivateEndpointObservation{Status: status, Code: code}))
 }
 
 func waitForLeafwikiContextCancellation(ctx context.Context) error {
@@ -652,14 +1109,14 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 	})
 
 	ginkgo.It("recognizes help commands before full startup dispatch", ginkgo.Label("unit"), func() {
-		Expect(shouldPrintUsage([]string{"help"})).To(BeTrue())
-		Expect(shouldPrintUsage([]string{"--help"})).To(BeTrue())
-		Expect(shouldPrintUsage([]string{"daemon"})).To(BeFalse())
+		Expect(classifyUsageDispatch([]string{"help"})).To(Equal(usageDispatchPrintsUsage))
+		Expect(classifyUsageDispatch([]string{"--help"})).To(Equal(usageDispatchPrintsUsage))
+		Expect(classifyUsageDispatch([]string{"daemon"})).To(Equal(usageDispatchContinuesStartup))
 	})
 
 	ginkgo.It("handles startup help positional commands without launching runtime work", ginkgo.Label("unit"), func() {
 		output := captureLeafwikiStdout(func() {
-			Expect(handleStartupPositionalCommand([]string{"help"}, false, "")).To(BeTrue())
+			Expect(classifyStartupPositionalCommand([]string{"help"}, false, "")).To(Equal(startupPositionalCommandHandledUsage))
 		})
 
 		Expect(output).To(ContainSubstring("Usage: leafwiki [command]"))
@@ -684,7 +1141,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(*flags.rootDir).To(Equal(filepath.Join(dataDir, "root")))
 		Expect(*flags.host).To(Equal("127.0.0.1"))
 		Expect(*flags.port).To(Equal("8080"))
-		Expect(*flags.logTarget).To(Equal("file"))
+		Expect(classifyLoggingTarget(*flags.logTarget)).To(Equal(loggingTargetFile))
 		Expect(visited).To(HaveKey("log-file"))
 	})
 
@@ -1079,12 +1536,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(errRelativePathOutsideBase))
 
 		canonicalDataDir := filepath.Join(leafwikiTempDir(), "canonical")
-		Expect(daemonLogFileForConfig(leafwikiRuntimeConfig{}, canonicalDataDir)).To(BeEmpty())
+		Expect(observeDaemonLogFileForConfig(leafwikiRuntimeConfig{}, canonicalDataDir)).To(Equal(daemonLogFileObservation{State: daemonLogFileAbsent}))
 		cfg.Workspace.DataDir = filepath.Join(leafwikiTempDir(), "original")
 		cfg.Logging = leaflogging.Config{Target: leaflogging.TargetFile, FilePath: filepath.Join(canonicalDataDir, ".leafwiki", "logs", "leafwiki.log")}
-		Expect(daemonLogFileForConfig(cfg, canonicalDataDir)).To(Equal(filepath.Clean(cfg.Logging.FilePath)))
+		Expect(observeDaemonLogFileForConfig(cfg, canonicalDataDir)).To(Equal(daemonLogFileObservation{State: daemonLogFileResolvedAbsolute, Path: filepath.Clean(cfg.Logging.FilePath)}))
 		cfg.Logging.FilePath = filepath.Join(leafwikiTempDir(), "external.log")
-		Expect(daemonLogFileForConfig(cfg, canonicalDataDir)).To(Equal(filepath.Clean(cfg.Logging.FilePath)))
+		Expect(observeDaemonLogFileForConfig(cfg, canonicalDataDir)).To(Equal(daemonLogFileObservation{State: daemonLogFileResolvedAbsolute, Path: filepath.Clean(cfg.Logging.FilePath)}))
 	})
 
 	ginkgo.It("handles runtime role lookup, HTTP tokens, and response encoding errors", ginkgo.Label("unit"), func() {
@@ -1388,7 +1845,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		err = callWikidPrivateEndpoint(context.Background(), privateServer.URL, "daemon-token", "/structured-error", nil, nil)
 		Expect(err).To(MatchWikidPrivateEndpointStatus(http.StatusForbidden))
-		Expect(isWikidPrivateAuthFailure(err)).To(BeTrue())
+		Expect(classifyWikidPrivateAuthFailure(err)).To(Equal(wikidPrivateAuthFailureRejected))
 		var endpointErr *wikidPrivateEndpointError
 		Expect(err).To(Satisfy(func(err error) bool {
 			return errors.As(err, &endpointErr)
@@ -1396,8 +1853,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(endpointErr).To(testmatchers.HaveStructuredError(errCodeStdioAuthAPIKeyInvalid, sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyInvalid)))
 		Expect((*wikidPrivateEndpointError)(nil).Error()).To(BeEmpty())
 		Expect((&wikidPrivateEndpointError{Path: "/empty", StatusCode: 499}).StatusCode).To(Equal(499))
-		Expect(isWikidPrivateAuthFailure(errors.New("plain"))).To(BeFalse())
-		Expect(isWikidPrivateAuthFailure(&wikidPrivateEndpointError{StatusCode: http.StatusInternalServerError})).To(BeFalse())
+		Expect(classifyWikidPrivateAuthFailure(errors.New("plain"))).To(Equal(wikidPrivateAuthFailureOther))
+		Expect(classifyWikidPrivateAuthFailure(&wikidPrivateEndpointError{StatusCode: http.StatusInternalServerError})).To(Equal(wikidPrivateAuthFailureOther))
 
 		_, err = wikidMCPTokenVerifier(privateServer.URL, "daemon-token")(context.Background(), "edge-token", httptest.NewRequest(http.MethodGet, "/mcp", nil))
 		Expect(err).NotTo(HaveOccurred())
@@ -1616,8 +2073,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		logPath := filepath.Join(dataDir, "startup.log")
 		logStartupValidationFailure(leaflogging.Config{Target: leaflogging.TargetStderr}, "ignored")
-		logStartupValidationFailure(leaflogging.Config{Target: leaflogging.TargetFile, FilePath: logPath}, "startup failed")
-		Expect(os.ReadFile(logPath)).To(ContainSubstring("startup failed"))
+		logStartupValidationFailure(leaflogging.Config{Target: leaflogging.TargetFile, FilePath: logPath}, localization.MessageIDCLIErrorLeafWikiStartupFailed)
+		Expect(readJSONLogEntries(logPath)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)))
 		parentFile := filepath.Join(leafwikiTempDir(), "not-a-dir")
 		Expect(os.WriteFile(parentFile, []byte("file"), 0o600)).To(Succeed())
 		logStartupValidationFailure(leaflogging.Config{Target: leaflogging.TargetFile, FilePath: filepath.Join(parentFile, "startup.log")}, "ignored")
@@ -2113,7 +2570,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		Expect((*wikidFrontdRuntime)(nil).stop(context.Background())).To(Succeed())
 		Expect((*internalRuntimeRoleProcess)(nil).wait()).To(Succeed())
-		Expect((*internalRuntimeRoleProcess)(nil).isDone()).To(BeTrue())
+		Expect(classifyRuntimeRoleProcessDone((*internalRuntimeRoleProcess)(nil))).To(Equal(runtimeRoleProcessDone))
 		Expect((*internalRuntimeRoleProcess)(nil).stop(context.Background())).To(Succeed())
 
 		done := make(chan error, 1)
@@ -2121,7 +2578,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		doneErr := errors.New("role exited")
 		done <- doneErr
 		Expect(proc.wait()).To(MatchError(doneErr))
-		Expect(proc.isDone()).To(BeTrue())
+		Expect(classifyRuntimeRoleProcessDone(proc)).To(Equal(runtimeRoleProcessDone))
 		process, err := os.FindProcess(os.Getpid())
 		Expect(err).NotTo(HaveOccurred())
 		proc.process = process
@@ -3086,9 +3543,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(processAlive(-1)).To(BeFalse())
 		Expect(processAlive(os.Getpid())).To(BeTrue())
 		Expect(publicURLForListener("127.0.0.1", leafwikiFakeListener{addr: leafwikiStringAddr("listener-without-port")}, "/base")).To(Equal("http://listener-without-port/base"))
-		Expect(setSysProcAttrBool(nil, "Setpgid", true)).To(BeFalse())
-		Expect(setSysProcAttrBool(&syscall.SysProcAttr{}, "MissingField", true)).To(BeFalse())
-		Expect(setSysProcAttrBool(&syscall.SysProcAttr{}, "Pdeathsig", true)).To(BeFalse())
+		Expect(observeSysProcAttrBool(nil, "Setpgid", true)).To(Equal(sysProcAttrMutationUnsupported))
+		Expect(observeSysProcAttrBool(&syscall.SysProcAttr{}, "MissingField", true)).To(Equal(sysProcAttrMutationUnsupported))
+		Expect(observeSysProcAttrBool(&syscall.SysProcAttr{}, "Pdeathsig", true)).To(Equal(sysProcAttrMutationUnsupported))
 
 		w := newFrontdActorTestWiki()
 		ginkgo.DeferCleanup(w.Close)
@@ -3121,7 +3578,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return "", errors.New("abs failed")
 		}
 		logCfg := leafwikiRuntimeConfig{Logging: leaflogging.Config{Target: leaflogging.TargetFile, FilePath: "leafwiki.log"}}
-		Expect(daemonLogFileForConfig(logCfg, leafwikiTempDir())).To(Equal("leafwiki.log"))
+		Expect(observeDaemonLogFileForConfig(logCfg, leafwikiTempDir())).To(Equal(daemonLogFileObservation{State: daemonLogFileRelativeFallback, Path: "leafwiki.log"}))
 		filepathAbsForRuntime = previousAbs
 
 		filepathRelForRuntime = func(string, string) (string, error) {

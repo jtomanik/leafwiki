@@ -32,7 +32,6 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/agenthooks"
@@ -104,72 +103,93 @@ func MatchAgentHookAllowResponse(provider agenthooks.ProviderID) types.GomegaMat
 func MatchPublicWorkspaceSyncDaemonConfig(fields gstruct.Fields) types.GomegaMatcher {
 	return SatisfyAll(
 		gstruct.MatchFields(gstruct.IgnoreExtras, fields),
-		gcustom.MakeMatcher(func(cfg projectdaemon.Config) (bool, error) {
-			return cfg.PublicMCPEnabled && cfg.EnableWorkspaceSync, nil
-		}).WithMessage("enable public MCP and workspace sync in daemon config"),
+		WithTransform(classifyPublicWorkspaceSyncConfig, Equal(publicWorkspaceSyncConfigEnabled)),
 	)
 }
 
 func MatchNoMCPTransports() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
-		return !transports.HTTP && !transports.Stdio, nil
-	}).WithMessage("disable all MCP transports")
+	return WithTransform(classifyMCPTransports, Equal(mcpTransportsDisabled))
 }
 
 func MatchHTTPMCPTransport() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
-		return transports.HTTP && !transports.Stdio, nil
-	}).WithMessage("select HTTP MCP transport only")
+	return WithTransform(classifyMCPTransports, Equal(mcpTransportHTTPOnly))
 }
 
 func MatchStdioMCPTransport() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
-		return !transports.HTTP && transports.Stdio, nil
-	}).WithMessage("select native STDIO MCP transport only")
+	return WithTransform(classifyMCPTransports, Equal(mcpTransportStdioOnly))
 }
 
 func MatchCombinedMCPTransports() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
-		return transports.HTTP && transports.Stdio, nil
-	}).WithMessage("select HTTP and native STDIO MCP transports")
+	return WithTransform(classifyMCPTransports, Equal(mcpTransportHTTPAndStdio))
 }
 
 func MatchPublicMCPRouterOptions(fields gstruct.Fields) types.GomegaMatcher {
 	return SatisfyAll(
 		gstruct.MatchFields(gstruct.IgnoreExtras, fields),
-		gcustom.MakeMatcher(func(opts httpinternal.RouterOptions) (bool, error) {
-			return opts.MCPEnabled, nil
-		}).WithMessage("enable MCP on HTTP router options"),
+		WithTransform(classifyPublicMCPRouterOptions, Equal(publicMCPRouterEnabled)),
 	)
 }
 
 func MatchProjectDaemonDescriptorPathIdentity(dataDir string, rootDir string) types.GomegaMatcher {
-	expected := struct {
-		DataDir string
-		RootDir string
-	}{DataDir: dataDir, RootDir: rootDir}
-	return gcustom.MakeMatcher(func(desc *projectdaemon.Descriptor) (bool, error) {
+	return WithTransform(func(desc *projectdaemon.Descriptor) workspacePathIdentity {
 		if desc == nil {
-			return false, nil
+			return workspacePathIdentity{}
 		}
-		dataInfo, err := os.Stat(desc.DataDir)
-		if err != nil {
-			return false, nil
+		return workspacePathIdentity{
+			DataDir: classifySameFilePath(desc.DataDir, dataDir),
+			RootDir: classifySameFilePath(desc.RootDir, rootDir),
 		}
-		wantDataInfo, err := os.Stat(dataDir)
-		if err != nil {
-			return false, nil
-		}
-		rootInfo, err := os.Stat(desc.RootDir)
-		if err != nil {
-			return false, nil
-		}
-		wantRootInfo, err := os.Stat(rootDir)
-		if err != nil {
-			return false, nil
-		}
-		return os.SameFile(dataInfo, wantDataInfo) && os.SameFile(rootInfo, wantRootInfo), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon descriptor path identity\n{{format .Data 1}}", expected)
+	}, Equal(workspacePathIdentity{DataDir: workspacePathSameFile, RootDir: workspacePathSameFile}))
+}
+
+type publicWorkspaceSyncConfigState uint8
+
+const (
+	publicWorkspaceSyncConfigDisabled publicWorkspaceSyncConfigState = iota
+	publicWorkspaceSyncConfigEnabled
+)
+
+func classifyPublicWorkspaceSyncConfig(cfg projectdaemon.Config) publicWorkspaceSyncConfigState {
+	if cfg.PublicMCPEnabled && cfg.EnableWorkspaceSync {
+		return publicWorkspaceSyncConfigEnabled
+	}
+	return publicWorkspaceSyncConfigDisabled
+}
+
+type mcpTransportSelection uint8
+
+const (
+	mcpTransportsDisabled mcpTransportSelection = iota
+	mcpTransportHTTPOnly
+	mcpTransportStdioOnly
+	mcpTransportHTTPAndStdio
+)
+
+func classifyMCPTransports(transports mcpTransports) mcpTransportSelection {
+	switch {
+	case transports.HTTP && transports.Stdio:
+		return mcpTransportHTTPAndStdio
+	case transports.HTTP:
+		return mcpTransportHTTPOnly
+	case transports.Stdio:
+		return mcpTransportStdioOnly
+	default:
+		return mcpTransportsDisabled
+	}
+}
+
+type publicMCPRouterState uint8
+
+const (
+	publicMCPRouterDisabled publicMCPRouterState = iota
+	publicMCPRouterEnabled
+)
+
+func classifyPublicMCPRouterOptions(opts httpinternal.RouterOptions) publicMCPRouterState {
+	if opts.MCPEnabled {
+		return publicMCPRouterEnabled
+	}
+	return publicMCPRouterDisabled
 }
 
 var (
@@ -3622,7 +3642,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		for _, name := range []projectdaemon.RoleName{projectdaemon.RoleWikid, projectdaemon.RoleFrontd, projectdaemon.RoleWorkspaced} {
 			Expect(gotRoles[name].State).To(Equal(projectdaemon.RoleStateReady), fmt.Sprintf("role %s state = %q, want ready; all roles = %#v", name, gotRoles[name].State, globalDesc.Roles))
 			Expect(gotRoles[name].PID).To(BeNumerically(">", 0), fmt.Sprintf("role %s PID = %d, want live role process; all roles = %#v", name, gotRoles[name].PID, globalDesc.Roles))
-			Expect(processExists(gotRoles[name].PID)).To(BeTrue(), fmt.Sprintf("role %s PID %d is not running; all roles = %#v", name, gotRoles[name].PID, globalDesc.Roles))
+			Expect(classifyProcessExists(gotRoles[name].PID)).To(Equal(processRunning), fmt.Sprintf("role %s PID %d is not running; all roles = %#v", name, gotRoles[name].PID, globalDesc.Roles))
 
 		}
 		Expect(gotRoles[projectdaemon.RoleWikid].PID).To(Equal(globalDesc.PID), fmt.Sprintf("wikid PID = %d, want descriptor owner PID %d", gotRoles[projectdaemon.RoleWikid].PID, globalDesc.PID))
@@ -4289,7 +4309,7 @@ var _ = ginkgo.Describe("internal runtime role process", func() {
 		if processExists(pid) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
-		Expect(processExists(pid)).To(BeFalse())
+		Expect(classifyProcessExists(pid)).To(Equal(processNotRunning))
 
 	})
 })
@@ -5900,7 +5920,7 @@ daemon-idle-timeout: 0
 
 		time.Sleep(projectdaemon.DefaultHeartbeatTTL + 500*time.Millisecond)
 		waitForLeafwikiReady(proc, port)
-		Expect(processExists(proc.cmd.Process.Pid)).To(BeTrue(), fmt.Sprintf("daemon process exited before signal"))
+		Expect(classifyProcessExists(proc.cmd.Process.Pid)).To(Equal(processRunning), fmt.Sprintf("daemon process exited before signal"))
 
 		waitForForegroundSignalHandler()
 		Expect(signalLeafwikiProcess(proc.cmd.Process)).To(Succeed(), fmt.Sprintf("send SIGTERM: %v", err))
