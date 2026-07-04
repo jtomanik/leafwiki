@@ -11,6 +11,7 @@ import (
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 )
@@ -43,17 +44,15 @@ var _ = Describe("English renderer", func() {
 				ContainSubstring("docs.md"),
 				ContainSubstring("README.md"),
 			),
-			"Missing": BeFalse(),
-			"Err":     Not(HaveOccurred()),
+			"Err": Not(HaveOccurred()),
 		}))
 	})
 
 	It("renders the fallback template and marks missing catalog entries", func() {
 		rendered := English.Render("errors.test.missing", missingCatalogFallbackTemplate, "value")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
 			"Message": Equal(missingCatalogFallbackRendered),
-			"Missing": BeTrue(),
 		}))
 	})
 
@@ -62,7 +61,6 @@ var _ = Describe("English renderer", func() {
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
 			"Message": Equal(safeFallbackRendered),
-			"Missing": BeFalse(),
 			"Err":     matchTemplateDataMismatch(messageIDPageVersionConflict),
 		}))
 	})
@@ -114,7 +112,6 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
 			"Message": Equal(genericFallbackRendered),
-			"Missing": BeFalse(),
 			"Err":     Not(HaveOccurred()),
 		}))
 	})
@@ -122,7 +119,7 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 	It("nil renderer reports missing catalog IDs", func() {
 		var renderer *Renderer
 
-		Expect(renderer.hasCatalogID(MessageIDCLIHelpUsage)).To(BeFalse())
+		Expect(renderer).To(missCatalogMessage(MessageIDCLIHelpUsage))
 	})
 
 	It("empty message IDs use the fallback message", func() {
@@ -130,7 +127,6 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
 			"Message": Equal(genericFallbackRendered),
-			"Missing": BeFalse(),
 			"Err":     Not(HaveOccurred()),
 		}))
 	})
@@ -140,7 +136,6 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
 			"Message": Not(Equal("fallback")),
-			"Missing": BeFalse(),
 			"Err":     Not(HaveOccurred()),
 		}))
 	})
@@ -148,9 +143,8 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 	It("non-string message IDs are stringified before fallback rendering", func() {
 		rendered := English.Render(123, genericFallbackTemplate, "value")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
 			"Message": Equal(genericFallbackRendered),
-			"Missing": BeTrue(),
 			"Err":     matchMissingCatalogMessage(fmt.Sprint(123)),
 		}))
 	})
@@ -158,18 +152,16 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 	It("fallback rendering returns literal default when template is invalid", func() {
 		rendered := English.Render("errors.test.missing", invalidFallbackTemplate)
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
 			"Message": Equal(invalidFallbackTemplate),
-			"Missing": BeTrue(),
 		}))
 	})
 
 	It("fallback rendering returns literal default when arguments are missing", func() {
 		rendered := English.Render("errors.test.missing", missingArgumentFallbackTemplate, "value")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
+		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
 			"Message": Equal(missingArgumentFallbackTemplate),
-			"Missing": BeTrue(),
 		}))
 	})
 
@@ -202,7 +194,6 @@ var _ = Describe("localization fallback and catalog validation contracts", func(
 
 		Expect(rendered).To(matchRenderResult(gstruct.Fields{
 			"Message": Not(Equal("fallback")),
-			"Missing": BeFalse(),
 			"Err":     Not(HaveOccurred()),
 		}))
 	})
@@ -369,7 +360,29 @@ func (fsys *sequentialCatalogFS) Open(name string) (fs.File, error) {
 
 func matchRenderResult(fields gstruct.Fields) types.GomegaMatcher {
 	GinkgoHelper()
-	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+	return gcustom.MakeMatcher(func(result Result) (bool, error) {
+		if result.Missing {
+			return false, nil
+		}
+		return gstruct.MatchFields(gstruct.IgnoreExtras, fields).Match(result)
+	}).WithMessage("resolve a localization message")
+}
+
+func matchMissingRenderResult(fields gstruct.Fields) types.GomegaMatcher {
+	GinkgoHelper()
+	return gcustom.MakeMatcher(func(result Result) (bool, error) {
+		if !result.Missing {
+			return false, nil
+		}
+		return gstruct.MatchFields(gstruct.IgnoreExtras, fields).Match(result)
+	}).WithMessage("fall back for a missing localization message")
+}
+
+func missCatalogMessage(id string) types.GomegaMatcher {
+	GinkgoHelper()
+	return gcustom.MakeMatcher(func(renderer *Renderer) (bool, error) {
+		return renderer == nil || !renderer.hasCatalogID(id), nil
+	}).WithMessage("miss catalog message ID")
 }
 
 func matchMissingCatalogMessage(id string) types.GomegaMatcher {
