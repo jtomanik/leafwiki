@@ -379,6 +379,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
 	checkGomegaMatcherFactoryGenericToolErrorArgs(ctx, fn)
 	checkGomegaMatcherFactoryBooleanErrorGate(ctx, fn)
+	checkGomegaMatcherFactoryLastErrorRenderedText(ctx, fn)
 	checkGomegaMatcherFactoryStructuredProtocolStatus(ctx, fn)
 	isMatcherFactory := gomegaMatcherFactoryName(fn.Name.Name)
 	isRenderedOutputMatcherFactory := gomegaRenderedOutputMatcherFactoryName(fn.Name.Name)
@@ -421,6 +422,23 @@ func checkGomegaMatcherFactoryBooleanErrorGate(ctx *analysisContext, fn *ast.Fun
 		return
 	}
 	ctx.report(ruleGomegaProxyBoolean, fn.Name, gomegaMatcherFactoryBooleanErrorGateDiagnostic())
+}
+
+func checkGomegaMatcherFactoryLastErrorRenderedText(ctx *analysisContext, fn *ast.FuncDecl) {
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch current := node.(type) {
+		case nil:
+			return false
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			if predicate := gomegaLastErrorRenderedPredicateMatcher(ctx, current); predicate != nil {
+				ctx.report(ruleGomegaLastErrorNotEmpty, predicate, gomegaLastErrorNotEmptyDiagnostic())
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func checkGomegaMatcherFactoryStructuredProtocolStatus(ctx *analysisContext, fn *ast.FuncDecl) {
@@ -714,6 +732,98 @@ func gomegaStructuredProtocolStatusPredicateMatcher(ctx *analysisContext, call *
 		return nil
 	}
 	return rawStructuredProtocolStatusPredicateReturn(ctx, fn.Body)
+}
+
+func gomegaLastErrorRenderedPredicateMatcher(ctx *analysisContext, call *ast.CallExpr) ast.Expr {
+	if callName(call) != "MakeMatcher" || len(call.Args) == 0 {
+		return nil
+	}
+	fn, ok := call.Args[0].(*ast.FuncLit)
+	if !ok {
+		return nil
+	}
+	return lastErrorRenderedPredicateReturn(ctx, fn.Body)
+}
+
+func lastErrorRenderedPredicateReturn(ctx *analysisContext, body *ast.BlockStmt) ast.Expr {
+	var predicate ast.Expr
+	ast.Inspect(body, func(node ast.Node) bool {
+		if predicate != nil || node == nil {
+			return false
+		}
+		switch current := node.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ReturnStmt:
+			if len(current.Results) > 0 {
+				predicate = lastErrorRenderedPredicate(ctx, current.Results[0])
+			}
+			return false
+		}
+		return true
+	})
+	return predicate
+}
+
+func lastErrorRenderedPredicate(ctx *analysisContext, expr ast.Expr) ast.Expr {
+	expr = unparenExpr(expr)
+	switch current := expr.(type) {
+	case *ast.BinaryExpr:
+		if current.Op == token.LAND || current.Op == token.LOR {
+			if predicate := lastErrorRenderedPredicate(ctx, current.X); predicate != nil {
+				return predicate
+			}
+			return lastErrorRenderedPredicate(ctx, current.Y)
+		}
+		if (current.Op == token.EQL || current.Op == token.NEQ) &&
+			(exprContainsLastErrorSelector(current.X) || exprContainsLastErrorSelector(current.Y)) {
+			return current
+		}
+	case *ast.CallExpr:
+		if callUsesLastErrorRenderedText(ctx, current) {
+			return current
+		}
+	}
+	return nil
+}
+
+func callUsesLastErrorRenderedText(ctx *analysisContext, call *ast.CallExpr) bool {
+	if callName(call) == "Match" {
+		return callArgsContainLastErrorSelector(call)
+	}
+	packagePath, name := calleePackageAndName(ctx, call)
+	if packagePath == "strings" && (name == "Contains" || name == "HasPrefix" || name == "HasSuffix") {
+		return callArgsContainLastErrorSelector(call)
+	}
+	return false
+}
+
+func callArgsContainLastErrorSelector(call *ast.CallExpr) bool {
+	for _, arg := range call.Args {
+		if exprContainsLastErrorSelector(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func exprContainsLastErrorSelector(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if ok && selector.Sel.Name == "LastError" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func rawStructuredProtocolStatusPredicateReturn(ctx *analysisContext, body *ast.BlockStmt) ast.Expr {
