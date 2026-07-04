@@ -379,6 +379,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
 	checkGomegaMatcherFactoryGenericToolErrorArgs(ctx, fn)
 	checkGomegaMatcherFactoryBooleanErrorGate(ctx, fn)
+	checkGomegaMatcherFactoryProxyBooleanPredicate(ctx, fn)
 	checkGomegaMatcherFactoryLastErrorRenderedText(ctx, fn)
 	checkGomegaMatcherFactoryStructuredProtocolStatus(ctx, fn)
 	isMatcherFactory := gomegaMatcherFactoryName(fn.Name.Name)
@@ -422,6 +423,23 @@ func checkGomegaMatcherFactoryBooleanErrorGate(ctx *analysisContext, fn *ast.Fun
 		return
 	}
 	ctx.report(ruleGomegaProxyBoolean, fn.Name, gomegaMatcherFactoryBooleanErrorGateDiagnostic())
+}
+
+func checkGomegaMatcherFactoryProxyBooleanPredicate(ctx *analysisContext, fn *ast.FuncDecl) {
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch current := node.(type) {
+		case nil:
+			return false
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			if predicate := gomegaProxyBooleanPredicateMatcher(ctx, current); predicate != nil {
+				ctx.report(ruleGomegaProxyBoolean, predicate, gomegaMatcherFactoryProxyBooleanPredicateDiagnostic())
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func checkGomegaMatcherFactoryLastErrorRenderedText(ctx *analysisContext, fn *ast.FuncDecl) {
@@ -743,6 +761,68 @@ func gomegaLastErrorRenderedPredicateMatcher(ctx *analysisContext, call *ast.Cal
 		return nil
 	}
 	return lastErrorRenderedPredicateReturn(ctx, fn.Body)
+}
+
+func gomegaProxyBooleanPredicateMatcher(ctx *analysisContext, call *ast.CallExpr) ast.Expr {
+	if callName(call) != "MakeMatcher" || len(call.Args) == 0 {
+		return nil
+	}
+	fn, ok := call.Args[0].(*ast.FuncLit)
+	if !ok {
+		return nil
+	}
+	return proxyBooleanPredicateReturn(ctx, fn.Body)
+}
+
+func proxyBooleanPredicateReturn(ctx *analysisContext, body *ast.BlockStmt) ast.Expr {
+	var predicate ast.Expr
+	ast.Inspect(body, func(node ast.Node) bool {
+		if predicate != nil || node == nil {
+			return false
+		}
+		switch current := node.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ReturnStmt:
+			if len(current.Results) > 0 && exprIsPureProxyBooleanPredicate(ctx, current.Results[0]) {
+				predicate = current.Results[0]
+			}
+			return false
+		}
+		return true
+	})
+	return predicate
+}
+
+func exprIsPureProxyBooleanPredicate(ctx *analysisContext, expr ast.Expr) bool {
+	pure, hasProxy := proxyBooleanPredicateParts(ctx, expr)
+	return pure && hasProxy
+}
+
+func proxyBooleanPredicateParts(ctx *analysisContext, expr ast.Expr) (pure bool, hasProxy bool) {
+	expr = unparenExpr(expr)
+	switch current := expr.(type) {
+	case *ast.Ident:
+		isProxy := isProxyBooleanName(current.Name) && isBoolType(ctx.pass.TypesInfo.TypeOf(current))
+		return isProxy, isProxy
+	case *ast.SelectorExpr:
+		isProxy := selectorIsProxyBoolean(ctx, current)
+		return isProxy, isProxy
+	case *ast.UnaryExpr:
+		if current.Op != token.NOT {
+			return false, false
+		}
+		return proxyBooleanPredicateParts(ctx, current.X)
+	case *ast.BinaryExpr:
+		if current.Op != token.LAND && current.Op != token.LOR {
+			return false, false
+		}
+		leftPure, leftProxy := proxyBooleanPredicateParts(ctx, current.X)
+		rightPure, rightProxy := proxyBooleanPredicateParts(ctx, current.Y)
+		return leftPure && rightPure, leftProxy || rightProxy
+	default:
+		return false, false
+	}
 }
 
 func lastErrorRenderedPredicateReturn(ctx *analysisContext, body *ast.BlockStmt) ast.Expr {
@@ -1661,14 +1741,14 @@ func isProxyBooleanName(name string) bool {
 	case "ok", "found", "exists", "present", "matched", "valid", "success", "done", "called",
 		"changed", "created", "updated", "modified", "deleted", "removed", "rewritten", "applied",
 		"accepted", "rejected", "renamed", "enabled", "disabled", "ready", "started", "stopped", "invoked",
-		"canceled", "cancelled", "healthy", "home":
+		"running", "canceled", "cancelled", "healthy", "home":
 		return true
 	}
 	for _, suffix := range []string{
 		"OK", "Ok", "Found", "Exists", "Present", "Matched", "Valid", "Success", "Done", "Called",
 		"Changed", "Created", "Updated", "Modified", "Deleted", "Removed", "Rewritten", "Applied",
 		"Accepted", "Rejected", "Renamed", "Enabled", "Disabled", "Ready", "Started", "Stopped", "Invoked",
-		"Canceled", "Cancelled", "Healthy", "Home",
+		"Running", "Canceled", "Cancelled", "Healthy", "Home",
 	} {
 		if strings.HasSuffix(name, suffix) {
 			return true

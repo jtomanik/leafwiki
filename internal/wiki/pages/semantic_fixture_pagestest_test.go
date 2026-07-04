@@ -80,7 +80,19 @@ func HaveHealthyOutgoingWithAnyTarget(path tree.RoutePath) types.GomegaMatcher {
 }
 
 func HavePageSaveContentChange() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
-		return event.ContentChanged, nil
-	}).WithMessage("record a page-save content change")
+	return WithTransform(pageSaveContentStateFor, Equal(pageSaveContentChanged))
+}
+
+type pageSaveContentState uint8
+
+const (
+	pageSaveContentUnchanged pageSaveContentState = iota
+	pageSaveContentChanged
+)
+
+func pageSaveContentStateFor(event pagesave.PageSaveEvent) pageSaveContentState {
+	if event.ContentChanged {
+		return pageSaveContentChanged
+	}
+	return pageSaveContentUnchanged
 }

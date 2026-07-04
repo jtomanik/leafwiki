@@ -1701,6 +1701,59 @@ func matchIssuedCSRFCookie(secure bool) GomegaMatcher {
 			))
 		})
 
+		ginkgo.It("reports matcher factories that return proxy boolean field predicates", func() {
+			h := newRuleHarness("/repo/internal/workspacesync/semantic_fixture_workspacesync_test.go", "github.com/perber/wiki/internal/workspacesync", `package workspacesync
+
+type GomegaMatcher interface{}
+type matcherBuilder struct{}
+type gcustomPackage struct{}
+type CommitHash string
+type SyncStatus struct {
+	Enabled        bool
+	WatcherRunning bool
+	LastCommitHash CommitHash
+}
+
+var gcustom gcustomPackage
+
+func (gcustomPackage) MakeMatcher(fn any) matcherBuilder { return matcherBuilder{} }
+func (matcherBuilder) WithMessage(message string) GomegaMatcher { return nil }
+
+func matchEnabledWorkspaceSyncStatus() GomegaMatcher {
+	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
+		return status.Enabled, nil
+	}).WithMessage("report enabled workspace sync status")
+}
+
+func matchDisabledWorkspaceSyncStatus() GomegaMatcher {
+	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
+		return !status.Enabled, nil
+	}).WithMessage("report disabled workspace sync status")
+}
+
+func matchRunningWatcherStatus() GomegaMatcher {
+	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
+		return status.WatcherRunning, nil
+	}).WithMessage("report running workspace watcher")
+}
+
+func matchCommittedStatus() GomegaMatcher {
+	return gcustom.MakeMatcher(func(status SyncStatus) (bool, error) {
+		return status.Enabled && status.LastCommitHash != "", nil
+	}).WithMessage("report committed workspace sync status")
+}
+`)
+			for _, name := range []string{"matchEnabledWorkspaceSyncStatus", "matchDisabledWorkspaceSyncStatus", "matchRunningWatcherStatus", "matchCommittedStatus"} {
+				checkGomegaMatcherFactorySignature(h.ctx, h.findFunc(name))
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher",
+				"semh:gomega.proxy-boolean: matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher",
+				"semh:gomega.proxy-boolean: matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher",
+			))
+		})
+
 		ginkgo.It("reports type-asserted map index assertion endpoints", func() {
 			h := newRuleHarness("/repo/internal/http/router_test.go", "github.com/perber/wiki/internal/http", `package http
 

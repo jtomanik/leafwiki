@@ -396,17 +396,35 @@ func ignoreReadmeMarkdownPathFallback(path string, kind tree.NodeKind, lookup Re
 }
 
 func BeRejectedMarkdownFence() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(line string) (bool, error) {
-		_, _, matched := parseMarkdownFence(line)
-		return !matched, nil
-	})
+	return WithTransform(markdownFenceParseStateFor, Equal(markdownLineRejected))
 }
 
 func BeRejectedMarkdownHeading() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(line string) (bool, error) {
-		_, _, matched := parseMarkdownHeading(line)
-		return !matched, nil
-	})
+	return WithTransform(markdownHeadingParseStateFor, Equal(markdownLineRejected))
+}
+
+type markdownLineParseState uint8
+
+const (
+	markdownLineRejected markdownLineParseState = iota
+	markdownLineAccepted
+)
+
+func markdownFenceParseStateFor(line string) markdownLineParseState {
+	_, _, matched := parseMarkdownFence(line)
+	return markdownLineParseStateFor(matched)
+}
+
+func markdownHeadingParseStateFor(line string) markdownLineParseState {
+	_, _, matched := parseMarkdownHeading(line)
+	return markdownLineParseStateFor(matched)
+}
+
+func markdownLineParseStateFor(matched bool) markdownLineParseState {
+	if matched {
+		return markdownLineAccepted
+	}
+	return markdownLineRejected
 }
 
 func HaveReadmeMarkdownFallbackRoutes(pageRoute string, sectionRoute string) types.GomegaMatcher {
@@ -488,21 +506,43 @@ func HaveSectionReadmeMarkdownFallback(pageRoute string, sectionRoute string) ty
 }
 
 func HavePageSaveContentChange() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
-		return event.ContentChanged, nil
-	}).WithMessage("record a page-save content change")
+	return WithTransform(pageSaveChangeSetFor, HaveField("Content", Equal(pageSaveChangePresent)))
 }
 
 func HavePageSaveSlugChange() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
-		return event.SlugChanged, nil
-	}).WithMessage("record a page-save slug change")
+	return WithTransform(pageSaveChangeSetFor, HaveField("Slug", Equal(pageSaveChangePresent)))
 }
 
 func HavePageSaveTitleChange() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
-		return event.TitleChanged, nil
-	}).WithMessage("record a page-save title change")
+	return WithTransform(pageSaveChangeSetFor, HaveField("Title", Equal(pageSaveChangePresent)))
+}
+
+type pageSaveChangeState uint8
+
+const (
+	pageSaveChangeAbsent pageSaveChangeState = iota
+	pageSaveChangePresent
+)
+
+type pageSaveChangeSet struct {
+	Content pageSaveChangeState
+	Slug    pageSaveChangeState
+	Title   pageSaveChangeState
+}
+
+func pageSaveChangeSetFor(event pagesave.PageSaveEvent) pageSaveChangeSet {
+	return pageSaveChangeSet{
+		Content: pageSaveChangeStateFor(event.ContentChanged),
+		Slug:    pageSaveChangeStateFor(event.SlugChanged),
+		Title:   pageSaveChangeStateFor(event.TitleChanged),
+	}
+}
+
+func pageSaveChangeStateFor(changed bool) pageSaveChangeState {
+	if changed {
+		return pageSaveChangePresent
+	}
+	return pageSaveChangeAbsent
 }
 
 func HavePageErrorDetail(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
@@ -516,10 +556,22 @@ func HavePageErrorDetail(status int, code sharederrors.ErrorCode) types.GomegaMa
 }
 
 func BeIgnoredByPageErrorDetail() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		_, _, matched := PageErrorDetailForError(err)
-		return !matched, nil
-	})
+	return WithTransform(pageErrorDetailResolutionFor, Equal(pageErrorDetailIgnored))
+}
+
+type pageErrorDetailResolution uint8
+
+const (
+	pageErrorDetailIgnored pageErrorDetailResolution = iota
+	pageErrorDetailResolved
+)
+
+func pageErrorDetailResolutionFor(err error) pageErrorDetailResolution {
+	_, _, matched := PageErrorDetailForError(err)
+	if matched {
+		return pageErrorDetailResolved
+	}
+	return pageErrorDetailIgnored
 }
 
 func HavePageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
