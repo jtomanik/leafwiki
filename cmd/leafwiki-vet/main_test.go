@@ -14,7 +14,7 @@ func TestLeafwikiVetSuite(t *testing.T) {
 	ginkgo.RunSpecs(t, "LeafWiki Vet Suite")
 }
 
-var _ = ginkgo.Describe("leafwiki-vet command", func() {
+var _ = ginkgo.Describe("leafwiki-vet command", ginkgo.Label("unit"), func() {
 	ginkgo.It("delegates to the semantic hygiene analyzer", func() {
 		previous := runSingleChecker
 		ginkgo.DeferCleanup(func() {
