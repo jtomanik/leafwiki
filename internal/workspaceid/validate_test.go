@@ -23,7 +23,6 @@ var _ = Describe("workspace ID parsing", func() {
 	It("rejects whitespace input with a typed validation code", func() {
 		_, err := ParseWorkspaceID(" Docs ")
 
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(Satisfy(func(err error) bool {
 			var validationErr *ValidationError
 			return stderrors.As(err, &validationErr) && validationErr != nil
@@ -60,7 +59,6 @@ var _ = Describe("workspace ID validation errors", func() {
 	It("returns the required code for empty input", func() {
 		_, err := ParseWorkspaceID("")
 
-		Expect(err).To(HaveOccurred())
 		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDRequired))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDRequired, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDRequired)))
 	})
@@ -68,7 +66,6 @@ var _ = Describe("workspace ID validation errors", func() {
 	It("returns the invalid code for pattern-invalid input", func() {
 		_, err := ParseWorkspaceID("Docs")
 
-		Expect(err).To(HaveOccurred())
 		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDInvalid))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid)))
 	})
@@ -96,8 +93,8 @@ var _ = Describe("workspace ID SQL conversion", func() {
 		value, err := WorkspaceID("Docs").Value()
 
 		Expect(value).To(BeNil())
-		Expect(err).To(HaveOccurred())
 		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDInvalid))
+		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid)))
 	})
 
 	It("Scan accepts string sources", func() {
@@ -119,8 +116,8 @@ var _ = Describe("workspace ID SQL conversion", func() {
 
 		err := id.Scan(nil)
 
-		Expect(err).To(HaveOccurred())
 		Expect(WorkspaceIDErrorCode(err)).To(Equal(ErrCodeWorkspaceIDRequired))
+		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDRequired, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDRequired)))
 	})
 
 	It("Scan rejects unsupported source types", func() {
