@@ -1037,6 +1037,50 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
+		ginkgo.It("reports direct fail calls inside callbacks nested in spec bodies", func() {
+			h := newRuleHarness("/repo/internal/frontd/frontd_test.go", "github.com/perber/wiki/internal/frontd", `package frontd
+
+import "net/http"
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+func (bddDSL) Fail(message string) {}
+
+func NewHandler(handler http.HandlerFunc) http.Handler { return handler }
+
+var _ = ginkgo.Describe("private handler", func() {
+	ginkgo.It("rejects private requests before reaching the upstream handler", func() {
+		handler := NewHandler(func(w http.ResponseWriter, req *http.Request) {
+			ginkgo.Fail("upstream handler was called")
+		})
+		_ = handler
+	})
+})
+`)
+			spec := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[spec.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+			fail := h.findCall("Fail")
+			h.ctx.pass.TypesInfo.Uses[fail.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"Fail",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, spec)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.fail-in-spec: avoid direct ginkgo.Fail inside specs; use Gomega expectations so assertions read semantically",
+			))
+		})
+
 		ginkgo.It("reports local failure helpers inside Ginkgo spec bodies", func() {
 			h := newRuleHarness("/repo/internal/tree/tree_test.go", "github.com/perber/wiki/internal/tree", `package tree
 

@@ -337,9 +337,6 @@ func checkGinkgoFailInSpec(ctx *analysisContext, call *ast.CallExpr, name string
 		if node == nil {
 			return false
 		}
-		if nested, ok := node.(*ast.FuncLit); ok && nested != body {
-			return false
-		}
 		candidate, ok := node.(*ast.CallExpr)
 		if !ok {
 			return true
