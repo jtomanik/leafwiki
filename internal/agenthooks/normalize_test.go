@@ -8,7 +8,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 )
@@ -25,10 +24,51 @@ func normalizeEvent(provider ProviderID, raw []byte, seenAt time.Time) (Event, e
 	return event, nil
 }
 
+type normalizedAgentHookEventState string
+
+const (
+	normalizedAgentHookEventContractSatisfied      normalizedAgentHookEventState = "normalized agent hook event contract is satisfied"
+	normalizedAgentHookEventProviderNotCanonical   normalizedAgentHookEventState = "provider is not canonical"
+	normalizedAgentHookEventNameNotCanonical       normalizedAgentHookEventState = "event name is not canonical"
+	normalizedAgentHookEventToolNameNotCanonical   normalizedAgentHookEventState = "tool name is not canonical"
+	normalizedAgentHookEventUnsupportedProvider    normalizedAgentHookEventState = "provider is unsupported"
+	normalizedAgentHookEventUnsupportedEvent       normalizedAgentHookEventState = "event is unsupported"
+	normalizedAgentHookEventInvalidSessionHash     normalizedAgentHookEventState = "session hash is invalid"
+	normalizedAgentHookEventMCPClassificationDrift normalizedAgentHookEventState = "MCP tool classification drifted"
+	normalizedAgentHookEventSubagentDeltaDrift     normalizedAgentHookEventState = "subagent delta drifted"
+	normalizedAgentHookEventSessionEndDrift        normalizedAgentHookEventState = "session-end classification drifted"
+)
+
 func beNormalizedAgentHookEvent() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(event Event) (bool, error) {
-		return IsNormalizedEvent(event), nil
-	}).WithMessage("be a normalized agent hook event")
+	return WithTransform(normalizedAgentHookEventStateFor, Equal(normalizedAgentHookEventContractSatisfied))
+}
+
+func normalizedAgentHookEventStateFor(event Event) normalizedAgentHookEventState {
+	provider := event.Provider.Normalize()
+	eventName := event.EventName.Normalize()
+	toolName := event.ToolName.Normalize()
+	switch {
+	case provider != event.Provider:
+		return normalizedAgentHookEventProviderNotCanonical
+	case eventName != event.EventName:
+		return normalizedAgentHookEventNameNotCanonical
+	case toolName != event.ToolName:
+		return normalizedAgentHookEventToolNameNotCanonical
+	case !isSupportedProvider(provider):
+		return normalizedAgentHookEventUnsupportedProvider
+	case !isSupportedEvent(provider, eventName):
+		return normalizedAgentHookEventUnsupportedEvent
+	case !isSessionIDHash(event.SessionIDHash):
+		return normalizedAgentHookEventInvalidSessionHash
+	case event.IsMCPTool != isMCPToolEvent(eventName, toolName):
+		return normalizedAgentHookEventMCPClassificationDrift
+	case event.SubagentDelta != subagentDelta(eventName):
+		return normalizedAgentHookEventSubagentDeltaDrift
+	case event.EndsSession != endsSession(provider, eventName):
+		return normalizedAgentHookEventSessionEndDrift
+	default:
+		return normalizedAgentHookEventContractSatisfied
+	}
 }
 
 var _ = Describe("agent hook normalization", Label("unit"), func() {
