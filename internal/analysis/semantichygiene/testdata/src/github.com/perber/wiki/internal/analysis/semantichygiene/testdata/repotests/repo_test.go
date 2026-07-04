@@ -133,6 +133,10 @@ func BeNil() any { return nil }
 
 func HaveOccurred() any { return nil }
 
+func Not(matcher any) any { return nil }
+
+func SatisfyAll(matchers ...any) any { return nil }
+
 func HaveLen(want int) any { return nil }
 
 func HavePrefix(want any) any { return nil }
@@ -572,9 +576,22 @@ type readMethodErrors struct {
 	TableColumns error
 }
 
+type pathContainmentResult struct {
+	Path string
+	Err  error
+}
+
 func TestRepoTestGomegaNestedGenericHaveOccurredIsRejected(t *testing.T) {
 	Expect(readMethodErrors{TableColumns: returnError()}).To(MatchFields(nil, Fields{ // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
 		"TableColumns": HaveOccurred(),
+	}))
+
+	Expect(pathContainmentResult{Err: returnError()}).To(SatisfyAll( // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+		HaveField("Path", BeNil()),
+		HaveField("Err", Not(BeNil())),
+	))
+	Expect(pathContainmentResult{Err: returnError()}).To(MatchFields(nil, Fields{ // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+		"Err": Not(BeNil()),
 	}))
 }
 
@@ -582,6 +599,13 @@ func HaveReadMethodErrors() GomegaMatcher {
 	return MatchFields(nil, Fields{ // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
 		"TableColumns": HaveOccurred(),
 	}).(GomegaMatcher)
+}
+
+func HaveRejectedPathContainment() GomegaMatcher {
+	return SatisfyAll( // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+		HaveField("Path", BeNil()),
+		HaveField("Err", Not(BeNil())),
+	).(GomegaMatcher)
 }
 
 func RejectRevisionValidation() GomegaMatcher {

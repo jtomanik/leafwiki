@@ -58,6 +58,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionMatcherTreeUsesGenericHaveOccurred(assertion) {
 		ctx.report(ruleGomegaGenericHaveOccurred, assertion.matcher, gomegaGenericHaveOccurredDiagnostic())
 	}
+	if assertionMatcherTreeUsesGenericErrorPresence(assertion) {
+		ctx.report(ruleGomegaGenericHaveOccurred, assertion.matcher, gomegaGenericHaveOccurredDiagnostic())
+	}
 	if assertionUsesInlineErrorReturnHaveOccurred(ctx, assertion) {
 		ctx.report(ruleGomegaInlineErrorSucceed, assertion.actual, gomegaInlineErrorSucceedDiagnostic())
 	}
@@ -403,6 +406,9 @@ func checkGomegaMatcherFactoryGenericHaveOccurred(ctx *analysisContext, fn *ast.
 					ctx.report(ruleGomegaGenericHaveOccurred, predicate, gomegaGenericHaveOccurredDiagnostic())
 				}
 				if matcherTreeContainsPositiveHaveOccurred(result) {
+					ctx.report(ruleGomegaGenericHaveOccurred, result, gomegaGenericHaveOccurredDiagnostic())
+				}
+				if matcherTreeContainsGenericErrorPresence(result) {
 					ctx.report(ruleGomegaGenericHaveOccurred, result, gomegaGenericHaveOccurredDiagnostic())
 				}
 			}
@@ -789,6 +795,13 @@ func assertionMatcherTreeUsesGenericHaveOccurred(assertion gomegaAssertion) bool
 	return matcherTreeContainsPositiveHaveOccurred(assertion.matcher)
 }
 
+func assertionMatcherTreeUsesGenericErrorPresence(assertion gomegaAssertion) bool {
+	if isNegativeAssertionMethod(assertion.method) {
+		return false
+	}
+	return matcherTreeContainsGenericErrorPresence(assertion.matcher)
+}
+
 func matcherTreeContainsPositiveHaveOccurred(expr ast.Expr) bool {
 	switch current := unparenExpr(expr).(type) {
 	case *ast.CallExpr:
@@ -815,6 +828,59 @@ func matcherTreeContainsPositiveHaveOccurred(expr ast.Expr) bool {
 		return matcherTreeContainsPositiveHaveOccurred(current.X)
 	}
 	return false
+}
+
+func matcherTreeContainsGenericErrorPresence(expr ast.Expr) bool {
+	switch current := unparenExpr(expr).(type) {
+	case *ast.CallExpr:
+		if matcherCallContainsGenericErrorPresence(current) {
+			return true
+		}
+		for _, arg := range current.Args {
+			if matcherTreeContainsGenericErrorPresence(arg) {
+				return true
+			}
+		}
+	case *ast.CompositeLit:
+		for _, elt := range current.Elts {
+			if matcherTreeContainsGenericErrorPresence(elt) {
+				return true
+			}
+		}
+	case *ast.KeyValueExpr:
+		if errorPresenceMatcherField(current.Key) && matcherIsGenericErrorPresence(current.Value) {
+			return true
+		}
+		return matcherTreeContainsGenericErrorPresence(current.Value)
+	case *ast.TypeAssertExpr:
+		return matcherTreeContainsGenericErrorPresence(current.X)
+	}
+	return false
+}
+
+func matcherCallContainsGenericErrorPresence(call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "HaveField") || len(call.Args) < 2 {
+		return false
+	}
+	return errorPresenceMatcherField(call.Args[0]) && matcherIsGenericErrorPresence(call.Args[1])
+}
+
+func errorPresenceMatcherField(expr ast.Expr) bool {
+	name := canonicalName(keyName(expr))
+	return name == "err" ||
+		name == "error" ||
+		strings.HasSuffix(name, "err") ||
+		strings.HasSuffix(name, "error") ||
+		strings.HasSuffix(name, "errors")
+}
+
+func matcherIsGenericErrorPresence(expr ast.Expr) bool {
+	call, ok := unparenExpr(expr).(*ast.CallExpr)
+	if !ok || !isMatcherNamed(call, "Not") || len(call.Args) != 1 {
+		return false
+	}
+	inner, ok := unparenExpr(call.Args[0]).(*ast.CallExpr)
+	return ok && (isMatcherNamed(inner, "BeNil") || isEqualNilMatcher(inner))
 }
 
 func assertionUsesMultiReturnErrorMatcher(ctx *analysisContext, assertion gomegaAssertion) bool {
