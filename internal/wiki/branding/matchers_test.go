@@ -2,11 +2,11 @@ package branding
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -31,29 +31,35 @@ type brandingValidationErrorExpectation struct {
 	MessageID sharederrors.MessageID
 }
 
+type brandingValidationErrorObservation struct {
+	Status int
+	Error  string
+	Fields []*sharederrors.FieldError
+}
+
 func HaveBrandingValidationError(
 	field brandingValidationField,
 	code sharederrors.FieldErrorCode,
 	messageID sharederrors.MessageID,
 ) types.GomegaMatcher {
-	expected := brandingValidationErrorExpectation{Field: field, Code: code, MessageID: messageID}
-	return gcustom.MakeMatcher(func(rec *httptest.ResponseRecorder) (bool, error) {
-		if rec.Code != http.StatusBadRequest {
-			return false, nil
-		}
-		var body struct {
-			Error  string                     `json:"error"`
-			Fields []*sharederrors.FieldError `json:"fields"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			return false, fmt.Errorf("decode branding validation error response: %w", err)
-		}
-		if body.Error != brandingValidationErrorCode {
-			return false, nil
-		}
-		matched, err := testmatchers.ContainFieldError(testmatchers.ValidationFieldName(field.String()), code, messageID).Match(body.Fields)
-		return matched, err
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} have branding validation error\n{{format .Data 1}}", expected)
+	return gomega.WithTransform(observeBrandingValidationError, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Status": gomega.Equal(http.StatusBadRequest),
+		"Error":  gomega.Equal(brandingValidationErrorCode),
+		"Fields": testmatchers.ContainFieldError(testmatchers.ValidationFieldName(field.String()), code, messageID),
+	}))
+}
+
+func observeBrandingValidationError(rec *httptest.ResponseRecorder) brandingValidationErrorObservation {
+	var body struct {
+		Error  string                     `json:"error"`
+		Fields []*sharederrors.FieldError `json:"fields"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	return brandingValidationErrorObservation{
+		Status: rec.Code,
+		Error:  body.Error,
+		Fields: body.Fields,
+	}
 }
 
 func MatchBrandingLocalizedError(code sharederrors.ErrorCode) types.GomegaMatcher {

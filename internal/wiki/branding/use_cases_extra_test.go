@@ -24,7 +24,7 @@ import (
 )
 
 var _ = ginkgo.Describe("branding use cases", func() {
-	ginkgo.It("updates branding and returns the updated config", func() {
+	ginkgo.It("updates branding and returns the updated config", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		uc := NewUpdateBrandingUseCase(svc)
 
@@ -34,7 +34,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		Expect(out.Config.SiteName).To(Equal("Docs Hub"))
 	})
 
-	ginkgo.It("returns validation errors from invalid branding updates", func() {
+	ginkgo.It("returns validation errors from invalid branding updates", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		uc := NewUpdateBrandingUseCase(svc)
 
@@ -45,7 +45,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		Expect(err).To(BeAssignableToTypeOf(validation))
 	})
 
-	ginkgo.It("uploads and deletes logo assets", func() {
+	ginkgo.It("uploads and deletes logo assets", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		upload := NewUploadLogoUseCase(svc)
 		deleteLogo := NewDeleteLogoUseCase(svc)
@@ -63,7 +63,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		Expect(cleared.Config.LogoFile).To(BeEmpty())
 	})
 
-	ginkgo.It("returns logo upload validation errors", func() {
+	ginkgo.It("returns logo upload validation errors", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		uc := NewUploadLogoUseCase(svc)
 
@@ -76,7 +76,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		Expect(err).To(MatchBrandingLocalizedError(corebranding.ErrCodeBrandingLogoInvalidType))
 	})
 
-	ginkgo.It("uploads and deletes favicon assets", func() {
+	ginkgo.It("uploads and deletes favicon assets", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		upload := NewUploadFaviconUseCase(svc)
 		deleteFavicon := NewDeleteFaviconUseCase(svc)
@@ -94,7 +94,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		Expect(cleared.Config.FaviconFile).To(BeEmpty())
 	})
 
-	ginkgo.It("returns favicon upload validation errors", func() {
+	ginkgo.It("returns favicon upload validation errors", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		uc := NewUploadFaviconUseCase(svc)
 
@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 		Expect(err).To(MatchBrandingLocalizedError(corebranding.ErrCodeBrandingFaviconInvalidType))
 	})
 
-	ginkgo.It("wraps config reload failures after branding operations", func() {
+	ginkgo.It("wraps config reload failures after branding operations", ginkgo.Label("unit"), func() {
 		configErr := errors.New("config unavailable")
 		svc := &fakeBrandingService{getErr: configErr, assetsDir: newBrandingTempDir()}
 
@@ -144,7 +144,7 @@ var _ = ginkgo.Describe("branding use cases", func() {
 })
 
 var _ = ginkgo.Describe("branding route mutations and assets", func() {
-	ginkgo.It("updates branding through the handler", func() {
+	ginkgo.It("updates branding through the handler", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 		ctx, rec := ginTestContext()
@@ -159,7 +159,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(body.SiteName).To(Equal("Docs Hub"))
 	})
 
-	ginkgo.It("returns update validation errors from valid JSON payloads", func() {
+	ginkgo.It("returns update validation errors from valid JSON payloads", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 		ctx, rec := ginTestContext()
@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(rec).To(HaveBrandingValidationError(brandingSiteNameValidationField, corebranding.FieldCodeBrandingSiteNameRequired, corebranding.MessageIDBrandingSiteNameRequired))
 	})
 
-	ginkgo.It("uploads and deletes logos through the handlers", func() {
+	ginkgo.It("uploads and deletes logos through the handlers", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 		body, contentType := brandingMultipartBody("logo.png", []byte("logo-bytes"))
@@ -194,10 +194,14 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		deleteCtx.Request = httptest.NewRequest(http.MethodDelete, "/api/branding/logo", nil)
 		routes.handleDeleteLogo(deleteCtx)
 		Expect(deleted).To(HaveHTTPStatus(http.StatusOK), deleted.Body.String())
-		Expect(deleted).To(HaveHTTPBody(ContainSubstring(`"logoFile":""`)))
+		var deleteBody struct {
+			Branding corebranding.BrandingConfigResponse `json:"branding"`
+		}
+		Expect(json.Unmarshal(deleted.Body.Bytes(), &deleteBody)).To(Succeed())
+		Expect(deleteBody.Branding.LogoFile).To(BeEmpty())
 	})
 
-	ginkgo.It("uploads and deletes favicons through the handlers", func() {
+	ginkgo.It("uploads and deletes favicons through the handlers", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 		body, contentType := brandingMultipartBody("favicon.ico", []byte("favicon-bytes"))
@@ -208,16 +212,26 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		routes.handleUploadFavicon(uploadCtx)
 
 		Expect(uploaded).To(HaveHTTPStatus(http.StatusOK), uploaded.Body.String())
-		Expect(uploaded).To(HaveHTTPBody(ContainSubstring(`"path":"favicon.ico"`)))
+		var uploadBody struct {
+			Path     string                              `json:"path"`
+			Branding corebranding.BrandingConfigResponse `json:"branding"`
+		}
+		Expect(json.Unmarshal(uploaded.Body.Bytes(), &uploadBody)).To(Succeed())
+		Expect(uploadBody.Path).To(Equal("favicon.ico"))
+		Expect(uploadBody.Branding.FaviconFile).To(Equal("favicon.ico"))
 
 		deleteCtx, deleted := ginTestContext()
 		deleteCtx.Request = httptest.NewRequest(http.MethodDelete, "/api/branding/favicon", nil)
 		routes.handleDeleteFavicon(deleteCtx)
 		Expect(deleted).To(HaveHTTPStatus(http.StatusOK), deleted.Body.String())
-		Expect(deleted).To(HaveHTTPBody(ContainSubstring(`"faviconFile":""`)))
+		var deleteBody struct {
+			Branding corebranding.BrandingConfigResponse `json:"branding"`
+		}
+		Expect(json.Unmarshal(deleted.Body.Bytes(), &deleteBody)).To(Succeed())
+		Expect(deleteBody.Branding.FaviconFile).To(BeEmpty())
 	})
 
-	ginkgo.It("returns structured upload request errors", func() {
+	ginkgo.It("returns structured upload request errors", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 
@@ -262,7 +276,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(invalidFavicon).To(HaveBrandingStructuredError(http.StatusBadRequest, ErrCodeBrandingFaviconInvalidType))
 	})
 
-	ginkgo.It("returns internal errors when branding config cannot be loaded by handlers", func() {
+	ginkgo.It("returns internal errors when branding config cannot be loaded by handlers", ginkgo.Label("integration"), func() {
 		configErr := sharederrors.NewLocalizedErrorFromCode(ErrCodeBrandingConfigUnavailable, errors.New("config unavailable"))
 		routes := newFailingBrandingRoutes(configErr)
 
@@ -295,7 +309,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(currentFaviconRec).To(HaveHTTPStatus(http.StatusInternalServerError), currentFaviconRec.Body.String())
 	})
 
-	ginkgo.It("logs multipart close errors after successful uploads", func() {
+	ginkgo.It("logs multipart close errors after successful uploads", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 		originalClose := closeBrandingMultipartFile
@@ -321,7 +335,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(faviconRec).To(HaveHTTPStatus(http.StatusOK), faviconRec.Body.String())
 	})
 
-	ginkgo.It("rejects branding asset paths when relative path validation fails", func() {
+	ginkgo.It("rejects branding asset paths when relative path validation fails", ginkgo.Label("unit"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 		originalRel := brandingRel
@@ -337,7 +351,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(status).To(Equal(http.StatusForbidden))
 	})
 
-	ginkgo.It("serves branding assets and disables client cache", func() {
+	ginkgo.It("serves branding assets and disables client cache", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		_, err := svc.UploadLogo(newBrandingUploadFile("logo-bytes"), "logo.png")
 		Expect(err).NotTo(HaveOccurred())
@@ -353,7 +367,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(rec.Header().Get("Expires")).NotTo(BeEmpty())
 	})
 
-	ginkgo.It("serves configured and default favicons", func() {
+	ginkgo.It("serves configured and default favicons", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		router := newBrandingTestRouter(svc)
 
@@ -376,7 +390,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(missingConfiguredRec).To(HaveHTTPBody(httpinternal.DefaultFaviconSVG))
 	})
 
-	ginkgo.It("returns static asset status codes for forbidden and missing assets", func() {
+	ginkgo.It("returns static asset status codes for forbidden and missing assets", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		router := newBrandingTestRouter(svc)
 
@@ -389,7 +403,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(missing).To(HaveHTTPStatus(http.StatusNotFound), missing.Body.String())
 	})
 
-	ginkgo.It("returns structured delete errors when stored branding files cannot be removed", func() {
+	ginkgo.It("returns structured delete errors when stored branding files cannot be removed", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		routes := newBrandingTestRoutes(svc)
 
@@ -418,7 +432,7 @@ var _ = ginkgo.Describe("branding route mutations and assets", func() {
 		Expect(faviconRec).To(HaveBrandingStructuredError(http.StatusInternalServerError, ErrCodeBrandingFaviconDeleteFailed))
 	})
 
-	ginkgo.It("returns internal errors for branding asset stat failures", func() {
+	ginkgo.It("returns internal errors for branding asset stat failures", ginkgo.Label("integration"), func() {
 		svc := newBrandingTestService()
 		router := newBrandingTestRouter(svc)
 

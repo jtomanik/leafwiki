@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	corebranding "github.com/perber/wiki/internal/branding"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
@@ -21,7 +22,7 @@ import (
 )
 
 var _ = ginkgo.Describe("branding error responses", func() {
-	ginkgo.It("renders validation errors with field metadata", func() {
+	ginkgo.It("renders validation errors with field metadata", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		ve := sharederrors.NewValidationErrors()
@@ -32,7 +33,7 @@ var _ = ginkgo.Describe("branding error responses", func() {
 		Expect(rec).To(HaveBrandingValidationError(brandingSiteNameValidationField, sharederrors.FieldValidationErrorCode, sharederrors.FieldValidationErrorMessageID))
 	})
 
-	ginkgo.It("preserves localized branding error identity", func() {
+	ginkgo.It("preserves localized branding error identity", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		err := sharederrors.NewLocalizedError(
@@ -49,16 +50,22 @@ var _ = ginkgo.Describe("branding error responses", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusBadRequest, ErrCodeBrandingLogoInvalidType, sharederrors.MessageIDForCode(ErrCodeBrandingLogoInvalidType)))
 	})
 
-	ginkgo.It("sanitizes unexpected internal error details", func() {
+	ginkgo.It("sanitizes unexpected internal error details", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithBrandingError(ctx, errors.New("write config: permission denied"))
 
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, ErrCodeBrandingInternalError, sharederrors.MessageIDForCode(ErrCodeBrandingInternalError)))
-		Expect(rec).NotTo(HaveHTTPBody(ContainSubstring("permission denied")))
+		var body BrandingErrorResponse
+		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+		Expect(body.Error).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code":      Equal(ErrCodeBrandingInternalError),
+			"MessageID": Equal(sharederrors.MessageIDForCode(ErrCodeBrandingInternalError)),
+			"Args":      BeEmpty(),
+		}))
 	})
 
-	ginkgo.It("maps branding error codes to HTTP statuses", func() {
+	ginkgo.It("maps branding error codes to HTTP statuses", ginkgo.Label("unit"), func() {
 		Expect(brandingErrorStatus(ErrCodeBrandingInvalidPayload)).To(Equal(http.StatusBadRequest))
 		Expect(brandingErrorStatus(ErrCodeBrandingLogoMissing)).To(Equal(http.StatusBadRequest))
 		Expect(brandingErrorStatus(ErrCodeBrandingFaviconMissing)).To(Equal(http.StatusBadRequest))
@@ -69,7 +76,7 @@ var _ = ginkgo.Describe("branding error responses", func() {
 		Expect(brandingErrorStatus(ErrCodeBrandingConfigUnavailable)).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("renders explicit status errors as structured localized responses", func() {
+	ginkgo.It("renders explicit status errors as structured localized responses", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithBrandingStatusError(ctx, http.StatusRequestEntityTooLarge, ErrCodeBrandingLogoTooLarge, "ignored", "ignored")
@@ -78,7 +85,7 @@ var _ = ginkgo.Describe("branding error responses", func() {
 	})
 })
 
-var _ = ginkgo.Describe("branding routes", func() {
+var _ = ginkgo.Describe("branding routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("serves public branding configuration", func() {
 		svc := newBrandingTestService()
 		router := httpinternal.NewRouter(
@@ -119,7 +126,7 @@ var _ = ginkgo.Describe("branding routes", func() {
 	})
 })
 
-var _ = ginkgo.Describe("branding asset paths", func() {
+var _ = ginkgo.Describe("branding asset paths", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects traversal and invalid extensions", func() {
 		svc := newBrandingTestService()
 		routes := NewRoutes(RoutesConfig{BrandingService: svc, Log: slog.Default()})
