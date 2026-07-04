@@ -77,7 +77,7 @@ func matchOrderIDs(want ...tree.PageID) types.GomegaMatcher {
 	return gcustom.MakeMatcher(func(actual []string) (bool, error) {
 		gotIDs := make([]tree.PageID, 0, len(actual))
 		for _, rawID := range actual {
-			gotIDs = append(gotIDs, newFixturePageID(rawID))
+			gotIDs = append(gotIDs, tree.PageIDFromString(rawID))
 		}
 		return Equal(want).Match(gotIDs)
 	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} preserve tree page IDs in order\n{{format .Data 1}}", want)
@@ -94,7 +94,7 @@ func matchManagedMetadata(createdAt string, updatedAt string, creatorID string, 
 
 func matchSectionFrontmatter(id tree.PageID, title string, createdAt string, updatedAt string, creatorID string, lastAuthorID string) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"LeafWikiID":           WithTransform(func(raw string) tree.PageID { return newFixturePageID(raw) }, Equal(id)),
+		"LeafWikiID":           WithTransform(func(raw string) tree.PageID { return tree.PageIDFromString(raw) }, Equal(id)),
 		"LeafWikiTitle":        Equal(title),
 		"LeafWikiCreatedAt":    Equal(createdAt),
 		"LeafWikiUpdatedAt":    Equal(updatedAt),
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("runner", func() {
 
 		Expect(parsedMigratedFrontmatter(markdown.ParseFrontmatter(string(raw)))).To(haveMigratedFrontmatter(
 			SatisfyAll(
-				HaveField("LeafWikiID", WithTransform(func(raw string) tree.PageID { return newFixturePageID(raw) }, Equal(*id))),
+				HaveField("LeafWikiID", WithTransform(func(raw string) tree.PageID { return tree.PageIDFromString(raw) }, Equal(*id))),
 				HaveField("LeafWikiTitle", WithTransform(strings.TrimSpace, Not(BeEmpty()))),
 			),
 			Equal(body),
@@ -201,7 +201,7 @@ Hello World
 		wantBody := "# Page 1 Content\nHello World\n"
 		Expect(parsedMigratedFrontmatter(markdown.ParseFrontmatter(migrated))).To(haveMigratedFrontmatter(
 			SatisfyAll(
-				HaveField("LeafWikiID", WithTransform(func(raw string) tree.PageID { return newFixturePageID(raw) }, Equal(*id))),
+				HaveField("LeafWikiID", WithTransform(func(raw string) tree.PageID { return tree.PageIDFromString(raw) }, Equal(*id))),
 				HaveField("LeafWikiTitle", WithTransform(strings.TrimSpace, Not(BeEmpty()))),
 			),
 			Equal(wantBody),
