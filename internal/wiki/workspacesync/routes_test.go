@@ -204,10 +204,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/status")
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
-		var body struct {
-			Enabled           bool `json:"enabled"`
-			PendingEventCount int  `json:"pendingEventCount"`
-		}
+		var body workspaceSyncStatusResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body).To(haveWorkspaceSyncEnabledStatus(3))
 	})
@@ -356,6 +353,31 @@ type restoreWorkspaceRecorder struct {
 	requests []restoreWorkspaceRequest
 }
 
+type workspaceSyncRouteState uint8
+
+const (
+	workspaceSyncRouteDisabled workspaceSyncRouteState = iota
+	workspaceSyncRouteEnabled
+)
+
+type workspaceSyncStatusResponse struct {
+	State             workspaceSyncRouteState `json:"enabled"`
+	PendingEventCount int                     `json:"pendingEventCount"`
+}
+
+func (state *workspaceSyncRouteState) UnmarshalJSON(raw []byte) error {
+	var enabled bool
+	if err := json.Unmarshal(raw, &enabled); err != nil {
+		return err
+	}
+	if enabled {
+		*state = workspaceSyncRouteEnabled
+		return nil
+	}
+	*state = workspaceSyncRouteDisabled
+	return nil
+}
+
 func (r *restoreWorkspaceRecorder) RestoreWorkspace(_ context.Context, commit workspacesync.CommitHash, actor workspacesync.Actor, source workspacesync.Source) (workspacesync.SyncStatus, error) {
 	r.requests = append(r.requests, restoreWorkspaceRequest{
 		Commit: commit,
@@ -418,7 +440,7 @@ func haveWorkspaceSyncSnapshotPageResponse(snapshot workspacesync.Snapshot, next
 func haveWorkspaceSyncEnabledStatus(pendingEventCount int) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Enabled":           BeTrue(),
+		"State":             Equal(workspaceSyncRouteEnabled),
 		"PendingEventCount": Equal(pendingEventCount),
 	})
 }
