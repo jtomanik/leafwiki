@@ -75,6 +75,7 @@ const (
 	ruleGomegaStructuredErrorMatcher       ruleID = "gomega.structured-error-matcher"
 	ruleGomegaStructuredProtocolKey        ruleID = "gomega.structured-protocol-key"
 	ruleGomegaStructuredProtocolPayload    ruleID = "gomega.structured-protocol-payload"
+	ruleGomegaStructuredProtocolStatus     ruleID = "gomega.structured-protocol-status"
 	ruleGomegaAsyncContext                 ruleID = "gomega.async-context"
 	ruleGomegaAsyncBoolean                 ruleID = "gomega.async-boolean"
 	ruleGomegaAsyncNegativeReceive         ruleID = "gomega.async-negative-receive"
@@ -180,6 +181,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGomegaStructuredErrorMatcher:       hardRule(ruleGomegaStructuredErrorMatcher),
 	ruleGomegaStructuredProtocolKey:        hardRule(ruleGomegaStructuredProtocolKey),
 	ruleGomegaStructuredProtocolPayload:    hardRule(ruleGomegaStructuredProtocolPayload),
+	ruleGomegaStructuredProtocolStatus:     hardRule(ruleGomegaStructuredProtocolStatus),
 	ruleGomegaAsyncContext:                 hardRule(ruleGomegaAsyncContext),
 	ruleGomegaAsyncBoolean:                 hardRule(ruleGomegaAsyncBoolean),
 	ruleGomegaAsyncNegativeReceive:         hardRule(ruleGomegaAsyncNegativeReceive),

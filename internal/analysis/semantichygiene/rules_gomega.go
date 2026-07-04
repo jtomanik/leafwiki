@@ -166,6 +166,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if matcherName, ok := assertionUsesStructuredProtocolPayloadMatcher(ctx, assertion); ok {
 		ctx.report(ruleGomegaStructuredProtocolPayload, assertion.matcher, gomegaStructuredProtocolPayloadMatcherDiagnostic(matcherName))
 	}
+	if assertionUsesStructuredProtocolStatusMatcher(ctx, assertion) {
+		ctx.report(ruleGomegaStructuredProtocolStatus, assertion.actual, gomegaStructuredProtocolStatusMatcherDiagnostic())
+	}
 }
 
 func checkGomegaIgnoredSemanticBoolean(ctx *analysisContext, assign *ast.AssignStmt) {
@@ -2769,6 +2772,42 @@ func assertionUsesStructuredProtocolPayloadMatcher(ctx *analysisContext, asserti
 		return "", false
 	}
 	return matcherTreeContainsStructuredProtocolPayloadMatcher(assertion.matcher)
+}
+
+func assertionUsesStructuredProtocolStatusMatcher(ctx *analysisContext, assertion gomegaAssertion) bool {
+	if assertionUsesDirectProtocolStatusBool(ctx, assertion) {
+		return true
+	}
+	if !exprSuggestsStructuredProtocolValue(ctx, assertion.actual) {
+		return false
+	}
+	return matcherTreeContainsStructuredProtocolStatusBool(assertion.matcher)
+}
+
+func assertionUsesDirectProtocolStatusBool(ctx *analysisContext, assertion gomegaAssertion) bool {
+	selector, ok := unparenExpr(assertion.actual).(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "IsError" || !isBooleanMatcher(assertion.matcher) {
+		return false
+	}
+	return exprSuggestsStructuredProtocolValue(ctx, selector.X)
+}
+
+func matcherTreeContainsStructuredProtocolStatusBool(expr ast.Expr) bool {
+	call, ok := unparenExpr(expr).(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	if isMatcherNamed(call, "HaveField") && len(call.Args) > 1 {
+		if fieldName, ok := stringLiteralValue(call.Args[0]); ok && fieldName == "IsError" && exprIsBooleanMatcher(call.Args[1]) {
+			return true
+		}
+	}
+	for _, arg := range call.Args {
+		if matcherTreeContainsStructuredProtocolStatusBool(arg) {
+			return true
+		}
+	}
+	return false
 }
 
 func matcherTreeContainsStructuredProtocolPayloadMatcher(expr ast.Expr) (string, bool) {

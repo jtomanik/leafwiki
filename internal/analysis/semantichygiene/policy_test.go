@@ -119,6 +119,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("gomega structured error matcher", ruleID("gomega.structured-error-matcher"), false, waiverScopeNone),
 			ginkgo.Entry("gomega structured protocol key", ruleID("gomega.structured-protocol-key"), false, waiverScopeNone),
 			ginkgo.Entry("gomega structured protocol payload", ruleID("gomega.structured-protocol-payload"), false, waiverScopeNone),
+			ginkgo.Entry("gomega structured protocol status", ruleID("gomega.structured-protocol-status"), false, waiverScopeNone),
 			ginkgo.Entry("gomega async context", ruleID("gomega.async-context"), false, waiverScopeNone),
 			ginkgo.Entry("gomega async boolean", ruleID("gomega.async-boolean"), false, waiverScopeNone),
 			ginkgo.Entry("gomega async negative receive", ruleID("gomega.async-negative-receive"), false, waiverScopeNone),

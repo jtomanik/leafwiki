@@ -1653,6 +1653,39 @@ func TestRouterResponse() {
 			))
 		})
 
+		ginkgo.It("reports raw MCP protocol result status assertions", func() {
+			h := newRuleHarness("/repo/internal/wiki/mcp/tools_test.go", "github.com/perber/wiki/internal/wiki/mcp", `package mcp
+
+type assertion struct{}
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) To(matcher any, extra ...any) {}
+func BeTrue() any { return nil }
+func BeFalse() any { return nil }
+func HaveField(name string, matcher any) any { return nil }
+func SatisfyAll(matchers ...any) any { return nil }
+
+type CallToolResult struct {
+	IsError bool
+}
+
+func TestToolResult() {
+	result := &CallToolResult{}
+	Expect(result.IsError).To(BeFalse())
+	Expect(result).To(HaveField("IsError", BeTrue()))
+	Expect(result).To(SatisfyAll(HaveField("IsError", BeFalse())))
+}
+`)
+			for _, call := range h.findCalls("To") {
+				checkGomegaSemanticMatcher(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",
+				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",
+				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",
+			))
+		})
+
 		ginkgo.It("reports map index aliases asserted as local values", func() {
 			h := newRuleHarness("/repo/internal/http/router_test.go", "github.com/perber/wiki/internal/http", `package http
 

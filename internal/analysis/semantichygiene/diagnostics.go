@@ -250,6 +250,10 @@ func gomegaStructuredProtocolPayloadMatcherDiagnostic(matcherName string) string
 	return fmt.Sprintf("assert structured protocol semantics with a typed domain matcher/helper instead of matching raw %s payload directly", matcherName)
 }
 
+func gomegaStructuredProtocolStatusMatcherDiagnostic() string {
+	return "assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean"
+}
+
 func gomegaNumericEquivalentDiagnostic() string {
 	return "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"
 }
