@@ -20,7 +20,7 @@ func tempRunMessageDir() string {
 	return dir
 }
 
-var _ = Describe("run message export", func() {
+var _ = Describe("run message export", Label("unit"), func() {
 	It("renders the shell variables that match the generated run message file", func() {
 		generated, err := GenerateRunMessages()
 		Expect(err).NotTo(HaveOccurred())
@@ -42,7 +42,7 @@ var _ = Describe("run message export", func() {
 	})
 })
 
-var _ = Describe("run message shell rendering", func() {
+var _ = Describe("run message shell rendering", Label("unit"), func() {
 	It("escapes single quotes for shell variables", func() {
 		Expect(shellSingleQuote("can't stop")).To(Equal(`can'"'"'t stop`))
 	})
