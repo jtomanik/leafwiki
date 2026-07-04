@@ -26,7 +26,7 @@ import (
 )
 
 var _ = ginkgo.Describe("link use cases", func() {
-	ginkgo.It("nil link services return ErrLinkServiceUnavailable for read use cases", func() {
+	ginkgo.It("unavailable link services report service-unavailable errors for read behavior", ginkgo.Label("unit"), func() {
 		_, err := NewGetLinkStatusUseCase(nil, nil).Execute(context.Background(), GetLinkStatusInput{PageID: newFixturePageID("page-1")})
 		Expect(err).To(MatchError(ErrLinkServiceUnavailable))
 
@@ -37,11 +37,11 @@ var _ = ginkgo.Describe("link use cases", func() {
 		Expect(err).To(MatchError(ErrLinkServiceUnavailable))
 	})
 
-	ginkgo.It("ReindexLinksUseCase is a no-op when the link service is unavailable", func() {
+	ginkgo.It("skips reindexing when the link service is unavailable", ginkgo.Label("unit"), func() {
 		Expect(NewReindexLinksUseCase(nil).Execute(context.Background())).To(Succeed())
 	})
 
-	ginkgo.It("GetLinkStatusUseCase maps missing pages to localized link-page-not-found errors", func() {
+	ginkgo.It("maps missing pages to localized link-page-not-found errors", ginkgo.Label("integration"), func() {
 		dataDir := tempLinksDir()
 		rootDir := tempLinksDir()
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
@@ -54,7 +54,7 @@ var _ = ginkgo.Describe("link use cases", func() {
 		Expect(err).To(testmatchers.MatchLocalizedError(ErrCodeLinkPageNotFound, sharederrors.MessageIDForCode(ErrCodeLinkPageNotFound)))
 	})
 
-	ginkgo.It("GetLinkStatusUseCase returns non-not-found tree lookup errors directly", func() {
+	ginkgo.It("returns tree lookup failures unchanged when page lookup fails before status collection", ginkgo.Label("integration"), func() {
 		treeService := tree.NewTreeService(tempLinksDir())
 
 		out, err := NewGetLinkStatusUseCase(&corelinks.LinkService{}, treeService).Execute(context.Background(), GetLinkStatusInput{PageID: newFixturePageID("page-1")})
@@ -63,7 +63,7 @@ var _ = ginkgo.Describe("link use cases", func() {
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 	})
 
-	ginkgo.It("GetLinkStatusUseCase returns link status for an indexed page", func() {
+	ginkgo.It("returns link status for an indexed page", ginkgo.Label("integration"), func() {
 		fixture := newWikiLinksFixture()
 		uc := NewGetLinkStatusUseCase(fixture.links, fixture.tree)
 
@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("link use cases", func() {
 		Expect(out.Status).To(haveLinkStatusForIndexedPage(fixture.targetID, tree.RoutePathFromString("/missing")))
 	})
 
-	ginkgo.It("GetBacklinksUseCase returns backlinks from the link service", func() {
+	ginkgo.It("returns backlinks from the link service", ginkgo.Label("integration"), func() {
 		fixture := newWikiLinksFixture()
 
 		out, err := NewGetBacklinksUseCase(fixture.links).Execute(context.Background(), GetBacklinksInput{PageID: fixture.targetID})
@@ -82,16 +82,16 @@ var _ = ginkgo.Describe("link use cases", func() {
 		Expect(out.Result).To(haveBacklinksResult(1, fixture.sourceID))
 	})
 
-	ginkgo.It("GetOutgoingLinksUseCase returns outgoing links from the link service", func() {
+	ginkgo.It("returns outgoing links from the link service", ginkgo.Label("integration"), func() {
 		fixture := newWikiLinksFixture()
 
 		out, err := NewGetOutgoingLinksUseCase(fixture.links).Execute(context.Background(), GetOutgoingLinksInput{PageID: fixture.sourceID})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out.Result).To(haveOutgoingLinksResult(2, fixture.targetID))
+		Expect(out.Result).To(haveOutgoingLinksResult(2, fixture.targetID, tree.RoutePathFromString("/missing")))
 	})
 
-	ginkgo.It("returns backing link store errors from read use cases", func() {
+	ginkgo.It("returns backing link store errors from read use cases", ginkgo.Label("integration"), func() {
 		fixture := newWikiLinksFixture()
 		dropLinksTable(fixture.dataDir)
 
@@ -108,14 +108,14 @@ var _ = ginkgo.Describe("link use cases", func() {
 		Expect(err).To(matchSQLitePrimaryError())
 	})
 
-	ginkgo.It("ReindexLinksUseCase delegates to the link service when available", func() {
+	ginkgo.It("delegates reindexing to the link service when available", ginkgo.Label("integration"), func() {
 		fixture := newWikiLinksFixture()
 
 		Expect(NewReindexLinksUseCase(fixture.links).Execute(context.Background())).To(Succeed())
 	})
 })
 
-var _ = ginkgo.Describe("link routes", func() {
+var _ = ginkgo.Describe("link routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("serves link status through the public route", func() {
 		fixture := newWikiLinksFixture()
 		router := httpinternal.NewRouter(
@@ -251,13 +251,13 @@ func haveBacklinksResult(count int, fromPageID tree.PageID) types.GomegaMatcher 
 	}))
 }
 
-func haveOutgoingLinksResult(count int, targetID tree.PageID) types.GomegaMatcher {
+func haveOutgoingLinksResult(count int, targetID tree.PageID, missingPath tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return HaveValue(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Count": Equal(count),
 		"Outgoings": SatisfyAll(
 			ContainElement(haveOutgoingLinkToPage(targetID)),
-			ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{"Broken": BeTrue()})),
+			ContainElement(haveBrokenOutgoingLinkToPath(missingPath)),
 		),
 	}))
 }
@@ -271,9 +271,33 @@ func haveOutgoingLinkToPage(targetID tree.PageID) types.GomegaMatcher {
 
 func haveBrokenOutgoingLinkToPath(path tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"ToPath": Equal(path),
-	})
+	return WithTransform(outgoingLinkResolutionFor, Equal(outgoingLinkResolution{
+		ToPath: path,
+		State:  outgoingLinkBroken,
+	}))
+}
+
+type outgoingLinkState string
+
+const (
+	outgoingLinkResolved outgoingLinkState = "resolved outgoing link"
+	outgoingLinkBroken   outgoingLinkState = "broken outgoing link"
+)
+
+type outgoingLinkResolution struct {
+	ToPath tree.RoutePath
+	State  outgoingLinkState
+}
+
+func outgoingLinkResolutionFor(link corelinks.OutgoingResultItem) outgoingLinkResolution {
+	state := outgoingLinkResolved
+	if link.Broken {
+		state = outgoingLinkBroken
+	}
+	return outgoingLinkResolution{
+		ToPath: link.ToPath,
+		State:  state,
+	}
 }
 
 func matchSQLitePrimaryError() types.GomegaMatcher {

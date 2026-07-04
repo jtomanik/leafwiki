@@ -6,7 +6,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("link semantic types", func() {
+var _ = ginkgo.Describe("link semantic types", ginkgo.Label("unit"), func() {
 	ginkgo.It("keeps link use case inputs typed as semantic page IDs", func() {
 		status := GetLinkStatusInput{PageID: newFixturePageID("page-1")}
 		var _ tree.PageID = status.PageID

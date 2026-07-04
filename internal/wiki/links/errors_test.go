@@ -14,7 +14,7 @@ import (
 )
 
 var _ = ginkgo.Describe("link errors", func() {
-	ginkgo.It("returns a localized not-found response for missing link pages", func() {
+	ginkgo.It("returns a localized not-found response for missing link pages", ginkgo.Label("integration"), func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("link errors", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusNotFound, ErrCodeLinkPageNotFound, sharederrors.MessageIDForCode(ErrCodeLinkPageNotFound)))
 	})
 
-	ginkgo.It("returns a localized service-unavailable response when links are unavailable", func() {
+	ginkgo.It("returns a localized service-unavailable response when links are unavailable", ginkgo.Label("integration"), func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
@@ -39,7 +39,7 @@ var _ = ginkgo.Describe("link errors", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusServiceUnavailable, ErrCodeLinkUnavailable, sharederrors.MessageIDForCode(ErrCodeLinkUnavailable)))
 	})
 
-	ginkgo.It("sanitizes unknown link failures as internal structured errors", func() {
+	ginkgo.It("sanitizes unknown link failures as internal structured errors", ginkgo.Label("integration"), func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
@@ -49,13 +49,13 @@ var _ = ginkgo.Describe("link errors", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, ErrCodeLinkInternalError, sharederrors.MessageIDForCode(ErrCodeLinkInternalError)))
 	})
 
-	ginkgo.It("assigns HTTP status classes to missing unavailable and unknown link failures", func() {
+	ginkgo.It("assigns HTTP status classes to missing unavailable and unknown link failures", ginkgo.Label("unit"), func() {
 		Expect(linkErrorStatus(ErrCodeLinkPageNotFound)).To(Equal(http.StatusNotFound))
 		Expect(linkErrorStatus(ErrCodeLinkUnavailable)).To(Equal(http.StatusServiceUnavailable))
 		Expect(linkErrorStatus("unknown")).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("returns structured localized detail for explicit link status failures", func() {
+	ginkgo.It("returns structured localized detail for explicit link status failures", ginkgo.Label("integration"), func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
