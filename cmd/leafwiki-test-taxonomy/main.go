@@ -45,10 +45,13 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	report, err := buildReport(reportOptions{Roots: roots})
 	if err != nil {
-		fmt.Fprintf(stderr, "leafwiki-test-taxonomy: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "leafwiki-test-taxonomy: %v\n", err)
 		return 2
 	}
-	fmt.Fprint(stdout, formatReport(report))
+	if _, err := fmt.Fprint(stdout, formatReport(report)); err != nil {
+		_, _ = fmt.Fprintf(stderr, "leafwiki-test-taxonomy: write report: %v\n", err)
+		return 2
+	}
 	return 0
 }
 
