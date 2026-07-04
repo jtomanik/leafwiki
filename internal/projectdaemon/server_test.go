@@ -383,14 +383,3 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
-
-func joinTestCounts(counts []int) string {
-	if len(counts) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(counts))
-	for _, count := range counts {
-		parts = append(parts, string(rune('0'+count)))
-	}
-	return strings.Join(parts, ",")
-}

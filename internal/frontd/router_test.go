@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -63,11 +62,4 @@ func newTestWiki() *wiki.Wiki {
 	})
 	Expect(err).To(Succeed())
 	return w
-}
-
-func request(router http.Handler, method, path string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, strings.NewReader(""))
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	return rec
 }

@@ -3,6 +3,7 @@ package wikid
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -17,12 +18,14 @@ func NewGrantStore(path string) *GrantStore {
 	return &GrantStore{path: path}
 }
 
-func (s *GrantStore) Load() (GrantDocument, error) {
+func (s *GrantStore) Load() (doc GrantDocument, err error) {
 	db, err := openWikidDB(s.path)
 	if err != nil {
 		return GrantDocument{}, err
 	}
-	defer db.Close()
+	defer func() {
+		err = errors.Join(err, wikidCloseDB(db))
+	}()
 	return loadGrantDocument(context.Background(), db)
 }
 
@@ -74,12 +77,14 @@ func (s *GrantStore) ReplaceSubjectGrants(subject string, grants []Grant) error 
 	})
 }
 
-func (s *GrantStore) GrantsForSubject(subject string) ([]Grant, error) {
+func (s *GrantStore) GrantsForSubject(subject string) (grants []Grant, err error) {
 	db, err := openWikidDB(s.path)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer func() {
+		err = errors.Join(err, wikidCloseDB(db))
+	}()
 	rows, err := db.Query(`
 		SELECT subject, workspace_id, role
 		FROM workspace_grants
@@ -89,8 +94,17 @@ func (s *GrantStore) GrantsForSubject(subject string) ([]Grant, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	return grantsForSubjectRows(rows)
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
+	grants, err = grantsForSubjectRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return grants, nil
 }
 
 type wikidRows interface {
@@ -124,7 +138,7 @@ type grantQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func loadGrantDocument(ctx context.Context, q grantQuerier) (GrantDocument, error) {
+func loadGrantDocument(ctx context.Context, q grantQuerier) (doc GrantDocument, err error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT subject, workspace_id, role
 		FROM workspace_grants
@@ -133,8 +147,17 @@ func loadGrantDocument(ctx context.Context, q grantQuerier) (GrantDocument, erro
 	if err != nil {
 		return GrantDocument{}, err
 	}
-	defer rows.Close()
-	return loadGrantRows(rows)
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
+	doc, err = loadGrantRows(rows)
+	if err != nil {
+		return GrantDocument{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return GrantDocument{}, err
+	}
+	return doc, nil
 }
 
 func loadGrantRows(rows wikidRows) (GrantDocument, error) {

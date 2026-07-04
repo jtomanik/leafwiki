@@ -136,7 +136,7 @@ func (c *Client) ListAgentPresence(ctx context.Context) ([]AgentPresenceSession,
 	return out, nil
 }
 
-func (c *Client) doJSON(ctx context.Context, method string, path controlPath, in any, out any) error {
+func (c *Client) doJSON(ctx context.Context, method string, path controlPath, in any, out any) (err error) {
 	var body io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)
@@ -157,7 +157,9 @@ func (c *Client) doJSON(ctx context.Context, method string, path controlPath, in
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err = errors.Join(err, resp.Body.Close())
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		code, messageID, msg := parseControlErrorBody(raw)

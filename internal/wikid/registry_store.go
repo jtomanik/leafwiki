@@ -3,6 +3,7 @@ package wikid
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -19,12 +20,14 @@ func NewRegistryStore(path string) *RegistryStore {
 	return &RegistryStore{path: path}
 }
 
-func (s *RegistryStore) Load() (RegistryDocument, error) {
+func (s *RegistryStore) Load() (doc RegistryDocument, err error) {
 	db, err := openWikidDB(s.path)
 	if err != nil {
 		return RegistryDocument{}, err
 	}
-	defer db.Close()
+	defer func() {
+		err = errors.Join(err, wikidCloseDB(db))
+	}()
 	return loadRegistryDocument(context.Background(), db)
 }
 
@@ -134,7 +137,7 @@ type registryQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func loadRegistryDocument(ctx context.Context, q registryQuerier) (RegistryDocument, error) {
+func loadRegistryDocument(ctx context.Context, q registryQuerier) (doc RegistryDocument, err error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at
 		FROM workspaces
@@ -143,8 +146,17 @@ func loadRegistryDocument(ctx context.Context, q registryQuerier) (RegistryDocum
 	if err != nil {
 		return RegistryDocument{}, err
 	}
-	defer rows.Close()
-	return loadRegistryRows(rows)
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
+	doc, err = loadRegistryRows(rows)
+	if err != nil {
+		return RegistryDocument{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return RegistryDocument{}, err
+	}
+	return doc, nil
 }
 
 func loadRegistryRows(rows wikidRows) (RegistryDocument, error) {

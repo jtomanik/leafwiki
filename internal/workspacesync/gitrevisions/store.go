@@ -430,10 +430,16 @@ func (s *Store) trackedMarkdownFiles() (map[string]string, error) {
 			if err != nil {
 				return err
 			}
-			defer reader.Close()
-			raw, err := gitRevisionReadAll(reader)
-			if err != nil {
-				return err
+			raw, readErr := gitRevisionReadAll(reader)
+			closeErr := reader.Close()
+			if readErr != nil {
+				if closeErr != nil {
+					return errors.Join(readErr, closeErr)
+				}
+				return readErr
+			}
+			if closeErr != nil {
+				return closeErr
 			}
 			files[file.Name] = string(raw)
 		}
@@ -922,10 +928,16 @@ func (s *Store) filesAtCommit(ctx context.Context, commit *object.Commit) (map[s
 		if err != nil {
 			return err
 		}
-		defer reader.Close()
-		raw, err := gitRevisionReadAll(reader)
-		if err != nil {
-			return err
+		raw, readErr := gitRevisionReadAll(reader)
+		closeErr := reader.Close()
+		if readErr != nil {
+			if closeErr != nil {
+				return errors.Join(readErr, closeErr)
+			}
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
 		}
 		files[file.Name] = string(raw)
 		return nil

@@ -3,6 +3,7 @@ package frontd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,7 +45,7 @@ func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := strings.TrimRight(upstream.String(), "/")
-	return func(source *http.Request) (workspaceid.WorkspaceID, error) {
+	return func(source *http.Request) (id workspaceid.WorkspaceID, err error) {
 		endpoint := baseURL + "/__leafwiki/workspaces"
 		ctx := contextForRequest(source)
 		req, err := newFrontdRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -61,7 +62,9 @@ func NewWikidSingleWorkspaceResolver(wikidURL string, daemonToken string) (func(
 		if err != nil {
 			return "", err
 		}
-		defer resp.Body.Close()
+		defer func() {
+			err = errors.Join(err, resp.Body.Close())
+		}()
 		switch resp.StatusCode {
 		case http.StatusOK:
 		case http.StatusForbidden, http.StatusUnauthorized:
@@ -104,7 +107,7 @@ func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := strings.TrimRight(upstream.String(), "/")
-	return func(source *http.Request, workspaceID workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+	return func(source *http.Request, workspaceID workspaceid.WorkspaceID) (route WorkspaceRoute, err error) {
 		if err := workspaceID.Validate(); err != nil {
 			return WorkspaceRoute{}, ErrWorkspaceNotFound
 		}
@@ -124,7 +127,9 @@ func NewWikidWorkspaceResolver(wikidURL string, daemonToken string) (func(*http.
 		if err != nil {
 			return WorkspaceRoute{}, err
 		}
-		defer resp.Body.Close()
+		defer func() {
+			err = errors.Join(err, resp.Body.Close())
+		}()
 		switch resp.StatusCode {
 		case http.StatusOK:
 		case http.StatusNotFound:

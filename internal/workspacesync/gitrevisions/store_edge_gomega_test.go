@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-billy/v6"
 	git "github.com/go-git/go-git/v6"
@@ -194,7 +195,7 @@ var _ = Describe("git revision edge behavior", func() {
 			return nil, errSecondOpenFailed
 		})
 		restoreInit = setGitRevisionSeam(&gitRevisionGitInit, func(gitstorage.Storer, ...git.InitOption) (*git.Repository, error) {
-			return nil, nil
+			return &git.Repository{}, nil
 		})
 		_, err = Open(StoreOptions{DataDir: gitRevisionTempDir(), RootDir: filepath.Join(gitRevisionTempDir(), "root")})
 		Expect(err).To(MatchError(errSecondOpenFailed))
@@ -270,7 +271,7 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreWorktree()
 
 		restoreWorktree = setGitRevisionSeam(&gitRevisionRepoWorktree, func(*git.Repository) (*git.Worktree, error) {
-			return nil, nil
+			return &git.Worktree{}, nil
 		})
 		errStageFailed := errors.New("stage failed")
 		restoreStage := setGitRevisionSeam(&gitRevisionStoreStageMarkdownChanges, func(*Store, context.Context, *git.Worktree) ([]string, error) {
@@ -319,7 +320,7 @@ var _ = Describe("git revision edge behavior", func() {
 			return plumbing.ZeroHash, errEmptyRestoreFailed
 		})
 		restoreHead = setGitRevisionSeam(&gitRevisionRepoHead, func(*git.Repository) (*plumbing.Reference, error) {
-			return nil, nil
+			return plumbing.NewHashReference(plumbing.HEAD, plumbing.ZeroHash), nil
 		})
 		_, err = store.Capture(context.Background(), CommitRequest{Reason: ReasonRestore})
 		Expect(err).To(MatchError(errEmptyRestoreFailed))
@@ -1075,7 +1076,33 @@ func (e fakeDirEntry) Type() fs.FileMode {
 }
 
 func (e fakeDirEntry) Info() (fs.FileInfo, error) {
-	return nil, nil
+	return fakeFileInfo{}, nil
+}
+
+type fakeFileInfo struct{}
+
+func (fakeFileInfo) Name() string {
+	return ""
+}
+
+func (fakeFileInfo) Size() int64 {
+	return 0
+}
+
+func (fakeFileInfo) Mode() fs.FileMode {
+	return 0
+}
+
+func (fakeFileInfo) ModTime() time.Time {
+	return time.Time{}
+}
+
+func (fakeFileInfo) IsDir() bool {
+	return false
+}
+
+func (fakeFileInfo) Sys() any {
+	return nil
 }
 
 func setGitRevisionSeam[T any](target *T, replacement T) func() {
@@ -1103,13 +1130,4 @@ func gitDirFileTargetResult(raw string, rootDir string) (string, error) {
 		return "", errGitDirTargetAbsent
 	}
 	return target, nil
-}
-
-func containsAll(haystack string, needles ...string) bool {
-	for _, needle := range needles {
-		if !strings.Contains(haystack, needle) {
-			return false
-		}
-	}
-	return true
 }

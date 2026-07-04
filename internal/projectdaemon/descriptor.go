@@ -62,7 +62,7 @@ func ReadDescriptor(path string) (*Descriptor, error) {
 	return &desc, nil
 }
 
-func WriteDescriptorAtomic(path string, desc *Descriptor) error {
+func WriteDescriptorAtomic(path string, desc *Descriptor) (err error) {
 	if desc == nil {
 		return errDescriptorRequired
 	}
@@ -78,7 +78,11 @@ func WriteDescriptorAtomic(path string, desc *Descriptor) error {
 		return fmt.Errorf("create temporary descriptor: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer removeTemporaryDescriptor(tmpPath)
+	defer func() {
+		if cleanupErr := removeTemporaryDescriptor(tmpPath); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
+			err = errors.Join(err, fmt.Errorf("cleanup temporary descriptor: %w", cleanupErr))
+		}
+	}()
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("secure temporary descriptor: %w", err)

@@ -1136,9 +1136,19 @@ type lockErrorExecer struct {
 func (e *lockErrorExecer) ExecContext(context.Context, string, ...any) (sql.Result, error) {
 	e.calls++
 	if e.succeedAfter > 0 && e.calls > e.succeedAfter {
-		return nil, nil
+		return wikidNoopSQLResult{}, nil
 	}
 	return nil, e.err
+}
+
+type wikidNoopSQLResult struct{}
+
+func (wikidNoopSQLResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (wikidNoopSQLResult) RowsAffected() (int64, error) {
+	return 0, nil
 }
 
 func wikidSQLiteErrorWithCode(code int) error {

@@ -7,7 +7,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 )
 
@@ -130,16 +129,4 @@ const (
 type sessionRegistrySeenState struct {
 	Outcome sessionObservationOutcome
 	Count   int
-}
-
-func lockedJoinCounts(mu *sync.Mutex, counts *[]int) string {
-	mu.Lock()
-	defer mu.Unlock()
-	return joinTestCounts(*counts)
-}
-
-func matchSessionHandle(id SessionID) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"ID": Equal(id),
-	})
 }
