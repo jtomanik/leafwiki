@@ -2284,6 +2284,8 @@ func plain() string { return "hello world" }
 			Expect(isStableMessageLikeLiteral("wiki_get_page")).To(BeTrue())
 			Expect(isStableMessageLikeLiteral("page_not_found")).To(BeTrue())
 			Expect(isStableMessageLikeLiteral("plain prose")).To(BeFalse())
+			Expect(isLikelyErrorCodeLiteral("page_invalid_kind")).To(BeTrue())
+			Expect(isLikelyErrorCodeLiteral("access_token")).To(BeFalse())
 
 			Expect(isStableLiteralAllowed(h.ctx, stableCall)).To(BeFalse())
 			Expect(isLocalizedProseLiteralAllowed(h.ctx, plain)).To(BeFalse())

@@ -1062,7 +1062,27 @@ func isStableTestContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value 
 	if isRuntimeRoleHealthWireLiteral(value) && isRuntimeRoleHealthWireLiteralContext(ctx, lit) {
 		return true
 	}
+	if isLikelyErrorCodeLiteral(value) && isTestStringMatcherLiteralContext(ctx, lit) {
+		return true
+	}
 	return isStableMessageLikeLiteral(value) && isTestContractLiteralContext(ctx, lit)
+}
+
+func isLikelyErrorCodeLiteral(value string) bool {
+	if !errorCodePattern.MatchString(strings.TrimSpace(value)) {
+		return false
+	}
+	canonical := canonicalName(value)
+	return strings.Contains(canonical, "invalid") ||
+		strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "failed") ||
+		strings.Contains(canonical, "failure") ||
+		strings.Contains(canonical, "missing") ||
+		strings.Contains(canonical, "required") ||
+		strings.Contains(canonical, "conflict") ||
+		strings.Contains(canonical, "forbidden") ||
+		strings.Contains(canonical, "unauthorized") ||
+		strings.Contains(canonical, "denied")
 }
 
 func isRuntimeRoleHealthWireLiteral(value string) bool {
@@ -1195,6 +1215,34 @@ func isTestContractLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool 
 			}
 		case *ast.FuncDecl:
 			return false
+		}
+	}
+	return false
+}
+
+func isTestStringMatcherLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			if isTestAssertionMatcherCall(callName(n)) && callContainsArg(n, lit) {
+				return matcherEventuallyUsedByTestAssertionOrHelper(ctx, n)
+			}
+		case *ast.FuncDecl:
+			return false
+		}
+	}
+	return false
+}
+
+func matcherEventuallyUsedByTestAssertionOrHelper(ctx *analysisContext, matcher *ast.CallExpr) bool {
+	for current := ctx.parent(matcher); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			if isGomegaAssertionMethod(callName(n)) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return isTestSemanticAssertionHelper(n.Name.Name)
 		}
 	}
 	return false

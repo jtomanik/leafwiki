@@ -238,6 +238,10 @@ func commitMessage() string {
 	return "LeafWiki workspace sync"
 }
 
+func invalidCreateKindHTTP() string {
+	return `{"error":{"code":"page_invalid_kind"}}`
+}
+
 type tableContractCase struct {
 	wantCode    string
 	wantMessage string
@@ -501,6 +505,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(now).To(Equal(now))                                                                                 // want "use BeTemporally for time.Time equality assertions"
 	Expect(payload.Code).To(Equal("page_not_found"))                                                           // want "assert structured error semantics with a typed domain matcher/helper instead of matching Code directly" "raw stable contract literal \"page_not_found\" used in test assertion code; use the typed constant or semantic helper"
 	Expect(payload.MessageID).To(Equal("errors.page.not_found"))                                               // want "assert structured error semantics with a typed domain matcher/helper instead of matching MessageID directly" "raw stable contract literal \"errors.page.not_found\" used in test assertion code; use the typed constant or semantic helper"
+	Expect(invalidCreateKindHTTP()).To(ContainSubstring("page_invalid_kind"))                                  // want "raw stable contract literal \"page_invalid_kind\" used in test assertion code; use the typed constant or semantic helper"
 	Expect(commitMessage()).To(HavePrefix("LeafWiki initial workspace snapshot"))                              // want "raw localized prose \"LeafWiki initial workspace snapshot\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
 	Expect(payload).To(MatchFields(nil, Fields{
 		"Message": Equal("LeafWiki workspace sync"), // want "raw localized prose \"LeafWiki workspace sync\" used in test assertion code; assert a semantic code/message ID instead"
@@ -550,6 +555,19 @@ func matchMatcherBackedRecord(content GomegaMatcher) any {
 		Content any
 	}
 	return Equal(matcherBackedRecord{Content: content.(interface{})}) // want "do not pass a Gomega matcher as an expected value to Equal; compose or apply the matcher directly"
+}
+
+func matchGenericToolErrorArgContainingAny(wants ...any) GomegaMatcher { // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
+	GinkgoHelper()
+
+	argMatchers := make([]any, 0, len(wants))
+	for _, want := range wants {
+		argMatchers = append(argMatchers, ContainSubstring(fmt.Sprint(want)))
+	}
+	return SatisfyAll(
+		HaveField("Code", Equal(ErrorCode("mcp_tool_error"))),
+		HaveField("Args", ContainElement(SatisfyAny(argMatchers...))),
+	).(GomegaMatcher)
 }
 
 func TestRepoTestGomegaStructuredMatcherShortcutsAreRejected(t *testing.T) {

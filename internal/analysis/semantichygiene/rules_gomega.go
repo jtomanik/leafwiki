@@ -374,6 +374,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 		return
 	}
 	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
+	checkGomegaMatcherFactoryGenericToolErrorArgs(ctx, fn)
 	checkGomegaMatcherFactoryBooleanErrorGate(ctx, fn)
 	checkGomegaMatcherFactoryStructuredProtocolStatus(ctx, fn)
 	if fn.Type.Params == nil || !gomegaMatcherFactoryName(fn.Name.Name) {
@@ -604,6 +605,64 @@ func checkGomegaMatcherFactoryGenericHaveOccurred(ctx *analysisContext, fn *ast.
 		}
 		return true
 	})
+}
+
+func checkGomegaMatcherFactoryGenericToolErrorArgs(ctx *analysisContext, fn *ast.FuncDecl) {
+	if matcherFactoryGenericToolErrorName(fn.Name.Name) {
+		ctx.report(ruleGomegaGenericHaveOccurred, fn.Name, gomegaGenericHaveOccurredDiagnostic())
+		return
+	}
+	var offender ast.Node
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if offender != nil || node == nil {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if !isMatcherNamed(call, "HaveField") || len(call.Args) < 2 {
+			return true
+		}
+		fieldName, ok := stringLiteralValue(call.Args[0])
+		if !ok || canonicalName(fieldName) != "args" {
+			return true
+		}
+		if matcherTreeContainsStringFragmentMatcher(ctx, call.Args[1]) {
+			offender = call
+			return false
+		}
+		return true
+	})
+	if offender != nil {
+		ctx.report(ruleGomegaGenericHaveOccurred, offender, gomegaGenericHaveOccurredDiagnostic())
+	}
+}
+
+func matcherFactoryGenericToolErrorName(name string) bool {
+	canonical := canonicalName(name)
+	return strings.Contains(canonical, "generic") &&
+		strings.Contains(canonical, "tool") &&
+		strings.Contains(canonical, "error")
+}
+
+func matcherTreeContainsStringFragmentMatcher(ctx *analysisContext, expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if isMatcherNamed(call, "ContainSubstring", "HavePrefix", "HaveSuffix", "MatchRegexp") && callHasStringArg(ctx, call) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func gomegaGenericErrorPredicateMatcherInExpr(ctx *analysisContext, expr ast.Expr) ast.Expr {
