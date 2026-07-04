@@ -21,6 +21,8 @@ import (
 	"github.com/perber/wiki/internal/http/dto"
 	coretags "github.com/perber/wiki/internal/tags"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 func matchTagsStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
@@ -64,6 +66,17 @@ func matchTagSet(tags ...string) types.GomegaMatcher {
 		elements = append(elements, tag)
 	}
 	return ConsistOf(elements...)
+}
+
+func matchTagsUseCaseSQLitePrimaryError(code int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(err error) int {
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) {
+			return -1
+		}
+		return sqliteErr.Code() & 0xFF
+	}, Equal(code))
 }
 
 // ─── test helpers ─────────────────────────────────────────────────────────────
@@ -210,7 +223,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchTagsUseCaseSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
 	ginkgo.It("returns tag metadata lookup errors after matching page IDs", func() {
@@ -236,7 +249,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchTagsUseCaseSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 })
 
