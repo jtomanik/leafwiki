@@ -261,7 +261,7 @@ type structuredTestError struct{}
 
 func (*structuredTestError) Error() string { return "" }
 
-var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", func() {
+var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", ginkgo.Label("unit"), func() {
 	ginkgo.It("allows behavior prose without treating it as contract data", func() {
 		if !strings.Contains("file mode mismatch: want 0600", "want 0600") {
 			panic("mode assertion failed")
@@ -299,25 +299,25 @@ var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", func
 	})
 })
 
-var _ = ginkgo.It("documents a package invariant without a container", func() {}) // want "semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason"
+var _ = ginkgo.It("documents a package invariant without a container", ginkgo.Label("unit"), func() {}) // want "semh:ginkgo.top-level-it: top-level It reads like a migrated unit test; place it under a behavior container or waive with a specific reason"
 
 // semh:allow ginkgo.top-level-it -- package-level invariant reads clearer without an artificial container
-var _ = ginkgo.It("documents an exceptional package invariant", func() {})
+var _ = ginkgo.It("documents an exceptional package invariant", ginkgo.Label("unit"), func() {})
 
 // semh:allow ginkgo.top-level-it -- first budgeted package invariant
-var _ = ginkgo.It("documents a first budgeted package invariant", func() {})
+var _ = ginkgo.It("documents a first budgeted package invariant", ginkgo.Label("unit"), func() {})
 
 // semh:allow ginkgo.top-level-it -- second budgeted package invariant
-var _ = ginkgo.It("documents a second budgeted package invariant", func() {})
+var _ = ginkgo.It("documents a second budgeted package invariant", ginkgo.Label("unit"), func() {})
 
 // semh:allow ginkgo.top-level-it -- third budgeted package invariant // want "semh:waiver.budget-exceeded: waiver budget exceeded for ginkgo.top-level-it: used 4, budget 3"
-var _ = ginkgo.It("documents a third budgeted package invariant", func() {})
+var _ = ginkgo.It("documents a third budgeted package invariant", ginkgo.Label("unit"), func() {})
 
 func It(description string, args ...any) bool { return true }
 
 var _ = It("local helper is not a Ginkgo DSL call", func() {})
 
-var _ = ginkgo.Describe("ginkgo and gomega quality regressions", func() {
+var _ = ginkgo.Describe("ginkgo and gomega quality regressions", ginkgo.Label("unit"), func() {
 	ginkgo.Describe("git revision edge coverage", func() {})                           // want "Ginkgo node name \"git revision edge coverage\" reads like a coverage bucket; describe observable behavior instead"
 	ginkgo.It("covers filesystem seam branches", func() {})                            // want "Ginkgo node name \"covers filesystem seam branches\" reads like a coverage bucket; describe observable behavior instead"
 	ginkgo.It("exercises fail-fast startup validation through the exit seam", func() { // want "Ginkgo node name \"exercises fail-fast startup validation through the exit seam\" reads like a coverage bucket; describe observable behavior instead"
@@ -501,7 +501,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(rec.Body.String()).To(ContainSubstring("ok"))  // want "use HaveHTTPBody matcher instead of matching recorder body strings directly"
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("ok")))
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("done")))                                                     // want "compose repeated HaveHTTPBody assertions for the same response into one matcher"
-	Expect(logOutput.String()).To(ContainSubstring("could not close store"))                                  // want "raw localized prose \"could not close store\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
+	Expect(logOutput.String()).To(ContainSubstring("could not close store"))                                   // want "raw localized prose \"could not close store\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
 	Expect(resp.Header.Get("X-Request-Id")).To(Equal("abc"))                                                   // want "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
 	Expect(httptest.NewRequest(http.MethodGet, "/", nil)).To(HaveHTTPHeaderWithValue("X-Request-Id", "req-1")) // want "HaveHTTPHeaderWithValue matches HTTP responses; assert request headers with request-header semantics instead"
 	Expect(count).To(BeEquivalentTo(int64(1)))                                                                 // want "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"

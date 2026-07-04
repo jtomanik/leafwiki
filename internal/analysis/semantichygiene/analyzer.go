@@ -70,6 +70,7 @@ func run(pass *analysis.Pass) (any, error) {
 			checkLocalizedProseLiteral(ctx, n)
 		}
 	})
+	checkGinkgoMissingTaxonomyLabels(ctx)
 	ctx.finalizeDiagnostics()
 	return nil, nil
 }

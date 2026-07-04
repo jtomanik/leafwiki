@@ -35,6 +35,7 @@ const (
 	ruleGinkgoPending                      ruleID = "ginkgo.pending"
 	ruleGinkgoFlakeAttempts                ruleID = "ginkgo.flake-attempts"
 	ruleGinkgoRestrictedDecorator          ruleID = "ginkgo.restricted-decorator"
+	ruleGinkgoTaxonomyMissingLabel         ruleID = "ginkgo.taxonomy-label.missing"
 	ruleGinkgoTaxonomyUnknownLabel         ruleID = "ginkgo.taxonomy-label.unknown"
 	ruleGinkgoTaxonomyDynamicLabel         ruleID = "ginkgo.taxonomy-label.dynamic"
 	ruleGinkgoTaxonomyMultipleLabels       ruleID = "ginkgo.taxonomy-label.multiple"
@@ -146,6 +147,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGinkgoPending:                      hardRule(ruleGinkgoPending),
 	ruleGinkgoFlakeAttempts:                hardRule(ruleGinkgoFlakeAttempts),
 	ruleGinkgoRestrictedDecorator:          hardRule(ruleGinkgoRestrictedDecorator),
+	ruleGinkgoTaxonomyMissingLabel:         hardRule(ruleGinkgoTaxonomyMissingLabel),
 	ruleGinkgoTaxonomyUnknownLabel:         hardRule(ruleGinkgoTaxonomyUnknownLabel),
 	ruleGinkgoTaxonomyDynamicLabel:         hardRule(ruleGinkgoTaxonomyDynamicLabel),
 	ruleGinkgoTaxonomyMultipleLabels:       hardRule(ruleGinkgoTaxonomyMultipleLabels),

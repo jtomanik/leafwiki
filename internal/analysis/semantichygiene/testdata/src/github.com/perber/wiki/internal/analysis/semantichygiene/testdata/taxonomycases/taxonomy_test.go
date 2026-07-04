@@ -17,7 +17,7 @@ var _ = ginkgo.Describe("e2e taxonomy labels", func() {
 })
 
 var _ = ginkgo.Describe("unlabeled taxonomy rollout", func() {
-	ginkgo.It("allows an unlabeled spec during the rollout", func() {})
+	ginkgo.It("rejects a spec without a taxonomy label", func() {}) // want "semh:ginkgo.taxonomy-label.missing: Ginkgo spec must have exactly one primary taxonomy label: unit, integration, or e2e"
 })
 
 var _ = ginkgo.Describe("unknown taxonomy labels", func() {

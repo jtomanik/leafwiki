@@ -17,7 +17,7 @@ func ordinaryHelper() {}
 
 // semh:allow ginkgo.top-level-it -- first duplicate package-level invariant // want "semh:waiver.duplicate: duplicate semh waiver for ginkgo.top-level-it; one waiver can suppress one diagnostic"
 // semh:allow ginkgo.top-level-it -- second duplicate package-level invariant
-var _ = ginkgo.It("documents duplicate waiver behavior", func() {})
+var _ = ginkgo.It("documents duplicate waiver behavior", ginkgo.Label("unit"), func() {})
 
 // semh:allow semantic.direct-cast -- hard semantic rules must stay non-waivable // want "semh:waiver.non-waivable-rule: semh waiver for semantic.direct-cast cannot suppress hard diagnostics"
 func hardRuleStillReports(raw string) PageID {

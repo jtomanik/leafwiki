@@ -11,15 +11,16 @@ func (assertion) To(matcher any, annotations ...any) {}
 func Equal(want any) any { return nil }
 
 // semh:allow ginkgo.top-level-it -- first package-level invariant
-var _ = ginkgo.It("documents first package invariant", func() {})
+var _ = ginkgo.It("documents first package invariant", ginkgo.Label("unit"), func() {})
 
 // semh:allow ginkgo.top-level-it -- second package-level invariant
-var _ = ginkgo.It("documents second package invariant", func() {})
+var _ = ginkgo.It("documents second package invariant", ginkgo.Label("unit"), func() {})
 
 // semh:allow ginkgo.top-level-it -- third package-level invariant
-var _ = ginkgo.It("documents third package invariant", func() {})
+var _ = ginkgo.It("documents third package invariant", ginkgo.Label("unit"), func() {})
 
 var _ = ginkgo.DescribeTable("wide entry budget cases",
+	ginkgo.Label("unit"),
 	func(name string, count int, enabled bool, code string, message string) {},
 	// semh:allow ginkgo.wide-entry -- first wide entry exception
 	ginkgo.Entry("wide row 1", "name", 1, true, "code", "message"),

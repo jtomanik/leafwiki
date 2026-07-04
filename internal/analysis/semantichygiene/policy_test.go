@@ -83,6 +83,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("ginkgo pending", ruleID("ginkgo.pending"), false, waiverScopeNone),
 			ginkgo.Entry("ginkgo flake attempts", ruleID("ginkgo.flake-attempts"), false, waiverScopeNone),
 			ginkgo.Entry("ginkgo restricted decorator", ruleID("ginkgo.restricted-decorator"), false, waiverScopeNone),
+			ginkgo.Entry("ginkgo taxonomy missing label", ruleID("ginkgo.taxonomy-label.missing"), false, waiverScopeNone),
 			ginkgo.Entry("ginkgo taxonomy unknown label", ruleID("ginkgo.taxonomy-label.unknown"), false, waiverScopeNone),
 			ginkgo.Entry("ginkgo taxonomy dynamic label", ruleID("ginkgo.taxonomy-label.dynamic"), false, waiverScopeNone),
 			ginkgo.Entry("ginkgo taxonomy multiple labels", ruleID("ginkgo.taxonomy-label.multiple"), false, waiverScopeNone),

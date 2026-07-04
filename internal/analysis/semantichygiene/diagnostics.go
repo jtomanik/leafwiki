@@ -341,6 +341,10 @@ func ginkgoTaxonomyDynamicLabelDiagnostic() string {
 	return "Ginkgo taxonomy labels must be static string literals"
 }
 
+func ginkgoTaxonomyMissingLabelDiagnostic() string {
+	return "Ginkgo spec must have exactly one primary taxonomy label: unit, integration, or e2e"
+}
+
 func ginkgoTaxonomyMultipleLabelsDiagnostic(labels []string) string {
 	return fmt.Sprintf("Ginkgo spec has multiple primary taxonomy labels (%s); use exactly one of unit, integration, or e2e", strings.Join(labels, ", "))
 }
