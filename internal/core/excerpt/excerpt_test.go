@@ -75,13 +75,13 @@ var _ = Describe("excerpt generation from content", func() {
 	})
 
 	It("truncates long bodies with an ellipsis", func() {
-		body := strings.Repeat("word ", 200)
+		body := strings.Repeat("w", MaxRunes+20)
 		raw := "---\ntitle: T\n---\n\n" + body
 
 		got := FromContent(raw)
 
 		Expect(got).To(HaveSuffix("..."))
-		Expect(len([]rune(got))).To(BeNumerically("<=", MaxRunes+10))
+		Expect([]rune(strings.TrimSuffix(got, "..."))).To(HaveLen(MaxRunes))
 	})
 
 	It("leaves short bodies unmarked by truncation", func() {
