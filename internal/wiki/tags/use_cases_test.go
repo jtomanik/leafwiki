@@ -107,7 +107,7 @@ func setupUseCasesWithDataDir() (*GetPagesByTagsUseCase, *coretags.TagsService, 
 func createAndIndexPage(ts *tree.TreeService, svc *coretags.TagsService, title, slug string, tags []string, body string) tree.PageID {
 	ginkgo.GinkgoHelper()
 	kind := tree.NodeKindPage
-	idPtr, err := ts.CreateNode("system", nil, title, newFixtureSlug(slug), &kind)
+	idPtr, err := ts.CreateNode("system", nil, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
 
 	fm := "---\ntags:\n"
@@ -116,7 +116,7 @@ func createAndIndexPage(ts *tree.TreeService, svc *coretags.TagsService, title, 
 	}
 	fm += "---\n\n" + body
 
-	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, newFixtureSlug(slug), &fm, true)).To(Succeed())
+	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, tree.SlugFromString(slug), &fm, true)).To(Succeed())
 
 	raw, err := ts.ReadPageRaw(*idPtr)
 	Expect(err).NotTo(HaveOccurred())
