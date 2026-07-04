@@ -12,7 +12,6 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -68,19 +67,38 @@ func skipUnlessSchemaVersionAtLeast(version int) {
 }
 
 func matchMigrationError(want error) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual error) (bool, error) {
-		return errors.Is(actual, want), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} wrap migration error\n{{format .Data 1}}", want)
+	return WithTransform(migrationErrorClassFor, Equal(migrationErrorClassFor(want)))
 }
 
 func matchOrderIDs(want ...tree.PageID) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual []string) (bool, error) {
-		gotIDs := make([]tree.PageID, 0, len(actual))
-		for _, rawID := range actual {
-			gotIDs = append(gotIDs, tree.PageIDFromString(rawID))
-		}
-		return Equal(want).Match(gotIDs)
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} preserve tree page IDs in order\n{{format .Data 1}}", want)
+	return WithTransform(migrationOrderIDsFor, Equal(want))
+}
+
+type migrationErrorClass string
+
+const (
+	migrationErrorClassPersistChildOrder       migrationErrorClass = "persist child order"
+	migrationErrorClassMaterializeSectionIndex migrationErrorClass = "materialize section index"
+	migrationErrorClassOther                   migrationErrorClass = "other migration error"
+)
+
+func migrationErrorClassFor(err error) migrationErrorClass {
+	switch {
+	case errors.Is(err, treemigration.ErrPersistChildOrder):
+		return migrationErrorClassPersistChildOrder
+	case errors.Is(err, treemigration.ErrMaterializeSectionIndex):
+		return migrationErrorClassMaterializeSectionIndex
+	default:
+		return migrationErrorClassOther
+	}
+}
+
+func migrationOrderIDsFor(actual []string) []tree.PageID {
+	gotIDs := make([]tree.PageID, 0, len(actual))
+	for _, rawID := range actual {
+		gotIDs = append(gotIDs, tree.PageIDFromString(rawID))
+	}
+	return gotIDs
 }
 
 func matchManagedMetadata(createdAt string, updatedAt string, creatorID string, lastAuthorID string) types.GomegaMatcher {
@@ -129,7 +147,7 @@ func haveMigratedFrontmatter(frontmatter types.GomegaMatcher, body types.GomegaM
 	})
 }
 
-var _ = ginkgo.Describe("runner", func() {
+var _ = ginkgo.Describe("runner", ginkgo.Label("unit"), func() {
 	ginkgo.It("adds managed frontmatter during V2 migration while preserving page body", func() {
 		skipUnlessSchemaVersionAtLeast(2)
 

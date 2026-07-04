@@ -179,17 +179,50 @@ type expectedMigrationMessages struct {
 }
 
 func recordMigrationMessages(expected expectedMigrationMessages) OmegaMatcher {
-	return Satisfy(func(log *recordingMigrationLogger) bool {
-		if log == nil {
-			return false
-		}
-		warningsOK, err := ContainElements(expected.Warnings).Match(log.warnings)
-		if err != nil || !warningsOK {
-			return false
-		}
-		infosOK, err := ContainElements(expected.Infos).Match(log.infos)
-		return err == nil && infosOK
-	})
+	return WithTransform(recordedMigrationMessagesFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Warnings": ContainElements(expected.Warnings),
+		"Infos":    ContainElements(expected.Infos),
+	}))
+}
+
+type recordedMigrationMessages struct {
+	Warnings []string
+	Infos    []string
+}
+
+func recordedMigrationMessagesFor(log *recordingMigrationLogger) recordedMigrationMessages {
+	if log == nil {
+		return recordedMigrationMessages{}
+	}
+	return recordedMigrationMessages{
+		Warnings: log.warnings,
+		Infos:    log.infos,
+	}
+}
+
+type migrationMetadataTimestampState string
+
+const (
+	migrationMetadataTimestampsMissing    migrationMetadataTimestampState = "missing metadata timestamps"
+	migrationMetadataTimestampsBackfilled migrationMetadataTimestampState = "backfilled metadata timestamps"
+	migrationMetadataTimestampsPartial    migrationMetadataTimestampState = "partial metadata timestamps"
+)
+
+func matchMigrationMetadataTimestampState(expected migrationMetadataTimestampState) OmegaMatcher {
+	return WithTransform(migrationMetadataTimestampStateFor, Equal(expected))
+}
+
+func migrationMetadataTimestampStateFor(meta Metadata) migrationMetadataTimestampState {
+	createdMissing := meta.CreatedAt.IsZero()
+	updatedMissing := meta.UpdatedAt.IsZero()
+	switch {
+	case createdMissing && updatedMissing:
+		return migrationMetadataTimestampsMissing
+	case !createdMissing && !updatedMissing:
+		return migrationMetadataTimestampsBackfilled
+	default:
+		return migrationMetadataTimestampsPartial
+	}
 }
 
 func tempMigrationScratchDir() string {
@@ -201,7 +234,7 @@ func tempMigrationScratchDir() string {
 	return path
 }
 
-var _ = ginkgo.Describe("tree migration metadata backfill", func() {
+var _ = ginkgo.Describe("tree migration metadata backfill", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses filesystem timestamps for missing metadata while preserving author identity", func() {
 		tmp := tempMigrationScratchDir()
 		path := filepath.Join(tmp, "page.md")
@@ -255,7 +288,7 @@ var _ = ginkgo.Describe("tree migration metadata backfill", func() {
 
 		Expect(backfillMetadata(Dependencies{Store: store, Log: log}, node)).To(Succeed())
 
-		Expect(node.Metadata().CreatedAt.IsZero()).To(BeTrue())
+		Expect(node.Metadata()).To(matchMigrationMetadataTimestampState(migrationMetadataTimestampsMissing))
 		Expect(log.errors).To(ContainElement("Could not resolve node for metadata backfill"))
 	})
 
@@ -277,8 +310,8 @@ var _ = ginkgo.Describe("tree migration metadata backfill", func() {
 
 		Expect(backfillMetadata(Dependencies{Store: store, Log: log}, node)).To(Succeed())
 
-		Expect(node.Metadata().CreatedAt.IsZero()).To(BeFalse())
-		Expect(child.Metadata().CreatedAt.IsZero()).To(BeFalse())
+		Expect(node.Metadata()).To(matchMigrationMetadataTimestampState(migrationMetadataTimestampsBackfilled))
+		Expect(child.Metadata()).To(matchMigrationMetadataTimestampState(migrationMetadataTimestampsBackfilled))
 		Expect(log.errors).To(ContainElement("Could not stat node for metadata"))
 	})
 

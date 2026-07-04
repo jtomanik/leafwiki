@@ -5,7 +5,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 )
 
@@ -49,26 +48,49 @@ func validDependencies() Dependencies {
 }
 
 type missingDependencyCase struct {
-	name   string
 	mutate func(*Dependencies)
 	want   error
 }
 
-var missingDependencyCases = []missingDependencyCase{
-	{name: "nil root", mutate: func(d *Dependencies) { d.Root = nil }, want: ErrMigrationRootRequired},
-	{name: "nil store", mutate: func(d *Dependencies) { d.Store = nil }, want: ErrMigrationStoreRequired},
-	{name: "nil log", mutate: func(d *Dependencies) { d.Log = nil }, want: ErrMigrationLoggerRequired},
-	{name: "nil save tree", mutate: func(d *Dependencies) { d.SaveTree = nil }, want: ErrSaveTreeCallbackRequired},
-	{name: "nil save schema", mutate: func(d *Dependencies) { d.SaveSchema = nil }, want: ErrSaveSchemaCallbackRequired},
-}
-
 func matchMigrationError(want error) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual error) (bool, error) {
-		return errors.Is(actual, want), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} wrap migration error\n{{format .Data 1}}", want)
+	return WithTransform(validationMigrationErrorClassFor, Equal(validationMigrationErrorClassFor(want)))
 }
 
-var _ = ginkgo.Describe("runner validation", func() {
+type validationMigrationErrorClass string
+
+const (
+	validationMigrationErrorInvalidSchemaVersion              validationMigrationErrorClass = "invalid schema version"
+	validationMigrationErrorRootRequired                      validationMigrationErrorClass = "root required"
+	validationMigrationErrorStoreRequired                     validationMigrationErrorClass = "store required"
+	validationMigrationErrorLoggerRequired                    validationMigrationErrorClass = "logger required"
+	validationMigrationErrorSaveTreeCallbackRequired          validationMigrationErrorClass = "save tree callback required"
+	validationMigrationErrorSaveSchemaCallbackRequired        validationMigrationErrorClass = "save schema callback required"
+	validationMigrationErrorUnsupportedSchemaMigrationVersion validationMigrationErrorClass = "unsupported schema migration version"
+	validationMigrationErrorOther                             validationMigrationErrorClass = "other migration validation error"
+)
+
+func validationMigrationErrorClassFor(err error) validationMigrationErrorClass {
+	switch {
+	case errors.Is(err, ErrInvalidSchemaVersion):
+		return validationMigrationErrorInvalidSchemaVersion
+	case errors.Is(err, ErrMigrationRootRequired):
+		return validationMigrationErrorRootRequired
+	case errors.Is(err, ErrMigrationStoreRequired):
+		return validationMigrationErrorStoreRequired
+	case errors.Is(err, ErrMigrationLoggerRequired):
+		return validationMigrationErrorLoggerRequired
+	case errors.Is(err, ErrSaveTreeCallbackRequired):
+		return validationMigrationErrorSaveTreeCallbackRequired
+	case errors.Is(err, ErrSaveSchemaCallbackRequired):
+		return validationMigrationErrorSaveSchemaCallbackRequired
+	case errors.Is(err, ErrUnsupportedSchemaMigrationVersion):
+		return validationMigrationErrorUnsupportedSchemaMigrationVersion
+	default:
+		return validationMigrationErrorOther
+	}
+}
+
+var _ = ginkgo.Describe("runner validation", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects negative stored schema versions", func() {
 		deps := validDependencies()
 
@@ -76,17 +98,34 @@ var _ = ginkgo.Describe("runner validation", func() {
 		Expect(err).To(matchMigrationError(ErrInvalidSchemaVersion))
 	})
 
-	ginkgo.Describe("required migration dependencies", func() {
-		for _, tt := range missingDependencyCases {
-			tt := tt
-			ginkgo.It("rejects "+tt.name, func() {
-				deps := validDependencies()
-				tt.mutate(&deps)
-				err := Run(0, deps)
-				Expect(err).To(matchMigrationError(tt.want))
-			})
-		}
-	})
+	ginkgo.DescribeTable("required migration dependencies",
+		func(tc missingDependencyCase) {
+			deps := validDependencies()
+			tc.mutate(&deps)
+			err := Run(0, deps)
+			Expect(err).To(matchMigrationError(tc.want))
+		},
+		ginkgo.Entry("rejects migrations without a root node", missingDependencyCase{
+			mutate: func(d *Dependencies) { d.Root = nil },
+			want:   ErrMigrationRootRequired,
+		}),
+		ginkgo.Entry("rejects migrations without a storage adapter", missingDependencyCase{
+			mutate: func(d *Dependencies) { d.Store = nil },
+			want:   ErrMigrationStoreRequired,
+		}),
+		ginkgo.Entry("rejects migrations without a logger", missingDependencyCase{
+			mutate: func(d *Dependencies) { d.Log = nil },
+			want:   ErrMigrationLoggerRequired,
+		}),
+		ginkgo.Entry("rejects migrations without a save-tree callback", missingDependencyCase{
+			mutate: func(d *Dependencies) { d.SaveTree = nil },
+			want:   ErrSaveTreeCallbackRequired,
+		}),
+		ginkgo.Entry("rejects migrations without a save-schema callback", missingDependencyCase{
+			mutate: func(d *Dependencies) { d.SaveSchema = nil },
+			want:   ErrSaveSchemaCallbackRequired,
+		}),
+	)
 
 	ginkgo.It("rejects unsupported migration versions", func() {
 		deps := validDependencies()
