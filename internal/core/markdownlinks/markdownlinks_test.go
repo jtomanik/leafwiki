@@ -171,20 +171,20 @@ var _ = ginkgo.Describe("markdown link resolution", func() {
 
 	ginkgo.When("normalizing markdown link root prefixes", func() {
 		ginkgo.DescribeTable("rejects non-path or unsafe root prefix values",
-			func(input string) {
+			func(input string, wantErr error) {
 				_, err := NormalizeMarkdownLinkRootPrefix(input)
 
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(wantErr))
 			},
-			ginkgo.Entry("repository root", "/"),
-			ginkgo.Entry("relative parent traversal", ".."),
-			ginkgo.Entry("absolute parent traversal", "/../docs"),
-			ginkgo.Entry("schemed URL", "https://example.com/docs"),
-			ginkgo.Entry("query string", "/docs?x=1"),
-			ginkgo.Entry("fragment", "/docs#intro"),
-			ginkgo.Entry("backslash path", `docs\sync`),
-			ginkgo.Entry("opaque HTTP-ish path", "http:/docs"),
-			ginkgo.Entry("mailto opaque path", "mailto:docs"),
+			ginkgo.Entry("repository root", "/", ErrMarkdownLinkRootPrefixRoot),
+			ginkgo.Entry("relative parent traversal", "..", ErrMarkdownLinkRootPrefixTraversal),
+			ginkgo.Entry("absolute parent traversal", "/../docs", ErrMarkdownLinkRootPrefixTraversal),
+			ginkgo.Entry("schemed URL", "https://example.com/docs", ErrMarkdownLinkRootPrefixNotPath),
+			ginkgo.Entry("query string", "/docs?x=1", ErrMarkdownLinkRootPrefixQueryOrFragment),
+			ginkgo.Entry("fragment", "/docs#intro", ErrMarkdownLinkRootPrefixQueryOrFragment),
+			ginkgo.Entry("backslash path", `docs\sync`, ErrMarkdownLinkRootPrefixBackslash),
+			ginkgo.Entry("opaque HTTP-ish path", "http:/docs", ErrMarkdownLinkRootPrefixNotPath),
+			ginkgo.Entry("mailto opaque path", "mailto:docs", ErrMarkdownLinkRootPrefixNotPath),
 		)
 
 		ginkgo.DescribeTable("accepts stable repository path forms",

@@ -163,7 +163,7 @@ var _ = ginkgo.Describe("markdown link parser internals", func() {
 		Expect(index).To(haveEmptyIndexEntryMaps())
 
 		_, err := NewIndexFromRootWithOptions(filepath.Join(markdownLinksTempDir(), "missing"), Options{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(os.ErrNotExist))
 
 		rootDir := markdownLinksTempDir()
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
