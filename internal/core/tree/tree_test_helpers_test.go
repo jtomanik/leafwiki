@@ -255,21 +255,21 @@ func matchSymlinkLoopError() types.GomegaMatcher {
 func matchExistingSectionIndexPath(path string) types.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("Path", Equal(path)),
-		HaveField("Exists", Equal(true)),
+		HaveField("Exists", BeTrue()),
 	)
 }
 
 func matchMissingSectionIndexPath(path string) types.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("Path", Equal(path)),
-		HaveField("Exists", Equal(false)),
+		HaveField("Exists", BeFalse()),
 	)
 }
 
 func matchExistingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("Path", path),
-		HaveField("Exists", Equal(true)),
+		HaveField("Exists", BeTrue()),
 		HaveField("Err", err),
 	)
 }
@@ -277,7 +277,7 @@ func matchExistingWorkspaceContentPath(path types.GomegaMatcher, err types.Gomeg
 func matchMissingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("Path", path),
-		HaveField("Exists", Equal(false)),
+		HaveField("Exists", BeFalse()),
 		HaveField("Err", err),
 	)
 }
