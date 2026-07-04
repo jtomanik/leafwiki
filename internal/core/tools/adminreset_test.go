@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"os"
@@ -12,16 +12,18 @@ import (
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/perber/wiki/internal/core/auth"
 )
 
 const (
-	resetAdminUsername              = auth.DefaultAdminUsername
-	resetAdminEmail                 = auth.DefaultAdminEmail
-	resetAdminCloseStoreLogMessage  = "could not close store"
-	resetAdminCloseStoreFixtureText = "close failed"
+	resetAdminUsername             = auth.DefaultAdminUsername
+	resetAdminEmail                = auth.DefaultAdminEmail
+	resetAdminCloseStoreLogMessage = "could not close store"
 )
+
+var errResetAdminCloseStore = errors.New("auth store close failed")
 
 func matchPasswordResetUser(username string) types.GomegaMatcher {
 	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -47,14 +49,72 @@ func matchPersistedAdminUser() types.GomegaMatcher {
 }
 
 func matchAdminStoreOpenSQLiteError() types.GomegaMatcher {
-	return WithTransform(func(err error) bool {
-		var sqliteErr *sqlite.Error
-		return errors.As(err, &sqliteErr)
-	}, BeTrue())
+	return WithTransform(sqliteErrorCodeFor, Equal(sqliteErrorCode(sqlite3.SQLITE_CANTOPEN)))
+}
+
+type sqliteErrorCode int
+
+const sqliteErrorAbsent sqliteErrorCode = -1
+
+func sqliteErrorCodeFor(err error) sqliteErrorCode {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return sqliteErrorAbsent
+	}
+	return sqliteErrorCode(sqliteErr.Code())
+}
+
+type capturedLogRecord struct {
+	Level   slog.Level
+	Message string
+	Attrs   map[string]any
+}
+
+type recordingSlogHandler struct {
+	records *[]capturedLogRecord
+}
+
+func newRecordingLogger() (*slog.Logger, *[]capturedLogRecord) {
+	records := []capturedLogRecord{}
+	return slog.New(recordingSlogHandler{records: &records}), &records
+}
+
+func (handler recordingSlogHandler) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (handler recordingSlogHandler) Handle(_ context.Context, record slog.Record) error {
+	attrs := map[string]any{}
+	record.Attrs(func(attr slog.Attr) bool {
+		attrs[attr.Key] = attr.Value.Any()
+		return true
+	})
+	*handler.records = append(*handler.records, capturedLogRecord{
+		Level:   record.Level,
+		Message: record.Message,
+		Attrs:   attrs,
+	})
+	return nil
+}
+
+func (handler recordingSlogHandler) WithAttrs([]slog.Attr) slog.Handler {
+	return handler
+}
+
+func (handler recordingSlogHandler) WithGroup(string) slog.Handler {
+	return handler
+}
+
+func matchAuthStoreCloseErrorLog(closeErr error) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Level":   Equal(slog.LevelError),
+		"Message": Equal(resetAdminCloseStoreLogMessage),
+		"Attrs":   HaveKeyWithValue("error", closeErr),
+	})
 }
 
 var _ = ginkgo.Describe("admin password reset", func() {
-	ginkgo.It("resets the existing admin password and persists the new credentials", func() {
+	ginkgo.It("resets the existing admin password and persists the new credentials", ginkgo.Label("integration"), func() {
 		storageDir := tempAdminResetStorageDir()
 		store := openUserStore(storageDir)
 		userService := auth.NewUserService(store)
@@ -75,7 +135,7 @@ var _ = ginkgo.Describe("admin password reset", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	ginkgo.It("creates a login-ready default admin when no admin exists", func() {
+	ginkgo.It("creates a login-ready default admin when no admin exists", ginkgo.Label("integration"), func() {
 		storageDir := tempAdminResetStorageDir()
 
 		adminUser, err := ResetAdminPassword(storageDir)
@@ -91,7 +151,7 @@ var _ = ginkgo.Describe("admin password reset", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	ginkgo.It("invalidates the previous admin password and preserves regular users", func() {
+	ginkgo.It("invalidates the previous admin password and preserves regular users", ginkgo.Label("integration"), func() {
 		storageDir := tempAdminResetStorageDir()
 		store := openUserStore(storageDir)
 		userService := auth.NewUserService(store)
@@ -117,7 +177,7 @@ var _ = ginkgo.Describe("admin password reset", func() {
 		Expect(editor.Role).To(Equal(auth.RoleEditor))
 	})
 
-	ginkgo.It("creates a complete default admin user when none exists", func() {
+	ginkgo.It("creates a complete default admin user when none exists", ginkgo.Label("integration"), func() {
 		storageDir := tempAdminResetStorageDir()
 
 		adminUser, err := ResetAdminPassword(storageDir)
@@ -134,7 +194,7 @@ var _ = ginkgo.Describe("admin password reset", func() {
 		Expect(persisted).To(matchPersistedAdminUser())
 	})
 
-	ginkgo.It("returns an error and nil user when the auth store cannot open", func() {
+	ginkgo.It("returns an error and nil user when the auth store cannot open", ginkgo.Label("integration"), func() {
 		storageFile := filepath.Join(tempAdminResetStorageDir(), "not-a-directory")
 		Expect(os.WriteFile(storageFile, []byte("not a directory"), 0o644)).To(Succeed())
 
@@ -144,16 +204,12 @@ var _ = ginkgo.Describe("admin password reset", func() {
 		Expect(adminUser).To(BeNil())
 	})
 
-	ginkgo.It("logs auth store close errors", func() {
-		var logOutput bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&logOutput, nil))
+	ginkgo.It("logs auth store close errors", ginkgo.Label("unit"), func() {
+		logger, records := newRecordingLogger()
 
-		logUserStoreClose(logger, closeErrorStore{err: errors.New(resetAdminCloseStoreFixtureText)})
+		logUserStoreClose(logger, closeErrorStore{err: errResetAdminCloseStore})
 
-		Expect(logOutput.String()).To(SatisfyAll(
-			ContainSubstring(resetAdminCloseStoreLogMessage),
-			ContainSubstring(resetAdminCloseStoreFixtureText),
-		))
+		Expect(*records).To(ConsistOf(matchAuthStoreCloseErrorLog(errResetAdminCloseStore)))
 	})
 })
 
