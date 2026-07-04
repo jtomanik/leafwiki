@@ -2527,9 +2527,10 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "CreateNode home failed: %v",
 
 			err)
+		var aboutID *PageID
 		{
 
-			_, err := svc.CreateNode("system", homeID, "About", "About", ptrKind(NodeKindPage))
+			aboutID, err = svc.CreateNode("system", homeID, "About", "About", ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode about failed: %v",
 
 				err)
@@ -2539,7 +2540,10 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
-		Expect(lookup.Exists).To(BeTrue(), "expected case-insensitive path lookup to resolve existing path")
+		Expect(lookup).To(matchExistingPathLookup(HaveExactElements(
+			matchExistingPathSegment(*homeID),
+			matchExistingPathSegment(*aboutID),
+		)), "expected case-insensitive path lookup to resolve existing path")
 
 	})
 })
@@ -2583,9 +2587,10 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
 			err)
+		var guideID *PageID
 		{
 
-			_, err := svc.CreateNode("system", id, "Guide", "guide", ptrKind(NodeKindPage))
+			guideID, err = svc.CreateNode("system", id, "Guide", "guide", ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode guide failed: %v",
 
 				err)
@@ -2602,17 +2607,19 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "LookupPagePath old path failed: %v",
 
 			err)
-		Expect(oldLookup.Exists).To(BeFalse(),
-			"expected old path to stop resolving after slug rename",
-		)
+		Expect(oldLookup).To(matchMissingPathLookup(HaveExactElements(
+			matchMissingPathSegment(),
+			matchMissingPathSegment(),
+		)), "expected old path to stop resolving after slug rename")
 
 		newLookup, err := svc.LookupPagePath("documentation/guide")
 		Expect(err).To(Succeed(), "LookupPagePath new path failed: %v",
 
 			err)
-		Expect(newLookup.Exists).To(BeTrue(),
-			"expected renamed path to resolve",
-		)
+		Expect(newLookup).To(matchExistingPathLookup(HaveExactElements(
+			matchExistingPathSegment(*id),
+			matchExistingPathSegment(*guideID),
+		)), "expected renamed path to resolve")
 
 		page, err := svc.FindPageByRoutePath("documentation/guide")
 		Expect(err).To(Succeed(), "FindPageByRoutePath renamed path failed: %v",
@@ -2770,7 +2777,12 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
-		Expect(lookup.Exists).To(BeTrue(), "expected path to exist after EnsurePagePath")
+		Expect(lookup).To(matchExistingPathLookup(HaveExactElements(
+			matchExistingPathSegment(res.Created[0].ID),
+			matchExistingPathSegment(res.Created[1].ID),
+			matchExistingPathSegment(res.Created[2].ID),
+			matchExistingPathSegment(res.Created[3].ID),
+		)), "expected path to exist after EnsurePagePath")
 
 	})
 })
@@ -2926,17 +2938,19 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "LookupPagePath old path failed: %v",
 
 			err)
-		Expect(oldLookup.Exists).To(BeFalse(),
-			"expected old path to stop resolving after move",
-		)
+		Expect(oldLookup).To(matchMissingPathLookup(HaveExactElements(
+			matchExistingPathSegment(*docsID),
+			matchMissingPathSegment(),
+		)), "expected old path to stop resolving after move")
 
 		newLookup, err := svc.LookupPagePath("archive/guide")
 		Expect(err).To(Succeed(), "LookupPagePath new path failed: %v",
 
 			err)
-		Expect(newLookup.Exists).To(BeTrue(),
-			"expected moved path to resolve at destination",
-		)
+		Expect(newLookup).To(matchExistingPathLookup(HaveExactElements(
+			matchExistingPathSegment(*archiveID),
+			matchExistingPathSegment(*guideID),
+		)), "expected moved path to resolve at destination")
 
 	})
 })
