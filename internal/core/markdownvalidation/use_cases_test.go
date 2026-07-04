@@ -1,9 +1,10 @@
 package markdownvalidation
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/tree"
