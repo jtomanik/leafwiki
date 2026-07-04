@@ -125,7 +125,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	ginkgo.It("User public projection and role validation keep sensitive fields out of public data", ginkgo.Label("unit"), func() {
+	ginkgo.It("projects public users without exposing sensitive credentials", ginkgo.Label("unit"), func() {
 		user := &User{
 			ID:       "user-1",
 			Username: "frank",
@@ -141,11 +141,24 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 			Email:    "frank@example.com",
 			Role:     RoleAdmin,
 		}))
-		Expect(user.HasRole(RoleAdmin)).To(BeTrue())
-		Expect(user.HasRole(RoleViewer)).To(BeFalse())
-		Expect(IsValidRole(RoleAdmin)).To(BeTrue())
-		Expect(IsValidRole(RoleEditor)).To(BeTrue())
-		Expect(IsValidRole(RoleViewer)).To(BeTrue())
-		Expect(IsValidRole("owner")).To(BeFalse())
+	})
+
+	ginkgo.It("accepts admin editor and viewer roles and rejects unsupported roles before storing users", ginkgo.Label("integration"), func() {
+		service := setupTestUserService()
+		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
+
+		for _, role := range []string{RoleAdmin, RoleEditor, RoleViewer} {
+			user, err := service.CreateUser("frank-"+role, "frank-"+role+"@example.com", "password", role)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(user.ToPublicUser()).To(Equal(&PublicUser{
+				ID:       user.ID,
+				Username: "frank-" + role,
+				Email:    "frank-" + role + "@example.com",
+				Role:     role,
+			}))
+		}
+
+		_, err := service.CreateUser("owner", "owner@example.com", "password", "owner")
+		Expect(err).To(Equal(ErrUserInvalidRole))
 	})
 })

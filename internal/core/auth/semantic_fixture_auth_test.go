@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/tree"
 )
@@ -19,16 +19,13 @@ var (
 )
 
 func matchAuthJSONSyntaxError() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
+	return gomega.WithTransform(func(err error) *json.SyntaxError {
 		var syntaxErr *json.SyntaxError
-		return errors.As(err, &syntaxErr), nil
-	}).WithMessage("match auth JSON syntax error")
-}
-
-func matchAuthSQLRowScanFailure() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return err != nil && errors.Unwrap(err) != nil, nil
-	}).WithMessage("match auth SQL row scan failure")
+		if errors.As(err, &syntaxErr) {
+			return syntaxErr
+		}
+		return nil
+	}, gomega.Not(gomega.BeNil()))
 }
 
 func newFixtureSessionID[T ~string](raw T) SessionID {

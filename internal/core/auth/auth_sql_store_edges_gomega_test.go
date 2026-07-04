@@ -164,21 +164,21 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", ginkgo.Label("integra
 			restoreOpen()
 
 			schemaErr := errors.New("api key schema failed")
-			closed := false
+			closeCalls := 0
 			restoreOpen = setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
 				return openAuthScriptedDB(&authScriptedDBScript{
 					exec: func(string, []driver.NamedValue) (driver.Result, error) {
 						return nil, schemaErr
 					},
 					close: func() error {
-						closed = true
+						closeCalls++
 						return nil
 					},
 				}), nil
 			})
 			_, err = NewAPIKeyStore(authTempDir())
 			Expect(err).To(MatchError(schemaErr))
-			Expect(closed).To(BeTrue())
+			Expect(closeCalls).To(Equal(1))
 			restoreOpen()
 
 			Expect((&APIKeyStore{}).Close()).To(Succeed())
@@ -439,8 +439,9 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", ginkgo.Label("integra
 			restoreCloseRows()
 
 			store = userStoreReturningRows(&authScriptedRows{columns: userColumns(), values: [][]driver.Value{{nil}}})
-			_, err = store.GetAllUsers()
-			Expect(err).To(matchAuthSQLRowScanFailure())
+			users, err := store.GetAllUsers()
+			Expect(users).To(BeNil())
+			Expect(err).To(MatchError(ErrUserStoreInvalidRow))
 
 			countRowErr := errors.New("user count row failed")
 			store = userStoreReturningRows(&authScriptedRows{columns: []string{"count"}, nextErr: countRowErr})

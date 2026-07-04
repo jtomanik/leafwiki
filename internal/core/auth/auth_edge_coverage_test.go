@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
 func signAuthClaims(service *AuthService, claims jwt.MapClaims) string {
@@ -18,6 +19,19 @@ func signAuthClaims(service *AuthService, claims jwt.MapClaims) string {
 	return token
 }
 
+type loginAttemptSnapshot struct {
+	Failures    int
+	LockedUntil time.Time
+}
+
+func snapshotLoginAttempt(tracker *loginAttemptTracker, userID UserID) loginAttemptSnapshot {
+	entry := tracker.entries[userID]
+	return loginAttemptSnapshot{
+		Failures:    entry.failures,
+		LockedUntil: entry.lockedUntil,
+	}
+}
+
 var _ = ginkgo.Describe("auth boundary behavior", func() {
 	ginkgo.Describe("login attempts", ginkgo.Label("unit"), func() {
 		ginkgo.It("locks an account after repeated failed attempts and resets after the lock expires", func() {
@@ -25,15 +39,32 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			userID := newFixtureUserID("lockable-user")
 
 			for range loginMaxFailures {
-				Expect(tracker.recordAttempt(userID)).To(BeTrue())
+				tracker.recordAttempt(userID)
 			}
-			Expect(tracker.recordAttempt(userID)).To(BeFalse())
+			snapshot := snapshotLoginAttempt(tracker, userID)
+			Expect(snapshot).To(gstruct.MatchAllFields(gstruct.Fields{
+				"Failures":    BeZero(),
+				"LockedUntil": BeTemporally(">", time.Now()),
+			}))
+
+			lockedUntil := snapshot.LockedUntil
+			tracker.recordAttempt(userID)
+			snapshot = snapshotLoginAttempt(tracker, userID)
+			Expect(snapshot).To(Equal(loginAttemptSnapshot{
+				Failures:    0,
+				LockedUntil: lockedUntil,
+			}))
 
 			tracker.mu.Lock()
 			tracker.entries[userID].lockedUntil = time.Now().Add(-time.Second)
 			tracker.mu.Unlock()
 
-			Expect(tracker.recordAttempt(userID)).To(BeTrue())
+			tracker.recordAttempt(userID)
+			snapshot = snapshotLoginAttempt(tracker, userID)
+			Expect(snapshot).To(Equal(loginAttemptSnapshot{
+				Failures:    1,
+				LockedUntil: time.Time{},
+			}))
 		})
 	})
 
@@ -62,15 +93,12 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			_, err = (&APIKeyService{}).VerifyAPIKey("lwk_key_secret")
 			Expect(err).To(Equal(ErrInvalidToken))
 
-			Expect(IsAPIKeyBearer("lwk_key_secret")).To(BeTrue())
-			Expect(IsAPIKeyBearer("Bearer lwk_key_secret")).To(BeFalse())
-
 			id, err := parseAPIKeyID("lwk_key_secret")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(id).To(Equal(newFixtureAPIKeyID("key")))
 
 			service := &APIKeyService{store: &APIKeyStore{}, users: &UserService{store: &UserStore{}}}
-			for _, raw := range []string{"", "not-lwk", "lwk_", "lwk_key_", "lwk__secret"} {
+			for _, raw := range []string{"", "not-lwk", "lwk_", "lwk_key_", "lwk__secret", "Bearer lwk_key_secret"} {
 				_, err := service.VerifyAPIKey(raw)
 				Expect(err).To(MatchError(ErrInvalidToken))
 			}
@@ -239,14 +267,14 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 
 		ginkgo.It("cleans up a partially opened connection when schema initialization fails", func() {
 			schemaErr := errors.New("session schema failed")
-			closed := false
+			closeCalls := 0
 			restoreOpen := setAuthSeam(&authSQLOpen, func(string, string) (*sql.DB, error) {
 				return openAuthScriptedDB(&authScriptedDBScript{
 					exec: func(string, []driver.NamedValue) (driver.Result, error) {
 						return nil, schemaErr
 					},
 					close: func() error {
-						closed = true
+						closeCalls++
 						return nil
 					},
 				}), nil
@@ -256,7 +284,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			store, err := NewSessionStore(authTempDir())
 			Expect(err).To(MatchError(schemaErr))
 			Expect(store).To(BeNil())
-			Expect(closed).To(BeTrue())
+			Expect(closeCalls).To(Equal(1))
 		})
 	})
 

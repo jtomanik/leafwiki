@@ -2,6 +2,7 @@ package auth
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -292,7 +293,7 @@ func (f *UserStore) GetAllUsers() ([]*User, error) {
 		user := &User{}
 		err = rows.Scan(&user.ID, &user.Username, &user.Password, &user.Email, &user.Role)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrUserStoreInvalidRow, err)
 		}
 		users = append(users, user)
 	}
