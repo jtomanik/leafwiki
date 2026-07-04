@@ -63,7 +63,7 @@ func (f *fakeDescriptorTempFile) Close() error {
 }
 
 var _ = ginkgo.Describe("project daemon deterministic edges", func() {
-	ginkgo.It("canonicalizes missing project paths and redacts config mismatch secrets", func() {
+	ginkgo.It("canonicalizes missing project paths and redacts config mismatch secrets", ginkgo.Label("integration"), func() {
 		baseDir := tempProjectdaemonDir()
 		dataDir := filepath.Join(baseDir, "missing", "data")
 		rootDir := filepath.Join(baseDir, "missing", "root")
@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(FormatConfigMismatch([]Mismatch{{Field: "flag-only"}})).To(Equal("project daemon config mismatch: flag-only"))
 	})
 
-	ginkgo.It("handles descriptor IO trust and write error edges", func() {
+	ginkgo.It("handles descriptor IO trust and write error edges", ginkgo.Label("integration"), func() {
 		dataDir := tempProjectdaemonDir()
 		path := DescriptorPath(dataDir)
 
@@ -127,7 +127,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(err).To(matchProjectdaemonPathError())
 	})
 
-	ginkgo.It("rejects malformed actor context envelopes before trusting workspace identity", func() {
+	ginkgo.It("rejects malformed actor context envelopes before trusting workspace identity", ginkgo.Label("unit"), func() {
 		now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 		valid := ActorContext{
 			Version:     1,
@@ -166,7 +166,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextExpired))
 	})
 
-	ginkgo.It("sorts agent presence, sanitizes metadata, and exits expiry loops on cancellation", func() {
+	ginkgo.It("sorts agent presence, sanitizes metadata, and exits expiry loops on cancellation", ginkgo.Label("unit"), func() {
 		registry := NewAgentPresenceRegistry(-1, nil)
 		Expect(registry.ttl).To(Equal(DefaultIdleTimeout))
 		registry.sessions[presenceKey(agenthooks.ProviderCursor, "b")] = AgentPresenceSession{Provider: agenthooks.ProviderCursor, SessionIDHash: "b"}
@@ -227,10 +227,10 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			Should(BeClosed(), "AgentPresenceRegistry RunExpiryLoop should exit after interval defaulting")
 	})
 
-	ginkgo.It("uses default session registry TTLs and exits session expiry loops on cancellation", func() {
+	ginkgo.It("uses default session registry TTLs and exits session expiry loops on cancellation", ginkgo.Label("unit"), func() {
 		registry := NewSessionRegistry(0, nil)
 		Expect(registry.ttl).To(Equal(DefaultHeartbeatTTL))
-		Expect(registry.Heartbeat("missing")).To(BeFalse())
+		Expect(registry).To(reportSeenSessionState(false, 0))
 
 		random, err := randomID()
 		Expect(err).NotTo(HaveOccurred())
@@ -248,7 +248,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			Should(BeClosed(), "SessionRegistry RunExpiryLoop should exit after context cancellation")
 	})
 
-	ginkgo.It("handles control client and control error parsing edge cases", func() {
+	ginkgo.It("handles control client and control error parsing edge cases", ginkgo.Label("integration"), func() {
 		Expect(&ControlHTTPError{StatusCode: http.StatusTeapot}).To(haveControlStatus(http.StatusTeapot))
 		Expect(parsedControlErrorBodyForSpec([]byte(`{"error":{"code":"daemon_control_unauthorized","messageId":"errors.daemon.control_unauthorized","message":" unauthorized "}}`))).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Code":      Equal(errCodeDaemonControlUnauthorized),
@@ -291,7 +291,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		var _ workspaceid.WorkspaceID = "home"
 	})
 
-	ginkgo.It("surfaces actor-context and config failure paths", func() {
+	ginkgo.It("surfaces actor-context and config failure paths", ginkgo.Label("unit"), func() {
 		marshalActorContextErr := errors.New("actor context marshal failed")
 		originalMarshalActorContext := marshalActorContextJSON
 		marshalActorContextJSON = func(any) ([]byte, error) {
@@ -344,7 +344,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		readRandom = originalReadRandom
 	})
 
-	ginkgo.It("reports canonical path resolution errors deterministically", func() {
+	ginkgo.It("reports canonical path resolution errors deterministically", ginkgo.Label("unit"), func() {
 		originalAbsPath := absPath
 		originalEvalSymlinks := evalSymlinks
 		ginkgo.DeferCleanup(func() {
@@ -406,7 +406,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(resolved).To(Equal(filepath.Clean(string(filepath.Separator))))
 	})
 
-	ginkgo.It("reports descriptor atomic-write failure branches", func() {
+	ginkgo.It("reports descriptor atomic-write failure branches", ginkgo.Label("integration"), func() {
 		tmp := tempProjectdaemonDir()
 		desc := &Descriptor{SchemaVersion: DescriptorSchemaVersion}
 
@@ -472,7 +472,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		}
 	})
 
-	ginkgo.It("uses registry fallback timestamps and prunes from expiry-loop ticks", func() {
+	ginkgo.It("uses registry fallback timestamps and prunes from expiry-loop ticks", ginkgo.Label("unit"), func() {
 		now := time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)
 		presenceChanges := make(chan int, 2)
 		presence := NewAgentPresenceRegistry(time.Millisecond, func(count int) {
@@ -531,7 +531,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(func() { zeroTTL.RunExpiryLoop(ctx, 0) }).ToNot(Panic())
 	})
 
-	ginkgo.It("reports control client and server error boundaries", func() {
+	ginkgo.It("reports control client and server error boundaries", ginkgo.Label("integration"), func() {
 		originalReadRandom := readRandom
 		readRandom = func([]byte) (int, error) {
 			return 0, errors.New("random failed")

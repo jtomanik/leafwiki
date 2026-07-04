@@ -8,13 +8,12 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 )
 
 var _ = ginkgo.Describe("project daemon descriptors", func() {
-	ginkgo.It("writes private descriptors atomically with 0600 permissions and no session secret material", func() {
+	ginkgo.It("writes private descriptors atomically with 0600 permissions and no session secret material", ginkgo.Label("integration"), func() {
 		dataDir := tempProjectdaemonDir()
 		rootDir := filepath.Join(tempProjectdaemonDir(), "root")
 		desc := &Descriptor{
@@ -56,11 +55,11 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(loaded).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"ControlToken": Equal("control-token"),
-			"Config":       matchAuthEnabledConfig(),
+			"Config":       matchAuthenticatedProjectConfig(dataDir, rootDir),
 		})))
 	})
 
-	ginkgo.It("round-trips runtime stack and role health metadata", func() {
+	ginkgo.It("round-trips runtime stack and role health metadata", ginkgo.Label("integration"), func() {
 		dataDir := tempProjectdaemonDir()
 		rootDir := filepath.Join(tempProjectdaemonDir(), "root")
 		now := time.Now().UTC().Truncate(time.Second)
@@ -114,11 +113,11 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		Expect(loaded).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"RuntimeStack": Equal(RuntimeStackWikidFrontd),
 			"Role":         Equal(RoleWikid),
-			"Roles":        ContainElement(matchPrivateReadyRoleHealth(RoleWorkspaced)),
+			"Roles":        ContainElement(matchPrivateReadyWorkspacedRoleHealth(now)),
 		})))
 	})
 
-	ginkgo.It("round-trips workspace identity and private MCP attach metadata without leaking tokens in mismatch messages", func() {
+	ginkgo.It("round-trips workspace identity and private MCP attach metadata without leaking tokens in mismatch messages", ginkgo.Label("integration"), func() {
 		dataDir := tempProjectdaemonDir()
 		rootDir := filepath.Join(tempProjectdaemonDir(), "root")
 		desc := &Descriptor{
@@ -172,13 +171,13 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		})))
 	})
 
-	ginkgo.It("builds global descriptor paths for daemon roles", func() {
+	ginkgo.It("builds global descriptor paths for daemon roles", ginkgo.Label("unit"), func() {
 		runtimeDir := filepath.Join(tempProjectdaemonDir(), ".leafwiki", "runtime")
 
 		Expect(GlobalDescriptorPath(runtimeDir, RoleWikid)).To(Equal(filepath.Join(runtimeDir, "wikid.json")))
 	})
 
-	ginkgo.It("removes missing and existing descriptors idempotently", func() {
+	ginkgo.It("removes missing and existing descriptors idempotently", ginkgo.Label("integration"), func() {
 		path := DescriptorPath(tempProjectdaemonDir())
 
 		Expect(RemoveDescriptor(path)).To(Succeed())
@@ -189,7 +188,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		Expect(err).To(MatchError(os.ErrNotExist))
 	})
 
-	ginkgo.It("produces deterministic hashes that change with canonical config values", func() {
+	ginkgo.It("produces deterministic hashes that change with canonical config values", ginkgo.Label("unit"), func() {
 		base := Config{DataDir: "/data", RootDir: "/root", Port: "8080"}
 
 		first, err := ConfigHash(base)
@@ -203,7 +202,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		Expect(changed).NotTo(Equal(first))
 	})
 
-	ginkgo.It("rejects trusted descriptors that are readable outside the owner", func() {
+	ginkgo.It("rejects trusted descriptors that are readable outside the owner", ginkgo.Label("integration"), func() {
 		dataDir := tempProjectdaemonDir()
 		path := DescriptorPath(dataDir)
 		Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
@@ -214,7 +213,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		Expect(err).To(MatchError(errDescriptorModeMismatch))
 	})
 
-	ginkgo.It("reports config mismatches with raw secret values redacted", func() {
+	ginkgo.It("reports config mismatches with raw secret values redacted", ginkgo.Label("unit"), func() {
 		owner := Config{
 			DataDir:                "/data",
 			RootDir:                "/root",
@@ -250,16 +249,21 @@ func descriptorWireMap(path string) map[string]any {
 	return wire
 }
 
-func matchAuthEnabledConfig() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(config Config) (bool, error) {
-		return !config.AuthDisabled, nil
-	}).WithMessage("preserve auth-enabled descriptor config")
+func matchAuthenticatedProjectConfig(dataDir string, rootDir string) types.GomegaMatcher {
+	return Equal(Config{
+		DataDir:      dataDir,
+		RootDir:      rootDir,
+		AuthDisabled: false,
+	})
 }
 
-func matchPrivateReadyRoleHealth(name RoleName) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(role RoleHealth) (bool, error) {
-		return role.Name == name &&
-			role.State == RoleStateReady &&
-			role.Private, nil
-	}).WithMessage("report private ready role health")
+func matchPrivateReadyWorkspacedRoleHealth(updatedAt time.Time) types.GomegaMatcher {
+	return Equal(RoleHealth{
+		Name:      RoleWorkspaced,
+		State:     RoleStateReady,
+		PID:       3456,
+		URL:       "http://127.0.0.1:43111",
+		Private:   true,
+		UpdatedAt: updatedAt,
+	})
 }

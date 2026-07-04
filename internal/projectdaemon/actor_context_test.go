@@ -10,7 +10,7 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.Describe("actor context envelopes", func() {
+var _ = ginkgo.Describe("actor context envelopes", ginkgo.Label("unit"), func() {
 	ginkgo.It("round-trips private actor context without exposing raw JSON bytes", func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		ctx := ActorContext{

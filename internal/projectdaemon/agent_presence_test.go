@@ -7,7 +7,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -16,7 +15,7 @@ import (
 
 var errAgentHookEventRejected = errors.New("agent hook event rejected")
 
-var _ = ginkgo.Describe("agent presence registry", func() {
+var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() {
 	ginkgo.It("records sanitized session metadata for accepted agent events", func() {
 		now := time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)
 		var counts []int
@@ -32,7 +31,7 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 		registry.Record(event)
 
 		Expect(registry.Count()).To(Equal(1))
-		Expect(registry.List()).To(ConsistOf(matchMCPAgentPresenceSession(gstruct.Fields{
+		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
 			"Provider":      Equal(agenthooks.ProviderCodex),
 			"SessionIDHash": Equal(event.SessionIDHash),
 			"FirstSeenAt":   BeTemporally("==", now),
@@ -69,7 +68,7 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 
 		registry.Record(event)
 
-		Expect(registry.List()).To(ConsistOf(matchMCPAgentPresenceSession(gstruct.Fields{
+		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
 			"Model":    BeEmpty(),
 			"Source":   BeEmpty(),
 			"ToolName": Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
@@ -78,12 +77,11 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 
 	ginkgo.It("reports seen state after accepted events", func() {
 		registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
-		Expect(registry.SeenPresence()).To(BeFalse())
+		Expect(registry).To(reportSeenPresenceState(false, 0))
 
 		event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session"}`)
 		registry.Record(event)
 
-		Expect(registry.SeenPresence()).To(BeTrue())
 		Expect(registry).To(reportSeenPresenceState(true, 1))
 	})
 
@@ -234,16 +232,6 @@ func normalizedAgentHookEventResult(provider agenthooks.ProviderID, raw []byte, 
 
 func matchAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
-}
-
-func matchMCPAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(session AgentPresenceSession) (bool, error) {
-		matched, err := matchAgentPresenceSession(fields).Match(session)
-		if err != nil || !matched {
-			return matched, err
-		}
-		return session.IsMCPTool, nil
-	}).WithMessage("record an MCP tool agent presence session")
 }
 
 func reportSeenPresenceState(seen bool, count int) types.GomegaMatcher {

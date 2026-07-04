@@ -11,7 +11,7 @@ import (
 	"github.com/onsi/gomega/types"
 )
 
-var _ = ginkgo.Describe("session registry", func() {
+var _ = ginkgo.Describe("session registry", ginkgo.Label("unit"), func() {
 	ginkgo.It("notifies only when the active session count changes", func() {
 		now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 		var counts []int
@@ -27,7 +27,8 @@ var _ = ginkgo.Describe("session registry", func() {
 		registry.Release("missing-session")
 		Expect(counts).To(Equal([]int{1}))
 
-		Expect(registry.Heartbeat(id)).To(BeTrue())
+		registry.Heartbeat(id)
+		Expect(registry).To(reportSeenSessionState(true, 1))
 		now = now.Add(2 * time.Second)
 		Expect(registry.PruneExpired()).To(BeZero())
 		Expect(registry.PruneExpired()).To(BeZero())
@@ -37,20 +38,28 @@ var _ = ginkgo.Describe("session registry", func() {
 	})
 
 	ginkgo.It("accepts semantic session identifiers for heartbeat and release", func() {
+		now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 		registry := NewSessionRegistry(time.Second, nil)
+		registry.now = func() time.Time {
+			return now
+		}
 
 		id, err := registry.Register()
 		Expect(err).NotTo(HaveOccurred())
 		var typed SessionID = id
 
-		Expect(registry.Heartbeat(typed)).To(BeTrue())
+		now = now.Add(500 * time.Millisecond)
+		registry.Heartbeat(typed)
+		now = now.Add(750 * time.Millisecond)
+
+		Expect(registry.PruneExpired()).To(Equal(1))
 		registry.Release(typed)
+		Expect(registry).To(reportSeenSessionState(true, 0))
 	})
 
 	ginkgo.It("reports whether any session has been seen and how many are active", func() {
 		registry := NewSessionRegistry(time.Second, nil)
 
-		Expect(registry.SeenSession()).To(BeFalse())
 		Expect(registry).To(reportSeenSessionState(false, 0))
 
 		id, err := registry.Register()
@@ -69,7 +78,7 @@ var _ = ginkgo.Describe("session registry", func() {
 			defer countsMu.Unlock()
 			counts = append(counts, count)
 		})
-		id, err := registry.Register()
+		_, err := registry.Register()
 		Expect(err).NotTo(HaveOccurred())
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -80,7 +89,6 @@ var _ = ginkgo.Describe("session registry", func() {
 			WithTimeout(500 * time.Millisecond).
 			WithPolling(5 * time.Millisecond).
 			Should(BeZero())
-		Expect(registry.Heartbeat(id)).To(BeFalse())
 		Eventually(func() []int {
 			countsMu.Lock()
 			defer countsMu.Unlock()

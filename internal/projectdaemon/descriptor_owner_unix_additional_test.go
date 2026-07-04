@@ -23,7 +23,7 @@ func (f fakeUnixDescriptorFileInfo) ModTime() time.Time { return time.Time{} }
 func (f fakeUnixDescriptorFileInfo) IsDir() bool        { return false }
 func (f fakeUnixDescriptorFileInfo) Sys() any           { return f.sys }
 
-var _ = ginkgo.Describe("descriptor owner unix edges", func() {
+var _ = ginkgo.Describe("descriptor owner unix edges", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects descriptors with unavailable or mismatched owners", func() {
 		unavailable := fakeUnixDescriptorFileInfo{mode: 0o600}
 		Expect(validateDescriptorOwner("descriptor.json", unavailable)).To(MatchError(errDescriptorOwnerUnavailable))

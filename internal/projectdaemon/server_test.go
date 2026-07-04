@@ -14,7 +14,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -23,7 +22,7 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
-var _ = ginkgo.Describe("project daemon control server", func() {
+var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integration"), func() {
 	ginkgo.It("rejects unauthorized requests before routing to sessions or private MCP", func() {
 		sessions := NewSessionRegistry(time.Minute, nil)
 		handler := NewControlServer(ControlServerOptions{
@@ -176,17 +175,19 @@ var _ = ginkgo.Describe("project daemon control server", func() {
 
 	ginkgo.It("lets the client call every control API and propagates structured errors", func() {
 		var verifiedKey string
+		expectedHealth := DaemonHealth{
+			OK:            true,
+			SchemaVersion: DescriptorSchemaVersion,
+			PID:           123,
+			DataDir:       "/data",
+			RootDir:       "/root",
+			ConfigHash:    "hash",
+		}
 		handler := NewControlServer(ControlServerOptions{
 			Token:         "control-token",
 			Sessions:      NewSessionRegistry(time.Minute, nil),
 			AgentPresence: NewAgentPresenceRegistry(time.Minute, nil),
-			Health: DaemonHealth{
-				SchemaVersion: DescriptorSchemaVersion,
-				PID:           123,
-				DataDir:       "/data",
-				RootDir:       "/root",
-				ConfigHash:    "hash",
-			},
+			Health:        expectedHealth,
 			VerifyAPIKey: func(key string) error {
 				verifiedKey = key
 				return nil
@@ -199,7 +200,7 @@ var _ = ginkgo.Describe("project daemon control server", func() {
 
 		health, err := client.Health(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(health).To(matchHealthyDaemonHealth(123))
+		Expect(health).To(matchDaemonHealth(expectedHealth))
 		handle, err := client.RegisterSession(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(handle.ID).NotTo(BeEmpty())
@@ -343,12 +344,8 @@ func decodeControlResponse[T any](resp *httptest.ResponseRecorder) T {
 	return out
 }
 
-func matchHealthyDaemonHealth(pid int) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(health *DaemonHealth) (bool, error) {
-		return health != nil &&
-			health.OK &&
-			health.PID == pid, nil
-	}).WithMessage("report healthy daemon control status")
+func matchDaemonHealth(expected DaemonHealth) types.GomegaMatcher {
+	return gstruct.PointTo(Equal(expected))
 }
 
 func matchControlHTTPError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
