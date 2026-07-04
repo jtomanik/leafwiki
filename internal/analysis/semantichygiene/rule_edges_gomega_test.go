@@ -264,7 +264,7 @@ func namedStringType(name string) *types.Named {
 
 var _ = ginkgo.Describe("semantichygiene diagnostic edge cases", func() {
 	ginkgo.Describe("structured diagnostics", func() {
-		ginkgo.It("delays rule diagnostics until finalization and prefixes the stable rule ID", func() {
+		ginkgo.It("delays rule diagnostics until finalization and prefixes the stable rule ID", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 func TestPage() {}
 `)
@@ -279,18 +279,53 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("formats every registered rule with its stable rule ID prefix", func() {
+		ginkgo.It("emits every registered rule identifier as a structured diagnostic prefix", ginkgo.Label("unit"), func() {
+			type formattedDiagnosticState uint8
+
+			const (
+				formattedDiagnosticMalformed formattedDiagnosticState = iota
+				formattedDiagnosticMatched
+			)
+
+			type formattedDiagnosticObservation struct {
+				State   formattedDiagnosticState
+				Rule    ruleID
+				Message string
+			}
+
+			observeFormattedDiagnostic := func(message string) formattedDiagnosticObservation {
+				rulePrefix, body, ok := strings.Cut(message, ": ")
+				if !ok {
+					return formattedDiagnosticObservation{State: formattedDiagnosticMalformed}
+				}
+				rawRule, ok := strings.CutPrefix(rulePrefix, "semh:")
+				if !ok {
+					return formattedDiagnosticObservation{State: formattedDiagnosticMalformed}
+				}
+				return formattedDiagnosticObservation{
+					State:   formattedDiagnosticMatched,
+					Rule:    ruleID(rawRule),
+					Message: body,
+				}
+			}
+
+			const diagnosticPayload = "diagnostic.payload"
+
 			for id := range allRuleMetadata() {
 				message := formatDiagnosticMessage(semanticDiagnostic{
 					rule:    id,
-					message: "diagnostic text",
+					message: diagnosticPayload,
 				})
 
-				Expect(message).To(HavePrefix("semh:" + string(id) + ": "))
+				Expect(observeFormattedDiagnostic(message)).To(Equal(formattedDiagnosticObservation{
+					State:   formattedDiagnosticMatched,
+					Rule:    id,
+					Message: diagnosticPayload,
+				}))
 			}
 		})
 
-		ginkgo.It("suppresses one matching call-scoped waivable diagnostic", func() {
+		ginkgo.It("suppresses one matching call-scoped waivable diagnostic", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 func It(text string, body func()) bool { return true }
@@ -305,7 +340,7 @@ var _ = It("documents package invariant", func() {})
 			Expect(h.diagnostics).To(BeEmpty())
 		})
 
-		ginkgo.It("suppresses a matcher diagnostic when the waiver is before the outer assertion call", func() {
+		ginkgo.It("suppresses a matcher diagnostic when the waiver is before the outer assertion call", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 func Expect(actual any) assertion { return assertion{} }
@@ -328,7 +363,7 @@ func TestPage() {
 			Expect(h.diagnostics).To(BeEmpty())
 		})
 
-		ginkgo.It("does not let a call-scoped waiver before a spec suppress diagnostics inside the spec body", func() {
+		ginkgo.It("does not let a call-scoped waiver before a spec suppress diagnostics inside the spec body", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 func It(text string, body func()) bool { return true }
@@ -352,7 +387,7 @@ var _ = It("documents behavior", func() {
 			))
 		})
 
-		ginkgo.It("suppresses one matching declaration-scoped waivable diagnostic", func() {
+		ginkgo.It("suppresses one matching declaration-scoped waivable diagnostic", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow gomega.helper-should-be-matcher -- compact helper reads clearer than a matcher here
@@ -365,7 +400,7 @@ func assertResponse() {}
 			Expect(h.diagnostics).To(BeEmpty())
 		})
 
-		ginkgo.It("matches next-node waivers only against the immediately following node", func() {
+		ginkgo.It("matches next-node waivers only against the immediately following node", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow ginkgo.top-level-it -- exercises next-node scope
@@ -390,7 +425,7 @@ func TestLater() {}
 			}, waiverScopeNextNode)).To(BeFalse())
 		})
 
-		ginkgo.It("reports a valid waiver that matches no diagnostic as stale", func() {
+		ginkgo.It("reports a valid waiver that matches no diagnostic as stale", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow ginkgo.top-level-it -- package-level invariant reads clearer here
@@ -404,7 +439,7 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("reports adjacent same-rule waivers for one diagnostic as duplicate", func() {
+		ginkgo.It("reports adjacent same-rule waivers for one diagnostic as duplicate", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 func It(text string, body func()) bool { return true }
@@ -422,7 +457,7 @@ var _ = It("documents package invariant", func() {})
 			))
 		})
 
-		ginkgo.It("reports non-waivable rule waivers and leaves the hard diagnostic active", func() {
+		ginkgo.It("reports non-waivable rule waivers and leaves the hard diagnostic active", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow semantic.direct-cast -- this must stay hard
@@ -438,7 +473,7 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("reports active waivers that exceed a per-rule budget", func() {
+		ginkgo.It("reports active waivers that exceed a per-rule budget", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 func It(text string, body func()) bool { return true }
@@ -463,7 +498,7 @@ var _ = It("documents fourth package invariant", func() {})
 			))
 		})
 
-		ginkgo.It("reports active waivers that exceed the total budget", func() {
+		ginkgo.It("reports active waivers that exceed the total budget", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 func Node(text string, body func()) bool { return true }
@@ -515,7 +550,7 @@ var _ = Node("node 11", func() {})
 			))
 		})
 
-		ginkgo.It("reports package-qualified top-level It calls without a file-wide container prerequisite", func() {
+		ginkgo.It("reports package-qualified top-level It calls without a file-wide container prerequisite", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
 
 type bddDSL struct{}
@@ -539,7 +574,7 @@ var _ = ginkgo.It("documents package invariant", func() {})
 			))
 		})
 
-		ginkgo.It("reports dot-imported top-level It calls", func() {
+		ginkgo.It("reports dot-imported top-level It calls", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
 
 func It(text string, body func()) bool { return true }
@@ -561,7 +596,7 @@ var _ = It("documents package invariant", func() {})
 			))
 		})
 
-		ginkgo.It("reports migrated GinkgoT wrappers", func() {
+		ginkgo.It("reports migrated GinkgoT wrappers", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
 
 type bddDSL struct{}
@@ -593,7 +628,7 @@ var _ = ginkgo.It("TestExistingMigratedSpec", func() {
 			))
 		})
 
-		ginkgo.It("reports top-level It in ordinary repo packages", func() {
+		ginkgo.It("reports top-level It in ordinary repo packages", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -617,7 +652,7 @@ var _ = ginkgo.It("documents existing migrated behavior", func() {})
 			))
 		})
 
-		ginkgo.It("ignores local selector calls on an identifier named ginkgo", func() {
+		ginkgo.It("ignores local selector calls on an identifier named ginkgo", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests", `package p
 
 type bddDSL struct{}
@@ -634,7 +669,7 @@ var _ = ginkgo.It("documents local DSL behavior", func() {})
 			Expect(h.diagnosticMessages()).To(BeEmpty())
 		})
 
-		ginkgo.It("reports Ginkgo spec names that preserve migrated Test function names", func() {
+		ginkgo.It("reports Ginkgo spec names that preserve migrated Test function names", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -661,7 +696,7 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
-		ginkgo.It("reports Ginkgo spec names that preserve Go code symbols", func() {
+		ginkgo.It("reports Ginkgo spec names that preserve Go code symbols", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wikid/wikid_helpers_test.go", "github.com/perber/wiki/internal/wikid", `package wikid
 
 type bddDSL struct{}
@@ -688,7 +723,7 @@ var _ = ginkgo.Describe("wikid process supervision", func() {
 			))
 		})
 
-		ginkgo.It("reports Ginkgo spec names that preserve exported Go identifier fragments", func() {
+		ginkgo.It("reports Ginkgo spec names that preserve exported Go identifier fragments", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/auth/use_cases_test.go", "github.com/perber/wiki/internal/wiki/auth", `package auth
 
 type bddDSL struct{}
@@ -715,7 +750,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			))
 		})
 
-		ginkgo.It("reports helper behavior names as vague migration residue", func() {
+		ginkgo.It("reports helper behavior names as vague migration residue", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wikid/wikid_helpers_test.go", "github.com/perber/wiki/internal/wikid", `package wikid
 
 type bddDSL struct{}
@@ -739,7 +774,7 @@ var _ = ginkgo.Describe("wikid helper behavior", func() {})
 			))
 		})
 
-		ginkgo.It("reports Ginkgo container names that preserve migrated Test function names", func() {
+		ginkgo.It("reports Ginkgo container names that preserve migrated Test function names", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -763,7 +798,7 @@ var _ = ginkgo.Describe("TestBrandRendering", func() {})
 			))
 		})
 
-		ginkgo.It("reports Ginkgo table names that preserve migrated Test function names", func() {
+		ginkgo.It("reports Ginkgo table names that preserve migrated Test function names", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -787,7 +822,7 @@ var _ = ginkgo.DescribeTable("TestBrandRows", func() {})
 			))
 		})
 
-		ginkgo.It("reports Ginkgo entry names that preserve migrated Test function names", func() {
+		ginkgo.It("reports Ginkgo entry names that preserve migrated Test function names", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -811,7 +846,7 @@ var _ = ginkgo.Entry("TestAcceptedBrand", 1)
 			))
 		})
 
-		ginkgo.It("reports Ginkgo entry description names that preserve migrated Test function names", func() {
+		ginkgo.It("reports Ginkgo entry description names that preserve migrated Test function names", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -836,7 +871,7 @@ var _ = ginkgo.Entry(ginkgo.EntryDescription("TestAcceptedBrand"), 1)
 			))
 		})
 
-		ginkgo.It("reports Ginkgo table entry description decorators that preserve migrated Test function names", func() {
+		ginkgo.It("reports Ginkgo table entry description decorators that preserve migrated Test function names", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -865,7 +900,7 @@ var _ = ginkgo.DescribeTable("brand rows", func() {},
 			))
 		})
 
-		ginkgo.It("reports GinkgoT adapters inside Ginkgo spec bodies", func() {
+		ginkgo.It("reports GinkgoT adapters inside Ginkgo spec bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -903,7 +938,7 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
-		ginkgo.It("reports GinkgoT adapters inside Ginkgo table bodies", func() {
+		ginkgo.It("reports GinkgoT adapters inside Ginkgo table bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -939,7 +974,7 @@ var _ = ginkgo.DescribeTable("brand rows", func() {
 			))
 		})
 
-		ginkgo.It("reports testing.T Fatalf assertions inside Ginkgo spec bodies", func() {
+		ginkgo.It("flags fatal testing adapters used as spec assertions", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 import "testing"
@@ -971,7 +1006,7 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
-		ginkgo.It("reports testing.T Fatalf assertions inside Ginkgo table bodies", func() {
+		ginkgo.It("flags fatal testing adapters used as table assertions", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 import "testing"
@@ -1001,7 +1036,7 @@ var _ = ginkgo.DescribeTable("brand rows", func() {
 			))
 		})
 
-		ginkgo.It("reports local testing.T-style adapters inside Ginkgo spec bodies", func() {
+		ginkgo.It("flags local test adapters that hide assertions and filesystem setup", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/tree/tree_test.go", "github.com/perber/wiki/internal/tree", `package tree
 
 type bddDSL struct{}
@@ -1041,7 +1076,7 @@ var _ = ginkgo.Describe("tree behavior", func() {
 			))
 		})
 
-		ginkgo.It("does not treat logger Error and Log methods as testing.T-style adapters", func() {
+		ginkgo.It("ignores ordinary logger severity methods when detecting test adapters", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/logging/logging_test.go", "github.com/perber/wiki/internal/logging", `package logging
 
 type bddDSL struct{}
@@ -1078,7 +1113,7 @@ var _ = ginkgo.Describe("logging behavior", func() {
 			Expect(h.diagnosticMessages()).To(BeEmpty())
 		})
 
-		ginkgo.It("reports direct fail calls inside spec bodies", func() {
+		ginkgo.It("reports direct fail calls inside spec bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -1115,7 +1150,7 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
-		ginkgo.It("reports direct fail calls inside callbacks nested in spec bodies", func() {
+		ginkgo.It("reports direct fail calls inside callbacks nested in spec bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/frontd/frontd_test.go", "github.com/perber/wiki/internal/frontd", `package frontd
 
 import "net/http"
@@ -1159,7 +1194,7 @@ var _ = ginkgo.Describe("private handler", func() {
 			))
 		})
 
-		ginkgo.It("reports local failure helpers inside Ginkgo spec bodies", func() {
+		ginkgo.It("reports local failure helpers inside Ginkgo spec bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/tree/tree_test.go", "github.com/perber/wiki/internal/tree", `package tree
 
 type bddDSL struct{}
@@ -1191,7 +1226,7 @@ var _ = ginkgo.Describe("tree behavior", func() {
 			))
 		})
 
-		ginkgo.It("reports helpers that hide ginkgo.Fail inside Ginkgo spec bodies", func() {
+		ginkgo.It("flags helper functions that hide explicit spec failures", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/mcp/mcp_test.go", "github.com/perber/wiki/internal/mcp", `package mcp
 
 type bddDSL struct{}
@@ -1234,7 +1269,7 @@ var _ = ginkgo.Describe("private actor context", func() {
 			))
 		})
 
-		ginkgo.It("reports goroutine assertions without recovery inside Ginkgo table bodies", func() {
+		ginkgo.It("reports goroutine assertions without recovery inside Ginkgo table bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -1259,7 +1294,7 @@ var _ = ginkgo.DescribeTable("brand rows", func() {
 			))
 		})
 
-		ginkgo.It("reports blocking receives inside Ginkgo table bodies", func() {
+		ginkgo.It("reports blocking receives inside Ginkgo table bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -1279,7 +1314,7 @@ var _ = ginkgo.DescribeTable("brand rows", func() {
 			))
 		})
 
-		ginkgo.It("reports async assertions without context inside Ginkgo table bodies with SpecContext", func() {
+		ginkgo.It("reports async assertions without context inside Ginkgo table bodies with SpecContext", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 type bddDSL struct{}
@@ -1303,7 +1338,7 @@ var _ = ginkgo.DescribeTable("brand rows", func(ctx SpecContext) {
 			))
 		})
 
-		ginkgo.It("reports testing.T fatal and error assertions inside Ginkgo spec bodies", func() {
+		ginkgo.It("flags fatal and nonfatal testing adapters used as spec assertions", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 import "testing"
@@ -1339,7 +1374,7 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
-		ginkgo.It("does not report testing.T usage outside Ginkgo spec bodies", func() {
+		ginkgo.It("ignores setup and helper failures outside runnable spec bodies", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 import "testing"
@@ -1387,7 +1422,7 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			Expect(h.diagnosticMessages()).To(BeEmpty())
 		})
 
-		ginkgo.It("reports raw ginkgolinter ignore comments as hard semantic-hygiene violations", func() {
+		ginkgo.It("reports raw ginkgolinter ignore comments as hard semantic-hygiene violations", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
 // ginkgo-linter:ignore-len-assertion
@@ -1400,7 +1435,7 @@ func helper() {}
 			))
 		})
 
-		ginkgo.It("reports boolean literal assertions that force pass or fail", func() {
+		ginkgo.It("reports boolean literal assertions that force pass or fail", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/cmd/leafwiki/main_test.go", "github.com/perber/wiki/cmd/leafwiki", `package main
 
 type assertion struct{}
@@ -1428,7 +1463,7 @@ func TestCLIBehavior() {
 			))
 		})
 
-		ginkgo.It("reports boolean literal Equal matchers inside structured matcher values", func() {
+		ginkgo.It("reports boolean literal Equal matchers inside structured matcher values", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/pages/routes_handlers_gomega_test.go", "github.com/perber/wiki/internal/wiki/pages", `package pages
 
 type assertion struct{}
@@ -1464,7 +1499,7 @@ func TestRouteLookup() {
 			))
 		})
 
-		ginkgo.It("reports nested boolean matchers inside structured matcher values", func() {
+		ginkgo.It("reports nested boolean matchers inside structured matcher values", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/pages/i18n_success_test.go", "github.com/perber/wiki/internal/wiki/pages", `package pages
 
 type assertion struct{}
@@ -1497,7 +1532,7 @@ func TestCatalogMessage() {
 			))
 		})
 
-		ginkgo.It("reports os.IsNotExist hidden behind WithTransform boolean matchers", func() {
+		ginkgo.It("flags missing-file probes hidden behind boolean transform matchers", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/wiki_test.go", "github.com/perber/wiki/internal/wiki", `package wiki
 
 import "os"
@@ -1527,7 +1562,7 @@ func TestWikiBehavior() {
 			))
 		})
 
-		ginkgo.It("reports proxy boolean assertions that hide the semantic value", func() {
+		ginkgo.It("reports proxy boolean assertions that hide the semantic value", ginkgo.Label("unit"), func() {
 			h := newRuleHarnessWithFiles("/repo/internal/projectdaemon/agent_presence_test.go", "github.com/perber/wiki/internal/projectdaemon", map[string]string{
 				"/repo/internal/projectdaemon/frontmatter.go": `package projectdaemon
 
@@ -1681,7 +1716,7 @@ func TestAgentPresence() {
 			))
 		})
 
-		ginkgo.It("reports matcher factories that return predicate-only domain booleans", func() {
+		ginkgo.It("reports matcher factories that return predicate-only domain booleans", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/oauth/service_test.go", "github.com/perber/wiki/internal/wiki/oauth", `package oauth
 
 import "errors"
@@ -1729,7 +1764,7 @@ func matchFositeRFC6749Error() GomegaMatcher {
 			))
 		})
 
-		ginkgo.It("reports matcher factories that gate error semantics on captured boolean state", func() {
+		ginkgo.It("reports matcher factories that gate error semantics on captured boolean state", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/cmd/leafwiki/main_edges_gomega_test.go", "github.com/perber/wiki/cmd/leafwiki", `package main
 
 import (
@@ -1797,7 +1832,7 @@ func matchIssuedCSRFCookie(secure bool) GomegaMatcher {
 			))
 		})
 
-		ginkgo.It("reports matcher factories that feed raw boolean parameters into transformed expected contracts", func() {
+		ginkgo.It("reports matcher factories that feed raw boolean parameters into transformed expected contracts", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/http/middleware/security/csrf_cookie_test.go", "github.com/perber/wiki/internal/http/middleware/security", `package security
 
 import "net/http"
@@ -1825,7 +1860,7 @@ func matchIssuedCSRFCookie(name string, secure bool) GomegaMatcher {
 			))
 		})
 
-		ginkgo.It("reports matcher factories that return proxy boolean field predicates", func() {
+		ginkgo.It("reports matcher factories that return proxy boolean field predicates", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/workspacesync/semantic_fixture_workspacesync_test.go", "github.com/perber/wiki/internal/workspacesync", `package workspacesync
 
 type GomegaMatcher interface{}
@@ -1879,7 +1914,7 @@ func matchCommittedStatus() GomegaMatcher {
 			))
 		})
 
-		ginkgo.It("reports type-asserted map index assertion endpoints", func() {
+		ginkgo.It("reports type-asserted map index assertion endpoints", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/http/router_test.go", "github.com/perber/wiki/internal/http", `package http
 
 type assertion struct{}
@@ -1904,7 +1939,7 @@ func TestRouterResponse() {
 			))
 		})
 
-		ginkgo.It("reports raw MCP protocol result status assertions", func() {
+		ginkgo.It("reports raw MCP protocol result status assertions", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/mcp/tools_test.go", "github.com/perber/wiki/internal/wiki/mcp", `package mcp
 
 type assertion struct{}
@@ -1941,7 +1976,7 @@ func TestToolResult() {
 			))
 		})
 
-		ginkgo.It("reports matcher factories that hide raw MCP protocol result status assertions", func() {
+		ginkgo.It("reports matcher factories that hide raw MCP protocol result status assertions", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/mcp/tools_test.go", "github.com/perber/wiki/internal/wiki/mcp", `package mcp
 
 type GomegaMatcher interface{}
@@ -1970,7 +2005,7 @@ func matchToolErrorResult() GomegaMatcher {
 			))
 		})
 
-		ginkgo.It("reports lowercase matcher factories that accept rendered error output fragments", func() {
+		ginkgo.It("reports lowercase matcher factories that accept rendered error output fragments", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/e2e/cmd/wikid-store/main_test.go", "github.com/perber/wiki/e2e/cmd/wikid-store", `package main
 
 type GomegaMatcher interface{}
@@ -1995,7 +2030,7 @@ func parseFatalOutput(raw string, context string) string {
 			))
 		})
 
-		ginkgo.It("reports map index aliases asserted as local values", func() {
+		ginkgo.It("reports map index aliases asserted as local values", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/http/router_test.go", "github.com/perber/wiki/internal/http", `package http
 
 type assertion struct{}
@@ -2022,7 +2057,7 @@ func TestRouterResponse() {
 			))
 		})
 
-		ginkgo.It("reports weak non-empty assertions on collections and semantic scalar fields", func() {
+		ginkgo.It("reports weak non-empty assertions on collections and semantic scalar fields", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/links/link_refactor_test.go", "github.com/perber/wiki/internal/links", `package links
 
 type assertion struct{}
@@ -2057,7 +2092,7 @@ func TestLinkWarnings() {
 			))
 		})
 
-		ginkgo.It("reports discarded semantic boolean returns in specs", func() {
+		ginkgo.It("reports discarded semantic boolean returns in specs", ginkgo.Label("unit"), func() {
 			h := newRuleHarnessWithFiles("/repo/internal/agenthooks/agenthooks_test.go", "github.com/perber/wiki/internal/agenthooks", map[string]string{
 				"/repo/internal/agenthooks/agenthooks.go": `package agenthooks
 
@@ -2101,7 +2136,7 @@ func TestAgentHookNormalization() {
 			))
 		})
 
-		ginkgo.It("reports project daemon control status predicate assertions", func() {
+		ginkgo.It("reports project daemon control status predicate assertions", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/projectdaemon/server_test.go", "github.com/perber/wiki/internal/projectdaemon", `package projectdaemon
 
 type assertion struct{}
@@ -2126,7 +2161,7 @@ func TestControlStatus(err error) {
 	})
 
 	ginkgo.Describe("waiver comments", func() {
-		ginkgo.It("parses a valid rule-specific waiver with an explanation", func() {
+		ginkgo.It("parses a valid rule-specific waiver with an explanation", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow ginkgo.top-level-it -- documents the package-level invariant
@@ -2145,7 +2180,7 @@ func TestPage() {}
 			)))
 		})
 
-		ginkgo.It("reports a waiver that omits the required explanation delimiter", func() {
+		ginkgo.It("reports a waiver that omits the required explanation delimiter", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow ginkgo.top-level-it
@@ -2160,7 +2195,7 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("reports a waiver for an unknown rule ID", func() {
+		ginkgo.It("reports a waiver for an unknown rule ID", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow ginkgo.made-up -- documents the package-level invariant
@@ -2175,7 +2210,7 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("reports a malformed waiver without a rule ID", func() {
+		ginkgo.It("reports a malformed waiver without a rule ID", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow -- documents the package-level invariant
@@ -2190,7 +2225,7 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("reports a bare semh allow directive as malformed", func() {
+		ginkgo.It("reports a bare semh allow directive as malformed", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allow
@@ -2205,7 +2240,7 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("reports a glued semh allow directive as malformed", func() {
+		ginkgo.It("reports a glued semh allow directive as malformed", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // semh:allowginkgo.top-level-it -- documents the package-level invariant
@@ -2220,7 +2255,7 @@ func TestPage() {}
 			))
 		})
 
-		ginkgo.It("reports semh directives that are not standalone comments as malformed", func() {
+		ginkgo.It("reports semh directives that are not standalone comments as malformed", ginkgo.Label("unit"), func() {
 			h := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 
 // TODO: revisit this exceptional shape semh:allow ginkgo.top-level-it -- package invariant
@@ -2236,42 +2271,70 @@ func TestPage() {}
 		})
 	})
 
-	ginkgo.Describe("policy helper branches", func() {
+	type ruleBranchDecision int
+
+	const (
+		ruleBranchRejected ruleBranchDecision = iota
+		ruleBranchAccepted
+	)
+
+	type namedClassification struct {
+		Name     string
+		Decision ruleBranchDecision
+	}
+
+	var decisionFor func(bool) ruleBranchDecision
+	var semanticTypeClassification func(types.Type) namedClassification
+	var primitiveCarrierClassification func(types.Type) namedClassification
+	var unnamedParamClassification func(string, string, int) namedClassification
+
+	ginkgo.BeforeEach(func() {
+		decisionFor = func(accepted bool) ruleBranchDecision {
+			if accepted {
+				return ruleBranchAccepted
+			}
+			return ruleBranchRejected
+		}
+		semanticTypeClassification = func(t types.Type) namedClassification {
+			name, ok := semanticTypeNameOf(t)
+			return namedClassification{Name: name, Decision: decisionFor(ok)}
+		}
+		primitiveCarrierClassification = func(t types.Type) namedClassification {
+			name, ok := primitiveCarrierTypeName(t)
+			return namedClassification{Name: name, Decision: decisionFor(ok)}
+		}
+		unnamedParamClassification = func(funcName string, typeName string, index int) namedClassification {
+			paramName, semanticTypeName, ok := semanticTypeForUnnamedParam(funcName, typeName, index)
+			return namedClassification{Name: paramName + semanticTypeName, Decision: decisionFor(ok)}
+		}
+	})
+
+	ginkgo.Describe("policy helper branches", ginkgo.Label("unit"), func() {
 		ginkgo.It("classifies semantic and primitive type fallback cases", func() {
-			name, hasSemanticType := semanticTypeNameOf(nil)
-			Expect(hasSemanticType).To(BeFalse())
-			Expect(name).To(BeEmpty())
-			name, hasSemanticType = semanticTypeNameOf(types.Typ[types.String])
-			Expect(hasSemanticType).To(BeFalse())
-			Expect(name).To(BeEmpty())
-			name, hasSemanticType = semanticTypeNameOf(namedStringType("PlainID"))
-			Expect(hasSemanticType).To(BeFalse())
-			Expect(name).To(BeEmpty())
-			name, hasSemanticType = semanticTypeNameOf(types.NewPointer(namedStringType("WorkspaceID")))
-			Expect(hasSemanticType).To(BeTrue())
-			Expect(name).To(Equal("WorkspaceID"))
+			Expect(semanticTypeClassification(nil)).To(Equal(namedClassification{}))
+			Expect(semanticTypeClassification(types.Typ[types.String])).To(Equal(namedClassification{}))
+			Expect(semanticTypeClassification(namedStringType("PlainID"))).To(Equal(namedClassification{}))
+			Expect(semanticTypeClassification(types.NewPointer(namedStringType("WorkspaceID")))).To(Equal(namedClassification{
+				Name:     "WorkspaceID",
+				Decision: ruleBranchAccepted,
+			}))
 
-			Expect(isString(nil)).To(BeFalse())
-			Expect(isString(types.Typ[types.UntypedString])).To(BeTrue())
-			Expect(isString(types.Typ[types.Int])).To(BeFalse())
+			Expect(decisionFor(isString(nil))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isString(types.Typ[types.UntypedString]))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isString(types.Typ[types.Int]))).To(Equal(ruleBranchRejected))
 
-			primitive, hasPrimitiveCarrier := primitiveCarrierTypeName(nil)
-			Expect(hasPrimitiveCarrier).To(BeFalse())
-			Expect(primitive).To(BeEmpty())
-			primitive, hasPrimitiveCarrier = primitiveCarrierTypeName(types.NewStruct(nil, nil))
-			Expect(hasPrimitiveCarrier).To(BeFalse())
-			Expect(primitive).To(BeEmpty())
-			primitive, hasPrimitiveCarrier = primitiveCarrierTypeName(types.Typ[types.Uint32])
-			Expect(hasPrimitiveCarrier).To(BeTrue())
-			Expect(primitive).To(Equal("uint32"))
-			primitive, hasPrimitiveCarrier = primitiveCarrierTypeName(types.Typ[types.Float64])
-			Expect(hasPrimitiveCarrier).To(BeFalse())
-			Expect(primitive).To(BeEmpty())
+			Expect(primitiveCarrierClassification(nil)).To(Equal(namedClassification{}))
+			Expect(primitiveCarrierClassification(types.NewStruct(nil, nil))).To(Equal(namedClassification{}))
+			Expect(primitiveCarrierClassification(types.Typ[types.Uint32])).To(Equal(namedClassification{
+				Name:     "uint32",
+				Decision: ruleBranchAccepted,
+			}))
+			Expect(primitiveCarrierClassification(types.Typ[types.Float64])).To(Equal(namedClassification{}))
 
-			Expect(semanticConstructorAllowsSource("", "ErrorCode")).To(BeFalse())
-			Expect(semanticConstructorAllowsSource("MessageID", "ErrorCode")).To(BeTrue())
-			Expect(semanticConstructorAllowsSource("MessageID", "UserID")).To(BeFalse())
-			Expect(semanticConstructorAllowsSource("ToolDescriptionID", "ToolID")).To(BeTrue())
+			Expect(decisionFor(semanticConstructorAllowsSource("", "ErrorCode"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(semanticConstructorAllowsSource("MessageID", "ErrorCode"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(semanticConstructorAllowsSource("MessageID", "UserID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(semanticConstructorAllowsSource("ToolDescriptionID", "ToolID"))).To(Equal(ruleBranchAccepted))
 		})
 
 		ginkgo.It("classifies AST names and parent fallback cases", func() {
@@ -2285,13 +2348,13 @@ func TestPage() {}
 			ctx := &analysisContext{parents: map[ast.Node]ast.Node{}}
 			Expect(enclosingFuncName(ctx, target)).To(BeEmpty())
 			Expect(enclosingFunc(ctx, target)).To(BeNil())
-			Expect(isConstOrTypeDefinition(ctx, target)).To(BeFalse())
+			Expect(decisionFor(isConstOrTypeDefinition(ctx, target))).To(Equal(ruleBranchRejected))
 
 			fn := &ast.FuncDecl{Name: &ast.Ident{Name: "Run"}}
 			ctx.parents[target] = fn
 			Expect(enclosingFuncName(ctx, target)).To(Equal("Run"))
 			Expect(enclosingFunc(ctx, target)).To(Equal(fn))
-			Expect(isConstOrTypeDefinition(ctx, target)).To(BeFalse())
+			Expect(decisionFor(isConstOrTypeDefinition(ctx, target))).To(Equal(ruleBranchRejected))
 		})
 
 		ginkgo.It("classifies AST struct and composite helper fallback cases", func() {
@@ -2299,70 +2362,70 @@ func TestPage() {}
 				{Names: []*ast.Ident{nil}},
 				{Names: []*ast.Ident{{Name: "StatusCode"}}},
 			}}}
-			Expect(astStructHasField(strct, "messageID")).To(BeFalse())
-			Expect(astStructHasField(&ast.StructType{Fields: &ast.FieldList{List: []*ast.Field{
+			Expect(decisionFor(astStructHasField(strct, "messageID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(astStructHasField(&ast.StructType{Fields: &ast.FieldList{List: []*ast.Field{
 				{Names: []*ast.Ident{{Name: "MessageID"}}},
-			}}}, "messageID")).To(BeTrue())
-			Expect(astStructHasContractSignal(strct)).To(BeTrue())
-			Expect(astStructIsMessageBearing("Plain", strct)).To(BeTrue())
+			}}}, "messageID"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(astStructHasContractSignal(strct))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(astStructIsMessageBearing("Plain", strct))).To(Equal(ruleBranchAccepted))
 
 			target := &ast.Ident{Name: "target"}
 			fn := &ast.FuncDecl{Name: &ast.Ident{Name: "Stop"}}
 			ctx := &analysisContext{parents: map[ast.Node]ast.Node{target: fn}}
 			named, typedStruct, lit, hasCompositeContext := enclosingNamedCompositeStructLiteral(ctx, target)
-			Expect(hasCompositeContext).To(BeFalse())
+			Expect(decisionFor(hasCompositeContext)).To(Equal(ruleBranchRejected))
 			Expect(named).To(BeNil())
 			Expect(typedStruct).To(BeNil())
 			Expect(lit).To(BeNil())
 
 			ctx.parents = map[ast.Node]ast.Node{}
 			_, _, _, hasCompositeContext = enclosingNamedCompositeStructLiteral(ctx, target)
-			Expect(hasCompositeContext).To(BeFalse())
+			Expect(decisionFor(hasCompositeContext)).To(Equal(ruleBranchRejected))
 
 			litNode := &ast.CompositeLit{}
 			ctx.pass = &analysis.Pass{TypesInfo: &types.Info{Types: map[ast.Expr]types.TypeAndValue{
 				litNode: {Type: types.NewStruct(nil, nil)},
 			}}}
 			_, _, _, hasCompositeContext = enclosingNamedCompositeStructLiteral(ctx, litNode)
-			Expect(hasCompositeContext).To(BeFalse())
+			Expect(decisionFor(hasCompositeContext)).To(Equal(ruleBranchRejected))
 
 			namedBasic := types.NewNamed(types.NewTypeName(token.NoPos, types.NewPackage("example.com/p", "p"), "NamedBasic", nil), types.Typ[types.String], nil)
 			ctx.pass.TypesInfo.Types[litNode] = types.TypeAndValue{Type: namedBasic}
 			_, _, _, hasCompositeContext = enclosingNamedCompositeStructLiteral(ctx, litNode)
-			Expect(hasCompositeContext).To(BeFalse())
+			Expect(decisionFor(hasCompositeContext)).To(Equal(ruleBranchRejected))
 
 			namedStruct := types.NewNamed(types.NewTypeName(token.NoPos, types.NewPackage("example.com/p", "p"), "Payload", nil), types.NewStruct(nil, nil), nil)
 			ctx.pass.TypesInfo.Types[litNode] = types.TypeAndValue{Type: types.NewPointer(namedStruct)}
 			gotNamed, gotStruct, gotLit, hasCompositeContext := enclosingNamedCompositeStructLiteral(ctx, litNode)
-			Expect(hasCompositeContext).To(BeTrue())
+			Expect(decisionFor(hasCompositeContext)).To(Equal(ruleBranchAccepted))
 			Expect(gotNamed.Obj().Name()).To(Equal("Payload"))
 			Expect(gotStruct.NumFields()).To(BeZero())
 			Expect(gotLit).To(Equal(litNode))
 			wrappedNamed, wrappedStruct, hasCompositeContext := enclosingNamedCompositeStruct(ctx, litNode)
-			Expect(hasCompositeContext).To(BeTrue())
+			Expect(decisionFor(hasCompositeContext)).To(Equal(ruleBranchAccepted))
 			Expect(wrappedNamed).To(Equal(gotNamed))
 			Expect(wrappedStruct).To(Equal(gotStruct))
 		})
 
 		ginkgo.DescribeTable("classifies remaining edge adapter filename cases",
 			func(filename string) {
-				Expect(isEdgeAdapterFile(filename)).To(BeTrue())
+				Expect(decisionFor(isEdgeAdapterFile(filename))).To(Equal(ruleBranchAccepted))
 			},
 			ginkgo.Entry("tree migration adapter", "/repo/internal/core/tree/migration_adapter.go"),
 			ginkgo.Entry("workspacesync watcher adapter", "/repo/internal/workspacesync/watcher_adapter.go"),
 		)
 
 		ginkgo.DescribeTable("classifies owner adapter files across packages",
-			func(packagePath string, filename string, want bool) {
+			func(packagePath string, filename string, want ruleBranchDecision) {
 				h := newRuleHarness(filename, packagePath, `package p`)
-				Expect(isSemanticOwnerAdapterFile(h.ctx, h.file.Package)).To(Equal(want))
+				Expect(decisionFor(isSemanticOwnerAdapterFile(h.ctx, h.file.Package))).To(Equal(want))
 			},
-			ginkgo.Entry("auth semantic owner", "github.com/perber/wiki/internal/core/auth", "/repo/internal/core/auth/semantic_types.go", true),
-			ginkgo.Entry("revision semantic owner", "github.com/perber/wiki/internal/core/revision", "/repo/internal/core/revision/semantic_types.go", true),
-			ginkgo.Entry("markdown validation semantic owner", "github.com/perber/wiki/internal/core/markdownvalidation", "/repo/internal/core/markdownvalidation/issue_codes.go", true),
-			ginkgo.Entry("workspacesync semantic owner", "github.com/perber/wiki/internal/workspacesync", "/repo/internal/workspacesync/semantic_types.go", true),
-			ginkgo.Entry("workspaceid semantic owner", "github.com/perber/wiki/internal/workspaceid", "/repo/internal/workspaceid/validate.go", true),
-			ginkgo.Entry("ordinary package", "github.com/perber/wiki/internal/wiki/pages", "/repo/internal/wiki/pages/page.go", false),
+			ginkgo.Entry("auth semantic owner", "github.com/perber/wiki/internal/core/auth", "/repo/internal/core/auth/semantic_types.go", ruleBranchAccepted),
+			ginkgo.Entry("revision semantic owner", "github.com/perber/wiki/internal/core/revision", "/repo/internal/core/revision/semantic_types.go", ruleBranchAccepted),
+			ginkgo.Entry("markdown validation semantic owner", "github.com/perber/wiki/internal/core/markdownvalidation", "/repo/internal/core/markdownvalidation/issue_codes.go", ruleBranchAccepted),
+			ginkgo.Entry("workspacesync semantic owner", "github.com/perber/wiki/internal/workspacesync", "/repo/internal/workspacesync/semantic_types.go", ruleBranchAccepted),
+			ginkgo.Entry("workspaceid semantic owner", "github.com/perber/wiki/internal/workspaceid", "/repo/internal/workspaceid/validate.go", ruleBranchAccepted),
+			ginkgo.Entry("ordinary package", "github.com/perber/wiki/internal/wiki/pages", "/repo/internal/wiki/pages/page.go", ruleBranchRejected),
 		)
 
 		ginkgo.It("permits direct casts only in policy allow contexts", func() {
@@ -2375,26 +2438,26 @@ const rawPageID = PageID("page-1")
 `
 
 			generated := newRuleHarness("/repo/vendor/example/p.go", "example.com/p", source)
-			Expect(isAllowedDirectCastContext(generated.ctx, generated.findCall("PageID"), "PageID")).To(BeTrue())
+			Expect(decisionFor(isAllowedDirectCastContext(generated.ctx, generated.findCall("PageID"), "PageID"))).To(Equal(ruleBranchAccepted))
 
 			testLiteral := newRuleHarness("/repo/internal/p/page_test.go", "example.com/p", `package p
 type PageID string
 func literal() PageID { return PageID("page-1") }
-`)
-			Expect(isAllowedDirectCastContext(testLiteral.ctx, testLiteral.findCall("PageID"), "PageID")).To(BeTrue())
+	`)
+			Expect(decisionFor(isAllowedDirectCastContext(testLiteral.ctx, testLiteral.findCall("PageID"), "PageID"))).To(Equal(ruleBranchAccepted))
 
 			fixture := newRuleHarness("/repo/internal/p/page_test.go", "example.com/p", source)
-			Expect(isAllowedDirectCastContext(fixture.ctx, fixture.findCall("PageID"), "PageID")).To(BeTrue())
+			Expect(decisionFor(isAllowedDirectCastContext(fixture.ctx, fixture.findCall("PageID"), "PageID"))).To(Equal(ruleBranchAccepted))
 
 			edge := newRuleHarness("/repo/internal/wiki/import_adapter.go", "example.com/p", source)
-			Expect(isAllowedDirectCastContext(edge.ctx, edge.findCalls("PageID")[1], "PageID")).To(BeTrue())
+			Expect(decisionFor(isAllowedDirectCastContext(edge.ctx, edge.findCalls("PageID")[1], "PageID"))).To(Equal(ruleBranchAccepted))
 
 			normal := newRuleHarness("/repo/internal/p/page.go", "example.com/p", source)
 			normalCasts := normal.findCalls("PageID")
-			Expect(isAllowedDirectCastContext(normal.ctx, normalCasts[0], "PageID")).To(BeFalse())
-			Expect(isConstOrTypeDefinition(normal.ctx, normalCasts[0])).To(BeFalse())
-			Expect(isAllowedDirectCastContext(normal.ctx, normalCasts[len(normalCasts)-1], "PageID")).To(BeTrue())
-			Expect(isConstOrTypeDefinition(normal.ctx, normalCasts[len(normalCasts)-1])).To(BeTrue())
+			Expect(decisionFor(isAllowedDirectCastContext(normal.ctx, normalCasts[0], "PageID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isConstOrTypeDefinition(normal.ctx, normalCasts[0]))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isAllowedDirectCastContext(normal.ctx, normalCasts[len(normalCasts)-1], "PageID"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isConstOrTypeDefinition(normal.ctx, normalCasts[len(normalCasts)-1]))).To(Equal(ruleBranchAccepted))
 		})
 
 		ginkgo.It("recognizes type containment and semantic function contexts", func() {
@@ -2410,27 +2473,27 @@ func noResult(raw string) { _ = raw }
 			scan := h.findFunc("Scan")
 			noResult := h.findFunc("noResult")
 
-			Expect(functionReturnsSemanticType(h.ctx, noResult, "PageID")).To(BeFalse())
-			Expect(functionReturnsSemanticType(h.ctx, constructor, "PageID")).To(BeTrue())
-			Expect(functionHasSemanticReceiver(h.ctx, constructor, "PageID")).To(BeFalse())
-			Expect(functionHasSemanticReceiver(h.ctx, value, "PageID")).To(BeTrue())
-			Expect(functionHasSemanticParameter(h.ctx, noResult, "PageID")).To(BeFalse())
-			Expect(functionHasSemanticParameter(h.ctx, scan, "PageID")).To(BeTrue())
-			Expect(isAllowedSemanticOwnerAdapterFunc(h.ctx, h.findCall("string"), "PageID")).To(BeTrue())
+			Expect(decisionFor(functionReturnsSemanticType(h.ctx, noResult, "PageID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(functionReturnsSemanticType(h.ctx, constructor, "PageID"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(functionHasSemanticReceiver(h.ctx, constructor, "PageID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(functionHasSemanticReceiver(h.ctx, value, "PageID"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(functionHasSemanticParameter(h.ctx, noResult, "PageID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(functionHasSemanticParameter(h.ctx, scan, "PageID"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isAllowedSemanticOwnerAdapterFunc(h.ctx, h.findCall("string"), "PageID"))).To(Equal(ruleBranchAccepted))
 
-			Expect(typeContainsSemanticType(nil, "PageID")).To(BeFalse())
-			Expect(typeContainsSemanticType(types.NewSlice(namedStringType("PageID")), "PageID")).To(BeTrue())
-			Expect(typeContainsSemanticType(types.NewArray(namedStringType("PageID"), 2), "PageID")).To(BeTrue())
-			Expect(typeContainsSemanticType(types.Typ[types.String], "PageID")).To(BeFalse())
+			Expect(decisionFor(typeContainsSemanticType(nil, "PageID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(typeContainsSemanticType(types.NewSlice(namedStringType("PageID")), "PageID"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(typeContainsSemanticType(types.NewArray(namedStringType("PageID"), 2), "PageID"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(typeContainsSemanticType(types.Typ[types.String], "PageID"))).To(Equal(ruleBranchRejected))
 
 			emptyParams := &ast.FuncDecl{Name: &ast.Ident{Name: "NoParams"}, Type: &ast.FuncType{}}
-			Expect(functionHasSemanticParameter(h.ctx, emptyParams, "PageID")).To(BeFalse())
+			Expect(decisionFor(functionHasSemanticParameter(h.ctx, emptyParams, "PageID"))).To(Equal(ruleBranchRejected))
 
 			plain := newRuleHarness("/repo/internal/core/tree/semantic_types.go", "github.com/perber/wiki/internal/core/tree", `package tree
 type PageID string
 func Plain(raw string) string { return raw }
 `)
-			Expect(isAllowedSemanticOwnerAdapterFunc(plain.ctx, plain.findFunc("Plain"), "PageID")).To(BeFalse())
+			Expect(decisionFor(isAllowedSemanticOwnerAdapterFunc(plain.ctx, plain.findFunc("Plain"), "PageID"))).To(Equal(ruleBranchRejected))
 		})
 
 		ginkgo.It("classifies wire persistence and JSON composite contexts", func() {
@@ -2440,32 +2503,32 @@ func Plain(raw string) string { return raw }
 				"  Plain string\n"+
 				"}\n"+
 				"func build(pageID string) PageResponse { return PageResponse{PageID: pageID, Plain: pageID} }\n")
-			Expect(inJSONCompositeLiteral(wire.ctx, wire.findKeyValue("PageID").Value)).To(BeTrue())
-			Expect(inJSONCompositeLiteral(wire.ctx, wire.findKeyValue("Plain").Value)).To(BeFalse())
-			Expect(compositeFieldHasWireTag(wire.ctx, wire.firstCompositeLiteral(), "Missing")).To(BeFalse())
-			Expect(isAllowedWireComposite(wire.ctx, wire.firstCompositeLiteral(), "PageResponse", wire.file.Package)).To(BeTrue())
+			Expect(decisionFor(inJSONCompositeLiteral(wire.ctx, wire.findKeyValue("PageID").Value))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(inJSONCompositeLiteral(wire.ctx, wire.findKeyValue("Plain").Value))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(compositeFieldHasWireTag(wire.ctx, wire.firstCompositeLiteral(), "Missing"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isAllowedWireComposite(wire.ctx, wire.firstCompositeLiteral(), "PageResponse", wire.file.Package))).To(Equal(ruleBranchAccepted))
 
 			store := newRuleHarness("/repo/internal/wiki/page_store.go", "example.com/p", `package p
 type pageRecord struct { PageID string }
 type pageModel struct { PageID string }
 func build(pageID string) pageRecord { return pageRecord{PageID: pageID} }
 `)
-			Expect(isPersistenceRowStruct(store.ctx, store.findTypeSpec("pageRecord"))).To(BeTrue())
-			Expect(isPersistenceRowStruct(store.ctx, store.findTypeSpec("pageModel"))).To(BeFalse())
-			Expect(isAllowedPersistenceRowKeyValue(store.ctx, store.findKeyValue("PageID").Value)).To(BeTrue())
-			Expect(isPersistenceRowComposite(store.ctx, store.firstCompositeLiteral())).To(BeTrue())
+			Expect(decisionFor(isPersistenceRowStruct(store.ctx, store.findTypeSpec("pageRecord")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isPersistenceRowStruct(store.ctx, store.findTypeSpec("pageModel")))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isAllowedPersistenceRowKeyValue(store.ctx, store.findKeyValue("PageID").Value))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isPersistenceRowComposite(store.ctx, store.firstCompositeLiteral()))).To(Equal(ruleBranchAccepted))
 
 			nonStore := newRuleHarness("/repo/internal/wiki/page.go", "example.com/p", `package p
 type pageRecord struct { PageID string }
 func build(pageID string) pageRecord { return pageRecord{PageID: pageID} }
 `)
-			Expect(isPersistenceRowComposite(nonStore.ctx, nonStore.firstCompositeLiteral())).To(BeFalse())
+			Expect(decisionFor(isPersistenceRowComposite(nonStore.ctx, nonStore.firstCompositeLiteral()))).To(Equal(ruleBranchRejected))
 
 			pointerStore := newRuleHarness("/repo/internal/wiki/page_store.go", "example.com/p", `package p
 type pageRecord struct { PageID string }
 func build(pageID string) *pageRecord { return &pageRecord{PageID: pageID} }
 `)
-			Expect(isPersistenceRowComposite(pointerStore.ctx, pointerStore.firstCompositeLiteral())).To(BeTrue())
+			Expect(decisionFor(isPersistenceRowComposite(pointerStore.ctx, pointerStore.firstCompositeLiteral()))).To(Equal(ruleBranchAccepted))
 
 			fset := token.NewFileSet()
 			file := fset.AddFile("/repo/internal/wiki/page_store.go", -1, 100)
@@ -2477,17 +2540,17 @@ func build(pageID string) *pageRecord { return &pageRecord{PageID: pageID} }
 					pointerComposite: {Type: types.NewPointer(recordType)},
 				}}},
 			}
-			Expect(isPersistenceRowComposite(pointerCtx, pointerComposite)).To(BeTrue())
+			Expect(decisionFor(isPersistenceRowComposite(pointerCtx, pointerComposite))).To(Equal(ruleBranchAccepted))
 
 			orphan := &ast.Ident{Name: "orphan"}
 			funcBarrier := &ast.FuncDecl{Name: &ast.Ident{Name: "stop"}}
 			manualCtx := &analysisContext{parents: map[ast.Node]ast.Node{orphan: funcBarrier}}
-			Expect(inJSONCompositeLiteral(manualCtx, orphan)).To(BeFalse())
+			Expect(decisionFor(inJSONCompositeLiteral(manualCtx, orphan))).To(Equal(ruleBranchRejected))
 			manualCtx.parents = map[ast.Node]ast.Node{}
-			Expect(inJSONCompositeLiteral(manualCtx, orphan)).To(BeFalse())
-			Expect(isAllowedPersistenceRowKeyValue(manualCtx, orphan)).To(BeFalse())
+			Expect(decisionFor(inJSONCompositeLiteral(manualCtx, orphan))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isAllowedPersistenceRowKeyValue(manualCtx, orphan))).To(Equal(ruleBranchRejected))
 			manualCtx.parents[orphan] = funcBarrier
-			Expect(isAllowedPersistenceRowKeyValue(manualCtx, orphan)).To(BeFalse())
+			Expect(decisionFor(isAllowedPersistenceRowKeyValue(manualCtx, orphan))).To(Equal(ruleBranchRejected))
 
 			pageIDField := types.NewVar(token.NoPos, types.NewPackage("example.com/p", "p"), "PageID", types.Typ[types.String])
 			taggedStruct := types.NewStruct([]*types.Var{pageIDField}, []string{`json:"pageId"`})
@@ -2496,12 +2559,12 @@ func build(pageID string) *pageRecord { return &pageRecord{PageID: pageID} }
 			manualCtx.pass = &analysis.Pass{Fset: token.NewFileSet(), TypesInfo: &types.Info{Types: map[ast.Expr]types.TypeAndValue{
 				composite: {Type: types.NewPointer(pageResponse)},
 			}}}
-			Expect(compositeFieldHasWireTag(manualCtx, composite, "PageID")).To(BeTrue())
+			Expect(decisionFor(compositeFieldHasWireTag(manualCtx, composite, "PageID"))).To(Equal(ruleBranchAccepted))
 
 			manualCtx.pass.TypesInfo.Types[composite] = types.TypeAndValue{Type: types.NewStruct(nil, nil)}
-			Expect(compositeFieldHasWireTag(manualCtx, composite, "PageID")).To(BeFalse())
+			Expect(decisionFor(compositeFieldHasWireTag(manualCtx, composite, "PageID"))).To(Equal(ruleBranchRejected))
 			manualCtx.pass.TypesInfo.Types[composite] = types.TypeAndValue{Type: namedStringType("PageResponse")}
-			Expect(compositeFieldHasWireTag(manualCtx, composite, "PageID")).To(BeFalse())
+			Expect(decisionFor(compositeFieldHasWireTag(manualCtx, composite, "PageID"))).To(Equal(ruleBranchRejected))
 		})
 
 		ginkgo.It("distinguishes stable and localized literal contexts", func() {
@@ -2517,51 +2580,51 @@ func plain() string { return "hello world" }
 			stableReturn := h.findLiteral("field_required")
 			plain := h.findLiteral("hello world")
 
-			Expect(isStableContractLiteral(h.ctx, stableCall, "page_not_found")).To(BeTrue())
-			Expect(stableLiteralContextSuggestsContract(h.ctx, stableReturn)).To(BeTrue())
-			Expect(stableLiteralContextSuggestsContract(h.ctx, plain)).To(BeFalse())
-			Expect(isStableMessageLikeLiteral("validation.page.title_required")).To(BeTrue())
-			Expect(isStableMessageLikeLiteral("wiki_get_page")).To(BeTrue())
-			Expect(isStableMessageLikeLiteral("page_not_found")).To(BeTrue())
-			Expect(isStableMessageLikeLiteral("plain prose")).To(BeFalse())
-			Expect(isLikelyErrorCodeLiteral("page_invalid_kind")).To(BeTrue())
-			Expect(isLikelyErrorCodeLiteral("access_token")).To(BeFalse())
+			Expect(decisionFor(isStableContractLiteral(h.ctx, stableCall, "page_not_found"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(stableLiteralContextSuggestsContract(h.ctx, stableReturn))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(stableLiteralContextSuggestsContract(h.ctx, plain))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isStableMessageLikeLiteral("validation.page.title_required"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isStableMessageLikeLiteral("wiki_get_page"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isStableMessageLikeLiteral("page_not_found"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isStableMessageLikeLiteral("plain prose"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isLikelyErrorCodeLiteral("page_invalid_kind"))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isLikelyErrorCodeLiteral("access_token"))).To(Equal(ruleBranchRejected))
 
-			Expect(isStableLiteralAllowed(h.ctx, stableCall)).To(BeFalse())
-			Expect(isLocalizedProseLiteralAllowed(h.ctx, plain)).To(BeFalse())
+			Expect(decisionFor(isStableLiteralAllowed(h.ctx, stableCall))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isLocalizedProseLiteralAllowed(h.ctx, plain))).To(Equal(ruleBranchRejected))
 			testFile := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 func plain() string { return "hello world" }
 `)
-			Expect(isStableLiteralAllowed(testFile.ctx, testFile.findLiteral("hello world"))).To(BeTrue())
-			Expect(isLocalizedProseLiteralAllowed(testFile.ctx, testFile.findLiteral("hello world"))).To(BeTrue())
+			Expect(decisionFor(isStableLiteralAllowed(testFile.ctx, testFile.findLiteral("hello world")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isLocalizedProseLiteralAllowed(testFile.ctx, testFile.findLiteral("hello world")))).To(Equal(ruleBranchAccepted))
 
 			plainCall := &ast.CallExpr{Args: []ast.Expr{
 				&ast.Ident{Name: "notLiteral"},
 				&ast.BasicLit{Kind: token.INT, Value: "1"},
 				&ast.BasicLit{Kind: token.STRING, Value: `"validation.page.required"`},
 			}}
-			Expect(localizedProseConstructorRequiresCatalogOnly("OtherConstructor", h.ctx, plainCall)).To(BeTrue())
-			Expect(callHasRawStableContractArg(h.ctx, &ast.CallExpr{})).To(BeFalse())
-			Expect(callContainsArg(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "other"}}}, stableCall)).To(BeFalse())
+			Expect(decisionFor(localizedProseConstructorRequiresCatalogOnly("OtherConstructor", h.ctx, plainCall))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(callHasRawStableContractArg(h.ctx, &ast.CallExpr{}))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(callContainsArg(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "other"}}}, stableCall))).To(Equal(ruleBranchRejected))
 
 			kv := &ast.KeyValueExpr{Key: &ast.Ident{Name: "errorCode"}}
 			matches, terminal := stableLiteralContextDecision(h.ctx, kv, stableCall)
-			Expect(matches).To(BeTrue())
-			Expect(terminal).To(BeFalse())
+			Expect(decisionFor(matches)).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(terminal)).To(Equal(ruleBranchRejected))
 			assign := &ast.AssignStmt{Lhs: []ast.Expr{&ast.Ident{Name: "errorCode"}}, Rhs: []ast.Expr{stableCall}}
 			matches, terminal = stableLiteralContextDecision(h.ctx, assign, stableCall)
-			Expect(matches).To(BeTrue())
-			Expect(terminal).To(BeFalse())
+			Expect(decisionFor(matches)).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(terminal)).To(Equal(ruleBranchRejected))
 			spec := &ast.ValueSpec{Names: []*ast.Ident{{Name: "errorCode"}}, Values: []ast.Expr{stableCall}}
 			matches, terminal = stableLiteralContextDecision(h.ctx, spec, stableCall)
-			Expect(matches).To(BeTrue())
-			Expect(terminal).To(BeFalse())
-			Expect(stableLiteralContextSuggestsContract(&analysisContext{parents: map[ast.Node]ast.Node{}}, stableCall)).To(BeFalse())
+			Expect(decisionFor(matches)).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(terminal)).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(stableLiteralContextSuggestsContract(&analysisContext{parents: map[ast.Node]ast.Node{}}, stableCall))).To(Equal(ruleBranchRejected))
 
-			Expect(isCLIOutputWriterExpr(&ast.Ident{Name: "stdout"})).To(BeFalse())
-			Expect(isResponsePayloadLiteral(&analysisContext{parents: map[ast.Node]ast.Node{plain: &ast.FuncDecl{}}}, plain)).To(BeFalse())
-			Expect(isResponsePayloadLiteral(&analysisContext{parents: map[ast.Node]ast.Node{}}, plain)).To(BeFalse())
-			Expect(isStrictLocalizedProseContractLiteral(&analysisContext{parents: map[ast.Node]ast.Node{}}, plain, "plain prose")).To(BeFalse())
+			Expect(decisionFor(isCLIOutputWriterExpr(&ast.Ident{Name: "stdout"}))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isResponsePayloadLiteral(&analysisContext{parents: map[ast.Node]ast.Node{plain: &ast.FuncDecl{}}}, plain))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isResponsePayloadLiteral(&analysisContext{parents: map[ast.Node]ast.Node{}}, plain))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isStrictLocalizedProseContractLiteral(&analysisContext{parents: map[ast.Node]ast.Node{}}, plain, "plain prose"))).To(Equal(ruleBranchRejected))
 
 			pkgName, calleeName := calleePackageAndName(h.ctx, &ast.CallExpr{Fun: &ast.SelectorExpr{Sel: &ast.Ident{Name: "Method"}}})
 			Expect(pkgName).To(BeEmpty())
@@ -2594,7 +2657,7 @@ var workspacedRoleCrashedHealth = runtimeRoleHealthWireCheck{
 		})
 	})
 
-	ginkgo.Describe("rule branches", func() {
+	ginkgo.Describe("rule branches", ginkgo.Label("unit"), func() {
 		ginkgo.It("reports LastError assertions that only prove non-empty rendered text", func() {
 			h := newRuleHarness("/repo/internal/workspacesync/service_test.go", "github.com/perber/wiki/internal/workspacesync", `package workspacesync
 
@@ -2796,11 +2859,11 @@ func use(id PageID) {
 	log.Printf("%s", id.String())
 	slog.Info("page", "id", id.String())
 	url.PathEscape(id.String())
-}
-`)
+				}
+	`)
 			for _, name := range []string{"Println", "Printf", "Info", "PathEscape"} {
-				Expect(isAllowedTerminalStringCall(h.ctx, h.findCall(name))).To(BeTrue())
-				Expect(isAllowedTerminalCallBoundary(h.ctx, h.findCall(name))).To(BeTrue())
+				Expect(decisionFor(isAllowedTerminalStringCall(h.ctx, h.findCall(name)))).To(Equal(ruleBranchAccepted))
+				Expect(decisionFor(isAllowedTerminalCallBoundary(h.ctx, h.findCall(name)))).To(Equal(ruleBranchAccepted))
 			}
 
 			gitHashBoundary := newRuleHarness("/repo/internal/workspacesync/gitrevisions/semantic_types.go", "github.com/perber/wiki/internal/workspacesync/gitrevisions", `package gitrevisions
@@ -2826,7 +2889,7 @@ func (id PageID) String() string { return string(id) }
 func use(id PageID) string { return wrap(fmt.Sprint(id.String())) }
 func wrap(value string) string { return value }
 `)
-			Expect(isAllowedTerminalStringCall(nested.ctx, nested.findCall("Sprint"))).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalStringCall(nested.ctx, nested.findCall("Sprint")))).To(Equal(ruleBranchRejected))
 			checkStringLeak(nested.ctx, nested.findCall("String"))
 			Expect(nested.diagnosticMessages()).To(ContainElement(ContainSubstring("before internal call Sprint")))
 
@@ -2840,30 +2903,30 @@ func use() {
 	slog.SetDefault(nil)
 }
 `)
-			Expect(isAllowedTerminalStringCall(otherTerminals.ctx, otherTerminals.findCall("Output"))).To(BeFalse())
-			Expect(isAllowedTerminalStringCall(otherTerminals.ctx, otherTerminals.findCall("SetDefault"))).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalStringCall(otherTerminals.ctx, otherTerminals.findCall("Output")))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isAllowedTerminalStringCall(otherTerminals.ctx, otherTerminals.findCall("SetDefault")))).To(Equal(ruleBranchRejected))
 
 			stmt := &ast.CallExpr{Fun: &ast.Ident{Name: "terminal"}}
 			binary := &ast.BinaryExpr{Op: token.LSS}
 			manualCtx := &analysisContext{parents: map[ast.Node]ast.Node{stmt: binary}}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchRejected))
 			manualCtx.parents[stmt] = &ast.ParenExpr{}
 			manualCtx.parents[manualCtx.parents[stmt]] = &ast.ExprStmt{}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeTrue())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchAccepted))
 			manualCtx.parents = map[ast.Node]ast.Node{stmt: &ast.BinaryExpr{Op: token.ADD}}
 			manualCtx.parents[manualCtx.parents[stmt]] = &ast.ReturnStmt{}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeTrue())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchAccepted))
 			manualCtx.parents[stmt] = &ast.CallExpr{}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchRejected))
 			manualCtx.parents[stmt] = &ast.FuncDecl{}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchRejected))
 			manualCtx.parents[stmt] = &ast.IfStmt{}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchRejected))
 			manualCtx.pass = h.ctx.pass
 			manualCtx.parents[stmt] = &ast.KeyValueExpr{}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchRejected))
 			manualCtx.parents = map[ast.Node]ast.Node{}
-			Expect(isAllowedTerminalCallBoundary(manualCtx, stmt)).To(BeFalse())
+			Expect(decisionFor(isAllowedTerminalCallBoundary(manualCtx, stmt))).To(Equal(ruleBranchRejected))
 
 			testCalls := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 import (
@@ -2883,12 +2946,12 @@ func TestCalls(t *testing.T) {
 func assertEqual(value string) {}
 func requireEqual(value string) {}
 `)
-			Expect(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("Join"))).To(BeTrue())
-			Expect(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("NewRequest"))).To(BeTrue())
-			Expect(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("append"))).To(BeTrue())
-			Expect(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("assertEqual"))).To(BeTrue())
-			Expect(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("requireEqual"))).To(BeTrue())
-			Expect(isAllowedTestAssertionCall(testCalls.findCall("Cleanup"))).To(BeFalse())
+			Expect(decisionFor(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("Join")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("NewRequest")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("append")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("assertEqual")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isAllowedTestStringCall(testCalls.ctx, testCalls.findCall("requireEqual")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isAllowedTestAssertionCall(testCalls.findCall("Cleanup")))).To(Equal(ruleBranchRejected))
 
 			comparison := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 type PageID string
@@ -2909,8 +2972,8 @@ func compare(id PageID, raw string) bool {
 				return true
 			})
 			Expect(binaryExpr).NotTo(BeNil())
-			Expect(isAllowedSerializedTestComparison(comparison.ctx, comparison.findCall("String"), binaryExpr)).To(BeFalse())
-			Expect(isAllowedSerializedTestComparison(comparison.ctx, &ast.BasicLit{Kind: token.STRING, Value: `"other"`, ValuePos: comparison.file.Package}, binaryExpr)).To(BeFalse())
+			Expect(decisionFor(isAllowedSerializedTestComparison(comparison.ctx, comparison.findCall("String"), binaryExpr))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isAllowedSerializedTestComparison(comparison.ctx, &ast.BasicLit{Kind: token.STRING, Value: `"other"`, ValuePos: comparison.file.Package}, binaryExpr))).To(Equal(ruleBranchRejected))
 
 			transform := newRuleHarness("/repo/internal/analysis/semantichygiene/testdata/semanticcases/message_constructor.go", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/semanticcases", `package semanticcases
 import "strings"
@@ -2921,14 +2984,14 @@ func MessageIDForCode(code ErrorCode) MessageID {
 	return ""
 }
 `)
-			Expect(isAllowedSemanticConstructorTransform(transform.ctx, transform.findCall("Contains"), "ErrorCode")).To(BeFalse())
+			Expect(decisionFor(isAllowedSemanticConstructorTransform(transform.ctx, transform.findCall("Contains"), "ErrorCode"))).To(Equal(ruleBranchRejected))
 
 			adapterReturn := newRuleHarness("/repo/internal/wiki/import_adapter.go", "example.com/p", `package p
 type PageID string
 func (id PageID) String() string { return string(id) }
 func Other(id PageID) string { return id.String() }
 `)
-			Expect(isAllowedAdapterStringReturn(adapterReturn.ctx, adapterReturn.findCall("String"))).To(BeFalse())
+			Expect(decisionFor(isAllowedAdapterStringReturn(adapterReturn.ctx, adapterReturn.findCall("String")))).To(Equal(ruleBranchRejected))
 		})
 
 		ginkgo.It("reports direct cast and unchecked constructor diagnostics", func() {
@@ -2956,34 +3019,34 @@ func use(raw string, count int) {
 			Expect(h.diagnosticMessages()).To(ContainElement(ContainSubstring("unchecked constructor NewPageIDUnchecked")))
 
 			primitiveCall := &ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "plain"}}}
-			Expect(callHasPrimitiveArg(h.ctx, primitiveCall)).To(BeFalse())
+			Expect(decisionFor(callHasPrimitiveArg(h.ctx, primitiveCall))).To(Equal(ruleBranchRejected))
 
 			generated := newRuleHarness("/repo/vendor/example/page.go", "example.com/p", `package p
 type PageID string
 func NewPageIDUnchecked(raw any) PageID { return "" }
 func use(raw string) { _ = NewPageIDUnchecked(raw) }
 `)
-			Expect(isAllowedUncheckedConstructorCall(generated.ctx, generated.findCall("NewPageIDUnchecked"), "PageID")).To(BeTrue())
+			Expect(decisionFor(isAllowedUncheckedConstructorCall(generated.ctx, generated.findCall("NewPageIDUnchecked"), "PageID"))).To(Equal(ruleBranchAccepted))
 
 			fixture := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 type PageID string
 func NewPageIDUnchecked(raw any) PageID { return "" }
 func NewFixturePageID(raw string) PageID { return NewPageIDUnchecked(raw) }
 `)
-			Expect(isAllowedUncheckedConstructorCall(fixture.ctx, fixture.findCall("NewPageIDUnchecked"), "PageID")).To(BeTrue())
+			Expect(decisionFor(isAllowedUncheckedConstructorCall(fixture.ctx, fixture.findCall("NewPageIDUnchecked"), "PageID"))).To(Equal(ruleBranchAccepted))
 
 			owner := newRuleHarness("/repo/internal/core/tree/semantic_types.go", "github.com/perber/wiki/internal/core/tree", `package tree
 type PageID string
 func NewPageIDUnchecked(raw any) PageID { return "" }
 func MakePageID(raw string) PageID { return NewPageIDUnchecked(raw) }
 `)
-			Expect(isAllowedUncheckedConstructorOwnerContext(owner.ctx, owner.findCall("NewPageIDUnchecked"), "PageID")).To(BeTrue())
+			Expect(decisionFor(isAllowedUncheckedConstructorOwnerContext(owner.ctx, owner.findCall("NewPageIDUnchecked"), "PageID"))).To(Equal(ruleBranchAccepted))
 
 			semanticConstructor := newRuleHarness("/repo/internal/core/tree/semantic_types.go", "github.com/perber/wiki/internal/core/tree", `package tree
 type PageID string
 func NewPageIDUnchecked(raw string) PageID { return NewPageIDUnchecked(raw) }
 `)
-			Expect(isAllowedUncheckedConstructorCall(semanticConstructor.ctx, semanticConstructor.findCall("NewPageIDUnchecked"), "PageID")).To(BeTrue())
+			Expect(decisionFor(isAllowedUncheckedConstructorCall(semanticConstructor.ctx, semanticConstructor.findCall("NewPageIDUnchecked"), "PageID"))).To(Equal(ruleBranchAccepted))
 		})
 
 		ginkgo.It("reports message field passthrough and response status diagnostics", func() {
@@ -3008,9 +3071,9 @@ func build(message string, lastError string) H {
 }
 func NewLocalizedError(code ErrorCode, message string) {}
 func makeError(message string) { NewLocalizedError("ok", message) }
-`)
+				`)
 			checkMessageFieldValue(h.ctx, h.findKeyValue("Message"))
-			Expect(isMessageFieldValueFreeFormPassthrough(h.ctx, h.findKeyValue("Message"))).To(BeTrue())
+			Expect(decisionFor(isMessageFieldValueFreeFormPassthrough(h.ctx, h.findKeyValue("Message")))).To(Equal(ruleBranchAccepted))
 			checkResponseStatusForward(h.ctx, h.findKeyValue("lastError"))
 			checkMessagePassthroughCall(h.ctx, h.findCall("NewLocalizedError"))
 			Expect(h.diagnosticMessages()).To(ContainElements(
@@ -3019,39 +3082,39 @@ func makeError(message string) { NewLocalizedError("ok", message) }
 				ContainSubstring("localized error constructor NewLocalizedError"),
 			))
 
-			Expect(compositeLiteralHasKey(nil, "messageID")).To(BeFalse())
-			Expect(callHasFreeFormMessageArg(h.ctx, h.findCall("NewLocalizedError"))).To(BeTrue())
-			Expect(exprSuggestsMessageStatusForward(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "lastError"}}})).To(BeTrue())
-			Expect(exprSuggestsMessageStatusForward(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "other"}}})).To(BeFalse())
-			Expect(exprSuggestsMessageStatusForward(&ast.BasicLit{Kind: token.STRING, Value: `"plain"`})).To(BeFalse())
-			Expect(compositeLiteralHasKey(&ast.CompositeLit{Elts: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"plain"`}}}, "messageID")).To(BeFalse())
+			Expect(decisionFor(compositeLiteralHasKey(nil, "messageID"))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(callHasFreeFormMessageArg(h.ctx, h.findCall("NewLocalizedError")))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(exprSuggestsMessageStatusForward(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "lastError"}}}))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(exprSuggestsMessageStatusForward(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "other"}}}))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(exprSuggestsMessageStatusForward(&ast.BasicLit{Kind: token.STRING, Value: `"plain"`}))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(compositeLiteralHasKey(&ast.CompositeLit{Elts: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"plain"`}}}, "messageID"))).To(Equal(ruleBranchRejected))
 
 			outside := &ast.KeyValueExpr{Key: &ast.Ident{Name: "Message"}, Value: &ast.BasicLit{Kind: token.STRING, Value: `"plain"`}}
 			checkMessageFieldValue(&analysisContext{parents: map[ast.Node]ast.Node{}, pass: h.ctx.pass}, outside)
 			checkResponseStatusForward(h.ctx, &ast.KeyValueExpr{Key: &ast.BasicLit{Kind: token.STRING, Value: `"lastError"`}, Value: &ast.Ident{Name: "other"}})
 			_, warningHasMessageID := warningFieldValueMissingMessageIDNamed(&analysisContext{parents: map[ast.Node]ast.Node{}, pass: h.ctx.pass}, outside)
-			Expect(warningHasMessageID).To(BeFalse())
+			Expect(decisionFor(warningHasMessageID)).To(Equal(ruleBranchRejected))
 
-			Expect(exprIsFreeFormMessageParam(h.ctx, &ast.BasicLit{Kind: token.STRING, Value: `"message"`})).To(BeFalse())
+			Expect(decisionFor(exprIsFreeFormMessageParam(h.ctx, &ast.BasicLit{Kind: token.STRING, Value: `"message"`}))).To(Equal(ruleBranchRejected))
 			defsMessage := &ast.Ident{Name: "message"}
 			defsVar := types.NewVar(token.NoPos, types.NewPackage("example.com/p", "p"), "message", types.Typ[types.String])
 			defsCtx := &analysisContext{pass: &analysis.Pass{TypesInfo: &types.Info{
 				Uses: map[*ast.Ident]types.Object{},
 				Defs: map[*ast.Ident]types.Object{defsMessage: defsVar},
 			}}, parents: map[ast.Node]ast.Node{}}
-			Expect(exprIsFreeFormMessageParam(defsCtx, defsMessage)).To(BeFalse())
+			Expect(decisionFor(exprIsFreeFormMessageParam(defsCtx, defsMessage))).To(Equal(ruleBranchRejected))
 			nonStringMessage := &ast.Ident{Name: "message"}
 			nonStringVar := types.NewVar(token.NoPos, types.NewPackage("example.com/p", "p"), "message", types.Typ[types.Int])
 			nonStringCtx := &analysisContext{pass: &analysis.Pass{TypesInfo: &types.Info{
 				Uses: map[*ast.Ident]types.Object{nonStringMessage: nonStringVar},
 			}}, parents: map[ast.Node]ast.Node{}}
-			Expect(exprIsFreeFormMessageParam(nonStringCtx, nonStringMessage)).To(BeFalse())
+			Expect(decisionFor(exprIsFreeFormMessageParam(nonStringCtx, nonStringMessage))).To(Equal(ruleBranchRejected))
 			freeMessage := &ast.Ident{Name: "message"}
 			freeVar := types.NewVar(token.NoPos, types.NewPackage("example.com/p", "p"), "message", types.Typ[types.String])
 			freeCtx := &analysisContext{pass: &analysis.Pass{TypesInfo: &types.Info{
 				Uses: map[*ast.Ident]types.Object{freeMessage: freeVar},
 			}}, parents: map[ast.Node]ast.Node{}}
-			Expect(exprIsFreeFormMessageParam(freeCtx, freeMessage)).To(BeFalse())
+			Expect(decisionFor(exprIsFreeFormMessageParam(freeCtx, freeMessage))).To(Equal(ruleBranchRejected))
 
 			otherMessage := &ast.Ident{Name: "message"}
 			paramName := &ast.Ident{Name: "other"}
@@ -3059,7 +3122,7 @@ func makeError(message string) { NewLocalizedError("ok", message) }
 			freeCtx.pass.TypesInfo.Defs = map[*ast.Ident]types.Object{paramName: types.NewVar(token.NoPos, types.NewPackage("example.com/p", "p"), "other", types.Typ[types.String])}
 			freeCtx.pass.TypesInfo.Uses = map[*ast.Ident]types.Object{otherMessage: param}
 			freeCtx.parents[otherMessage] = &ast.FuncDecl{Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{paramName}}}}}}
-			Expect(exprIsFreeFormMessageParam(freeCtx, otherMessage)).To(BeFalse())
+			Expect(decisionFor(exprIsFreeFormMessageParam(freeCtx, otherMessage))).To(Equal(ruleBranchRejected))
 		})
 
 		ginkgo.It("reports signature and validator helper diagnostics", func() {
@@ -3091,15 +3154,12 @@ func ValidatePlain(raw string) (bool, error) { return true, nil }
 			))
 
 			Expect(semanticContextName(nil)).To(BeEmpty())
-			paramName, typeName, hasSemanticType := semanticTypeForUnnamedParam("Other", "Other", 1)
-			Expect(hasSemanticType).To(BeFalse())
-			Expect(paramName).To(BeEmpty())
-			Expect(typeName).To(BeEmpty())
-			Expect(isRawStringCarrier(nil)).To(BeFalse())
-			Expect(isRawStringCarrier(types.NewSlice(types.Typ[types.String]))).To(BeTrue())
-			Expect(isRawStringCarrier(types.NewArray(types.Typ[types.String], 2))).To(BeTrue())
-			Expect(isRawStringCarrier(types.NewMap(types.Typ[types.String], types.Typ[types.Int]))).To(BeTrue())
-			Expect(isRawStringCarrier(types.NewMap(types.Typ[types.Int], types.Typ[types.String]))).To(BeFalse())
+			Expect(unnamedParamClassification("Other", "Other", 1)).To(Equal(namedClassification{}))
+			Expect(decisionFor(isRawStringCarrier(nil))).To(Equal(ruleBranchRejected))
+			Expect(decisionFor(isRawStringCarrier(types.NewSlice(types.Typ[types.String])))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isRawStringCarrier(types.NewArray(types.Typ[types.String], 2)))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isRawStringCarrier(types.NewMap(types.Typ[types.String], types.Typ[types.Int])))).To(Equal(ruleBranchAccepted))
+			Expect(decisionFor(isRawStringCarrier(types.NewMap(types.Typ[types.Int], types.Typ[types.String])))).To(Equal(ruleBranchRejected))
 
 			checkSignatureParams(h.ctx, "NoParams", "NoParams", nil)
 			nilNameField := &ast.Field{Names: []*ast.Ident{nil}, Type: ast.NewIdent("string")}
@@ -3109,8 +3169,7 @@ func ValidatePlain(raw string) (bool, error) { return true, nil }
 			h.ctx.pass.TypesInfo.Types[primitiveNilNameField.Type] = types.TypeAndValue{Type: types.Typ[types.Int]}
 			checkPrimitiveSignatureField(h.ctx, primitiveNilNameField, "Search", "SearchPage")
 
-			_, _, hasSemanticType = semanticTypeForUnnamedParam("Other", "Other", 0)
-			Expect(hasSemanticType).To(BeFalse())
+			Expect(unnamedParamClassification("Other", "Other", 0)).To(Equal(namedClassification{}))
 
 			testFile := newRuleHarness("/repo/internal/wiki/page_test.go", "example.com/p", `package p
 type PageID string
