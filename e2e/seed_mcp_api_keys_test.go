@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -21,7 +19,7 @@ import (
 )
 
 var _ = ginkgo.Describe("seed MCP API keys", func() {
-	ginkgo.It("default seams read process args and report auth store open errors", func() {
+	ginkgo.It("default seams read process args and report auth store open errors", ginkgo.Label("integration"), func() {
 		Expect(seedArgs()).NotTo(BeNil())
 		blockedPath := filepath.Join(seedTempDir(), "not-a-dir")
 		Expect(os.WriteFile(blockedPath, []byte("blocked"), 0o600)).To(Succeed())
@@ -32,7 +30,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(services.users).To(BeNil())
 	})
 
-	ginkgo.It("main delegates to the runner and exits with its status", func() {
+	ginkgo.It("main delegates to the runner and exits with its status", ginkgo.Label("unit"), func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 		restore := restoreSeedSeams()
@@ -62,7 +60,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(apiKeys.revokedKeyID).To(Equal(apiKeys.created["E2E STDIO revoked"].Key.ID))
 	})
 
-	ginkgo.DescribeTable("seed command failures",
+	ginkgo.DescribeTable("seed command failures", ginkgo.Label("unit"),
 		func(tc runSeedErrorCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -76,10 +74,15 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 			code := runSeedMCPAPIKeys(tc.args, &stderr)
 
 			Expect(code).To(Equal(1))
-			Expect(stderr.String()).To(ContainSubstring(tc.want))
+			Expect(seedCommandFailureReportFrom(stderr.String())).To(Equal(tc.wantFailure))
 		},
-		ginkgo.Entry("rejects unknown command flags", runSeedErrorCase{args: []string{"--unknown"}, want: "parse flags:"}),
-		ginkgo.Entry("requires data directory and output path arguments", runSeedErrorCase{want: "--data-dir and --output are required"}),
+		ginkgo.Entry("rejects unknown command flags", runSeedErrorCase{
+			args:        []string{"--unknown"},
+			wantFailure: seedCommandFailureReport{Kind: seedCommandFailureFlagParsing},
+		}),
+		ginkgo.Entry("requires data directory and output path arguments", runSeedErrorCase{
+			wantFailure: seedCommandFailureReport{Kind: seedCommandFailureMissingPaths},
+		}),
 		ginkgo.Entry("reports output file write failures", runSeedErrorCase{
 			args: []string{"--data-dir", "/tmp/data", "--output", "/tmp/seeds.json"},
 			configure: func() {
@@ -91,22 +94,22 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 					return errors.New("write failed")
 				}
 			},
-			want: "write output: write failed",
+			wantFailure: seedCommandFailureReport{Kind: seedCommandFailureOutputWrite},
 		}),
 	)
 
-	ginkgo.It("writes Wikid auth stores when legacy runtime stack variables are absent", func() {
+	ginkgo.It("writes Wikid auth stores when legacy runtime stack variables are absent", ginkgo.Label("integration"), func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 		dataDir := seedTempDir()
 
 		seeds, err := seedMCPAPIKeys(dataDir)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		Expect(seeds).To(HaveWikidSeededAPIKey(dataDir))
 	})
 
-	ginkgo.DescribeTable("removed runtime stack environment variables",
+	ginkgo.DescribeTable("removed runtime stack environment variables", ginkgo.Label("unit"),
 		func(name string) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -119,32 +122,32 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		ginkgo.Entry("rejects the legacy MCP runtime stack variable", "LEAFWIKI_RUN_MCP_RUNTIME_STACK"),
 	)
 
-	ginkgo.It("writes Wikid auth stores for seeded API key principals", func() {
+	ginkgo.It("writes Wikid auth stores for seeded API key principals", ginkgo.Label("integration"), func() {
 		dataDir := seedTempDir()
 
 		seeds, err := seedMCPAPIKeys(dataDir)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		Expect(seeds).To(HaveWikidSeededAPIKey(dataDir))
 	})
 
-	ginkgo.It("accepts the environment when removed runtime stack variables are absent", func() {
+	ginkgo.It("accepts the environment when removed runtime stack variables are absent", ginkgo.Label("unit"), func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 
 		Expect(rejectRemovedRuntimeStackEnv()).To(Succeed())
 	})
 
-	ginkgo.It("seed output populates every principal and invalidates revoked and deleted keys", func() {
+	ginkgo.It("seed output populates every principal and invalidates revoked and deleted keys", ginkgo.Label("integration"), func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 		dataDir := seedTempDir()
 
 		seeds, err := seedMCPAPIKeys(dataDir)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		stores, err := wikid.OpenAuthStores(dataDir)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		ginkgo.DeferCleanup(func() {
 			Expect(stores.Close()).To(Succeed())
 		})
@@ -160,7 +163,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 		for _, seeded := range []seededUser{seeds.Admin, seeds.Editor, seeds.SecondEditor, seeds.Viewer, seeds.Revoked} {
 			user, err := users.GetUserByUsername(seeded.Username)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(Succeed())
 			Expect(user).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 				"ID":   Equal(seeded.ID),
 				"Role": Equal(seeded.Role),
@@ -175,7 +178,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(err).To(MatchError(coreauth.ErrInvalidToken))
 	})
 
-	ginkgo.It("writes JSON seed output to the requested file", func() {
+	ginkgo.It("writes JSON seed output to the requested file", ginkgo.Label("integration"), func() {
 		unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 		unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
 		dataDir := seedTempDir()
@@ -183,11 +186,11 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 		Expect(writeSeedMCPAPIKeysOutput(dataDir, outputPath)).To(Succeed())
 		info, err := os.Stat(outputPath)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o600)))
 
 		raw, err := os.ReadFile(outputPath)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		var seeds seedOutput
 		Expect(json.Unmarshal(raw, &seeds)).To(Succeed())
 		ExpectSeededUser(seeds.Admin, "admin", coreauth.RoleAdmin)
@@ -195,7 +198,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		Expect(seeds.Admin.APIKey).NotTo(Equal(seeds.Editor.APIKey))
 	})
 
-	ginkgo.DescribeTable("seed output failures",
+	ginkgo.DescribeTable("seed output failures", ginkgo.Label("unit"),
 		func(tc seedOutputFailureCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -241,7 +244,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 		}),
 	)
 
-	ginkgo.DescribeTable("seeded user setup failures",
+	ginkgo.DescribeTable("seeded user setup failures", ginkgo.Label("unit"),
 		func(tc seedServiceFailureCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -257,55 +260,55 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 			Expect(err).To(MatchError(tc.cause))
 		},
-		ginkgo.Entry("init admin", seedServiceFailureCase{
+		ginkgo.Entry("reports admin initialization failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) { users.initErr = cause },
 			cause:     errors.New("init failed"),
 		}),
-		ginkgo.Entry("load admin", seedServiceFailureCase{
+		ginkgo.Entry("reports admin lookup failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) { users.getErr = cause },
 			cause:     errors.New("load failed"),
 		}),
-		ginkgo.Entry("create editor", seedServiceFailureCase{
+		ginkgo.Entry("reports editor creation failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) {
 				users.createErrFor["stdio-editor"] = cause
 			},
 			cause: errors.New("create failed"),
 		}),
-		ginkgo.Entry("create second editor", seedServiceFailureCase{
+		ginkgo.Entry("reports second editor creation failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) {
 				users.createErrFor["stdio-second-editor"] = cause
 			},
 			cause: errors.New("create failed"),
 		}),
-		ginkgo.Entry("create viewer", seedServiceFailureCase{
+		ginkgo.Entry("reports viewer creation failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) {
 				users.createErrFor["stdio-viewer"] = cause
 			},
 			cause: errors.New("create failed"),
 		}),
-		ginkgo.Entry("create revoked", seedServiceFailureCase{
+		ginkgo.Entry("reports revoked-user creation failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) {
 				users.createErrFor["stdio-revoked"] = cause
 			},
 			cause: errors.New("create failed"),
 		}),
-		ginkgo.Entry("create deleted", seedServiceFailureCase{
+		ginkgo.Entry("reports deleted-user creation failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) {
 				users.createErrFor["stdio-deleted"] = cause
 			},
 			cause: errors.New("create failed"),
 		}),
-		ginkgo.Entry("revoke key", seedServiceFailureCase{
+		ginkgo.Entry("reports revoked-key revocation failures", seedServiceFailureCase{
 			configure: func(_ *fakeSeedUsers, apiKeys *fakeSeedAPIKeys, cause error) { apiKeys.revokeErr = cause },
 			cause:     errors.New("revoke failed"),
 		}),
-		ginkgo.Entry("delete user", seedServiceFailureCase{
+		ginkgo.Entry("reports deleted-user removal failures", seedServiceFailureCase{
 			configure: func(users *fakeSeedUsers, _ *fakeSeedAPIKeys, cause error) { users.deleteErr = cause },
 			cause:     errors.New("delete failed"),
 		}),
 	)
 
-	ginkgo.DescribeTable("seeded API key creation failures",
+	ginkgo.DescribeTable("seeded API key creation failures", ginkgo.Label("unit"),
 		func(tc seedAPIKeyCreationFailureCase) {
 			unsetEnvForTest("LEAFWIKI_RUNTIME_STACK")
 			unsetEnvForTest("LEAFWIKI_RUN_MCP_RUNTIME_STACK")
@@ -322,19 +325,48 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 			Expect(err).To(MatchError(keyFailedErr))
 		},
-		ginkgo.Entry("admin", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO admin", user: "admin"}),
-		ginkgo.Entry("editor", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO editor", user: "stdio-editor"}),
-		ginkgo.Entry("second editor", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO second editor", user: "stdio-second-editor"}),
-		ginkgo.Entry("viewer", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO viewer", user: "stdio-viewer"}),
-		ginkgo.Entry("revoked", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO revoked", user: "stdio-revoked"}),
-		ginkgo.Entry("deleted", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO deleted", user: "stdio-deleted"}),
+		ginkgo.Entry("reports admin API key creation failures", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO admin", user: "admin"}),
+		ginkgo.Entry("reports editor API key creation failures", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO editor", user: "stdio-editor"}),
+		ginkgo.Entry("reports second editor API key creation failures", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO second editor", user: "stdio-second-editor"}),
+		ginkgo.Entry("reports viewer API key creation failures", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO viewer", user: "stdio-viewer"}),
+		ginkgo.Entry("reports revoked-user API key creation failures", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO revoked", user: "stdio-revoked"}),
+		ginkgo.Entry("reports deleted-user API key creation failures", seedAPIKeyCreationFailureCase{keyName: "E2E STDIO deleted", user: "stdio-deleted"}),
 	)
 })
 
 type runSeedErrorCase struct {
-	args      []string
-	configure func()
-	want      string
+	args        []string
+	configure   func()
+	wantFailure seedCommandFailureReport
+}
+
+type seedCommandFailureKind string
+
+const (
+	seedCommandFailureUnknown      seedCommandFailureKind = "unknown seed command failure"
+	seedCommandFailureFlagParsing  seedCommandFailureKind = "seed command flag parsing failure"
+	seedCommandFailureMissingPaths seedCommandFailureKind = "seed command missing required paths failure"
+	seedCommandFailureOutputWrite  seedCommandFailureKind = "seed command output write failure"
+)
+
+type seedCommandFailureReport struct {
+	Kind seedCommandFailureKind
+}
+
+func seedCommandFailureReportFrom(stderr string) seedCommandFailureReport {
+	for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+		line = strings.TrimSpace(line)
+		if _, ok := strings.CutPrefix(line, "parse flags:"); ok {
+			return seedCommandFailureReport{Kind: seedCommandFailureFlagParsing}
+		}
+		if line == "--data-dir and --output are required" {
+			return seedCommandFailureReport{Kind: seedCommandFailureMissingPaths}
+		}
+		if _, ok := strings.CutPrefix(line, "write output:"); ok {
+			return seedCommandFailureReport{Kind: seedCommandFailureOutputWrite}
+		}
+	}
+	return seedCommandFailureReport{Kind: seedCommandFailureUnknown}
 }
 
 type seedOutputFailureCase struct {
@@ -355,28 +387,76 @@ type seedAPIKeyCreationFailureCase struct {
 func HaveWikidSeededAPIKey(dataDir string) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(seeds seedOutput) (bool, error) {
-		for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
-			_, err := os.Stat(filepath.Join(dataDir, name))
-			if !errors.Is(err, os.ErrNotExist) {
-				return false, fmt.Errorf("legacy auth DB %s stat err = %w", name, err)
-			}
-		}
+	return WithTransform(
+		func(seeds seedOutput) wikidSeededAPIKeyObservation {
+			return observeWikidSeededAPIKey(dataDir, seeds)
+		},
+		Equal(wikidSeededAPIKeyObservation{
+			AuthStores:   wikidAuthStoresUseCurrentLayout,
+			EditorAPIKey: seededEditorAPIKeyVerifies,
+		}),
+	)
+}
 
-		stores, err := wikid.OpenAuthStores(dataDir)
-		if err != nil {
-			return false, err
-		}
-		defer stores.Close()
-		users := coreauth.NewUserService(stores.Users)
-		apiKeys := coreauth.NewAPIKeyService(stores.APIKeys, users)
+type wikidAuthStoreLayout string
 
-		verified, err := apiKeys.VerifyAPIKey(seeds.Editor.APIKey)
-		if err != nil {
-			return false, err
+const (
+	wikidAuthStoresUseCurrentLayout wikidAuthStoreLayout = "Wikid auth stores use current layout"
+	wikidAuthStoresExposeLegacyDBs  wikidAuthStoreLayout = "legacy auth database files are present"
+	wikidAuthStoreLayoutStatFailed  wikidAuthStoreLayout = "auth store layout inspection failed"
+	wikidAuthStoreOpenFailed        wikidAuthStoreLayout = "Wikid auth stores could not be opened"
+)
+
+type seededAPIKeyVerification string
+
+const (
+	seededEditorAPIKeyUnchecked           seededAPIKeyVerification = "seeded editor API key was not checked"
+	seededEditorAPIKeyVerifies            seededAPIKeyVerification = "seeded editor API key verifies"
+	seededEditorAPIKeyRejected            seededAPIKeyVerification = "seeded editor API key is rejected"
+	seededEditorAPIKeyUnexpectedPrincipal seededAPIKeyVerification = "seeded editor API key resolves to another principal"
+)
+
+type wikidSeededAPIKeyObservation struct {
+	AuthStores   wikidAuthStoreLayout
+	EditorAPIKey seededAPIKeyVerification
+}
+
+func observeWikidSeededAPIKey(dataDir string, seeds seedOutput) wikidSeededAPIKeyObservation {
+	observed := wikidSeededAPIKeyObservation{EditorAPIKey: seededEditorAPIKeyUnchecked}
+	for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
+		_, err := os.Stat(filepath.Join(dataDir, name))
+		switch {
+		case err == nil:
+			observed.AuthStores = wikidAuthStoresExposeLegacyDBs
+			return observed
+		case errors.Is(err, os.ErrNotExist):
+		default:
+			observed.AuthStores = wikidAuthStoreLayoutStatFailed
+			return observed
 		}
-		return verified.User.Username == seeds.Editor.Username, nil
-	}).WithMessage("verify Wikid seeded API key")
+	}
+
+	stores, err := wikid.OpenAuthStores(dataDir)
+	if err != nil {
+		observed.AuthStores = wikidAuthStoreOpenFailed
+		return observed
+	}
+	defer stores.Close()
+	observed.AuthStores = wikidAuthStoresUseCurrentLayout
+	users := coreauth.NewUserService(stores.Users)
+	apiKeys := coreauth.NewAPIKeyService(stores.APIKeys, users)
+
+	verified, err := apiKeys.VerifyAPIKey(seeds.Editor.APIKey)
+	if err != nil {
+		observed.EditorAPIKey = seededEditorAPIKeyRejected
+		return observed
+	}
+	if verified.User.Username != seeds.Editor.Username {
+		observed.EditorAPIKey = seededEditorAPIKeyUnexpectedPrincipal
+		return observed
+	}
+	observed.EditorAPIKey = seededEditorAPIKeyVerifies
+	return observed
 }
 
 func unsetEnvForTest(name string) {
@@ -408,7 +488,7 @@ func setEnvForTest(name string, value string) {
 func seedTempDir() string {
 	ginkgo.GinkgoHelper()
 	dir, err := os.MkdirTemp("", "leafwiki-seed-mcp-api-keys-*")
-	Expect(err).NotTo(HaveOccurred())
+	Expect(err).To(Succeed())
 	ginkgo.DeferCleanup(os.RemoveAll, dir)
 	return dir
 }
