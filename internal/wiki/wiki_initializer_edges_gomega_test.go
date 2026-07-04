@@ -10,7 +10,8 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/branding"
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -197,11 +198,7 @@ var _ = ginkgo.Describe("wiki startup initialization behavior", func() {
 		w := newInitializerWiki()
 		Expect(w.initSearch()).To(Succeed())
 		Eventually(func(g Gomega) {
-			g.Expect(w.status.Snapshot()).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Active":     BeFalse(),
-				"Failed":     BeNumerically(">", 0),
-				"FinishedAt": Not(BeZero()),
-			})))
+			g.Expect(w.status.Snapshot()).To(haveFailedSearchInitializationStatus())
 		}).WithTimeout(time.Second).Should(Succeed())
 	})
 
@@ -301,6 +298,16 @@ var _ = ginkgo.Describe("wiki startup initialization behavior", func() {
 		}).Close()).To(Succeed())
 	})
 })
+
+func haveFailedSearchInitializationStatus() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gcustom.MakeMatcher(func(status *search.IndexingStatus) (bool, error) {
+		return status != nil &&
+			status.IsFailed() &&
+			status.Failed > 0 &&
+			!status.FinishedAt.IsZero(), nil
+	}).WithMessage("record a failed search initialization status")
+}
 
 func restoreWikiTestSeams() func() {
 	ginkgo.GinkgoHelper()

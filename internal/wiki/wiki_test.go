@@ -14,11 +14,13 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
+	corelinks "github.com/perber/wiki/internal/links"
 	"github.com/perber/wiki/internal/projectdaemon"
 	wikihealth "github.com/perber/wiki/internal/wiki/health"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -44,6 +46,13 @@ func beMissingFileSystemPath() types.GomegaMatcher {
 		_, err := os.Stat(path)
 		return err
 	}, MatchError(os.ErrNotExist))
+}
+
+func matchResolvedOutgoingLinkToPath(path tree.RoutePath) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gcustom.MakeMatcher(func(item corelinks.OutgoingResultItem) (bool, error) {
+		return item.ToPath == path && !item.Broken, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be a resolved outgoing link to\n{{format .Data 1}}", path)
 }
 
 type wikiServiceSet struct {
@@ -521,10 +530,7 @@ leafwiki_title: Glossary
 		Expect(err).To(Succeed())
 		Expect(outgoing).To(SatisfyAll(
 			HaveField("Count", Equal(1)),
-			HaveField("Outgoings", ContainElement(SatisfyAll(
-				HaveField("ToPath", Equal(tree.RoutePath("/sync/glossary"))),
-				HaveField("Broken", BeFalse()),
-			))),
+			HaveField("Outgoings", ContainElement(matchResolvedOutgoingLinkToPath(tree.RoutePath("/sync/glossary")))),
 		))
 		closeWithErrorCheckForTest(w.Close)
 	})

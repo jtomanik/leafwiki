@@ -11,6 +11,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -254,7 +255,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 
 		rootLookup, err := adapter.LookupPagePath("")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(rootLookup).To(haveWikiPathLookup(tree.RoutePathFromString(""), BeFalse()))
+		Expect(rootLookup).To(haveMissingWikiPathLookup(tree.RoutePathFromString("")))
 
 		sectionRootLookup, err := adapter.LookupPagePathForKind("", tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
@@ -278,11 +279,11 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 
 		lookup, err := adapter.LookupPagePath("docs/imported")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(lookup.Exists).To(BeTrue())
+		Expect(lookup).To(haveExistingWikiPathLookup(tree.RoutePath("docs/imported")))
 
 		lookup, err = adapter.LookupPagePathForKind("docs/imported", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(lookup.Exists).To(BeTrue())
+		Expect(lookup).To(haveExistingWikiPathLookup(tree.RoutePath("docs/imported")))
 
 		found, err := adapter.FindByPath("docs/imported")
 		Expect(err).NotTo(HaveOccurred())
@@ -395,25 +396,14 @@ var (
 	expectedAgentPresenceUnavailable   = errors.New("agent presence is unavailable")
 )
 
-type workspaceSyncLifecycleSnapshot struct {
-	AfterSyncConfigured bool
-	Started             bool
-	Stopped             bool
-}
-
 func haveWorkspaceSyncLifecycleObserved() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return WithTransform(func(fake *fakeWorkspaceSyncFacade) workspaceSyncLifecycleSnapshot {
-		return workspaceSyncLifecycleSnapshot{
-			AfterSyncConfigured: fake.afterSync != nil,
-			Started:             fake.startCalled,
-			Stopped:             fake.stopCalled,
-		}
-	}, gstruct.MatchAllFields(gstruct.Fields{
-		"AfterSyncConfigured": BeTrue(),
-		"Started":             BeTrue(),
-		"Stopped":             BeTrue(),
-	}))
+	return gcustom.MakeMatcher(func(fake *fakeWorkspaceSyncFacade) (bool, error) {
+		return fake != nil &&
+			fake.afterSync != nil &&
+			fake.startCalled &&
+			fake.stopCalled, nil
+	}).WithMessage("observe workspace sync rebuilder configuration and watcher lifecycle")
 }
 
 func haveWorkspaceSyncActor(id workspacesync.ActorID, name types.GomegaMatcher, email types.GomegaMatcher) types.GomegaMatcher {
@@ -425,12 +415,18 @@ func haveWorkspaceSyncActor(id workspacesync.ActorID, name types.GomegaMatcher, 
 	})
 }
 
-func haveWikiPathLookup(path tree.RoutePath, exists types.GomegaMatcher) types.GomegaMatcher {
+func haveMissingWikiPathLookup(path tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return HaveValue(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Path":   Equal(path),
-		"Exists": exists,
-	}))
+	return gcustom.MakeMatcher(func(lookup *tree.PathLookup) (bool, error) {
+		return lookup != nil && lookup.Path == path && !lookup.Exists, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be a missing wiki path lookup for\n{{format .Data 1}}", path)
+}
+
+func haveExistingWikiPathLookup(path tree.RoutePath) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gcustom.MakeMatcher(func(lookup *tree.PathLookup) (bool, error) {
+		return lookup != nil && lookup.Path == path && lookup.Exists, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be an existing wiki path lookup for\n{{format .Data 1}}", path)
 }
 
 func matchWorkspaceSyncDisabled() types.GomegaMatcher {
