@@ -431,9 +431,33 @@ func ResolveCatalogMessage() types.GomegaMatcher {
 }
 
 func HaveExistingRoutePathLookup(path tree.RoutePath) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(lookup tree.PathLookup) (bool, error) {
-		return lookup.Exists && lookup.Path == path, nil
-	}).WithMessage("describe an existing route path lookup")
+	return WithTransform(routePathLookupStateFor, Equal(routePathLookupState{
+		Path:  path,
+		State: routePathLookupExisting,
+	}))
+}
+
+type routePathLookupExistence uint8
+
+const (
+	routePathLookupMissing routePathLookupExistence = iota
+	routePathLookupExisting
+)
+
+type routePathLookupState struct {
+	Path  tree.RoutePath
+	State routePathLookupExistence
+}
+
+func routePathLookupStateFor(lookup tree.PathLookup) routePathLookupState {
+	state := routePathLookupMissing
+	if lookup.Exists {
+		state = routePathLookupExisting
+	}
+	return routePathLookupState{
+		Path:  lookup.Path,
+		State: state,
+	}
 }
 
 func HavePageOnlyReadmeMarkdownFallback(pageRoute string, sectionRoute string) types.GomegaMatcher {

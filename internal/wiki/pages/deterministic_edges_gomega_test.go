@@ -136,7 +136,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		lookup, err := NewLookupPagePathUseCase(deps.tree).Execute(context.Background(), LookupPagePathInput{Path: "docs/guide"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(lookup.Lookup.Exists).To(BeTrue())
+		Expect(lookup.Lookup).To(gstruct.PointTo(HaveExistingRoutePathLookup(tree.RoutePath("docs/guide"))))
 
 		_, err = NewLookupPagePathUseCase(deps.tree).Execute(context.Background(), LookupPagePathInput{})
 		Expect(err).To(HavePageValidationField("path"))
