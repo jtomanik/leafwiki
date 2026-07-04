@@ -118,7 +118,7 @@ Later slices move current shell-checker policy into analyzers, update docs and M
 | File | Change | Downstream Impact |
 |---|---|---|
 | `.custom-gcl.yml` | New custom golangci-lint build definition | Defines the pinned local binary build |
-| `.golangci.yml` | New v2 lint config | Becomes the static source-policy contract |
+| `.golangci.leafwiki.yml` | New v2 lint config | Becomes the static source-policy contract |
 | `.golangci-lint` | Remove or replace invalid config | Prevents accidental default/config drift |
 | `.golangci.ginkgolinter.yml` | Merge or retire after parity | Avoids duplicate lint config surfaces |
 | `tools/golangci/leafwiki/plugin.go` | New module-plugin adapter | Lets golangci-lint run LeafWiki analyzers |
@@ -127,7 +127,7 @@ Later slices move current shell-checker policy into analyzers, update docs and M
 | `go.mod` / `go.sum` | Add plugin registration dependency | Needed by adapter package |
 | `scripts/check-semantic-hygiene.sh` | Later compatibility-wrapper change or deletion | Moves policy execution to golangci-lint |
 | `scripts/check-typed-id-oracles.sh` | Later compatibility-wrapper change or deletion | Avoids duplicated policy entrypoints |
-| `scripts/check-i18n-catalog.sh` | Later split/migration | Moves static policy into analyzers where practical |
+| `scripts/check-i18n-catalog.sh` | Compatibility wrapper after migration | Delegates to the golangci-lint static-policy gate |
 | `docs/typed-ids.md` | Update reviewer command | Points semantic policy at local golangci-lint gate |
 | `docs/i18n.md` | Update catalog workflow | Separates static lint from runtime/catalog regeneration steps |
 | `docs/plans/*` | Preserve this plan and OODA artifacts | Provides migration contract for implementation agents |
@@ -159,7 +159,7 @@ Do not scan `ui/leafwiki-ui/node_modules` as Go source.
 | `tools/golangci/leafwiki` | Importable plugin adapter | No runtime product API |
 | `internal/analysis/semantichygiene` | No public API | Reviewer-owned analyzer policy |
 | `internal/analysis/i18ncatalog` | No public API | Reviewer-owned catalog policy if added |
-| `.golangci.yml` | Local lint contract | Source-policy config |
+| `.golangci.leafwiki.yml` | Local lint contract | Source-policy config |
 
 ## Architecture & Design
 
@@ -181,14 +181,14 @@ flowchart TB
   Build --> RootRun[Run root module packages]
   Build --> ProxyRun[Run e2e-proxy module packages]
 
-  RootRun --> Config[.golangci.yml]
+  RootRun --> Config[.golangci.leafwiki.yml]
   ProxyRun --> Config
   Config --> Stock[Stock linters]
   Config --> Ginkgo[ginkgolinter]
   Config --> Custom[leafwiki module plugin]
 
   Custom --> Semh[internal/analysis/semantichygiene]
-  Custom --> I18n[future internal/analysis/i18ncatalog]
+  Custom --> I18n[internal/analysis/i18ncatalog]
 
   OldScripts[checker shell scripts] -.transition wrappers.-> Entry
 ```
@@ -198,7 +198,7 @@ flowchart TB
 ```markdown
 .
 ├── .custom-gcl.yml
-├── .golangci.yml
+├── .golangci.leafwiki.yml
 ├── Makefile
 ├── scripts/
 │   ├── golangci-lint.sh
@@ -218,7 +218,7 @@ flowchart TB
     └── go.mod
 ```
 
-`internal/analysis/i18ncatalog` is introduced only when the i18n migration slice starts.
+`internal/analysis/i18ncatalog` owns migrated i18n/catalog static policy once parity is proven.
 
 #### Dependency Graph
 
@@ -229,7 +229,7 @@ flowchart TB
   Plugin --> Register[github.com/golangci/plugin-module-register]
   Plugin --> Semh[internal/analysis/semantichygiene]
   Plugin --> Catalog[internal/analysis/i18ncatalog]
-  Config[.golangci.yml] --> Plugin
+  Config[.golangci.leafwiki.yml] --> Plugin
   Config --> Ginkgo[ginkgolinter]
   Config --> Stock[govet / gosmopolitan / later stock linters]
 ```
@@ -238,7 +238,7 @@ flowchart TB
 
 1. The plugin adapter is importable, but analyzer policy remains internal.
 2. The local wrapper owns module iteration and custom-binary bootstrapping.
-3. `.golangci.yml` owns enabled checks and their settings.
+3. `.golangci.leafwiki.yml` owns enabled checks and their settings.
 4. Existing checker shell scripts become transition wrappers only after parity.
 5. No stock linter enters the default gate until clean.
 
@@ -352,7 +352,7 @@ Then the binary lists or runs the leafwiki custom linter successfully
 
 ```gherkin
 Given the custom binary runs on a package currently clean for semantichygiene
-When golangci-lint runs with .golangci.yml
+When golangci-lint runs with .golangci.leafwiki.yml
 Then it exits successfully with no semantichygiene diagnostics
 ```
 
@@ -424,7 +424,7 @@ No E2E test files.
 
 - Do not touch `.github/workflows/`.
 - Do not clean all stock linter findings in the first implementation slice.
-- Do not remove `scripts/check-i18n-catalog.sh` until catalog and non-Go policy parity is proven.
+- Do not leave `scripts/check-i18n-catalog.sh` as an independent reporter after catalog and non-Go policy parity is proven.
 - Do not change application runtime behavior.
 
 ### Implementation Steps
@@ -460,12 +460,12 @@ No E2E test files.
 **Files:**
 
 - Create: `.custom-gcl.yml`
-- Create: `.golangci.yml`
+- Create: `.golangci.leafwiki.yml`
 - Modify or remove: `.golangci-lint`
 - Review: `.golangci.ginkgolinter.yml`
 - Modify: `.gitignore` only if `.cache/tools` needs a more specific ignore rule
 
-**Approach:** Add `.custom-gcl.yml` with a pinned golangci-lint version and a local module plugin path. Add `.golangci.yml` using `version: "2"`, `linters.default: none`, and only clean initial checks. Do not enable noisy stock linters yet.
+**Approach:** Add `.custom-gcl.yml` with a pinned golangci-lint version and a local module plugin path. Add `.golangci.leafwiki.yml` using `version: "2"`, `linters.default: none`, and only clean initial checks. Do not enable noisy stock linters yet.
 
 **Execution note:** This is mostly packaging/config; prove it with config validation and a focused custom binary smoke run.
 
@@ -473,12 +473,12 @@ No E2E test files.
 
 **Test scenarios:**
 
-- Happy path: `.golangci.yml` verifies as valid v2 config.
+- Happy path: `.golangci.leafwiki.yml` verifies as valid v2 config.
 - Happy path: `.custom-gcl.yml` builds a local custom binary.
 - Edge case: the invalid `.golangci-lint` file no longer affects local lint execution.
 - Edge case: generated tool binaries remain ignored by git.
 
-**Verification:** The pinned custom binary builds locally, `.golangci.yml` verifies, and no CI workflow files are modified.
+**Verification:** The pinned custom binary builds locally, `.golangci.leafwiki.yml` verifies, and no CI workflow files are modified.
 
 #### U3. Add the LeafWiki Module Plugin Adapter
 
@@ -495,7 +495,7 @@ No E2E test files.
 - Modify: `go.mod`
 - Modify: `go.sum`
 
-**Approach:** Register a `leafwiki` module plugin with `github.com/golangci/plugin-module-register/register`. Return `semantichygiene.Analyzer` from `BuildAnalyzers()` and `register.LoadModeTypesInfo` from `GetLoadMode()`. Reject unknown plugin settings if settings are introduced.
+**Approach:** Register a `leafwiki` module plugin with `github.com/golangci/plugin-module-register/register`. Return LeafWiki analyzers from `BuildAnalyzers()` and `register.LoadModeTypesInfo` from `GetLoadMode()`. Reject unknown plugin settings if settings are introduced.
 
 **Execution note:** Start with tests proving analyzer registration before running the custom binary against real packages.
 
@@ -507,7 +507,7 @@ No E2E test files.
 **Test scenarios:**
 
 - Happy path: constructing the plugin with empty settings succeeds.
-- Happy path: `BuildAnalyzers()` returns `semantichygiene.Analyzer`.
+- Happy path: `BuildAnalyzers()` returns `semantichygiene.Analyzer` and `i18ncatalog.Analyzer`.
 - Happy path: `GetLoadMode()` returns type-info load mode.
 - Error path: unknown settings fail if settings decoding is used.
 
@@ -528,7 +528,7 @@ No E2E test files.
 - Modify: `Makefile`
 - Modify: `scripts/README.md`
 
-**Approach:** Add a wrapper that resolves repo root, ensures the custom binary exists, runs root package patterns explicitly, then runs `e2e-proxy` from `e2e-proxy/`. Add `make lint` to delegate to the wrapper. Keep linter selection in `.golangci.yml`, not in shell logic.
+**Approach:** Add a wrapper that resolves repo root, ensures the custom binary exists, runs root package patterns explicitly, then runs `e2e-proxy` from `e2e-proxy/`. Add `make lint` to delegate to the wrapper. Keep linter selection in `.golangci.leafwiki.yml`, not in shell logic.
 
 **Execution note:** Prefer script smoke verification over broad lint cleanup in this unit.
 
@@ -558,7 +558,7 @@ No E2E test files.
 
 **Files:**
 
-- Modify: `.golangci.yml`
+- Modify: `.golangci.leafwiki.yml`
 - Modify: `scripts/check-semantic-hygiene.sh`
 - Modify: `scripts/check-typed-id-oracles.sh`
 - Modify: `docs/typed-ids.md`
@@ -600,7 +600,7 @@ No E2E test files.
 - Modify: `scripts/check-i18n-catalog.sh`
 - Modify: `docs/i18n.md`
 
-**Approach:** Add a dedicated analyzer for catalog parity and repo-specific i18n source policy. Start with checks that naturally fit Go analysis: extractable `i18n.Message` registry coverage, `active.en.toml` parity, English-only `translate.*` prohibition, and Go payload policy. Keep non-Go E2E TypeScript and shell scans in the script until a robust analyzer design exists.
+**Approach:** Add a dedicated analyzer for catalog parity and repo-specific i18n source policy. The analyzer covers extractable `i18n.Message` registry parity with `active.en.toml`, English-only `translate.*` prohibition, generated shell-message drift, production message ID obligations, ErrorCode-derived message obligations, MCP descriptor message IDs, Go `gin.H` payload policy, E2E TypeScript localized prose assertions, and `scripts/run.sh` literal failure bodies. Repository-scoped checks run once from the root module's `internal/localization` package so diagnostics are not duplicated across every package.
 
 **Execution note:** Characterize current script diagnostics with fixtures before replacing them.
 
@@ -619,7 +619,7 @@ No E2E test files.
 - Error path: Go API payload emits `message` without `messageId` where the policy requires both.
 - Edge case: OAuth RFC `error` payload compatibility remains allowed.
 
-**Verification:** The analyzer reproduces the Go-side and catalog-file portions of `scripts/check-i18n-catalog.sh`.
+**Verification:** The analyzer reproduces the static reporting classes from `scripts/check-i18n-catalog.sh`. Runtime localization, MCP, and CLI behavior remain ordinary Go test coverage rather than a second static reporter.
 
 #### U7. Retire Policy-Bearing Shell Checkers
 
@@ -663,7 +663,7 @@ No E2E test files.
 
 **Files:**
 
-- Modify: `.golangci.yml`
+- Modify: `.golangci.leafwiki.yml`
 - Create or modify: `docs/todo/golangci-lint-rollout.md`
 - Modify: `docs/typed-ids.md` or `scripts/README.md` if contributor guidance needs the rollout policy
 
@@ -683,7 +683,7 @@ No E2E test files.
 - Error path: trying to enable a linter with remaining findings fails the gate rather than requiring a baseline.
 - Edge case: `e2e-proxy` linter findings are tracked separately from root-module findings.
 
-**Verification:** `.golangci.yml` contains only clean enabled stock linters, and the ledger explains remaining disabled categories.
+**Verification:** `.golangci.leafwiki.yml` contains only clean enabled stock linters, and the ledger explains remaining disabled categories.
 
 ## Requirements
 
@@ -704,7 +704,7 @@ Run verification from the implementation worktree.
 Expected checks:
 
 - Custom golangci-lint binary builds from `.custom-gcl.yml`.
-- `.golangci.yml` validates as golangci-lint v2 config.
+- `.golangci.leafwiki.yml` validates as golangci-lint v2 config.
 - Plugin adapter unit tests pass.
 - Existing `semantichygiene` analyzer tests pass.
 - Local lint entrypoint runs root module and `e2e-proxy`.
@@ -723,7 +723,7 @@ The tooling-only branch is complete when a fresh implementation worktree has a l
 Completion requires:
 
 - `.custom-gcl.yml` builds the custom binary.
-- `.golangci.yml` is the authoritative v2 config.
+- `.golangci.leafwiki.yml` is the authoritative v2 config.
 - The LeafWiki module plugin runs `semantichygiene` with type information and surfaces existing diagnostics without a baseline.
 - `ginkgolinter` and initially green stock linters run through the same gate, with standalone `ginkgolinter` remaining clean in both modules.
 - Current semantic checker shell policy is represented in golangci-lint or retained only as a delegating wrapper.

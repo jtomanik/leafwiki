@@ -36,11 +36,20 @@ var _ = ginkgo.Describe("go-i18n rollout plan traceability", ginkgo.Label("integ
 
 	})
 
-	ginkgo.It("keeps the catalog gate running the CLI stderr evidence test", func() {
+	ginkgo.It("keeps the catalog compatibility command delegated to golangci-lint", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "check-i18n-catalog.sh"))
 		Expect(err).NotTo(HaveOccurred(), "read check-i18n-catalog.sh")
-		Expect(string(raw)).To(ContainSubstring("TestFailureMessageRendersCatalogBackedErrorBody"))
+		Expect(string(raw)).To(SatisfyAll(
+			ContainSubstring("compatibility wrapper"),
+			ContainSubstring("scripts/golangci-lint.sh"),
+			Not(ContainSubstring("go test")),
+			Not(ContainSubstring("python")),
+		))
+
+		plugin, err := os.ReadFile(filepath.Join(repoRoot, "tools", "golangci", "leafwiki", "plugin.go"))
+		Expect(err).NotTo(HaveOccurred(), "read golangci plugin")
+		Expect(string(plugin)).To(ContainSubstring("i18ncatalog.Analyzer"))
 
 	})
 })
@@ -120,10 +129,10 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 	case "Version conflict toast keeps existing semantic assertion pattern":
 		return evidence("e2e/tests/page.spec.ts", "data-error-code', 'page_version_conflict"), true
 	case "Test prose checker rejects behavior tests that assert localized copy":
-		return evidence("scripts/check-i18n-catalog.sh", "E2E behavior tests must assert semantic IDs/status"), true
+		return evidence("internal/analysis/i18ncatalog/repository.go", "E2E behavior tests must assert semantic IDs/status"), true
 	case "Catalog extraction is reproducible",
 		"Every emitted message ID has English catalog coverage":
-		return evidence("scripts/check-i18n-catalog.sh", "goi18n extract"), true
+		return evidence("internal/analysis/i18ncatalog/repository.go", "checkCatalogParity"), true
 	case "Semantic analyzer rejects raw user-facing prose in Go contracts":
 		return evidence("internal/analysis/semantichygiene/testdata/src/github.com/perber/wiki/internal/analysis/semantichygiene/testdata/semanticcases/semanticcases.go", "raw localized prose"), true
 	case "Plantrace maps every Gherkin scenario to evidence":

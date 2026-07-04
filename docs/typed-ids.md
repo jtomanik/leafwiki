@@ -131,14 +131,13 @@ rtk make lint
 The `make lint` target delegates to `scripts/golangci-lint.sh`, which builds or
 reuses the pinned custom `leafwiki-golangci-lint` binary and runs the root Go
 module plus `e2e-proxy`. The custom binary registers the
-`internal/analysis/semantichygiene` analyzer through the LeafWiki module plugin.
+`internal/analysis/semantichygiene` and `internal/analysis/i18ncatalog`
+analyzers through the LeafWiki module plugin.
 
-`scripts/check-semantic-hygiene.sh` remains as a compatibility gate for review
-flows that need the full historical semantic policy surface. It runs the
-golangci-lint source-policy gate and then preserves the sibling
-`scripts/check-i18n-catalog.sh` catalog/non-Go policy checks until those can
-move into analyzer-backed checks without editing the analyzer tree in this
-slice.
+`scripts/check-semantic-hygiene.sh`, `scripts/check-i18n-catalog.sh`, and
+`scripts/check-typed-id-oracles.sh` remain as compatibility wrappers only. They
+delegate to `scripts/golangci-lint.sh` and do not run independent static policy
+reporters.
 
 The semantic hygiene analyzer checks for:
 
@@ -268,10 +267,10 @@ Existing `data-testid` attributes remain for locating stable widgets. Semantic a
 ## Scan Guidance
 
 Use `rtk make lint` or `rtk bash scripts/golangci-lint.sh` as the authoritative
-local static source-policy command. `scripts/check-semantic-hygiene.sh` remains
-a compatibility wrapper for review flows that need the historical semantic
-hygiene plus i18n/catalog gate shape, and `scripts/check-typed-id-oracles.sh`
-continues to exist only as a compatibility wrapper for that path.
+local static source-policy command. `scripts/check-semantic-hygiene.sh`,
+`scripts/check-i18n-catalog.sh`, and `scripts/check-typed-id-oracles.sh` are
+compatibility wrappers for older command names and delegate directly to the
+golangci-lint gate.
 
 When a machine-facing contract assertion is too dependent on visible copy,
 prefer a stable code, message ID, typed helper value, or semantic `data-*`

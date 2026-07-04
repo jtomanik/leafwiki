@@ -13,7 +13,7 @@ linters:
     custom:
       leafwiki:
         type: module
-        description: LeafWiki semantic hygiene analyzer.
+        description: LeafWiki semantic hygiene and i18n catalog analyzers.
         settings: {}
     ginkgolinter:
       allow-havelen-zero: true

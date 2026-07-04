@@ -9,6 +9,7 @@ Current gate status:
 | Check | Status | Notes |
 | --- | --- | --- |
 | `leafwiki` | Configured, red | The custom module plugin runs semantic hygiene through golangci-lint, but the broad gate currently reports existing diagnostics in the root module and `e2e-proxy`. Do not narrow the package surface, add suppressions, or add a baseline to hide them. |
+| `i18ncatalog` | Configured | The custom module plugin reports static i18n/catalog policy through golangci-lint: catalog parity, generated shell-message drift, committed `translate.*` files, E2E localized prose assertions, `gin.H` payload policy, and `scripts/run.sh` literal failure bodies. |
 | `ginkgolinter` | Clean | Verified through the transition config in both modules. |
 | `govet` | Clean when scoped | Scoped to project package patterns by `scripts/golangci-lint.sh` to avoid unrelated frontend dependency trees. |
 
@@ -27,6 +28,9 @@ Deferred stock-linter cleanup order:
 4. `gocritic`
 5. `staticcheck`
 
-The i18n/catalog policy remains in `scripts/check-i18n-catalog.sh` until the
-catalog and non-Go scans can move into analyzer-backed checks without weakening
-coverage. Do not replace this with a lint baseline.
+The i18n/catalog static policy has moved into `internal/analysis/i18ncatalog`.
+`scripts/check-i18n-catalog.sh`, `scripts/check-semantic-hygiene.sh`, and
+`scripts/check-typed-id-oracles.sh` remain only as compatibility wrappers that
+delegate to `scripts/golangci-lint.sh`. Do not reintroduce a sibling shell or
+Python reporter for migrated static policy, and do not replace current findings
+with a lint baseline.

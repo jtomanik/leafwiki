@@ -37,7 +37,7 @@ Implementation must happen in a separate worktree because the current checkout i
    - Use `register.LoadModeTypesInfo`.
    - Keep analyzer policy under `internal/analysis`.
 
-3. Replace the invalid broad config with `.golangci.yml`.
+3. Replace the invalid broad config with `.golangci.leafwiki.yml`.
    - Use golangci-lint v2 config.
    - Enable only clean checks at first.
    - Keep `.golangci.ginkgolinter.yml` only until the unified config has proven parity.
@@ -71,7 +71,7 @@ Implementation must happen in a separate worktree because the current checkout i
 | Plugin package location | `tools/golangci/leafwiki` | Importable by custom binary while still able to import LeafWiki `internal` analyzer code |
 | Plugin name | `leafwiki` | Allows multiple LeafWiki analyzers behind one config entry |
 | Load mode | Type info | `semantichygiene` relies on `pass.TypesInfo` and `pass.Pkg` |
-| Config file | `.golangci.yml` | Current `.golangci-lint` file is invalid for v2 |
+| Config file | `.golangci.leafwiki.yml` | Current `.golangci-lint` file is invalid for v2 |
 | Baseline | None | User wants the repo to meet enabled lint contracts, not freeze existing violations |
 | Module execution | Explicit root plus `e2e-proxy` runs | Root `./...` does not include nested module |
 | i18n built-in support | Enable `gosmopolitan` only as a smell check | It does not validate LeafWiki's go-i18n catalog/message policy |

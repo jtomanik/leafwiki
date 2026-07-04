@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-config="$repo_root/.golangci.yml"
+config="$repo_root/.golangci.leafwiki.yml"
 
 lint_bin="${LEAFWIKI_GOLANGCI_LINT_BIN:-$repo_root/.cache/tools/leafwiki-golangci-lint}"
 lint_args=("$@")
@@ -26,7 +26,7 @@ safe_flag_requires_value() {
 
 reject_unsafe_flag() {
 	echo "scripts/golangci-lint.sh only accepts non-policy runtime/output flags; rejected $1" >&2
-	echo "Use the repository .golangci.yml policy, fixed package surface, and normal issue exit code." >&2
+	echo "Use the repository .golangci.leafwiki.yml policy, fixed package surface, and normal issue exit code." >&2
 	exit 2
 }
 

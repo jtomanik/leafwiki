@@ -54,7 +54,7 @@ That makes a golangci-lint module plugin a packaging change rather than a rewrit
 - The existing analyzer remains in `internal/analysis/semantichygiene`.
 - A small adapter package registers it with `github.com/golangci/plugin-module-register`.
 - `.custom-gcl.yml` builds a custom `leafwiki-golangci-lint` binary.
-- `.golangci.yml` enables the custom linter like any other golangci-lint linter.
+- `.golangci.leafwiki.yml` enables the custom linter like any other golangci-lint linter.
 
 This keeps the analyzer reviewer-owned, typed, and fixture-tested while moving execution into the standard local lint gate.
 
@@ -79,7 +79,7 @@ Recommended shape:
 - Later analyzers returned by the same plugin:
   - `i18ncatalog.Analyzer` or equivalent.
 
-This keeps `.golangci.yml` readable and avoids a proliferation of custom linter names.
+This keeps `.golangci.leafwiki.yml` readable and avoids a proliferation of custom linter names.
 
 The current analyzer name `semantichygiene` should remain stable because diagnostics, tests, and existing vocabulary already use it.
 
@@ -94,11 +94,11 @@ The direct binary cannot be assumed to exist globally. The local entrypoint shou
 - Run `e2e-proxy` from its module directory.
 - Use the same config file for both module runs.
 
-This wrapper is orchestration only. Policy lives in `.golangci.yml` and analyzer code.
+This wrapper is orchestration only. Policy lives in `.golangci.leafwiki.yml` and analyzer code.
 
 ## Config Shape
 
-Replace the invalid `.golangci-lint` file with `.golangci.yml`.
+Replace the invalid `.golangci-lint` file with `.golangci.leafwiki.yml`.
 
 The first enabled set should be green:
 
@@ -154,7 +154,7 @@ Recommended enablement order:
 4. `gocritic`, because it is mixed style/performance/readability.
 5. `staticcheck`, because it is large and includes both useful bugs and style suggestions.
 
-Each linter should enter `.golangci.yml` only after the current repo is clean for that linter in both Go modules or after the scope is intentionally limited with a documented rationale.
+Each linter should enter `.golangci.leafwiki.yml` only after the current repo is clean for that linter in both Go modules or after the scope is intentionally limited with a documented rationale.
 
 ## Worktree Strategy
 
@@ -172,7 +172,7 @@ The plan should not prescribe the exact branch name, but it should require:
 The plan introduces a local static-policy toolchain layer:
 
 - `.custom-gcl.yml` defines how to build the custom binary.
-- `.golangci.yml` defines the enabled lint contract.
+- `.golangci.leafwiki.yml` defines the enabled lint contract.
 - `tools/golangci/leafwiki` adapts LeafWiki analyzers to golangci-lint.
 - `scripts/golangci-lint.sh` or `make lint` becomes the local source-policy command.
 

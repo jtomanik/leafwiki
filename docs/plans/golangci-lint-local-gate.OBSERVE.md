@@ -69,7 +69,7 @@ Validation observed during planning:
 - The same `ginkgolinter` config also reports `0 issues` in `e2e-proxy`.
 - `golangci-lint v2.12.2 config verify --config=.golangci-lint` fails with unsupported config type.
 
-The project should replace `.golangci-lint` with a real `.golangci.yml` instead of relying on defaults.
+The project should replace `.golangci-lint` with a real `.golangci.leafwiki.yml` instead of relying on defaults.
 
 ## Current Default Lint Noise
 

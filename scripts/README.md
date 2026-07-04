@@ -16,15 +16,14 @@ make lint
 ```
 
 The wrapper builds or reuses `.cache/tools/leafwiki-golangci-lint`, a pinned
-custom golangci-lint binary with the LeafWiki semantic-hygiene module plugin.
-It runs the root Go module and `e2e-proxy` as separate module targets using
-`.golangci.yml`.
+custom golangci-lint binary with the LeafWiki `semantichygiene` and
+`i18ncatalog` analyzers. It runs the root Go module and `e2e-proxy` as separate
+module targets using `.golangci.leafwiki.yml`.
 
-`scripts/check-semantic-hygiene.sh` is retained as a compatibility gate: it
-delegates the Go semantic-hygiene pass to `scripts/golangci-lint.sh`, then runs
-`scripts/check-i18n-catalog.sh`. The i18n/catalog script remains authoritative
-for catalog drift and non-Go i18n policy until that policy can move into an
-analyzer without weakening coverage.
+`scripts/check-semantic-hygiene.sh`, `scripts/check-i18n-catalog.sh`, and
+`scripts/check-typed-id-oracles.sh` are retained as compatibility command names
+only. They delegate directly to `scripts/golangci-lint.sh` and do not implement
+independent static policy reporting.
 
 ### Install Local macOS Helpers
 

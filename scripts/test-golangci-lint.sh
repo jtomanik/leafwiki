@@ -5,6 +5,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
+if [[ -e "$repo_root/.golangci.yml" ]]; then
+	echo "local custom golangci-lint config must not use root auto-discovered .golangci.yml" >&2
+	exit 1
+fi
+
 fake_bin="$tmpdir/leafwiki-golangci-lint"
 failing_root_bin="$tmpdir/failing-root-leafwiki-golangci-lint"
 stale_repo="$tmpdir/stale-repo"
@@ -49,10 +54,6 @@ FAKE_REBUILT_LINTER
 	exit 0
 fi
 
-if [[ "${1:-}" == "bash" && "${2:-}" == */scripts/check-i18n-catalog.sh ]]; then
-	exit 0
-fi
-
 if [[ "${1:-}" == "bash" ]]; then
 	shift
 	exec bash "$@"
@@ -69,8 +70,8 @@ chmod +x "$tmpdir/rtk"
 			rtk bash "$repo_root/scripts/golangci-lint.sh" --timeout 5m --output.text.colors=false
 	)
 
-	expected_root="$repo_root"$'\t'"run --config $repo_root/.golangci.yml --timeout 5m --output.text.colors=false ./cmd/... ./internal/... ./e2e/... ./tools/..."
-	expected_proxy="$repo_root/e2e-proxy"$'\t'"run --config $repo_root/.golangci.yml --timeout 5m --output.text.colors=false ./..."
+	expected_root="$repo_root"$'\t'"run --config $repo_root/.golangci.leafwiki.yml --timeout 5m --output.text.colors=false ./cmd/... ./internal/... ./e2e/... ./tools/..."
+	expected_proxy="$repo_root/e2e-proxy"$'\t'"run --config $repo_root/.golangci.leafwiki.yml --timeout 5m --output.text.colors=false ./..."
 
 if ! grep -Fxq "$expected_root" "$log_file"; then
 	echo "missing root module invocation" >&2
@@ -175,7 +176,7 @@ fi
 
 mkdir -p "$stale_repo/scripts" "$stale_repo/.cache/tools" "$stale_repo/tools/golangci/leafwiki" "$stale_repo/internal/analysis/semantichygiene" "$stale_repo/e2e-proxy"
 cp "$repo_root/scripts/golangci-lint.sh" "$stale_repo/scripts/golangci-lint.sh"
-touch "$stale_repo/.golangci.yml" "$stale_repo/.custom-gcl.yml" "$stale_repo/go.mod" "$stale_repo/go.sum"
+touch "$stale_repo/.golangci.leafwiki.yml" "$stale_repo/.custom-gcl.yml" "$stale_repo/go.mod" "$stale_repo/go.sum"
 touch "$stale_repo/tools/golangci/leafwiki/plugin.go" "$stale_repo/internal/analysis/semantichygiene/analyzer.go"
 cat >"$stale_repo/.cache/tools/leafwiki-golangci-lint" <<'STALE_LINTER'
 #!/usr/bin/env bash
@@ -209,8 +210,46 @@ if ! grep -Fxq "bash $repo_root/scripts/golangci-lint.sh" "$rtk_log_file"; then
 	exit 1
 fi
 
-if ! grep -Fxq "bash $repo_root/scripts/check-i18n-catalog.sh" "$rtk_log_file"; then
-	echo "semantic hygiene wrapper did not preserve the i18n catalog gate" >&2
+if grep -Fq "check-i18n-catalog.sh" "$rtk_log_file"; then
+	echo "semantic hygiene wrapper must not invoke a second i18n catalog reporter" >&2
+	cat "$rtk_log_file" >&2
+	exit 1
+fi
+
+: >"$rtk_log_file"
+PATH="$tmpdir:$PATH" \
+	LEAFWIKI_GOLANGCI_LINT_BIN="$fake_bin" \
+	LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$log_file" \
+	LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG="$rtk_log_file" \
+	rtk bash "$repo_root/scripts/check-i18n-catalog.sh"
+
+if ! grep -Fxq "bash $repo_root/scripts/golangci-lint.sh" "$rtk_log_file"; then
+	echo "i18n catalog compatibility wrapper did not invoke the golangci-lint gate" >&2
+	cat "$rtk_log_file" >&2
+	exit 1
+fi
+
+if grep -Eq '^(go|python|python3)( |$)' "$rtk_log_file"; then
+	echo "i18n catalog compatibility wrapper must not run independent policy tools" >&2
+	cat "$rtk_log_file" >&2
+	exit 1
+fi
+
+: >"$rtk_log_file"
+PATH="$tmpdir:$PATH" \
+	LEAFWIKI_GOLANGCI_LINT_BIN="$fake_bin" \
+	LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$log_file" \
+	LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG="$rtk_log_file" \
+	rtk bash "$repo_root/scripts/check-typed-id-oracles.sh"
+
+if ! grep -Fxq "bash $repo_root/scripts/golangci-lint.sh" "$rtk_log_file"; then
+	echo "typed-id oracle compatibility wrapper did not invoke the golangci-lint gate" >&2
+	cat "$rtk_log_file" >&2
+	exit 1
+fi
+
+if grep -Fq "check-semantic-hygiene.sh" "$rtk_log_file"; then
+	echo "typed-id oracle compatibility wrapper should delegate directly to golangci-lint" >&2
 	cat "$rtk_log_file" >&2
 	exit 1
 fi
