@@ -21,7 +21,7 @@ import (
 )
 
 var _ = ginkgo.Describe("workspace sync routes", func() {
-	ginkgo.It("returns a localized structured error when snapshot listing is disabled", func() {
+	ginkgo.It("returns a localized structured error when snapshot listing is disabled", ginkgo.Label("integration"), func() {
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: false}
@@ -33,7 +33,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusNotFound, errCodeWorkspaceSyncDisabled), rec.Body.String())
 	})
 
-	ginkgo.It("sanitizes raw snapshot listing failures in structured error responses", func() {
+	ginkgo.It("sanitizes raw snapshot listing failures in structured error responses", ginkgo.Label("integration"), func() {
 		rawErr := errors.New("git exploded with private path /tmp/secret")
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
@@ -55,7 +55,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		))
 	})
 
-	ginkgo.It("maps SyncStatus fields into the public status response", func() {
+	ginkgo.It("maps SyncStatus fields into the public status response", ginkgo.Label("unit"), func() {
 		lastSync := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
 		status := workspacesync.SyncStatus{
 			Enabled:                    true,
@@ -75,9 +75,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 		response := statusResponse(status)
 
-		Expect(response).To(HaveKeyWithValue("enabled", true))
-		Expect(response).To(HaveKeyWithValue("watcherEnabled", true))
-		Expect(response).To(HaveKeyWithValue("watcherRunning", true))
+		Expect(response).To(haveWorkspaceSyncPublishedStatus(status))
 		Expect(response).To(HaveKeyWithValue("pendingEventCount", 7))
 		Expect(response).To(HaveKeyWithValue("lastSyncTime", lastSync))
 		Expect(response).To(HaveKeyWithValue("lastCommitHash", workspacesync.CommitHashFromString("abc123")))
@@ -88,19 +86,19 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		))
 	})
 
-	ginkgo.It("omits last-error detail for blank status errors", func() {
+	ginkgo.It("omits last-error detail for blank status errors", ginkgo.Label("unit"), func() {
 		Expect(workspaceSyncLastErrorDetail("")).To(BeNil())
 		Expect(workspaceSyncLastErrorDetail(" \t\n")).To(BeNil())
 	})
 
-	ginkgo.It("returns localized failed detail for non-empty status errors", func() {
+	ginkgo.It("returns localized failed detail for non-empty status errors", ginkgo.Label("unit"), func() {
 		detail := workspaceSyncLastErrorDetail("git failed")
 
 		Expect(detail).NotTo(BeNil())
 		Expect(detail).To(testmatchers.HaveStructuredError(errCodeWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeWorkspaceSyncFailed)))
 	})
 
-	ginkgo.DescribeTable("rejects invalid snapshot cursors",
+	ginkgo.DescribeTable("rejects invalid snapshot cursors", ginkgo.Label("integration"),
 		func(query string) {
 			router := newWorkspaceSyncTestRouter(RoutesConfig{
 				Status: func() workspacesync.SyncStatus {
@@ -115,11 +113,11 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 			Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusBadRequest, errCodeWorkspaceSyncInvalidCursor), rec.Body.String())
 		},
-		ginkgo.Entry("cursor with whitespace", "abc%20123"),
-		ginkgo.Entry("cursor longer than 256 characters", strings.Repeat("a", 257)),
+		ginkgo.Entry("rejects cursor values containing whitespace", "abc%20123"),
+		ginkgo.Entry("rejects cursor values longer than 256 characters", strings.Repeat("a", 257)),
 	)
 
-	ginkgo.DescribeTable("rejects invalid snapshot limits",
+	ginkgo.DescribeTable("rejects invalid snapshot limits", ginkgo.Label("integration"),
 		func(limit string) {
 			router := newWorkspaceSyncTestRouter(RoutesConfig{
 				Status: func() workspacesync.SyncStatus {
@@ -134,12 +132,12 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 
 			Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusBadRequest, errCodeWorkspaceSyncInvalidLimit), rec.Body.String())
 		},
-		ginkgo.Entry("non-number", "many"),
-		ginkgo.Entry("zero", "0"),
-		ginkgo.Entry("over maximum", "201"),
+		ginkgo.Entry("rejects non-numeric limits", "many"),
+		ginkgo.Entry("rejects zero limits", "0"),
+		ginkgo.Entry("rejects limits over the maximum page size", "201"),
 	)
 
-	ginkgo.It("passes snapshot cursor and limit to the list callback and returns next cursor", func() {
+	ginkgo.It("passes snapshot cursor and limit to the list callback and returns next cursor", ginkgo.Label("integration"), func() {
 		var gotCursor workspacesync.CommitHash
 		var gotLimit workspacesync.SnapshotLimit
 		expectedSnapshot := workspacesync.Snapshot{
@@ -176,7 +174,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(body).To(haveWorkspaceSyncSnapshotPageResponse(expectedSnapshot, workspacesync.CommitHashFromString("next-snapshot")))
 	})
 
-	ginkgo.It("uses the default snapshot page limit when the query omits limit", func() {
+	ginkgo.It("uses the default snapshot page limit when the query omits limit", ginkgo.Label("integration"), func() {
 		var gotLimit workspacesync.SnapshotLimit
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
@@ -194,7 +192,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(gotLimit).To(Equal(workspacesync.SnapshotLimit(50)))
 	})
 
-	ginkgo.It("serves status through the protected route when public access is disabled", func() {
+	ginkgo.It("serves status through the protected route when public access is disabled", ginkgo.Label("integration"), func() {
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: true, PendingEventCount: 3}
@@ -209,7 +207,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(body).To(haveWorkspaceSyncEnabledStatus(3))
 	})
 
-	ginkgo.It("serves status from the public route when public access is enabled", func() {
+	ginkgo.It("serves status from the public route when public access is enabled", ginkgo.Label("integration"), func() {
 		router := newWorkspaceSyncTestRouterWithOptions(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: true}
@@ -221,7 +219,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
-	ginkgo.It("returns disabled when refresh is not configured", func() {
+	ginkgo.It("returns disabled when refresh is not configured", ginkgo.Label("integration"), func() {
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: false}
@@ -233,7 +231,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusNotFound, errCodeWorkspaceSyncDisabled), rec.Body.String())
 	})
 
-	ginkgo.It("passes explicit filesystem refresh requests to the refresh callback", func() {
+	ginkgo.It("passes explicit filesystem refresh requests to the refresh callback", ginkgo.Label("integration"), func() {
 		var gotRequest workspacesync.SyncRequest
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
@@ -251,7 +249,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(gotRequest).To(haveWorkspaceSyncRequest(workspacesync.ReasonExplicit, workspacesync.SourceFilesystem, workspacesync.PublicEditorActor()))
 	})
 
-	ginkgo.It("returns a structured failure when refresh fails", func() {
+	ginkgo.It("returns a structured failure when refresh fails", ginkgo.Label("integration"), func() {
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: true}
@@ -266,7 +264,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusInternalServerError, errCodeWorkspaceSyncFailed), rec.Body.String())
 	})
 
-	ginkgo.It("returns disabled when restore is not configured", func() {
+	ginkgo.It("returns disabled when restore is not configured", ginkgo.Label("integration"), func() {
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: false}
@@ -278,7 +276,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusNotFound, errCodeWorkspaceSyncDisabled), rec.Body.String())
 	})
 
-	ginkgo.It("passes commit and public-editor actor details to the restore callback", func() {
+	ginkgo.It("passes commit and public-editor actor details to the restore callback", ginkgo.Label("integration"), func() {
 		var gotCommit workspacesync.CommitHash
 		var gotActor workspacesync.Actor
 		var gotSource workspacesync.Source
@@ -302,7 +300,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(gotSource).To(Equal(workspacesync.SourceWeb))
 	})
 
-	ginkgo.It("returns a structured failure when restore fails", func() {
+	ginkgo.It("returns a structured failure when restore fails", ginkgo.Label("integration"), func() {
 		router := newWorkspaceSyncTestRouter(RoutesConfig{
 			Status: func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: true}
@@ -317,7 +315,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusInternalServerError, errCodeWorkspaceSyncFailed), rec.Body.String())
 	})
 
-	ginkgo.It("ignores nil route registrations and configs without a status callback", func() {
+	ginkgo.It("ignores nil route registrations and configs without a status callback", ginkgo.Label("unit"), func() {
 		Expect(func() {
 			var routes *Routes
 			routes.RegisterRoutes(httpinternal.RouterContext{})
@@ -327,7 +325,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		}).NotTo(Panic())
 	})
 
-	ginkgo.It("does not call restore when middleware did not attach a user", func() {
+	ginkgo.It("does not call restore when middleware did not attach a user", ginkgo.Label("integration"), func() {
 		gin.SetMode(gin.TestMode)
 		restore := &restoreWorkspaceRecorder{}
 		routes := NewRoutes(RoutesConfig{
@@ -360,6 +358,20 @@ const (
 	workspaceSyncRouteEnabled
 )
 
+type workspaceSyncPublishedStatusState uint8
+
+const (
+	workspaceSyncPublishedStatusUnknown workspaceSyncPublishedStatusState = iota
+	workspaceSyncPublishedStatusDisabled
+	workspaceSyncPublishedStatusEnabled
+)
+
+type workspaceSyncPublishedStatus struct {
+	Sync           workspaceSyncPublishedStatusState
+	Watcher        workspaceSyncPublishedStatusState
+	WatcherRuntime workspaceSyncPublishedStatusState
+}
+
 type workspaceSyncStatusResponse struct {
 	State             workspaceSyncRouteState `json:"enabled"`
 	PendingEventCount int                     `json:"pendingEventCount"`
@@ -385,6 +397,36 @@ func (r *restoreWorkspaceRecorder) RestoreWorkspace(_ context.Context, commit wo
 		Source: source,
 	})
 	return workspacesync.SyncStatus{}, nil
+}
+
+func haveWorkspaceSyncPublishedStatus(status workspacesync.SyncStatus) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(response gin.H) workspaceSyncPublishedStatus {
+		return workspaceSyncPublishedStatus{
+			Sync:           workspaceSyncPublishedStatusStateFor(response["enabled"]),
+			Watcher:        workspaceSyncPublishedStatusStateFor(response["watcherEnabled"]),
+			WatcherRuntime: workspaceSyncPublishedStatusStateFor(response["watcherRunning"]),
+		}
+	}, Equal(workspaceSyncPublishedStatus{
+		Sync:           workspaceSyncPublishedStatusStateFromBool(status.Enabled),
+		Watcher:        workspaceSyncPublishedStatusStateFromBool(status.WatcherEnabled),
+		WatcherRuntime: workspaceSyncPublishedStatusStateFromBool(status.WatcherRunning),
+	}))
+}
+
+func workspaceSyncPublishedStatusStateFor(value any) workspaceSyncPublishedStatusState {
+	enabled, ok := value.(bool)
+	if !ok {
+		return workspaceSyncPublishedStatusUnknown
+	}
+	return workspaceSyncPublishedStatusStateFromBool(enabled)
+}
+
+func workspaceSyncPublishedStatusStateFromBool(enabled bool) workspaceSyncPublishedStatusState {
+	if enabled {
+		return workspaceSyncPublishedStatusEnabled
+	}
+	return workspaceSyncPublishedStatusDisabled
 }
 
 func newWorkspaceSyncTestRouter(cfg RoutesConfig) http.Handler {
