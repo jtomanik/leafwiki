@@ -93,7 +93,7 @@ var _ = ginkgo.Describe("tag extraction from page frontmatter", ginkgo.Label("un
 	})
 })
 
-var _ = ginkgo.Describe("TagsService tree indexing", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("tree-backed tag indexing", ginkgo.Label("unit"), func() {
 	ginkgo.It("builds a queryable tag index for pages with tags", func() {
 		svc, ts := setupTagsService()
 
@@ -206,7 +206,7 @@ var _ = ginkgo.Describe("TagsService tree indexing", ginkgo.Label("unit"), func(
 	})
 })
 
-var _ = ginkgo.Describe("TagsService page content indexing", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("single-page content indexing", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores extracted tags and excerpt together", func() {
 		svc, _ := setupTagsService()
 

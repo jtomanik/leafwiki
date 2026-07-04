@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("TagsService page index deletion", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("indexed page metadata deletion", ginkgo.Label("unit"), func() {
 	ginkgo.It("deletes both tags and excerpts for a page", func() {
 		store := newTestStore()
 		service := NewTagsService(store)
@@ -70,7 +70,7 @@ var _ = ginkgo.Describe("tag normalization", ginkgo.Label("unit"), func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore duplicate tag writes", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("duplicate page tag persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores duplicate input tags only once for a page", func() {
 		store := newTestStore()
 		Expect(store.SetTagsForPage("page-1", []string{"go", "go", "rust"})).To(Succeed())
