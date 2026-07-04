@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -97,7 +98,7 @@ var _ = Describe("directory locking", func() {
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(dataLock.Release)
 		_, dataErr := AcquireDataDirLock(dataDir)
-		Expect(dataErr).To(HaveOccurred())
+		Expect(dataErr).To(MatchError(errDataDirLockHeld))
 		wrappedDataErr := fmt.Errorf("acquire data directory lock: %w", dataErr)
 		Expect(IsDataDirLockHeld(wrappedDataErr)).To(BeTrue())
 		Expect(IsLockHeld(wrappedDataErr)).To(BeTrue())
@@ -108,7 +109,7 @@ var _ = Describe("directory locking", func() {
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(rootLock.Release)
 		_, rootErr := AcquireRootDirLock(rootDir)
-		Expect(rootErr).To(HaveOccurred())
+		Expect(rootErr).To(MatchError(errRootDirLockHeld))
 		wrappedRootErr := fmt.Errorf("acquire root directory lock: %w", rootErr)
 		Expect(IsRootDirLockHeld(wrappedRootErr)).To(BeTrue())
 		Expect(IsLockHeld(wrappedRootErr)).To(BeTrue())
@@ -195,7 +196,7 @@ var _ = Describe("directory lock edge behavior", func() {
 		lock, err := acquirePathLock(filepath.Join(blockedParent, "leafwiki.lock"), "subject", "custom", errDataDirLockHeld)
 
 		Expect(lock).To(BeNil())
-		Expect(err).To(SatisfyAll(HaveOccurred(), Not(MatchError(errDataDirLockHeld))))
+		Expect(err).To(MatchError(syscall.ENOTDIR))
 	})
 
 	It("returns an open-lock error when the requested lock path is a directory", func() {
@@ -205,7 +206,7 @@ var _ = Describe("directory lock edge behavior", func() {
 		lock, err := acquirePathLock(lockPath, "subject", "custom", errDataDirLockHeld)
 
 		Expect(lock).To(BeNil())
-		Expect(err).To(SatisfyAll(HaveOccurred(), Not(MatchError(errDataDirLockHeld))))
+		Expect(err).To(MatchError(syscall.EISDIR))
 	})
 
 	It("returns non-contention errors from the lock syscall", func() {
@@ -288,7 +289,7 @@ var _ = Describe("directory lock edge behavior", func() {
 
 		err := lockDataDirFile(file)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(syscall.EBADF))
 		Expect(err).NotTo(MatchError(errDataDirLockHeld))
 	})
 })
