@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -17,7 +18,7 @@ import (
 )
 
 var _ = ginkgo.Describe("search error responses", func() {
-	ginkgo.It("returns a localized service-unavailable response for unavailable search", func() {
+	ginkgo.It("returns a localized service-unavailable response for unavailable search", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithSearchError(ctx, ErrSearchUnavailable)
@@ -25,7 +26,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 		Expect(rec).To(matchSearchStructuredError(http.StatusServiceUnavailable, ErrCodeSearchUnavailable))
 	})
 
-	ginkgo.It("sanitizes unknown search failures as internal structured errors", func() {
+	ginkgo.It("sanitizes unknown search failures as internal structured errors", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithSearchError(ctx, errors.New("sqlite disk I/O error"))
@@ -33,7 +34,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 		Expect(rec).To(matchSearchStructuredError(http.StatusInternalServerError, ErrCodeSearchInternal))
 	})
 
-	ginkgo.It("maps search error codes to HTTP status codes", func() {
+	ginkgo.It("maps search error codes to HTTP status codes", ginkgo.Label("unit"), func() {
 		Expect(searchErrorStatus(ErrCodeSearchUnavailable)).To(Equal(http.StatusServiceUnavailable))
 		Expect(searchErrorStatus(ErrCodeSearchMissingQuery)).To(Equal(http.StatusBadRequest))
 		Expect(searchErrorStatus(ErrCodeSearchInvalidOffset)).To(Equal(http.StatusBadRequest))
@@ -41,7 +42,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 		Expect(searchErrorStatus(ErrCodeSearchInternal)).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("renders explicit status errors as structured localized responses", func() {
+	ginkgo.It("renders explicit status errors as structured localized responses", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithSearchStatusError(ctx, http.StatusBadRequest, ErrCodeSearchInvalidOffset, "ignored", "ignored")
@@ -49,7 +50,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 		Expect(rec).To(matchSearchStructuredError(http.StatusBadRequest, ErrCodeSearchInvalidOffset))
 	})
 
-	ginkgo.It("renders localized errors with their mapped status", func() {
+	ginkgo.It("renders localized errors with their mapped status", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithSearchError(ctx, sharederrors.NewLocalizedErrorFromCode(ErrCodeSearchMissingQuery, nil))
@@ -58,7 +59,7 @@ var _ = ginkgo.Describe("search error responses", func() {
 	})
 })
 
-var _ = ginkgo.Describe("search request helpers", func() {
+var _ = ginkgo.Describe("search request helpers", ginkgo.Label("unit"), func() {
 	ginkgo.It("requires either a query or non-empty normalized tags", func() {
 		err := ValidateSearchRequest("", nil)
 		Expect(err).To(testmatchers.MatchLocalizedError(ErrCodeSearchMissingQuery, sharederrors.MessageIDForCode(ErrCodeSearchMissingQuery)))
@@ -85,7 +86,7 @@ var _ = ginkgo.Describe("search request helpers", func() {
 	})
 })
 
-var _ = ginkgo.Describe("search use cases", func() {
+var _ = ginkgo.Describe("search use cases", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns search unavailable when the index dependency is nil", func() {
 		uc := NewSearchUseCase(nil, nil, nil)
 
@@ -128,11 +129,7 @@ var _ = ginkgo.Describe("search use cases", func() {
 		status.Fail()
 
 		Expect(out.Status).NotTo(BeNil())
-		Expect(out.Status.IsActive()).To(BeTrue())
-		Expect(out.Status).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Indexed": Equal(1),
-			"Failed":  BeZero(),
-		})))
+		Expect(out.Status).To(matchActiveIndexingStatusSnapshot(1, 0))
 	})
 })
 
@@ -153,4 +150,33 @@ func ginContextForTarget(target string) *gin.Context {
 
 func matchSearchStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
 	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+type activeIndexingStatusSnapshotMatcher struct {
+	indexed int
+	failed  int
+}
+
+func matchActiveIndexingStatusSnapshot(indexed int, failed int) types.GomegaMatcher {
+	return activeIndexingStatusSnapshotMatcher{indexed: indexed, failed: failed}
+}
+
+func (m activeIndexingStatusSnapshotMatcher) Match(actual interface{}) (bool, error) {
+	status, ok := actual.(*coresearch.IndexingStatus)
+	if !ok || status == nil {
+		return false, nil
+	}
+	snapshot := status.Snapshot()
+	return snapshot.Active &&
+		snapshot.Indexed == m.indexed &&
+		snapshot.Failed == m.failed &&
+		snapshot.FinishedAt.IsZero(), nil
+}
+
+func (m activeIndexingStatusSnapshotMatcher) FailureMessage(actual interface{}) string {
+	return format.Message(actual, "to be an active indexing status snapshot with indexed and failed counts", []int{m.indexed, m.failed})
+}
+
+func (m activeIndexingStatusSnapshotMatcher) NegatedFailureMessage(actual interface{}) string {
+	return format.Message(actual, "not to be an active indexing status snapshot with indexed and failed counts", []int{m.indexed, m.failed})
 }

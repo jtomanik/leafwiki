@@ -22,7 +22,7 @@ import (
 )
 
 var _ = ginkgo.Describe("search execution", func() {
-	ginkgo.It("searches indexed pages and attaches tags and facets", func() {
+	ginkgo.It("searches indexed pages and attaches tags and facets", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		goID := fixture.createIndexedPage("Go Guide", "go-guide", []string{"go", "docs"}, "A guide about Go testing.")
 		fixture.createIndexedPage("React Notes", "react-notes", []string{"react", "docs"}, "Frontend notes.")
@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		}))
 	})
 
-	ginkgo.It("intersects query results with normalized tag filters", func() {
+	ginkgo.It("intersects query results with normalized tag filters", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		goID := fixture.createIndexedPage("Go Guide", "go-guide", []string{"go", "docs"}, "A guide about Go testing.")
 		fixture.createIndexedPage("React Guide", "react-guide", []string{"react", "docs"}, "A guide about React testing.")
@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		}))
 	})
 
-	ginkgo.It("returns sorted and paged tag-only results from the tree", func() {
+	ginkgo.It("returns sorted and paged tag-only results from the tree", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		fixture.createIndexedPage("Beta Page", "beta", []string{"go"}, "Beta body.")
 		alphaID := fixture.createIndexedPage("Alpha Page", "alpha", []string{"go", "docs"}, "Alpha body.")
@@ -98,7 +98,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		}))
 	})
 
-	ginkgo.It("sorts equal tag-only titles by path and applies the default page size", func() {
+	ginkgo.It("sorts equal tag-only titles by path and applies the default page size", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		firstID := fixture.createIndexedPage("Same Title", "a-page", []string{"go"}, "First body.")
 		fixture.createIndexedPage("Same Title", "b-page", []string{"go"}, "Second body.")
@@ -120,7 +120,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		}))
 	})
 
-	ginkgo.It("bounds tag-only result offsets past the end", func() {
+	ginkgo.It("bounds tag-only result offsets past the end", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		fixture.createIndexedPage("Only Page", "only", []string{"go"}, "body")
 
@@ -137,7 +137,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		}))
 	})
 
-	ginkgo.It("returns tag lookup errors before searching", func() {
+	ginkgo.It("returns tag lookup errors before searching", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "tags.db", "DROP TABLE page_tags")
@@ -152,7 +152,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		Expect(err).To(matchSQLiteSearchFailure())
 	})
 
-	ginkgo.It("returns tag-only excerpt lookup errors", func() {
+	ginkgo.It("returns tag-only excerpt lookup errors", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "tags.db", "DROP TABLE page_meta")
@@ -166,7 +166,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		Expect(err).To(matchSQLiteSearchFailure())
 	})
 
-	ginkgo.It("returns index search errors", func() {
+	ginkgo.It("returns index search errors", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "search.db", "DROP TABLE pages")
@@ -180,7 +180,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		Expect(err).To(matchSQLiteSearchFailure())
 	})
 
-	ginkgo.It("returns full-match page ID lookup errors after searching", func() {
+	ginkgo.It("returns full-match page ID lookup errors after searching", ginkgo.Label("unit"), func() {
 		lookupErr := errors.New("page ID lookup failed")
 		uc := &SearchUseCase{
 			index: fakeSearchIndex{
@@ -200,7 +200,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		Expect(err).To(MatchError(lookupErr))
 	})
 
-	ginkgo.It("omits tags and facets when tag attachment lookups fail", func() {
+	ginkgo.It("omits tags and facets when tag attachment lookups fail", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "tags.db", "DROP TABLE page_tags")
@@ -219,7 +219,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		}))
 	})
 
-	ginkgo.It("handles empty tag attachment inputs", func() {
+	ginkgo.It("handles empty tag attachment inputs", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 
 		fixture.useCase.attachTags(nil)
@@ -232,7 +232,7 @@ var _ = ginkgo.Describe("search execution", func() {
 		Expect(fixture.useCase.buildTagFacets(nil)).To(BeEmpty())
 	})
 
-	ginkgo.It("sets empty tags when an attached result has no tag entry", func() {
+	ginkgo.It("sets empty tags when an attached result has no tag entry", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		items := []coresearch.SearchResultItem{{PageID: tree.PageIDFromString("missing"), Title: "Missing"}}
 
@@ -245,7 +245,7 @@ var _ = ginkgo.Describe("search execution", func() {
 })
 
 var _ = ginkgo.Describe("search routes", func() {
-	ginkgo.It("serves public search results and indexing status", func() {
+	ginkgo.It("serves public search results and indexing status", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
 		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "A guide about Go.")
 		status := coresearch.NewIndexingStatus()
@@ -271,7 +271,7 @@ var _ = ginkgo.Describe("search routes", func() {
 		Expect(statusBody.Indexed).To(Equal(1))
 	})
 
-	ginkgo.It("returns structured validation errors from the public route", func() {
+	ginkgo.It("returns structured validation errors from the public route", ginkgo.Label("integration"), func() {
 		router := newSearchTestRouter(RoutesConfig{
 			Search: NewSearchUseCase(nil, nil, nil),
 		}, httpinternal.RouterOptions{PublicAccess: true})
@@ -289,7 +289,7 @@ var _ = ginkgo.Describe("search routes", func() {
 		Expect(badLimit).To(matchSearchStructuredError(http.StatusBadRequest, ErrCodeSearchInvalidLimit))
 	})
 
-	ginkgo.It("returns structured search errors from the public route", func() {
+	ginkgo.It("returns structured search errors from the public route", ginkgo.Label("integration"), func() {
 		router := newSearchTestRouter(RoutesConfig{
 			Search: NewSearchUseCase(nil, nil, nil),
 		}, httpinternal.RouterOptions{PublicAccess: true})
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("search routes", func() {
 		Expect(rec).To(matchSearchStructuredError(http.StatusServiceUnavailable, ErrCodeSearchUnavailable))
 	})
 
-	ginkgo.It("requires authentication for private search routes", func() {
+	ginkgo.It("requires authentication for private search routes", ginkgo.Label("integration"), func() {
 		router := newSearchTestRouter(RoutesConfig{}, httpinternal.RouterOptions{})
 
 		rec := httptest.NewRecorder()
@@ -309,7 +309,7 @@ var _ = ginkgo.Describe("search routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
-	ginkgo.It("returns nil query tags when the key is absent", func() {
+	ginkgo.It("returns nil query tags when the key is absent", ginkgo.Label("unit"), func() {
 		ctx := ginContextForTarget("/api/search?q=docs")
 
 		Expect(queryTags(ctx, "tags")).To(BeNil())
