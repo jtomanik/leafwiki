@@ -73,7 +73,7 @@ func tempPropertiesDataDir() string {
 	return dataDir
 }
 
-var _ = ginkgo.Describe("properties routes", func() {
+var _ = ginkgo.Describe("properties routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("exposes property keys without authentication when public access is enabled", func() {
 		svc := newPropertiesTestService()
 		Expect(svc.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("properties routes", func() {
 })
 
 var _ = ginkgo.Describe("properties use cases", func() {
-	ginkgo.It("normalizes key filter and page size before listing property keys", func() {
+	ginkgo.It("normalizes key filter and page size before listing property keys", ginkgo.Label("unit"), func() {
 		svc := newPropertiesTestService()
 		Expect(svc.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
 			"Status": {Value: "draft", Type: "text"},
@@ -194,7 +194,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		}))
 	})
 
-	ginkgo.It("defaults non-positive page size and normalizes nil key results to an empty slice", func() {
+	ginkgo.It("defaults non-positive page size and normalizes nil key results to an empty slice", ginkgo.Label("unit"), func() {
 		uc := NewGetPropertyKeysUseCase(newPropertiesTestService())
 
 		out, err := uc.Execute(context.Background(), GetPropertyKeysInput{PageSize: 0})
@@ -203,7 +203,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		Expect(out.Keys).To(BeEmpty())
 	})
 
-	ginkgo.It("returns localized errors for missing property page key and value", func() {
+	ginkgo.It("returns localized errors for missing property page key and value", ginkgo.Label("unit"), func() {
 		uc := NewGetPagesByPropertyUseCase(newPropertiesTestService(), nil, nil)
 
 		out, err := uc.Execute(context.Background(), GetPagesByPropertyInput{Key: " ", Value: "draft"})
@@ -215,7 +215,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		Expect(err).To(matchLocalizedPropertiesError(ErrCodePropertiesMissingValue))
 	})
 
-	ginkgo.It("returns an empty property page slice when no pages match", func() {
+	ginkgo.It("returns an empty property page slice when no pages match", ginkgo.Label("unit"), func() {
 		uc := NewGetPagesByPropertyUseCase(newPropertiesTestService(), nil, nil)
 
 		out, err := uc.Execute(context.Background(), GetPagesByPropertyInput{Key: "status", Value: "draft"})
@@ -224,7 +224,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		Expect(out.Pages).To(BeEmpty())
 	})
 
-	ginkgo.It("returns backing store errors from property key and page lookup use cases", func() {
+	ginkgo.It("returns backing store errors from property key and page lookup use cases", ginkgo.Label("unit"), func() {
 		propertiesService, dataDir := newPropertiesTestServiceWithDataDir()
 		Expect(propertiesService.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
@@ -240,7 +240,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		Expect(err).To(matchPropertiesUseCaseSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
-	ginkgo.It("returns property detail lookup errors after matching page IDs", func() {
+	ginkgo.It("returns property detail lookup errors after matching page IDs", ginkgo.Label("unit"), func() {
 		propertiesService, dataDir := newPropertiesTestServiceWithDataDir()
 		replacePropertiesTableWithoutType(dataDir)
 
@@ -250,7 +250,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		Expect(err).To(matchPropertiesUseCaseSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
-	ginkgo.It("returns structured route errors when property key listing fails", func() {
+	ginkgo.It("returns structured route errors when property key listing fails", ginkgo.Label("integration"), func() {
 		propertiesService, dataDir := newPropertiesTestServiceWithDataDir()
 		Expect(propertiesService.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
@@ -270,7 +270,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		Expect(rec).To(matchPropertiesStructuredError(http.StatusInternalServerError, ErrCodePropertiesInternal), rec.Body.String())
 	})
 
-	ginkgo.It("maps matching page IDs to property page DTOs and skips missing tree nodes", func() {
+	ginkgo.It("maps matching page IDs to property page DTOs and skips missing tree nodes", ginkgo.Label("unit"), func() {
 		fixture := newPropertiesPageFixture()
 		Expect(fixture.properties.SetPropertiesForPage("missing-page", map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
@@ -290,14 +290,14 @@ var _ = ginkgo.Describe("properties use cases", func() {
 })
 
 var _ = ginkgo.Describe("properties error responses", func() {
-	ginkgo.It("maps validation errors to bad request and unknown errors to internal", func() {
+	ginkgo.It("maps validation errors to bad request and unknown errors to internal", ginkgo.Label("unit"), func() {
 		Expect(propertiesErrorStatus(ErrCodePropertiesMissingKey)).To(Equal(http.StatusBadRequest))
 		Expect(propertiesErrorStatus(ErrCodePropertiesMissingValue)).To(Equal(http.StatusBadRequest))
 		Expect(propertiesErrorStatus(ErrCodePropertiesInvalidLimit)).To(Equal(http.StatusBadRequest))
 		Expect(propertiesErrorStatus(ErrCodePropertiesInternal)).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("renders localized bad-request details", func() {
+	ginkgo.It("renders localized bad-request details", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithPropertiesBadRequest(ctx, ErrCodePropertiesInvalidLimit, "ignored", "ignored")
@@ -305,7 +305,7 @@ var _ = ginkgo.Describe("properties error responses", func() {
 		Expect(rec).To(matchPropertiesStructuredError(http.StatusBadRequest, ErrCodePropertiesInvalidLimit), rec.Body.String())
 	})
 
-	ginkgo.It("renders localized errors with their mapped status", func() {
+	ginkgo.It("renders localized errors with their mapped status", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithPropertiesError(ctx, ErrPropertiesMissingKey)
@@ -313,7 +313,7 @@ var _ = ginkgo.Describe("properties error responses", func() {
 		Expect(rec).To(matchPropertiesStructuredError(http.StatusBadRequest, ErrCodePropertiesMissingKey), rec.Body.String())
 	})
 
-	ginkgo.It("sanitizes unknown errors as internal property failures", func() {
+	ginkgo.It("sanitizes unknown errors as internal property failures", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithPropertiesError(ctx, errors.New("sqlite path leaked"))
