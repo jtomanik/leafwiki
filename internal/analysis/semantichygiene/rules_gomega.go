@@ -33,6 +33,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if matcherUsesPositionalTransform(ctx, call) {
 		ctx.report(ruleGomegaPositionalTransform, call, gomegaPositionalTransformDiagnostic())
 	}
+	if matcherUsesOSIsNotExistTransform(ctx, call) {
+		ctx.report(ruleGomegaOSIsNotExistMatcher, call, gomegaOSIsNotExistMatcherDiagnostic())
+	}
 	if isEqualZeroMatcherCall(call) {
 		ctx.report(ruleGomegaEqualZero, call, gomegaEqualZeroDiagnostic())
 	}
@@ -1245,6 +1248,31 @@ func assertionUsesOSIsNotExist(ctx *analysisContext, assertion gomegaAssertion) 
 	return packagePath == "os" && name == "IsNotExist"
 }
 
+func matcherUsesOSIsNotExistTransform(ctx *analysisContext, matcher *ast.CallExpr) bool {
+	if !isMatcherNamed(matcher, "WithTransform") || len(matcher.Args) < 2 || !exprIsBooleanMatcher(matcher.Args[1]) {
+		return false
+	}
+	packagePath, name := referencedFunctionPackageAndName(ctx, matcher.Args[0])
+	return packagePath == "os" && name == "IsNotExist"
+}
+
+func referencedFunctionPackageAndName(ctx *analysisContext, expr ast.Expr) (string, string) {
+	switch fun := unparenExpr(expr).(type) {
+	case *ast.Ident:
+		if fn, ok := ctx.pass.TypesInfo.Uses[fun].(*types.Func); ok && fn.Pkg() != nil {
+			return fn.Pkg().Path(), fun.Name
+		}
+		return "", fun.Name
+	case *ast.SelectorExpr:
+		if fn, ok := ctx.pass.TypesInfo.Uses[fun.Sel].(*types.Func); ok && fn.Pkg() != nil {
+			return fn.Pkg().Path(), fun.Sel.Name
+		}
+		return "", fun.Sel.Name
+	default:
+		return "", ""
+	}
+}
+
 func assertionUsesControlStatus(assertion gomegaAssertion) bool {
 	call, ok := assertion.actual.(*ast.CallExpr)
 	return ok && callName(call) == "IsControlStatus"
@@ -2151,6 +2179,11 @@ func isBooleanMatcher(matcher *ast.CallExpr) bool {
 	}
 	ident, ok := unparenExpr(matcher.Args[0]).(*ast.Ident)
 	return ok && (ident.Name == "true" || ident.Name == "false")
+}
+
+func exprIsBooleanMatcher(expr ast.Expr) bool {
+	call, ok := unparenExpr(expr).(*ast.CallExpr)
+	return ok && isBooleanMatcher(call)
 }
 
 func matcherCallUsesMatcherValueAsExpected(ctx *analysisContext, call *ast.CallExpr) bool {

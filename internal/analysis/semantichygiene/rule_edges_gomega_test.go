@@ -1401,6 +1401,36 @@ func TestCLIBehavior() {
 			))
 		})
 
+		ginkgo.It("reports os.IsNotExist hidden behind WithTransform boolean matchers", func() {
+			h := newRuleHarness("/repo/internal/wiki/wiki_test.go", "github.com/perber/wiki/internal/wiki", `package wiki
+
+import "os"
+
+type assertion struct{}
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) To(matcher any, extra ...any) {}
+func WithTransform(transform any, matcher any) any { return nil }
+func BeTrue() any { return nil }
+
+func TestWikiBehavior() {
+	var err error
+	Expect(err).To(WithTransform(os.IsNotExist, BeTrue()))
+	Expect("missing.md").To(WithTransform(func(path string) error {
+		_, err := os.Stat(path)
+		return err
+	}, WithTransform(os.IsNotExist, BeTrue())))
+}
+`)
+			for _, call := range h.findCalls("WithTransform") {
+				checkGomegaSemanticMatcher(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.os-is-not-exist-matcher: assert error semantics with MatchError instead of os.IsNotExist(...) with BeTrue/BeFalse",
+				"semh:gomega.os-is-not-exist-matcher: assert error semantics with MatchError instead of os.IsNotExist(...) with BeTrue/BeFalse",
+			))
+		})
+
 		ginkgo.It("reports proxy boolean assertions that hide the semantic value", func() {
 			h := newRuleHarnessWithFiles("/repo/internal/projectdaemon/agent_presence_test.go", "github.com/perber/wiki/internal/projectdaemon", map[string]string{
 				"/repo/internal/projectdaemon/frontmatter.go": `package projectdaemon
