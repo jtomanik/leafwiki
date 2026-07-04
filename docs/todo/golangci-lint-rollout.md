@@ -12,10 +12,12 @@ Current gate status:
 | `ginkgolinter` | Clean | Verified through the transition config in both modules. |
 | `govet` | Clean when scoped | Scoped to project package patterns by `scripts/golangci-lint.sh` to avoid unrelated frontend dependency trees. |
 
-The first migration slice is therefore infrastructure-complete but not DoD-clean:
-`leafwiki` must be made green before the acceptance phrase "the LeafWiki
-golangci-lint gate reports no issues" is true. Some current diagnostics are
-under `internal/analysis/`, which is outside this thread's allowed write scope.
+The first migration slice is tooling-complete when it installs the local gate
+and reports current findings without hiding them. It does not fix the findings
+reported by `leafwiki`; making the acceptance phrase "the LeafWiki golangci-lint
+gate reports no issues" true belongs to later cleanup work. Do not narrow the
+package surface, add suppressions, or add a baseline to make this first branch
+look green.
 
 Deferred stock-linter cleanup order:
 

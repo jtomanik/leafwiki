@@ -38,10 +38,10 @@ Make `golangci-lint` the local static source-policy gate for LeafWiki by introdu
 **Key Decisions:**
 
 1. Use `golangci-lint` as a local tool only. Reason: CI use was explicitly excluded.
-2. Make the final source-policy acceptance phrase "the LeafWiki golangci-lint gate reports no issues". Reason: new work should have one clear static quality gate.
+2. Make the final source-policy acceptance phrase "the LeafWiki golangci-lint gate reports no issues". Reason: new work should eventually have one clear static quality gate. This phrase is the end-state contract, not the Definition of Done for the first tooling-only branch.
 3. Use a custom golangci-lint module plugin for LeafWiki analyzers. Reason: `semantichygiene` is already a `go/analysis` analyzer.
 4. Keep runtime tests outside golangci-lint. Reason: `go test`, frontend lint/build, E2E, and install smoke tests prove behavior, not static source policy.
-5. Do not use a baseline file. Reason: enabled lint contracts should be clean, not grandfathered.
+5. Do not use a baseline file. Reason: existing findings should be reported truthfully and fixed in later cleanup slices, not grandfathered or hidden.
 6. Remove shell checker policy only after parity. Reason: current scripts encode real semantic and i18n checks that must not silently disappear.
 7. Implement from a separate worktree. Reason: the current checkout has unrelated Ginkgo cleanup changes.
 
@@ -92,11 +92,13 @@ Later slices move current shell-checker policy into analyzers, update docs and M
 - E2E test replacement.
 - Installer/runtime smoke-test replacement.
 - Fixing all current `errcheck`, `unused`, `staticcheck`, `gocritic`, and `ineffassign` findings in the first slice.
+- Fixing current `leafwiki` semantic hygiene findings reported by the new gate.
+- Making "the LeafWiki golangci-lint gate reports no issues" true in this tooling-only branch.
 - Removing `cmd/leafwiki-vet` before golangci-lint parity is proven.
 
 ### Intentional Limitations
 
-- The first golangci-lint gate enables only clean checks.
+- The first golangci-lint gate may report existing `leafwiki` semantic findings. That is acceptable for this tooling-only branch as long as the wrapper reports them truthfully across the intended package surface.
 - Shell checkers may remain temporarily as compatibility wrappers.
 - Cross-language policy checks move into golangci-lint only when the analyzer design is less fragile than the existing script.
 
@@ -544,7 +546,7 @@ No E2E test files.
 - Error path: wrapper fails clearly when the custom binary cannot be built.
 - Edge case: wrapper does not scan `ui/leafwiki-ui/node_modules`.
 
-**Verification:** `make lint` or the wrapper reports no issues for the initially enabled clean checks in both modules.
+**Verification:** `make lint` or the wrapper runs both modules over the fixed package surface and reports the current enabled-check results without parser/build failures, baselines, suppressions, or scope narrowing. Clean `ginkgolinter` remains a required acceptance check; existing `leafwiki` diagnostics are reported but fixed in later cleanup work.
 
 #### U5. Prove Semantic Hygiene Parity
 
@@ -686,7 +688,7 @@ No E2E test files.
 ## Requirements
 
 - R1. The local static source-policy gate is run through a LeafWiki golangci-lint entrypoint.
-- R2. The gate reports no issues for every enabled check and does not rely on a baseline.
+- R2. The tooling-only branch reports current findings for every enabled check without relying on a baseline, suppressions, or narrowed scope. Making the gate report no issues is deferred to later cleanup slices.
 - R3. LeafWiki semantic hygiene runs inside golangci-lint through a module plugin.
 - R4. The gate covers both the root Go module and `e2e-proxy`.
 - R5. Current shell checker policy is preserved until golangci-lint parity is proven.
@@ -706,7 +708,8 @@ Expected checks:
 - Plugin adapter unit tests pass.
 - Existing `semantichygiene` analyzer tests pass.
 - Local lint entrypoint runs root module and `e2e-proxy`.
-- Local lint entrypoint reports no issues for enabled checks.
+- Local lint entrypoint reports current findings for enabled checks and exits non-zero when findings remain.
+- Standalone `ginkgolinter` verification reports no issues in the root module and `e2e-proxy`.
 - Compatibility wrappers, if retained, delegate to the local lint entrypoint.
 - Documentation no longer names policy-bearing shell scripts as the authoritative source-policy gate after parity.
 - `git diff --check` passes for the migration diff.
@@ -715,14 +718,14 @@ Do not require the noisy stock linter categories to be clean until their rollout
 
 ## Definition Of Done
 
-The migration is complete when a fresh implementation worktree has a local `make lint` or `scripts/golangci-lint.sh` gate that builds or reuses `leafwiki-golangci-lint`, runs both Go modules, and reports no issues for all enabled LeafWiki static source-policy checks.
+The tooling-only branch is complete when a fresh implementation worktree has a local `make lint` or `scripts/golangci-lint.sh` gate that builds or reuses `leafwiki-golangci-lint`, runs both Go modules, and truthfully reports current findings for all enabled LeafWiki static source-policy checks. The later cleanup effort owns making the gate report no issues.
 
 Completion requires:
 
 - `.custom-gcl.yml` builds the custom binary.
 - `.golangci.yml` is the authoritative v2 config.
-- The LeafWiki module plugin runs `semantichygiene` with type information.
-- `ginkgolinter` and initially green stock linters run through the same gate.
+- The LeafWiki module plugin runs `semantichygiene` with type information and surfaces existing diagnostics without a baseline.
+- `ginkgolinter` and initially green stock linters run through the same gate, with standalone `ginkgolinter` remaining clean in both modules.
 - Current semantic checker shell policy is represented in golangci-lint or retained only as a delegating wrapper.
 - Go-side i18n/catalog policy has migrated into analyzer-backed checks, or any remaining non-Go policy check is explicitly documented as outside the golangci-lint static-policy gate.
 - No lint baseline exists.
