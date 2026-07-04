@@ -558,7 +558,7 @@ func waitForLeafwikiContextCancellation(ctx context.Context) error {
 }
 
 var _ = ginkgo.Describe("leafwiki command helper edges", func() {
-	ginkgo.It("panics on usage write failures instead of silently truncating help", func() {
+	ginkgo.It("panics on usage write failures instead of silently truncating help", ginkgo.Label("unit"), func() {
 		writeErr := errors.New("usage writer failed")
 		Expect(func() {
 			writeUsage(&leafwikiFailAfterWriter{failAt: 1, err: writeErr})
@@ -569,7 +569,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}).To(PanicWith(writeErr))
 	})
 
-	ginkgo.It("exits when internal startup validation rejects missing or invalid role inputs", func() {
+	ginkgo.It("exits when internal startup validation rejects missing or invalid role inputs", ginkgo.Label("unit"), func() {
 
 		_, flags := leafwikiEdgeFlagSet()
 		*flags.internalProjectDaemon = filepath.Join(leafwikiTempDir(), "missing-daemon-startup.json")
@@ -610,7 +610,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}).To(PanicWithLeafwikiExit(1))
 	})
 
-	ginkgo.It("resolves startup data directories for service mode without ignoring explicit inputs", func() {
+	ginkgo.It("resolves startup data directories for service mode without ignoring explicit inputs", ginkgo.Label("unit"), func() {
 		homeDir := leafwikiTempDir()
 		leafwikiSetenv("HOME", homeDir)
 		_, flags := leafwikiEdgeFlagSet()
@@ -629,7 +629,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}).To(PanicWithLeafwikiExit(1))
 	})
 
-	ginkgo.It("parses agent-hook commands without treating flag values as providers", func() {
+	ginkgo.It("parses agent-hook commands without treating flag values as providers", ginkgo.Label("unit"), func() {
 		provider, err := agentHookProviderFromArgsResult([]string{"--config", "leafwiki.yml"})
 		Expect(err).To(MatchError(errAgentHookProviderAbsent))
 		Expect(provider).To(BeEmpty())
@@ -651,13 +651,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(provider).To(Equal(agenthooks.ProviderUnknown))
 	})
 
-	ginkgo.It("recognizes help commands before full startup dispatch", func() {
+	ginkgo.It("recognizes help commands before full startup dispatch", ginkgo.Label("unit"), func() {
 		Expect(shouldPrintUsage([]string{"help"})).To(BeTrue())
 		Expect(shouldPrintUsage([]string{"--help"})).To(BeTrue())
 		Expect(shouldPrintUsage([]string{"daemon"})).To(BeFalse())
 	})
 
-	ginkgo.It("handles startup help positional commands without launching runtime work", func() {
+	ginkgo.It("handles startup help positional commands without launching runtime work", ginkgo.Label("unit"), func() {
 		output := captureLeafwikiStdout(func() {
 			Expect(handleStartupPositionalCommand([]string{"help"}, false, "")).To(BeTrue())
 		})
@@ -665,7 +665,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(output).To(ContainSubstring("Usage: leafwiki [command]"))
 	})
 
-	ginkgo.It("resolves daemon service defaults from the current user home", func() {
+	ginkgo.It("resolves daemon service defaults from the current user home", ginkgo.Label("unit"), func() {
 		homeDir := leafwikiTempDir()
 		leafwikiSetenv("HOME", homeDir)
 
@@ -688,7 +688,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(visited).To(HaveKey("log-file"))
 	})
 
-	ginkgo.It("parses scalar config helpers without invoking failure exits", func() {
+	ginkgo.It("parses scalar config helpers without invoking failure exits", ginkgo.Label("unit"), func() {
 		Expect(resolveInt("workers", 7, map[string]bool{"workers": true}, "LEAFWIKI_TEST_WORKERS", 3)).To(Equal(7))
 		leafwikiSetenv("LEAFWIKI_TEST_WORKERS", "42")
 		Expect(resolveInt("workers", 7, map[string]bool{}, "LEAFWIKI_TEST_WORKERS", 3)).To(Equal(42))
@@ -714,7 +714,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(duration).To(BeZero())
 	})
 
-	ginkgo.It("fails fast for invalid scalar environment and byte-size values", func() {
+	ginkgo.It("fails fast for invalid scalar environment and byte-size values", ginkgo.Label("unit"), func() {
 
 		leafwikiSetenv("LEAFWIKI_EDGE_BOOL", "bogus")
 		Expect(func() {
@@ -745,13 +745,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}).To(PanicWithLeafwikiExit(1))
 	})
 
-	ginkgo.It("returns logger setup errors without replacing the default logger", func() {
+	ginkgo.It("returns logger setup errors without replacing the default logger", ginkgo.Label("unit"), func() {
 		closer, err := setupLogger(leaflogging.Config{Target: leaflogging.Target("bogus")}, io.Discard, io.Discard)
 		Expect(err).To(MatchError(leaflogging.ErrInvalidLogTarget))
 		Expect(closer).To(BeNil())
 	})
 
-	ginkgo.It("formats project daemon identity and role snapshots", func() {
+	ginkgo.It("formats project daemon identity and role snapshots", ginkgo.Label("unit"), func() {
 		err := projectDaemonIdentityMismatch(&projectdaemon.Descriptor{
 			DataDir: "/owner/data",
 			RootDir: "/owner/root",
@@ -790,7 +790,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		})))
 	})
 
-	ginkgo.It("derives workspace display names and original request paths", func() {
+	ginkgo.It("derives workspace display names and original request paths", ginkgo.Label("unit"), func() {
 		Expect(federatedWorkspaceDisplayName(projectdaemon.Config{RootDir: "/repo/docs", DataDir: "/data/wiki"})).To(Equal("docs"))
 		Expect(federatedWorkspaceDisplayName(projectdaemon.Config{RootDir: string(filepath.Separator), DataDir: "/data/wiki"})).To(Equal("wiki"))
 		Expect(federatedWorkspaceDisplayName(projectdaemon.Config{})).To(Equal("Workspace"))
@@ -803,7 +803,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(originalPath(&http.Request{})).To(Equal("/"))
 	})
 
-	ginkgo.It("writes structured project daemon startup errors", func() {
+	ginkgo.It("writes structured project daemon startup errors", ginkgo.Label("integration"), func() {
 		path := filepath.Join(leafwikiTempDir(), "startup-error.json")
 		writeProjectDaemonStartupError(path, os.ErrPermission)
 
@@ -854,7 +854,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(ownerStartupErr).To(MatchProjectDaemonStartupFailure())
 	})
 
-	ginkgo.It("filters native STDIO frames without leaking invalid JSON to the MCP stream", func() {
+	ginkgo.It("filters native STDIO frames without leaking invalid JSON to the MCP stream", ginkgo.Label("unit"), func() {
 		var stdout strings.Builder
 		pr, pw := io.Pipe()
 
@@ -866,7 +866,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(stdout.String()).To(MatchNativeStdioParseErrorFrame())
 	})
 
-	ginkgo.It("normalizes valid native STDIO frames and preserves IO failures", func() {
+	ginkgo.It("normalizes valid native STDIO frames and preserves IO failures", ginkgo.Label("unit"), func() {
 		pr, pw := io.Pipe()
 		done := make(chan error, 1)
 		go func() {
@@ -905,14 +905,14 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(filterNativeStdioJSON(leafwikiErrReader{err: readErr}, failingReadForward, io.Discard)).To(MatchError(readErr))
 	})
 
-	ginkgo.It("classifies native STDIO close errors narrowly", func() {
+	ginkgo.It("classifies native STDIO close errors narrowly", ginkgo.Label("unit"), func() {
 		Expect(error(nil)).To(BeCleanNativeStdioClose())
 		Expect(io.EOF).To(BeCleanNativeStdioClose())
 		Expect(errors.New("server is closing: EOF")).To(BeCleanNativeStdioClose())
 		Expect(errors.New("broken pipe")).NotTo(BeCleanNativeStdioClose())
 	})
 
-	ginkgo.It("parses startup diagnostics and trusts only local daemon control URLs", func() {
+	ginkgo.It("parses startup diagnostics and trusts only local daemon control URLs", ginkgo.Label("unit"), func() {
 		structured := parseProjectDaemonStartupError([]byte(`{"message":" ` + leafwikiFixtureDaemonStopped + ` "}`))
 		Expect(structured).To(MatchProjectDaemonStartupFailure())
 		Expect(formatProjectDaemonStartupError(structured)).To(MatchError(errProjectDaemonStartupFailed))
@@ -928,7 +928,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect("http://%zz").NotTo(BeTrustedDaemonControlURL())
 	})
 
-	ginkgo.It("classifies project daemon lock states from real data and root locks", func() {
+	ginkgo.It("classifies project daemon lock states from real data and root locks", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "root")
@@ -961,7 +961,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(projectDaemonLocks(fileDataDir, rootDir)).To(MatchProjectDaemonLockAvailabilityError(syscall.ENOTDIR))
 	})
 
-	ginkgo.It("compares daemon descriptor health and request identity variants", func() {
+	ginkgo.It("compares daemon descriptor health and request identity variants", ginkgo.Label("unit"), func() {
 		desc := &projectdaemon.Descriptor{
 			SchemaVersion: 1,
 			PID:           1234,
@@ -1010,7 +1010,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		})))
 	})
 
-	ginkgo.It("normalizes daemon runtime config and log paths for owner and workspace requests", func() {
+	ginkgo.It("normalizes daemon runtime config and log paths for owner and workspace requests", ginkgo.Label("unit"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		rootDir := filepath.Join(leafwikiTempDir(), "root")
 		logPath := filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log")
@@ -1087,7 +1087,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(daemonLogFileForConfig(cfg, canonicalDataDir)).To(Equal(filepath.Clean(cfg.Logging.FilePath)))
 	})
 
-	ginkgo.It("handles runtime role lookup, HTTP tokens, and response encoding errors", func() {
+	ginkgo.It("handles runtime role lookup, HTTP tokens, and response encoding errors", ginkgo.Label("unit"), func() {
 		roles := []projectdaemon.RoleHealth{
 			{Name: projectdaemon.RoleFrontd, URL: "http://127.0.0.1:8080"},
 		}
@@ -1123,7 +1123,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(failingWriter.statuses).To(ContainElement(http.StatusForbidden))
 	})
 
-	ginkgo.It("maps actor contexts, runtime grants, and home workspace status edges", func() {
+	ginkgo.It("maps actor contexts, runtime grants, and home workspace status edges", ginkgo.Label("unit"), func() {
 		_, err := actorContextForUser(nil, "api_key", leafwikiRuntimeConfig{})
 		Expect(err).To(MatchError(errRuntimeActorUserRequired))
 
@@ -1187,7 +1187,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(supervisor.Status(wikid.HomeWorkspaceID).State).To(Equal(wikid.WorkspaceStateRegistered))
 	})
 
-	ginkgo.It("preserves runtime tokens, actor resolution, restart handling, and readiness waits", func() {
+	ginkgo.It("preserves runtime tokens, actor resolution, restart handling, and readiness waits", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		ginkgo.DeferCleanup(w.Close)
 		cfg := leafwikiRuntimeConfig{
@@ -1308,7 +1308,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		activeRuntime.restartRole(projectdaemon.RoleName("unsupported"))
 	})
 
-	ginkgo.It("resolves private endpoints, wikid tokens, and frontd actors", func() {
+	ginkgo.It("resolves private endpoints, wikid tokens, and frontd actors", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		ginkgo.DeferCleanup(w.Close)
 		editor, err := w.UserService().CreateUser("edge-editor", "edge-editor@example.com", "password", coreauth.RoleEditor)
@@ -1454,7 +1454,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(method).To(Equal("public_access"))
 	})
 
-	ginkgo.It("orchestrates wikid-frontd runtime roles through the starter boundary", func() {
+	ginkgo.It("orchestrates wikid-frontd runtime roles through the starter boundary", ginkgo.Label("integration"), func() {
 		var calls []internalRuntimeRoleStartupConfig
 		var doneChans []chan error
 		swapInternalRuntimeRoleStarter(func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
@@ -1498,7 +1498,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		})))
 	})
 
-	ginkgo.It("reports wikid-frontd runtime startup and restart failures", func() {
+	ginkgo.It("reports wikid-frontd runtime startup and restart failures", ginkgo.Label("integration"), func() {
 		workspacedErr := errors.New("workspaced failed")
 		swapInternalRuntimeRoleStarter(func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
 			return nil, internalRuntimeRoleReady{}, workspacedErr
@@ -1530,7 +1530,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(runtime.startFrontdLocked()).To(MatchError(errRuntimeWorkspacedURLUnavailable))
 	})
 
-	ginkgo.It("restarts runtime roles and publishes crash details", func() {
+	ginkgo.It("restarts runtime roles and publishes crash details", ginkgo.Label("integration"), func() {
 		var doneChans []chan error
 		swapInternalRuntimeRoleStarter(func(startup internalRuntimeRoleStartupConfig) (*internalRuntimeRoleProcess, internalRuntimeRoleReady, error) {
 			proc, done := newLeafwikiRuntimeRoleProcess(startup.Role, 300+len(doneChans))
@@ -1604,7 +1604,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		waitForLeafwikiRoleState(scheduledRuntime, projectdaemon.RoleFrontd, projectdaemon.RoleStateReady)
 	})
 
-	ginkgo.It("authenticates daemon STDIO requests and keeps workspace descriptors scoped to local runtime state", func() {
+	ginkgo.It("authenticates daemon STDIO requests and keeps workspace descriptors scoped to local runtime state", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		rootDir := filepath.Join(leafwikiTempDir(), "root")
 		Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
@@ -1791,7 +1791,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(projectDaemonDescriptorHealthResult(context.Background(), healthyDesc)).To(MatchProjectDaemonDescriptorHealthError(errPrivateMCPURLUntrusted))
 	})
 
-	ginkgo.It("derives wikid actor context from remote-user requests", func() {
+	ginkgo.It("derives wikid actor context from remote-user requests", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		ginkgo.DeferCleanup(w.Close)
 		editor, err := w.UserService().CreateUser("remote-editor", "remote-editor@example.com", "password", coreauth.RoleEditor)
@@ -1901,7 +1901,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(coreauth.ErrUserNotFound))
 	})
 
-	ginkgo.It("cancels wikid-frontd owner boot through runtime role boundaries", func() {
+	ginkgo.It("cancels wikid-frontd owner boot through runtime role boundaries", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		rootDir := filepath.Join(leafwikiTempDir(), "root")
 
@@ -1961,7 +1961,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Eventually(done).WithTimeout(3 * time.Second).Should(Receive(Succeed()))
 	})
 
-	ginkgo.It("coordinates project daemon locks, descriptors, and foreground waits", func() {
+	ginkgo.It("coordinates project daemon locks, descriptors, and foreground waits", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		rootDir := filepath.Join(leafwikiTempDir(), "root")
 		Expect(os.MkdirAll(dataDir, 0o755)).To(Succeed())
@@ -2109,7 +2109,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchProjectDaemonConfigMismatch())
 	})
 
-	ginkgo.It("starts direct runtime role processes through startup helpers", func() {
+	ginkgo.It("starts direct runtime role processes through startup helpers", ginkgo.Label("integration"), func() {
 
 		Expect((*wikidFrontdRuntime)(nil).stop(context.Background())).To(Succeed())
 		Expect((*internalRuntimeRoleProcess)(nil).wait()).To(Succeed())
@@ -2204,7 +2204,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(runInternalRuntimeRoleName(canceled, projectdaemon.RoleWikid)).To(Succeed())
 	})
 
-	ginkgo.It("reports runtime role startup process failures through existing boundaries", func() {
+	ginkgo.It("reports runtime role startup process failures through existing boundaries", ginkgo.Label("integration"), func() {
 		blockingFile := filepath.Join(leafwikiTempDir(), "not-a-dir")
 		validTempDir := leafwikiTempDir()
 		missingExecutable := filepath.Join(leafwikiTempDir(), "missing-leafwiki")
@@ -2245,7 +2245,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(os.ErrNotExist))
 	})
 
-	ginkgo.It("reports temp-file chmod, write, and close failures", func() {
+	ginkgo.It("reports temp-file chmod, write, and close failures", ginkgo.Label("integration"), func() {
 		previousCreateTemp := createTempFileForRuntime
 		previousExecutable := projectDaemonExecutable
 		ginkgo.DeferCleanup(func() {
@@ -2333,7 +2333,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(roleStartupCloseErr))
 	})
 
-	ginkgo.It("reports runtime role readiness failures", func() {
+	ginkgo.It("reports runtime role readiness failures", ginkgo.Label("integration"), func() {
 
 		exitedProc, exitedDone := newLeafwikiRuntimeRoleProcess(projectdaemon.RoleFrontd, os.Getpid())
 		exitedDone <- nil
@@ -2365,7 +2365,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		releaseLeafwikiRuntimeRoleProcesses([]chan error{blankDone}, context.Canceled)
 	})
 
-	ginkgo.It("reports frontd and workspaced role fast failures", func() {
+	ginkgo.It("reports frontd and workspaced role fast failures", ginkgo.Label("integration"), func() {
 		validRuntime := leafwikiRuntimeConfig{
 			Workspace: wiki.Workspace{
 				DataDir: filepath.Join(leafwikiTempDir(), "data"),
@@ -2477,7 +2477,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Eventually(done).WithTimeout(3 * time.Second).Should(Receive(Succeed()))
 	})
 
-	ginkgo.It("dispatches runtime roles through project daemon launcher boundaries", func() {
+	ginkgo.It("dispatches runtime roles through project daemon launcher boundaries", ginkgo.Label("integration"), func() {
 		previousRunDaemonService := runDaemonServiceForDispatch
 		previousRunAgentHookCommand := runAgentHookCommandForDispatch
 		previousRunProjectDaemonLauncher := runProjectDaemonLauncherForDispatch
@@ -2638,7 +2638,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(runProjectDaemonLauncher(context.Background(), leafwikiRuntimeConfig{DisableAuth: true, MCPTransports: mcpTransports{Stdio: true}})).To(Succeed())
 	})
 
-	ginkgo.It("reports SDK transport bridge connect and pump errors", func() {
+	ginkgo.It("reports SDK transport bridge connect and pump errors", ginkgo.Label("integration"), func() {
 		connectErr := errors.New("left connect failed")
 		Expect(bridgeTransports(context.Background(), leafwikiFakeMCPTransport{err: connectErr}, leafwikiFakeMCPTransport{})).To(MatchError(connectErr))
 
@@ -2718,7 +2718,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		encodeActorContextForRuntime = previousEncodeActorContext
 	})
 
-	ginkgo.It("reports project daemon owner and spawn failures", func() {
+	ginkgo.It("reports project daemon owner and spawn failures", ginkgo.Label("integration"), func() {
 		previousOwner := runWikidFrontdOwnerForProjectDaemon
 		previousExecutable := projectDaemonExecutable
 		ginkgo.DeferCleanup(func() {
@@ -2820,7 +2820,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		scheduleProjectDaemonStartupConfigCleanup("")
 	})
 
-	ginkgo.It("reports wikid-frontd owner dependency failures", func() {
+	ginkgo.It("reports wikid-frontd owner dependency failures", ginkgo.Label("integration"), func() {
 		cfg := leafwikiRuntimeConfig{
 			Workspace: wiki.Workspace{
 				ID:      wikid.HomeWorkspaceID,
@@ -2935,7 +2935,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(runWikidFrontdOwner(context.Background(), cfg, ownerCfg)).To(MatchError(writeGlobalDescriptorErr))
 	})
 
-	ginkgo.It("reports direct actor, token, and private endpoint errors", func() {
+	ginkgo.It("reports direct actor, token, and private endpoint errors", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		ginkgo.DeferCleanup(w.Close)
 
@@ -3011,7 +3011,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(seedRuntimeHomeGrants(badGrantStore, leafwikiRuntimeConfig{PublicAccess: true})).To(MatchPathError())
 	})
 
-	ginkgo.It("keeps direct manager, storage, and environment helpers deterministic", func() {
+	ginkgo.It("keeps direct manager, storage, and environment helpers deterministic", ginkgo.Label("integration"), func() {
 
 		var manager *federatedWorkspaceManager
 		manager.MarkReady("workspace-a", 1, "http://workspace.local")
@@ -3099,7 +3099,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(errFrontdWorkspaceCredentialsMissing))
 	})
 
-	ginkgo.It("reports portable system errors from runtime helpers", func() {
+	ginkgo.It("reports portable system errors from runtime helpers", ginkgo.Label("integration"), func() {
 		previousAbs := filepathAbsForRuntime
 		previousRel := filepathRelForRuntime
 		previousHome := userHomeDirForRuntime
@@ -3207,7 +3207,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		resolveLoggingForRuntime = previousResolveLogging
 	})
 
-	ginkgo.It("reports process, wait, bridge, and role dependency failures", func() {
+	ginkgo.It("reports process, wait, bridge, and role dependency failures", ginkgo.Label("integration"), func() {
 		previousWaitTimeout := projectDaemonWaitTimeout
 		previousFindProcess := processFindProcessForRuntime
 		previousStartCommand := startCommandForRuntime
@@ -3454,7 +3454,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(runProjectDaemonOwner(context.Background(), ownerCfg)).To(MatchError(mkdirRootErr))
 	})
 
-	ginkgo.It("normalizes workspace ensure results and daemon auth callbacks", func() {
+	ginkgo.It("normalizes workspace ensure results and daemon auth callbacks", ginkgo.Label("integration"), func() {
 
 		status, err := federatedEnsureResultStatus("workspace-a", wikid.WorkspaceStatus{State: wikid.WorkspaceStateRunning}, nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -3612,7 +3612,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(registeredWorkspaceErr))
 	})
 
-	ginkgo.It("runs wikid owner server startup and shutdown behavior", func() {
+	ginkgo.It("runs wikid owner server startup and shutdown behavior", ginkgo.Label("integration"), func() {
 		previousNewRuntimeWiki := newRuntimeWikiForRuntime
 		previousStartRuntime := startWikidFrontdRuntimeForOwner
 		previousMCPProxy := newMCPProxyWithActorForRuntime
@@ -3754,7 +3754,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(shutdownHTTPServer(&http.Server{}, context.Background())).To(Succeed())
 	})
 
-	ginkgo.It("validates descriptor health and manager cleanup behavior", func() {
+	ginkgo.It("validates descriptor health and manager cleanup behavior", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		rootDir := filepath.Join(leafwikiTempDir(), "root")
 		Expect(os.MkdirAll(dataDir, 0o755)).To(Succeed())
@@ -3975,7 +3975,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchPathError())
 	})
 
-	ginkgo.It("orchestrates federated attach behavior through daemon boundaries", func() {
+	ginkgo.It("orchestrates federated attach behavior through daemon boundaries", ginkgo.Label("integration"), func() {
 		cfg := leafwikiRuntimeConfig{
 			Workspace: wiki.Workspace{
 				DataDir: filepath.Join(leafwikiTempDir(), "workspace-data"),

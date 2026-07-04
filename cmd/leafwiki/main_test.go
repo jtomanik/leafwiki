@@ -332,7 +332,7 @@ func newFixtureUserID[T ~string](raw T) coreauth.UserID {
 }
 
 var _ = ginkgo.Describe("leafwiki usage output", func() {
-	ginkgo.It("documents MCP transport selector", func() {
+	ginkgo.It("documents MCP transport selector", ginkgo.Label("unit"), func() {
 		var buf bytes.Buffer
 
 		writeUsage(&buf)
@@ -385,7 +385,7 @@ var _ = ginkgo.Describe("leafwiki usage output", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki usage output", func() {
-	ginkgo.It("renders help body from catalog", func() {
+	ginkgo.It("renders help body from catalog", ginkgo.Label("unit"), func() {
 		var buf bytes.Buffer
 
 		writeUsage(&buf)
@@ -399,7 +399,7 @@ var _ = ginkgo.Describe("leafwiki usage output", func() {
 
 // Plantrace evidence: TestFailureMessageRendersCatalogBackedErrorBody.
 var _ = ginkgo.Describe("CLI failure messages", func() {
-	ginkgo.It("renders catalog backed error body", func() {
+	ginkgo.It("renders catalog backed error body", ginkgo.Label("unit"), func() {
 		got := failureMessage("cli.error.invalid_environment", "error", "bad env")
 		want := "Invalid environment error=bad env"
 		Expect(got).To(Equal(want), fmt.Sprintf("failureMessage = %q, want %q", got, want))
@@ -408,7 +408,7 @@ var _ = ginkgo.Describe("CLI failure messages", func() {
 })
 
 var _ = ginkgo.Describe("CLI flag registration", func() {
-	ginkgo.It("rejects removed startup flags", func() {
+	ginkgo.It("rejects removed startup flags", ginkgo.Label("unit"), func() {
 		for _, arg := range []string{
 			"--enable-revision",
 			"--enable-workspace-sync",
@@ -435,6 +435,7 @@ var _ = ginkgo.Describe("CLI flag registration", func() {
 
 var _ = ginkgo.Describe("removed LeafWiki environment validation", func() {
 	ginkgo.DescribeTable("rejects removed runtime environment variables",
+		ginkgo.Label("unit"),
 		func(name string) {
 			leafwikiSetenv(name, "")
 
@@ -451,7 +452,7 @@ var _ = ginkgo.Describe("removed LeafWiki environment validation", func() {
 })
 
 var _ = ginkgo.Describe("daemon runtime configuration", func() {
-	ginkgo.It("includes workspace ID", func() {
+	ginkgo.It("includes workspace ID", ginkgo.Label("unit"), func() {
 		cfg := leafwikiRuntimeConfig{
 			Workspace: wiki.Workspace{
 				ID:      "home",
@@ -469,7 +470,7 @@ var _ = ginkgo.Describe("daemon runtime configuration", func() {
 })
 
 var _ = ginkgo.Describe("workspace resolution", func() {
-	ginkgo.It("defaults to home workspace ID", func() {
+	ginkgo.It("defaults to home workspace ID", ginkgo.Label("unit"), func() {
 		fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		flags := registerFlags(fs)
@@ -488,7 +489,7 @@ var _ = ginkgo.Describe("workspace resolution", func() {
 })
 
 var _ = ginkgo.Describe("daemon STDIO bridge configuration", func() {
-	ginkgo.It("prefers descriptor private MCP", func() {
+	ginkgo.It("prefers descriptor private MCP", ginkgo.Label("unit"), func() {
 		desc := &projectdaemon.Descriptor{
 			ControlURL:      "http://127.0.0.1:41000",
 			ControlToken:    "control-token",
@@ -508,7 +509,7 @@ var _ = ginkgo.Describe("daemon STDIO bridge configuration", func() {
 })
 
 var _ = ginkgo.Describe("control-plane router", func() {
-	ginkgo.It("registers OAuth when HTTPMCP enabled", func() {
+	ginkgo.It("registers OAuth when HTTPMCP enabled", ginkgo.Label("integration"), func() {
 		dataDir := leafwikiTempDir()
 		rootDir := leafwikiTempDir()
 		cfg := leafwikiRuntimeConfig{
@@ -560,7 +561,7 @@ var _ = ginkgo.Describe("control-plane router", func() {
 })
 
 var _ = ginkgo.Describe("frontd actor resolution", func() {
-	ginkgo.It("allows public access reads as viewer", func() {
+	ginkgo.It("allows public access reads as viewer", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		defer w.Close()
 		req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
@@ -580,7 +581,7 @@ var _ = ginkgo.Describe("frontd actor resolution", func() {
 })
 
 var _ = ginkgo.Describe("frontd actor resolution", func() {
-	ginkgo.It("honors trusted remote user header", func() {
+	ginkgo.It("honors trusted remote user header", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		defer w.Close()
 		created, err := w.UserService().CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
@@ -608,7 +609,7 @@ var _ = ginkgo.Describe("frontd actor resolution", func() {
 })
 
 var _ = ginkgo.Describe("frontd actor resolution", func() {
-	ginkgo.It("rejects MCPAPI key for workspace API", func() {
+	ginkgo.It("rejects MCPAPI key for workspace API", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		defer w.Close()
 		editor, err := w.UserService().CreateUser("mcp-editor", "mcp-editor@example.com", "password", coreauth.RoleEditor)
@@ -630,7 +631,7 @@ var _ = ginkgo.Describe("frontd actor resolution", func() {
 })
 
 var _ = ginkgo.Describe("frontd frontend configuration", func() {
-	ginkgo.It("uses branding for spahtml", func() {
+	ginkgo.It("uses branding for spahtml", ginkgo.Label("integration"), func() {
 		dataDir := leafwikiTempDir()
 		Expect(os.WriteFile(filepath.Join(dataDir, "branding.json"), []byte(`{"siteName":"Runtime Wiki","faviconFile":"favicon.ico"}`), 0o644)).To(Succeed())
 		embedFrontendOrig := httpinternal.EmbedFrontend
@@ -653,7 +654,7 @@ var _ = ginkgo.Describe("frontd frontend configuration", func() {
 })
 
 var _ = ginkgo.Describe("wikid/frontd runtime", func() {
-	ginkgo.It("with process lock serializes process map access", func() {
+	ginkgo.It("with process lock serializes process map access", ginkgo.Label("unit"), func() {
 		runtime := &wikidFrontdRuntime{}
 		runtime.mu.Lock()
 		entered := make(chan struct{})
@@ -677,7 +678,7 @@ var _ = ginkgo.Describe("wikid/frontd runtime", func() {
 })
 
 var _ = ginkgo.Describe("frontd public MCP proxy", func() {
-	ginkgo.It("requires bearer before proxying", func() {
+	ginkgo.It("requires bearer before proxying", ginkgo.Label("integration"), func() {
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("X-LeafWiki-Upstream", "workspaced")
 			w.WriteHeader(http.StatusAccepted)
@@ -701,7 +702,7 @@ var _ = ginkgo.Describe("frontd public MCP proxy", func() {
 })
 
 var _ = ginkgo.Describe("frontd workspace MCP proxy", func() {
-	ginkgo.It("requires bearer before proxying", func() {
+	ginkgo.It("requires bearer before proxying", ginkgo.Label("integration"), func() {
 		handler := frontdMCPBearerAuthHandler(
 			leafwikiRuntimeConfig{
 				BasePath:  "",
@@ -726,7 +727,7 @@ var _ = ginkgo.Describe("frontd workspace MCP proxy", func() {
 })
 
 var _ = ginkgo.Describe("workspace MCP unavailable handler", func() {
-	ginkgo.It("returns structured error", func() {
+	ginkgo.It("returns structured error", ginkgo.Label("integration"), func() {
 		rec := httptest.NewRecorder()
 
 		workspaceMCPUnavailableHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp/workspaces/docs", nil))
@@ -737,7 +738,7 @@ var _ = ginkgo.Describe("workspace MCP unavailable handler", func() {
 })
 
 var _ = ginkgo.Describe("private MCP unauthorized response", func() {
-	ginkgo.It("returns structured error", func() {
+	ginkgo.It("returns structured error", ginkgo.Label("integration"), func() {
 		rec := httptest.NewRecorder()
 
 		writePrivateMCPUnauthorized(rec)
@@ -748,7 +749,7 @@ var _ = ginkgo.Describe("private MCP unauthorized response", func() {
 })
 
 var _ = ginkgo.Describe("local-only HTTP MCP handler", func() {
-	ginkgo.It("rejects non loopback requests", func() {
+	ginkgo.It("rejects non loopback requests", ginkgo.Label("integration"), func() {
 		calls := 0
 		handler := localOnlyHTTPMCPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			calls++
@@ -773,7 +774,7 @@ var _ = ginkgo.Describe("local-only HTTP MCP handler", func() {
 })
 
 var _ = ginkgo.Describe("wikid control MCP actor resolver", func() {
-	ginkgo.It("loads API key user from wikid auth store", func() {
+	ginkgo.It("loads API key user from wikid auth store", ginkgo.Label("integration"), func() {
 		authDir := leafwikiTempDir()
 		userStore, err := coreauth.NewUserStore(authDir)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("NewUserStore failed: %v", err))
@@ -808,7 +809,7 @@ var _ = ginkgo.Describe("wikid control MCP actor resolver", func() {
 })
 
 var _ = ginkgo.Describe("federated first-contact registration", func() {
-	ginkgo.It("grants the native STDIO API key editor access to a new federated workspace", func() {
+	ginkgo.It("grants the native STDIO API key editor access to a new federated workspace", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
 		authDir := wikid.AuthStoragePaths(layout.HomeDir).AuthDir
@@ -842,7 +843,7 @@ var _ = ginkgo.Describe("federated first-contact registration", func() {
 })
 
 var _ = ginkgo.Describe("federated first-contact registration", func() {
-	ginkgo.It("reuses an existing federated workspace without adding a native STDIO grant", func() {
+	ginkgo.It("reuses an existing federated workspace without adding a native STDIO grant", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
 		authDir := wikid.AuthStoragePaths(layout.HomeDir).AuthDir
@@ -877,7 +878,7 @@ var _ = ginkgo.Describe("federated first-contact registration", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace ensure", func() {
-	ginkgo.It("preserves structured grant denial", func() {
+	ginkgo.It("preserves structured grant denial", ginkgo.Label("integration"), func() {
 		control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.URL.Path != "/__leafwiki/workspaces/workspace-b/ensure" {
 				http.NotFound(w, req)
@@ -902,7 +903,7 @@ var _ = ginkgo.Describe("federated workspace ensure", func() {
 })
 
 var _ = ginkgo.Describe("runtime error responses", func() {
-	ginkgo.It("renders message from catalog", func() {
+	ginkgo.It("renders message from catalog", ginkgo.Label("integration"), func() {
 
 		rec := httptest.NewRecorder()
 		writeRuntimeError(rec, http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied)
@@ -916,7 +917,7 @@ var _ = ginkgo.Describe("runtime error responses", func() {
 })
 
 var _ = ginkgo.Describe("federated first-contact registration", func() {
-	ginkgo.It("persists markdown link root prefix", func() {
+	ginkgo.It("persists markdown link root prefix", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		layout := wikid.GlobalLayout(filepath.Join(baseDir, ".leafwiki"))
 		requestCfg := projectdaemon.Config{
@@ -941,7 +942,7 @@ var _ = ginkgo.Describe("federated first-contact registration", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace runtime configuration", func() {
-	ginkgo.It("restores markdown link root prefix", func() {
+	ginkgo.It("restores markdown link root prefix", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "workspace-data")
 		rootDir := filepath.Join(baseDir, "workspace-root")
@@ -961,7 +962,7 @@ var _ = ginkgo.Describe("federated workspace runtime configuration", func() {
 })
 
 var _ = ginkgo.Describe("daemon owner runtime configuration", func() {
-	ginkgo.It("clears home markdown link root prefix", func() {
+	ginkgo.It("clears home markdown link root prefix", ginkgo.Label("unit"), func() {
 		baseDir := leafwikiTempDir()
 		cfg := testRuntimeConfig(
 			filepath.Join(baseDir, "workspace-data"),
@@ -982,7 +983,7 @@ var _ = ginkgo.Describe("daemon owner runtime configuration", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace manager", func() {
-	ginkgo.It("uses semantic workspace ID state", func() {
+	ginkgo.It("uses semantic workspace ID state", ginkgo.Label("integration"), func() {
 		manager := &federatedWorkspaceManager{}
 		manager.processes = map[workspaceid.WorkspaceID]*internalRuntimeRoleProcess{}
 		manager.descriptors = map[workspaceid.WorkspaceID][]string{}
@@ -999,7 +1000,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 })
 
 var _ = ginkgo.Describe("home workspace status synchronization", func() {
-	ginkgo.It("tracks workspaced role", func() {
+	ginkgo.It("tracks workspaced role", ginkgo.Label("integration"), func() {
 		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
 		now := time.Now().UTC()
 
@@ -1044,7 +1045,7 @@ var _ = ginkgo.Describe("home workspace status synchronization", func() {
 })
 
 var _ = ginkgo.Describe("project daemon descriptor health", func() {
-	ginkgo.It("probes workspaced private MCP", func() {
+	ginkgo.It("probes workspaced private MCP", ginkgo.Label("integration"), func() {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.Header.Get(projectdaemon.ControlTokenHeader) != "private-token" {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -1073,7 +1074,7 @@ var _ = ginkgo.Describe("project daemon descriptor health", func() {
 })
 
 var _ = ginkgo.Describe("wikid actor context handler", func() {
-	ginkgo.It("resolves OAuth bearer for MCP", func() {
+	ginkgo.It("resolves OAuth bearer for MCP", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		defer w.Close()
 		cfg := leafwikiRuntimeConfig{
@@ -1110,7 +1111,7 @@ var _ = ginkgo.Describe("wikid actor context handler", func() {
 })
 
 var _ = ginkgo.Describe("wikid actor context handler", func() {
-	ginkgo.It("returns structured workspace grant denial", func() {
+	ginkgo.It("returns structured workspace grant denial", ginkgo.Label("integration"), func() {
 		w := newFrontdActorTestWiki()
 		defer w.Close()
 		cfg := leafwikiRuntimeConfig{
@@ -1137,7 +1138,7 @@ var _ = ginkgo.Describe("wikid actor context handler", func() {
 })
 
 var _ = ginkgo.Describe("workspace grant role resolution", func() {
-	ginkgo.It("caps grant by current user role", func() {
+	ginkgo.It("caps grant by current user role", ginkgo.Label("unit"), func() {
 		tests := []struct {
 			name     string
 			userRole wikid.GrantRole
@@ -1249,7 +1250,7 @@ func issueOAuthAccessTokenForTest(router http.Handler) string {
 }
 
 var _ = ginkgo.Describe("boolean configuration resolution", func() {
-	ginkgo.It("uses workspace sync environment when flag absent", func() {
+	ginkgo.It("uses workspace sync environment when flag absent", ginkgo.Label("unit"), func() {
 		leafwikiSetenv("LEAFWIKI_ENABLE_WORKSPACE_SYNC", "true")
 
 		got := resolveBool("enable-workspace-sync", false, map[string]bool{}, "LEAFWIKI_ENABLE_WORKSPACE_SYNC")
@@ -1259,7 +1260,7 @@ var _ = ginkgo.Describe("boolean configuration resolution", func() {
 })
 
 var _ = ginkgo.Describe("logging configuration resolution", func() {
-	ginkgo.It("defaults to file under resolved data dir", func() {
+	ginkgo.It("defaults to file under resolved data dir", ginkgo.Label("unit"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 
 		cfg := resolveLoggingConfigForArgs([]string{"--data-dir=" + dataDir})
@@ -1269,7 +1270,7 @@ var _ = ginkgo.Describe("logging configuration resolution", func() {
 })
 
 var _ = ginkgo.Describe("logging configuration resolution", func() {
-	ginkgo.It("CLI overrides environment target", func() {
+	ginkgo.It("CLI overrides environment target", ginkgo.Label("unit"), func() {
 		leafwikiSetenv("LEAFWIKI_LOG_TARGET", "file")
 
 		cfg := resolveLoggingConfigForArgs([]string{"--log-target=stderr"})
@@ -1279,7 +1280,7 @@ var _ = ginkgo.Describe("logging configuration resolution", func() {
 })
 
 var _ = ginkgo.Describe("logging configuration resolution", func() {
-	ginkgo.It("uses environment when flag absent", func() {
+	ginkgo.It("uses environment when flag absent", ginkgo.Label("unit"), func() {
 		leafwikiSetenv("LEAFWIKI_LOG_TARGET", "stdout")
 
 		cfg := resolveLoggingConfigForArgs(nil)
@@ -1289,7 +1290,7 @@ var _ = ginkgo.Describe("logging configuration resolution", func() {
 })
 
 var _ = ginkgo.Describe("logging configuration resolution", func() {
-	ginkgo.It("CLI stream target ignores inherited env log file", func() {
+	ginkgo.It("CLI stream target ignores inherited env log file", ginkgo.Label("unit"), func() {
 		leafwikiSetenv("LEAFWIKI_LOG_FILE", "logs/from-env.log")
 
 		cfg := resolveLoggingConfigForArgs([]string{"--log-target=stderr"})
@@ -1299,7 +1300,7 @@ var _ = ginkgo.Describe("logging configuration resolution", func() {
 })
 
 var _ = ginkgo.Describe("logging configuration resolution", func() {
-	ginkgo.It("rejects log file for stream target", func() {
+	ginkgo.It("rejects log file for stream target", ginkgo.Label("unit"), func() {
 		_, err := resolveLoggingConfigForArgsAllowError([]string{
 			"--log-target=stderr",
 			"--log-file=custom.log",
@@ -1310,7 +1311,7 @@ var _ = ginkgo.Describe("logging configuration resolution", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("default server logging uses file for startup and request logs and keeps stdout clean", func() {
+	ginkgo.It("default server logging uses file for startup and request logs and keeps stdout clean", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		port := freeTCPPort()
 		proc := startLeafwikiHelper([]string{
@@ -1346,7 +1347,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("default file logging records fresh data directory creation", func() {
+	ginkgo.It("default file logging records fresh data directory creation", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		port := freeTCPPort()
 		proc := startLeafwikiHelper([]string{
@@ -1374,7 +1375,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("CLI stderr target overrides env file target", func() {
+	ginkgo.It("CLI stderr target overrides env file target", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		port := freeTCPPort()
 		proc := startLeafwikiHelper([]string{
@@ -1406,7 +1407,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("environment stderr target is used when flag absent", func() {
+	ginkgo.It("environment stderr target is used when flag absent", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		port := freeTCPPort()
 		proc := startLeafwikiHelper([]string{
@@ -1435,7 +1436,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("rejects invalid log target on stderr with no stdout", func() {
+	ginkgo.It("rejects invalid log target on stderr with no stdout", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--disable-auth",
 			"--data-dir", filepath.Join(leafwikiTempDir(), "data"),
@@ -1450,7 +1451,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config YAML value overrides environment", func() {
+	ginkgo.It("config YAML value overrides environment", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -1475,7 +1476,7 @@ log-target: stderr
 
 // Plantrace evidence: TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars.
 var _ = ginkgo.Describe("YAML configuration loading", func() {
-	ginkgo.It("resolution precedence and explicit scalars", func() {
+	ginkgo.It("resolution precedence and explicit scalars", ginkgo.Label("unit"), func() {
 		leafwikiSetenv("LEAFWIKI_PORT", "9999")
 		leafwikiSetenv("LEAFWIKI_HOST", "0.0.0.0")
 		leafwikiSetenv("LEAFWIKI_BASE_PATH", "/wiki")
@@ -1504,7 +1505,7 @@ public-access: false
 })
 
 var _ = ginkgo.Describe("config file flag registry", func() {
-	ginkgo.It("registers public runtime flags", func() {
+	ginkgo.It("registers public runtime flags", ginkgo.Label("unit"), func() {
 		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
 		registerFlags(fs)
 
@@ -1545,7 +1546,7 @@ var _ = ginkgo.Describe("config file flag registry", func() {
 })
 
 var _ = ginkgo.Describe("service example configuration", func() {
-	ginkgo.It("parses active template", func() {
+	ginkgo.It("parses active template", ginkgo.Label("unit"), func() {
 		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
 		registerFlags(fs)
 		visited := map[string]bool{}
@@ -1569,7 +1570,7 @@ var _ = ginkgo.Describe("service example configuration", func() {
 })
 
 var _ = ginkgo.Describe("service example configuration", func() {
-	ginkgo.It("documents every public YAML key", func() {
+	ginkgo.It("documents every public YAML key", ginkgo.Label("unit"), func() {
 		documented := serviceExampleConfigKeys()
 		allowed := configFileFlagNames()
 
@@ -1594,7 +1595,7 @@ var _ = ginkgo.Describe("service example configuration", func() {
 })
 
 var _ = ginkgo.Describe("YAML configuration loading", func() {
-	ginkgo.It("accepts quoted scalar coercions", func() {
+	ginkgo.It("accepts quoted scalar coercions", ginkgo.Label("unit"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 		writeTestConfig(configPath, `public-access: "false"
 allow-insecure: "true"
@@ -1611,7 +1612,7 @@ access-token-timeout: "30m"
 })
 
 var _ = ginkgo.Describe("YAML configuration loading", func() {
-	ginkgo.It("rejects invalid keys and values", func() {
+	ginkgo.It("rejects invalid keys and values", ginkgo.Label("unit"), func() {
 		tests := []struct {
 			name   string
 			yaml   string
@@ -1649,7 +1650,7 @@ var _ = ginkgo.Describe("YAML configuration loading", func() {
 })
 
 var _ = ginkgo.Describe("YAML configuration loading", func() {
-	ginkgo.It("rejects config mixed with normal CLI flag", func() {
+	ginkgo.It("rejects config mixed with normal CLI flag", ginkgo.Label("unit"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 		writeTestConfig(configPath, "port: 8080\n")
 
@@ -1661,7 +1662,7 @@ var _ = ginkgo.Describe("YAML configuration loading", func() {
 })
 
 var _ = ginkgo.Describe("YAML configuration loading", func() {
-	ginkgo.It("rejects config mixed with subcommand trailing CLI flag", func() {
+	ginkgo.It("rejects config mixed with subcommand trailing CLI flag", ginkgo.Label("unit"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 		writeTestConfig(configPath, "data-dir: ./data\n")
 
@@ -1699,7 +1700,7 @@ var _ = ginkgo.Describe("YAML configuration loading", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config path value named agent hook does not fail open", func() {
+	ginkgo.It("config path value named agent hook does not fail open", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
 			"--config", "agent-hook",
 			"--not-a-real-flag",
@@ -1711,7 +1712,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook rejects trailing CLI flag without fail open", func() {
+	ginkgo.It("config agent hook rejects trailing CLI flag without fail open", ginkgo.Label("e2e"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 		writeTestConfig(configPath, "data-dir: ./data\n")
 		payload := `{"hook_event_name":"SessionStart","session_id":"config-conflict-secret"}`
@@ -1729,7 +1730,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook rejects trailing CLI flag before reading config", func() {
+	ginkgo.It("config agent hook rejects trailing CLI flag before reading config", ginkgo.Label("e2e"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "missing.yml")
 		payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-conflict-secret"}`
 
@@ -1746,7 +1747,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook missing config file fails open", func() {
+	ginkgo.It("config agent hook missing config file fails open", ginkgo.Label("e2e"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "missing.yml")
 		payload := `{"hook_event_name":"SessionStart","session_id":"missing-config-secret"}`
 
@@ -1761,7 +1762,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook rejects flag looking config path without fail open", func() {
+	ginkgo.It("config agent hook rejects flag looking config path without fail open", ginkgo.Label("e2e"), func() {
 		payload := `{"hook_event_name":"SessionStart","session_id":"flag-looking-config-secret"}`
 
 		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
@@ -1776,7 +1777,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook rejects dash prefixed config path without fail open", func() {
+	ginkgo.It("config agent hook rejects dash prefixed config path without fail open", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		configPath := filepath.Join(baseDir, "---config")
 		writeTestConfig(configPath, fmt.Sprintf(`disable-auth: true
@@ -1805,7 +1806,7 @@ log-target: stderr
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook rejects empty config path without fail open", func() {
+	ginkgo.It("config agent hook rejects empty config path without fail open", ginkgo.Label("e2e"), func() {
 		tests := []struct {
 			name string
 			args []string
@@ -1834,7 +1835,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook rejects help mix without fail open", func() {
+	ginkgo.It("config agent hook rejects help mix without fail open", ginkgo.Label("e2e"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 		writeTestConfig(configPath, "data-dir: ./data\n")
 		payload := `{"hook_event_name":"SessionStart","session_id":"config-help-secret"}`
@@ -1852,7 +1853,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config rejects positional help", func() {
+	ginkgo.It("config rejects positional help", ginkgo.Label("e2e"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 		writeTestConfig(configPath, "data-dir: ./data\n")
 
@@ -1868,7 +1869,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config agent hook rejects unknown flag without fail open", func() {
+	ginkgo.It("config agent hook rejects unknown flag without fail open", ginkgo.Label("e2e"), func() {
 		configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 		writeTestConfig(configPath, "data-dir: ./data\n")
 		payload := `{"hook_event_name":"SessionStart","session_id":"unknown-config-flag-secret"}`
@@ -1885,7 +1886,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook fail open uses config", func() {
+	ginkgo.It("agent hook fail open uses config", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		sameDir := filepath.Join(baseDir, "same")
 		configPath := filepath.Join(baseDir, "leafwiki.yml")
@@ -1907,7 +1908,7 @@ log-target: stderr
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("reset admin password uses config data dir", func() {
+	ginkgo.It("reset admin password uses config data dir", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		initWikidAdminUser(dataDir)
@@ -1933,7 +1934,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config path does not affect daemon identity", func() {
+	ginkgo.It("config path does not affect daemon identity", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		baseDir := leafwikiTempDir()
@@ -1967,7 +1968,7 @@ log-target: stderr
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("rejects explicit log file for stream target", func() {
+	ginkgo.It("rejects explicit log file for stream target", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--disable-auth",
 			"--data-dir", filepath.Join(leafwikiTempDir(), "data"),
@@ -1982,7 +1983,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO auth enabled requires API key", func() {
+	ginkgo.It("native STDIO auth enabled requires API key", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--mcp=stdio",
@@ -1998,7 +1999,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO rejects invalid API key without leaking secret", func() {
+	ginkgo.It("native STDIO rejects invalid API key without leaking secret", ginkgo.Label("e2e"), func() {
 		secret := "lwk_secret_bad"
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--mcp=stdio",
@@ -2016,7 +2017,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO rejects stdout logging", func() {
+	ginkgo.It("native STDIO rejects stdout logging", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--mcp=stdio",
 			"--disable-auth",
@@ -2031,7 +2032,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("public HTTPMCP non loopback host starts web and keeps local MCP", func() {
+	ginkgo.It("public HTTPMCP non loopback host starts web and keeps local MCP", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		baseDir := leafwikiTempDir()
 		ginkgo.DeferCleanup(func() {
@@ -2064,7 +2065,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO rejects positional command with stderr only", func() {
+	ginkgo.It("native STDIO rejects positional command with stderr only", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--mcp=stdio",
 			"bogus",
@@ -2077,7 +2078,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO environment rejects positional command with stderr only", func() {
+	ginkgo.It("native STDIO environment rejects positional command with stderr only", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--disable-auth",
 			"bogus",
@@ -2092,7 +2093,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO starts HTTP and stdin close stops server", func() {
+	ginkgo.It("native STDIO starts HTTP and stdin close stops server", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		rootDir := filepath.Join(leafwikiTempDir(), "content")
@@ -2118,7 +2119,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO only keeps HTTPMCP route disabled", func() {
+	ginkgo.It("native STDIO only keeps HTTPMCP route disabled", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		port := freeTCPPort()
@@ -2147,7 +2148,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO second compatible startup attaches to project daemon", func() {
+	ginkgo.It("native STDIO second compatible startup attaches to project daemon", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		baseDir := leafwikiTempDir()
@@ -2187,7 +2188,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO only startup attaches to HTTP enabled project daemon", func() {
+	ginkgo.It("native STDIO only startup attaches to HTTP enabled project daemon", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2224,7 +2225,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO owner stderr logging falls back to file", func() {
+	ginkgo.It("native STDIO owner stderr logging falls back to file", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		baseDir := leafwikiTempDir()
@@ -2254,7 +2255,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("project daemon owner spawn", func() {
-	ginkgo.It("removes secret startup config on executable failure", func() {
+	ginkgo.It("removes secret startup config on executable failure", ginkgo.Label("e2e"), func() {
 		oldExecutable := projectDaemonExecutable
 		ginkgo.DeferCleanup(func() {
 			projectDaemonExecutable = oldExecutable
@@ -2288,7 +2289,7 @@ var _ = ginkgo.Describe("project daemon owner spawn", func() {
 })
 
 var _ = ginkgo.Describe("project daemon owner spawn", func() {
-	ginkgo.It("eventually removes secret startup config when child exits before read", func() {
+	ginkgo.It("eventually removes secret startup config when child exits before read", ginkgo.Label("e2e"), func() {
 		oldExecutable := projectDaemonExecutable
 		oldCleanupDelay := projectDaemonStartupConfigPostStartCleanupDelay
 		ginkgo.DeferCleanup(func() {
@@ -2326,7 +2327,7 @@ var _ = ginkgo.Describe("project daemon owner spawn", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("allows native tool attachment without owner bootstrap secrets", func() {
+	ginkgo.It("allows native tool attachment without owner bootstrap secrets", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2366,7 +2367,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("stale descriptor is replaced without sending API key", func() {
+	ginkgo.It("stale descriptor is replaced without sending API key", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2451,7 +2452,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("untrusted stale descriptor is replaced when locks are free", func() {
+	ginkgo.It("untrusted stale descriptor is replaced when locks are free", ginkgo.Label("e2e"), func() {
 		tests := []struct {
 			name  string
 			setup func(path string)
@@ -2519,7 +2520,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("project daemon descriptor trust", func() {
-	ginkgo.It("preserves untrusted descriptor when any project lock is held", func() {
+	ginkgo.It("preserves untrusted descriptor when any project lock is held", ginkgo.Label("integration"), func() {
 		tests := []struct {
 			name string
 			lock func(dataDir string, rootDir string) func()
@@ -2579,7 +2580,7 @@ var _ = ginkgo.Describe("project daemon descriptor trust", func() {
 })
 
 var _ = ginkgo.Describe("project daemon descriptor trust", func() {
-	ginkgo.It("preserves trusted descriptor when locks held but control unreachable", func() {
+	ginkgo.It("preserves trusted descriptor when locks held but control unreachable", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2625,7 +2626,7 @@ var _ = ginkgo.Describe("project daemon descriptor trust", func() {
 })
 
 var _ = ginkgo.Describe("project daemon descriptor trust", func() {
-	ginkgo.It("preserves trusted unsupported schema descriptor when project lock held", func() {
+	ginkgo.It("preserves trusted unsupported schema descriptor when project lock held", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2667,7 +2668,7 @@ var _ = ginkgo.Describe("project daemon descriptor trust", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("plain web owner supports later private STDIO attach", func() {
+	ginkgo.It("plain web owner supports later private STDIO attach", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2703,7 +2704,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent presence control starts owner activity", func() {
+	ginkgo.It("agent presence control starts owner activity", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2737,7 +2738,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook malformed JSON fails open", func() {
+	ginkgo.It("agent hook malformed JSON fails open", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2763,7 +2764,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook starts daemon and records presence", func() {
+	ginkgo.It("agent hook starts daemon and records presence", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -2811,7 +2812,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook replaces stale descriptor and fails open", func() {
+	ginkgo.It("agent hook replaces stale descriptor and fails open", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		leafwikiSetenv("HOME", filepath.Join(baseDir, "home"))
 		dataDir := filepath.Join(baseDir, "data")
@@ -2888,7 +2889,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("agent-hook command", func() {
-	ginkgo.It("recovers panic and allows", func() {
+	ginkgo.It("recovers panic and allows", ginkgo.Label("unit"), func() {
 		var stdout bytes.Buffer
 		err := runAgentHookCommand(context.Background(), testRuntimeConfig(leafwikiTempDir(), filepath.Join(leafwikiTempDir(), "root"), freeTCPPort(), mcpTransports{}, true), agenthooks.ProviderCodex, panicReader{}, &stdout)
 		Expect(stdout.String()).To(MatchCodexAgentHookAllowResponse())
@@ -2898,7 +2899,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 })
 
 var _ = ginkgo.Describe("agent-hook command", func() {
-	ginkgo.It("read error fails open", func() {
+	ginkgo.It("read error fails open", ginkgo.Label("unit"), func() {
 		var stdout bytes.Buffer
 		readErr := errors.New("synthetic read failure")
 		err := runAgentHookCommand(
@@ -2915,7 +2916,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook pre dispatch failures fail open", func() {
+	ginkgo.It("agent hook pre dispatch failures fail open", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		sameDir := filepath.Join(baseDir, "same")
 		payload := `{"hook_event_name":"SessionStart","session_id":"pre-dispatch-secret"}`
@@ -2935,7 +2936,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook flag first pre dispatch failures fail open", func() {
+	ginkgo.It("agent hook flag first pre dispatch failures fail open", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		sameDir := filepath.Join(baseDir, "same")
 		payload := `{"hook_event_name":"SessionStart","session_id":"flag-first-secret"}`
@@ -2955,7 +2956,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("non hook flag value named agent hook does not fail open", func() {
+	ginkgo.It("non hook flag value named agent hook does not fail open", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		sameDir := filepath.Join(baseDir, "same")
 		Expect(os.MkdirAll(sameDir, 0o755)).To(Succeed())
@@ -2975,7 +2976,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("non hook flag value named agent hook parse error does not fail open", func() {
+	ginkgo.It("non hook flag value named agent hook parse error does not fail open", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
 			"--log-file", "agent-hook",
 			"--not-a-real-flag",
@@ -2987,7 +2988,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook flag first parse errors fail open", func() {
+	ginkgo.It("agent hook flag first parse errors fail open", ginkgo.Label("e2e"), func() {
 		payload := `{"hook_event_name":"SessionStart","session_id":"flag-parse-secret"}`
 
 		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
@@ -3002,7 +3003,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook flag value named config does not disable fail open", func() {
+	ginkgo.It("agent hook flag value named config does not disable fail open", ginkgo.Label("e2e"), func() {
 		payload := `{"hook_event_name":"SessionStart","session_id":"flag-value-config-secret"}`
 
 		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
@@ -3018,7 +3019,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook malformed config flag does not disable fail open", func() {
+	ginkgo.It("agent hook malformed config flag does not disable fail open", ginkgo.Label("e2e"), func() {
 		payload := `{"hook_event_name":"SessionStart","session_id":"malformed-config-flag-secret"}`
 
 		stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
@@ -3034,7 +3035,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("agent hook provider allow responses fail open", func() {
+	ginkgo.It("agent hook provider allow responses fail open", ginkgo.Label("e2e"), func() {
 		tests := []struct {
 			name       string
 			provider   agenthooks.ProviderID
@@ -3071,7 +3072,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("agent-hook command", func() {
-	ginkgo.It("oversized payload fails open", func() {
+	ginkgo.It("oversized payload fails open", ginkgo.Label("unit"), func() {
 		var stdout bytes.Buffer
 		baseDir := leafwikiTempDir()
 		err := runAgentHookCommand(
@@ -3088,7 +3089,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 })
 
 var _ = ginkgo.Describe("agent-hook command", func() {
-	ginkgo.It("locked project fails open", func() {
+	ginkgo.It("locked project fails open", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3126,7 +3127,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 })
 
 var _ = ginkgo.Describe("agent-hook command", func() {
-	ginkgo.It("control record failures fail open", func() {
+	ginkgo.It("control record failures fail open", ginkgo.Label("integration"), func() {
 		tests := []struct {
 			name          string
 			recordHandler func(http.ResponseWriter, *http.Request)
@@ -3192,7 +3193,7 @@ func (r errorReader) Read([]byte) (int, error) {
 }
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("disabled auth owner rejects API key STDIO attach", func() {
+	ginkgo.It("disabled auth owner rejects API key STDIO attach", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3232,7 +3233,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("non loopback plain web owner supports later private STDIO attach", func() {
+	ginkgo.It("non loopback plain web owner supports later private STDIO attach", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3264,7 +3265,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("plain web second startup attaches to existing owner", func() {
+	ginkgo.It("plain web second startup attaches to existing owner", ginkgo.Label("e2e"), func() {
 		if !supportsGracefulProcessSignal() {
 			ginkgo.Skip(fmt.Sprint("graceful process signaling is required to assert foreground session release"))
 		}
@@ -3308,7 +3309,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("proxies native tool frames through a plain web owner", func() {
+	ginkgo.It("proxies native tool frames through a plain web owner", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3346,7 +3347,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("proxies native user context through an authenticated HTTP owner", func() {
+	ginkgo.It("proxies native user context through an authenticated HTTP owner", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3388,7 +3389,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("disabled auth STDIO CLIents collaborate through owner", func() {
+	ginkgo.It("disabled auth STDIO CLIents collaborate through owner", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3433,7 +3434,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("plain web owner rejects later public MCP enablement", func() {
+	ginkgo.It("plain web owner rejects later public MCP enablement", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3471,7 +3472,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("base path owner rejects later no base path startup", func() {
+	ginkgo.It("base path owner rejects later no base path startup", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3506,7 +3507,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("auth owner rejects later disable auth startup", func() {
+	ginkgo.It("auth owner rejects later disable auth startup", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -3539,7 +3540,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("project daemon descriptor uses default idle timeout when unspecified", func() {
+	ginkgo.It("project daemon descriptor uses default idle timeout when unspecified", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -3568,7 +3569,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("wikidfrontd runtime writes role descriptor", func() {
+	ginkgo.It("wikidfrontd runtime writes role descriptor", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -3635,7 +3636,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("wikidfrontd runtime lists home workspace", func() {
+	ginkgo.It("wikidfrontd runtime lists home workspace", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -3682,7 +3683,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("wikidfrontd runtime proxies workspace API by ID", func() {
+	ginkgo.It("wikidfrontd runtime proxies workspace API by ID", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -3719,7 +3720,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("wikidfrontd runtime ensures registered workspace by ID", func() {
+	ginkgo.It("wikidfrontd runtime ensures registered workspace by ID", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -3798,7 +3799,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("federated STDIO attach", func() {
-	ginkgo.It("rejects descriptor for different registered workspace", func() {
+	ginkgo.It("rejects descriptor for different registered workspace", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		leafwikiSetenv("HOME", filepath.Join(baseDir, "home"))
 		dataDir := filepath.Join(baseDir, "beta-data")
@@ -3862,7 +3863,7 @@ var _ = ginkgo.Describe("federated STDIO attach", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace manager", func() {
-	ginkgo.It("ensure single flights concurrent startup", func() {
+	ginkgo.It("ensure single flights concurrent startup", ginkgo.Label("integration"), func() {
 		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
 		manager := newFederatedWorkspaceManager(
 			leafwikiRuntimeConfig{},
@@ -3945,7 +3946,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace manager", func() {
-	ginkgo.It("ensure canceled duplicate waiter returns context error", func() {
+	ginkgo.It("ensure canceled duplicate waiter returns context error", ginkgo.Label("integration"), func() {
 		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
 		manager := newFederatedWorkspaceManager(
 			leafwikiRuntimeConfig{},
@@ -4008,7 +4009,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace manager", func() {
-	ginkgo.It("ensure failure does not poison retry", func() {
+	ginkgo.It("ensure failure does not poison retry", ginkgo.Label("integration"), func() {
 		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
 		manager := newFederatedWorkspaceManager(
 			leafwikiRuntimeConfig{},
@@ -4057,7 +4058,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace manager", func() {
-	ginkgo.It("ensure does not serialize different workspaces", func() {
+	ginkgo.It("ensure does not serialize different workspaces", ginkgo.Label("integration"), func() {
 		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
 		manager := newFederatedWorkspaceManager(
 			leafwikiRuntimeConfig{},
@@ -4135,7 +4136,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace manager", func() {
-	ginkgo.It("starts workspaced with ephemeral port", func() {
+	ginkgo.It("starts workspaced with ephemeral port", ginkgo.Label("integration"), func() {
 		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{})
 		manager := newFederatedWorkspaceManager(
 			leafwikiRuntimeConfig{},
@@ -4173,7 +4174,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 })
 
 var _ = ginkgo.Describe("federated workspace manager", func() {
-	ginkgo.It("removes stale descriptors and restarts after crash", func() {
+	ginkgo.It("removes stale descriptors and restarts after crash", ginkgo.Label("integration"), func() {
 		supervisor := wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{
 			MaxRestarts: 1,
 			Backoff:     time.Millisecond,
@@ -4251,21 +4252,21 @@ func testRuntimeRoleProcess(role projectdaemon.RoleName, pid int, done <-chan er
 }
 
 var _ = ginkgo.Describe("internal runtime role readiness timeout", func() {
-	ginkgo.It("is thirty seconds", func() {
+	ginkgo.It("is thirty seconds", ginkgo.Label("unit"), func() {
 		Expect(internalRuntimeRoleReadinessTimeout).To(Equal(30*time.Second), fmt.Sprintf("internal runtime role readiness timeout = %v, want 30s", internalRuntimeRoleReadinessTimeout))
 
 	})
 })
 
 var _ = ginkgo.Describe("federated workspace ensure timeout", func() {
-	ginkgo.It("is thirty seconds", func() {
+	ginkgo.It("is thirty seconds", ginkgo.Label("unit"), func() {
 		Expect(federatedWorkspaceEnsureTimeout).To(Equal(30*time.Second), fmt.Sprintf("federated workspace ensure timeout = %v, want 30s", federatedWorkspaceEnsureTimeout))
 
 	})
 })
 
 var _ = ginkgo.Describe("internal runtime role process", func() {
-	ginkgo.It("stops child when ready role mismatches", func() {
+	ginkgo.It("stops child when ready role mismatches", ginkgo.Label("e2e"), func() {
 		pidPath := filepath.Join(leafwikiTempDir(), "wrong-role.pid")
 		leafwikiSetenv("GO_WANT_LEAFWIKI_HELPER_PROCESS", "1")
 		leafwikiSetenv("LEAFWIKI_TEST_RUNTIME_READY_WRONG_ROLE", "1")
@@ -4294,7 +4295,7 @@ var _ = ginkgo.Describe("internal runtime role process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("wikidfrontd runtime restarts workspaced and updates descriptor", func() {
+	ginkgo.It("wikidfrontd runtime restarts workspaced and updates descriptor", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -4343,7 +4344,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("wikidfrontd runtime uses fresh wikid auth stores", func() {
+	ginkgo.It("wikidfrontd runtime uses fresh wikid auth stores", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -4398,7 +4399,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("project daemon descriptor includes workspace sync flag", func() {
+	ginkgo.It("project daemon descriptor includes workspace sync flag", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -4426,7 +4427,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("removed revision and workspace sync flags fail unknown", func() {
+	ginkgo.It("removed revision and workspace sync flags fail unknown", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -4453,7 +4454,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("config endpoint reports workspace sync flag", func() {
+	ginkgo.It("config endpoint reports workspace sync flag", ginkgo.Label("e2e"), func() {
 		var ownerPID int
 		ginkgo.DeferCleanup(func() {
 			terminateProjectDaemonProcess(ownerPID)
@@ -4490,7 +4491,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("different root dir does not remove live project descriptor", func() {
+	ginkgo.It("different root dir does not remove live project descriptor", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		ownerRootDir := filepath.Join(baseDir, "owner-content")
@@ -4528,7 +4529,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("first startup writes secure project daemon descriptor", func() {
+	ginkgo.It("first startup writes secure project daemon descriptor", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		baseDir := leafwikiTempDir()
@@ -4560,7 +4561,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("canonical path variants attach with default file logging", func() {
+	ginkgo.It("canonical path variants attach with default file logging", ginkgo.Label("e2e"), func() {
 		if runtime.GOOS == "windows" {
 			ginkgo.Skip(fmt.Sprint("symlink path canonicalization test is Unix-oriented"))
 		}
@@ -4604,7 +4605,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("auth enabled project daemon descriptor omits bootstrap secret fingerprints", func() {
+	ginkgo.It("auth enabled project daemon descriptor omits bootstrap secret fingerprints", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -4643,7 +4644,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO close keeps owner alive until idle timeout", func() {
+	ginkgo.It("native STDIO close keeps owner alive until idle timeout", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
@@ -4670,7 +4671,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("crashed native STDIO frontend expires heartbeat and releases locks", func() {
+	ginkgo.It("crashed native STDIO frontend expires heartbeat and releases locks", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
@@ -4699,7 +4700,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO piped output exits before owner idle timeout", func() {
+	ginkgo.It("native STDIO piped output exits before owner idle timeout", ginkgo.Label("e2e"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -4723,7 +4724,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("exposes HTTP tools when native and HTTP transports run together", func() {
+	ginkgo.It("exposes HTTP tools when native and HTTP transports run together", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		port := freeTCPPort()
@@ -4749,7 +4750,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("reattaches combined transports while keeping logs on stderr", func() {
+	ginkgo.It("reattaches combined transports while keeping logs on stderr", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		baseDir := leafwikiTempDir()
@@ -4787,7 +4788,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("legacy MCP flags fail unknown", func() {
+	ginkgo.It("legacy MCP flags fail unknown", ginkgo.Label("e2e"), func() {
 		for _, removedFlag := range []string{"--enable-mcp", "--mcp-stdio"} {
 			func() {
 				_ = removedFlag
@@ -4810,7 +4811,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO malformed JSON returns parse error and continues", func() {
+	ginkgo.It("native STDIO malformed JSON returns parse error and continues", ginkgo.Label("e2e"), func() {
 		proc, stdin := startLeafwikiHelperWithStdinPipe([]string{
 			"--mcp=stdio",
 			"--disable-auth",
@@ -4839,7 +4840,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO rejects second process with config mismatch", func() {
+	ginkgo.It("native STDIO rejects second process with config mismatch", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		baseDir := leafwikiTempDir()
@@ -4882,7 +4883,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native STDIO rejects second process with same root dir", func() {
+	ginkgo.It("native STDIO rejects second process with same root dir", ginkgo.Label("e2e"), func() {
 		stdinReader, stdinWriter := io.Pipe()
 		defer stdinWriter.Close()
 		baseDir := leafwikiTempDir()
@@ -4921,7 +4922,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("concurrent project daemon startup", func() {
-	ginkgo.It("attaches to winning owner after spawn error", func() {
+	ginkgo.It("attaches to winning owner after spawn error", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -5000,7 +5001,7 @@ var _ = ginkgo.Describe("concurrent project daemon startup", func() {
 })
 
 var _ = ginkgo.Describe("concurrent project daemon startup", func() {
-	ginkgo.It("handles structured lock error", func() {
+	ginkgo.It("handles structured lock error", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -5084,7 +5085,7 @@ var _ = ginkgo.Describe("concurrent project daemon startup", func() {
 })
 
 var _ = ginkgo.Describe("project daemon startup", func() {
-	ginkgo.It("reports non lock startup error directly", func() {
+	ginkgo.It("reports non lock startup error directly", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -5114,7 +5115,7 @@ var _ = ginkgo.Describe("project daemon startup", func() {
 })
 
 var _ = ginkgo.Describe("project daemon startup", func() {
-	ginkgo.It("reports structured non lock startup error directly", func() {
+	ginkgo.It("reports structured non lock startup error directly", ginkgo.Label("integration"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -5150,7 +5151,7 @@ var _ = ginkgo.Describe("project daemon startup", func() {
 })
 
 var _ = ginkgo.Describe("STDIO attach daemon config comparison", func() {
-	ginkgo.It("ignores owner logging settings", func() {
+	ginkgo.It("ignores owner logging settings", ginkgo.Label("unit"), func() {
 		owner := projectdaemon.Config{
 			DataDir:           "/tmp/leafwiki-data",
 			RootDir:           "/tmp/leafwiki-root",
@@ -5174,7 +5175,7 @@ var _ = ginkgo.Describe("STDIO attach daemon config comparison", func() {
 })
 
 var _ = ginkgo.Describe("plain server daemon config comparison", func() {
-	ginkgo.It("preserves public MCP mismatch", func() {
+	ginkgo.It("preserves public MCP mismatch", ginkgo.Label("unit"), func() {
 		owner := projectdaemon.Config{
 			DataDir:          "/tmp/leafwiki-data",
 			RootDir:          "/tmp/leafwiki-root",
@@ -5193,7 +5194,7 @@ var _ = ginkgo.Describe("plain server daemon config comparison", func() {
 })
 
 var _ = ginkgo.Describe("daemon runtime configuration", func() {
-	ginkgo.It("includes workspace sync", func() {
+	ginkgo.It("includes workspace sync", ginkgo.Label("unit"), func() {
 		baseDir := leafwikiTempDir()
 		cfg := testRuntimeConfig(
 			filepath.Join(baseDir, "data"),
@@ -5212,7 +5213,7 @@ var _ = ginkgo.Describe("daemon runtime configuration", func() {
 })
 
 var _ = ginkgo.Describe("daemon owner runtime configuration", func() {
-	ginkgo.It("for wikidfrontd forces workspace sync", func() {
+	ginkgo.It("for wikidfrontd forces workspace sync", ginkgo.Label("unit"), func() {
 		baseDir := leafwikiTempDir()
 		cfg := testRuntimeConfig(
 			filepath.Join(baseDir, "data"),
@@ -5237,7 +5238,7 @@ var _ = ginkgo.Describe("daemon owner runtime configuration", func() {
 
 var _ = ginkgo.Describe("project daemon request comparison", func() {
 	// Plantrace evidence: TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields.
-	ginkgo.It("reports daemon relevant descriptor fields", func() {
+	ginkgo.It("reports daemon relevant descriptor fields", ginkgo.Label("unit"), func() {
 		owner := completeDaemonCompareConfig()
 		tests := []struct {
 			name  string
@@ -5287,7 +5288,7 @@ var _ = ginkgo.Describe("project daemon request comparison", func() {
 })
 
 var _ = ginkgo.Describe("STDIO attach daemon config comparison", func() {
-	ginkgo.It("documents ignored fields", func() {
+	ginkgo.It("documents ignored fields", ginkgo.Label("unit"), func() {
 		owner := completeDaemonCompareConfig()
 		requested := owner
 		requested.PublicMCPEnabled = !owner.PublicMCPEnabled
@@ -5303,7 +5304,7 @@ var _ = ginkgo.Describe("STDIO attach daemon config comparison", func() {
 })
 
 var _ = ginkgo.Describe("project daemon descriptor comparison", func() {
-	ginkgo.It("checks top level workspace ID", func() {
+	ginkgo.It("checks top level workspace ID", ginkgo.Label("unit"), func() {
 		requested := completeDaemonCompareConfig()
 		requested.WorkspaceID = "beta"
 		descriptorConfig := requested
@@ -5326,7 +5327,7 @@ var _ = ginkgo.Describe("project daemon descriptor comparison", func() {
 })
 
 var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
-	ginkgo.It("has no full request timeout", func() {
+	ginkgo.It("has no full request timeout", ginkgo.Label("integration"), func() {
 		client := daemonStdioBridgeHTTPClient(daemonStdioBridge{
 			ControlToken: "control-token",
 			APIKey:       "stdio-api-key",
@@ -5337,7 +5338,7 @@ var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
 })
 
 var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
-	ginkgo.It("refreshes actor context before forwarding", func() {
+	ginkgo.It("refreshes actor context before forwarding", ginkgo.Label("integration"), func() {
 		verifyCalls := 0
 		revoked := false
 		now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
@@ -5422,7 +5423,7 @@ var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
 })
 
 var _ = ginkgo.Describe("daemon STDIO actor context", func() {
-	ginkgo.It("preserves workspace grant denial", func() {
+	ginkgo.It("preserves workspace grant denial", ginkgo.Label("integration"), func() {
 		control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.URL.Path != "/__leafwiki/actor-context" {
 				http.NotFound(w, req)
@@ -5445,7 +5446,7 @@ var _ = ginkgo.Describe("daemon STDIO actor context", func() {
 })
 
 var _ = ginkgo.Describe("daemon heartbeat", func() {
-	ginkgo.It("returns control errors", func() {
+	ginkgo.It("returns control errors", ginkgo.Label("unit"), func() {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, "session not found", http.StatusNotFound)
 		}))
@@ -5461,7 +5462,7 @@ var _ = ginkgo.Describe("daemon heartbeat", func() {
 })
 
 var _ = ginkgo.Describe("idle shutdown activity tracking", func() {
-	ginkgo.It("ignores stale zero notification with active session", func() {
+	ginkgo.It("ignores stale zero notification with active session", ginkgo.Label("unit"), func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		currentCount := 1
@@ -5481,7 +5482,7 @@ var _ = ginkgo.Describe("idle shutdown activity tracking", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki command behavior", func() {
-	ginkgo.It("cancel if no session after startup grace waits for first session", func() {
+	ginkgo.It("cancel if no session after startup grace waits for first session", ginkgo.Label("unit"), func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		registry := projectdaemon.NewSessionRegistry(time.Second, nil)
@@ -5503,7 +5504,7 @@ var _ = ginkgo.Describe("leafwiki command behavior", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki command behavior", func() {
-	ginkgo.It("cancel if no session after startup grace cancels when no session registers", func() {
+	ginkgo.It("cancel if no session after startup grace cancels when no session registers", ginkgo.Label("unit"), func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		registry := projectdaemon.NewSessionRegistry(time.Second, nil)
@@ -5515,7 +5516,7 @@ var _ = ginkgo.Describe("leafwiki command behavior", func() {
 })
 
 var _ = ginkgo.Describe("project daemon activity count", func() {
-	ginkgo.It("combines sessions and agent presence", func() {
+	ginkgo.It("combines sessions and agent presence", ginkgo.Label("unit"), func() {
 		sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
 		presence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
 
@@ -5537,7 +5538,7 @@ var _ = ginkgo.Describe("project daemon activity count", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki command behavior", func() {
-	ginkgo.It("cancel if no activity after startup grace waits for first agent presence", func() {
+	ginkgo.It("cancel if no activity after startup grace waits for first agent presence", ginkgo.Label("unit"), func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
@@ -5562,7 +5563,7 @@ var _ = ginkgo.Describe("leafwiki command behavior", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki command behavior", func() {
-	ginkgo.It("cancel if no activity after startup grace ignores missing agent end", func() {
+	ginkgo.It("cancel if no activity after startup grace ignores missing agent end", ginkgo.Label("unit"), func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		sessions := projectdaemon.NewSessionRegistry(time.Second, nil)
@@ -5589,7 +5590,7 @@ var _ = ginkgo.Describe("leafwiki command behavior", func() {
 })
 
 var _ = ginkgo.Describe("daemon owner environment", func() {
-	ginkgo.It("omits session and bootstrap secrets", func() {
+	ginkgo.It("omits session and bootstrap secrets", ginkgo.Label("unit"), func() {
 		leafwikiSetenv("LEAFWIKI_MCP_API_KEY", "lwk_secret")
 		leafwikiSetenv("LEAFWIKI_RUN_MCP_API_KEY", "lwk_run_secret")
 		leafwikiSetenv("LEAFWIKI_JWT_SECRET", "jwt-secret")
@@ -5619,7 +5620,7 @@ var _ = ginkgo.Describe("daemon owner environment", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("native stdiosigterm releases data dir lock", func() {
+	ginkgo.It("native stdiosigterm releases data dir lock", ginkgo.Label("e2e"), func() {
 		if !supportsGracefulProcessSignal() {
 			ginkgo.Skip(fmt.Sprint("SIGTERM-style graceful process signaling is not available on this platform"))
 		}
@@ -5665,7 +5666,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("foreground server signal leaves detached owner until idle timeout", func() {
+	ginkgo.It("foreground server signal leaves detached owner until idle timeout", ginkgo.Label("e2e"), func() {
 		if !supportsProcessGroupSignal() {
 			ginkgo.Skip(fmt.Sprint("process-group signaling is not available on this platform"))
 		}
@@ -5694,7 +5695,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("file target startup failure also reaches stderr", func() {
+	ginkgo.It("file target startup failure also reaches stderr", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--data-dir", dataDir,
@@ -5719,7 +5720,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("help stays on stdout", func() {
+	ginkgo.It("help stays on stdout", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{"--help"}, nil)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("help process error = %v, stderr=%q", err, stderr))
 
@@ -5730,7 +5731,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("daemon help stays on stdout", func() {
+	ginkgo.It("daemon help stays on stdout", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{"daemon", "--help"}, nil)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("daemon help process error = %v, stderr=%q", err, stderr))
 
@@ -5741,7 +5742,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("daemon requires default service config", func() {
+	ginkgo.It("daemon requires default service config", ginkgo.Label("e2e"), func() {
 		homeDir := leafwikiTempDir()
 		stdout, stderr, err := runLeafwikiHelper([]string{"daemon"}, map[string]string{
 			"HOME": homeDir,
@@ -5755,7 +5756,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("daemon rejects invalid default service config", func() {
+	ginkgo.It("daemon rejects invalid default service config", ginkgo.Label("e2e"), func() {
 		homeDir := leafwikiTempDir()
 		serviceDir := filepath.Join(homeDir, ".leafwiki")
 		Expect(os.MkdirAll(serviceDir, 0o755)).To(Succeed())
@@ -5773,7 +5774,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("daemon rejects internal service config keys", func() {
+	ginkgo.It("daemon rejects internal service config keys", ginkgo.Label("e2e"), func() {
 		homeDir := leafwikiTempDir()
 		serviceDir := filepath.Join(homeDir, ".leafwiki")
 		Expect(os.MkdirAll(serviceDir, 0o755)).To(Succeed())
@@ -5791,7 +5792,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("rejects service-mode native transport configuration", func() {
+	ginkgo.It("rejects service-mode native transport configuration", ginkgo.Label("e2e"), func() {
 		homeDir := leafwikiTempDir()
 		serviceDir := filepath.Join(homeDir, ".leafwiki")
 		Expect(os.MkdirAll(serviceDir, 0o755)).To(Succeed())
@@ -5811,7 +5812,7 @@ mcp: stdio
 })
 
 var _ = ginkgo.Describe("daemon service configuration", func() {
-	ginkgo.It("uses defaults instead of environment", func() {
+	ginkgo.It("uses defaults instead of environment", ginkgo.Label("unit"), func() {
 		homeDir := leafwikiTempDir()
 		leafwikiSetenv("HOME", homeDir)
 		leafwikiSetenv("LEAFWIKI_HOST", "0.0.0.0")
@@ -5849,7 +5850,7 @@ var _ = ginkgo.Describe("daemon service configuration", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("daemon runs foreground runtime until signal", func() {
+	ginkgo.It("daemon runs foreground runtime until signal", ginkgo.Label("e2e"), func() {
 		if !supportsGracefulProcessSignal() {
 			ginkgo.Skip(fmt.Sprint("SIGTERM-style graceful process signaling is not available on this platform"))
 		}
@@ -5912,7 +5913,7 @@ daemon-idle-timeout: 0
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("daemon rejects runtime stack environment", func() {
+	ginkgo.It("daemon rejects runtime stack environment", ginkgo.Label("e2e"), func() {
 		homeDir := leafwikiTempDir()
 		serviceDir := filepath.Join(homeDir, ".leafwiki")
 		Expect(os.MkdirAll(serviceDir, 0o755)).To(Succeed())
@@ -5935,7 +5936,7 @@ daemon-idle-timeout: 0
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("daemon runs from service example template", func() {
+	ginkgo.It("daemon runs from service example template", ginkgo.Label("e2e"), func() {
 		if !supportsGracefulProcessSignal() {
 			ginkgo.Skip(fmt.Sprint("SIGTERM-style graceful process signaling is not available on this platform"))
 		}
@@ -5988,7 +5989,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("help flag after other flags stays on stdout", func() {
+	ginkgo.It("help flag after other flags stays on stdout", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--log-target", "stderr",
 			"--help",
@@ -6001,7 +6002,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("help flag value does not short circuit subcommand parsing", func() {
+	ginkgo.It("help flag value does not short circuit subcommand parsing", ginkgo.Label("e2e"), func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--admin-password", "help",
 			"unknown-command",
@@ -6013,7 +6014,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("unknown command ignores dirty server only environment", func() {
+	ginkgo.It("unknown command ignores dirty server only environment", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--data-dir", dataDir,
@@ -6029,7 +6030,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("unknown command rejects MCPstdio environment", func() {
+	ginkgo.It("unknown command rejects MCPstdio environment", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--data-dir", dataDir,
@@ -6044,7 +6045,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("reset admin password ignores dirty server only environment", func() {
+	ginkgo.It("reset admin password ignores dirty server only environment", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		initWikidAdminUser(dataDir)
 
@@ -6061,7 +6062,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("unknown command stays user facing and does not create log file", func() {
+	ginkgo.It("unknown command stays user facing and does not create log file", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		stdout, stderr, err := runLeafwikiHelper([]string{
 			"--data-dir", dataDir,
@@ -6078,7 +6079,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("reset admin password keeps credentials on stdout only", func() {
+	ginkgo.It("reset admin password keeps credentials on stdout only", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		initWikidAdminUser(dataDir)
 
@@ -6098,7 +6099,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("wikidfrontd reset admin password uses wikid auth store", func() {
+	ginkgo.It("wikidfrontd reset admin password uses wikid auth store", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		initWikidAdminUser(dataDir)
 
@@ -6117,7 +6118,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("explicit stdout target writes server logs to stdout", func() {
+	ginkgo.It("explicit stdout target writes server logs to stdout", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		port := freeTCPPort()
 		proc := startLeafwikiHelper([]string{
@@ -6150,7 +6151,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
-	ginkgo.It("disable request log suppresses process request log", func() {
+	ginkgo.It("disable request log suppresses process request log", ginkgo.Label("e2e"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		port := freeTCPPort()
 		proc := startLeafwikiHelper([]string{
@@ -6180,7 +6181,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 })
 
 var _ = ginkgo.Describe("workspace resolution", func() {
-	ginkgo.It("defaults root dir under data dir", func() {
+	ginkgo.It("defaults root dir under data dir", ginkgo.Label("unit"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 
 		workspace := resolveWorkspaceForArgs([]string{"--data-dir=" + dataDir})
@@ -6193,7 +6194,7 @@ var _ = ginkgo.Describe("workspace resolution", func() {
 })
 
 var _ = ginkgo.Describe("workspace resolution", func() {
-	ginkgo.It("env root dir overrides default", func() {
+	ginkgo.It("env root dir overrides default", ginkgo.Label("unit"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		rootDir := filepath.Join(leafwikiTempDir(), "content")
 		leafwikiSetenv("LEAFWIKI_ROOT_DIR", rootDir)
@@ -6205,7 +6206,7 @@ var _ = ginkgo.Describe("workspace resolution", func() {
 })
 
 var _ = ginkgo.Describe("workspace resolution", func() {
-	ginkgo.It("CLI root dir overrides env", func() {
+	ginkgo.It("CLI root dir overrides env", ginkgo.Label("unit"), func() {
 		dataDir := filepath.Join(leafwikiTempDir(), "data")
 		envRootDir := filepath.Join(leafwikiTempDir(), "env-content")
 		cliRootDir := filepath.Join(leafwikiTempDir(), "cli-content")
@@ -6221,7 +6222,7 @@ var _ = ginkgo.Describe("workspace resolution", func() {
 })
 
 var _ = ginkgo.Describe("workspace resolution", func() {
-	ginkgo.It("normalizes paths", func() {
+	ginkgo.It("normalizes paths", ginkgo.Label("unit"), func() {
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -6239,7 +6240,7 @@ var _ = ginkgo.Describe("workspace resolution", func() {
 })
 
 var _ = ginkgo.Describe("workspace validation", func() {
-	ginkgo.It("rejects same data and root dir", func() {
+	ginkgo.It("rejects same data and root dir", ginkgo.Label("unit"), func() {
 		dir := leafwikiTempDir()
 
 		err := validateWorkspaceDirs(dir, filepath.Clean(filepath.Join(dir, ".")))
@@ -6249,7 +6250,7 @@ var _ = ginkgo.Describe("workspace validation", func() {
 })
 
 var _ = ginkgo.Describe("workspace validation", func() {
-	ginkgo.It("rejects root dir containing data dir", func() {
+	ginkgo.It("rejects root dir containing data dir", ginkgo.Label("unit"), func() {
 		rootDir := filepath.Join(leafwikiTempDir(), "wiki")
 		dataDir := filepath.Join(rootDir, "data")
 
@@ -6260,7 +6261,7 @@ var _ = ginkgo.Describe("workspace validation", func() {
 })
 
 var _ = ginkgo.Describe("startup workspace resolution", func() {
-	ginkgo.It("skips workspace validation for reset admin password", func() {
+	ginkgo.It("skips workspace validation for reset admin password", ginkgo.Label("unit"), func() {
 		dir := leafwikiTempDir()
 		leafwikiSetenv("LEAFWIKI_ROOT_DIR", dir)
 
@@ -6278,7 +6279,7 @@ var _ = ginkgo.Describe("startup workspace resolution", func() {
 })
 
 var _ = ginkgo.Describe("MCP transport resolution", func() {
-	ginkgo.It("default env CLI and selector", func() {
+	ginkgo.It("default env CLI and selector", ginkgo.Label("unit"), func() {
 		func() {
 			_ = "default none"
 			got, err := resolveMCPTransportsForArgs(nil)
@@ -6328,7 +6329,7 @@ var _ = ginkgo.Describe("MCP transport resolution", func() {
 })
 
 var _ = ginkgo.Describe("MCP transport parsing", func() {
-	ginkgo.It("rejects invalid values", func() {
+	ginkgo.It("rejects invalid values", ginkgo.Label("unit"), func() {
 		tests := []struct {
 			name   string
 			raw    string
@@ -6352,7 +6353,7 @@ var _ = ginkgo.Describe("MCP transport parsing", func() {
 })
 
 var _ = ginkgo.Describe("MCP transport validation", func() {
-	ginkgo.It("accepts compatible transport settings and rejects invalid STDIO authentication combinations", func() {
+	ginkgo.It("accepts compatible transport settings and rejects invalid STDIO authentication combinations", ginkgo.Label("unit"), func() {
 		tests := []struct {
 			name      string
 			opts      mcpTransportOptions
@@ -6434,7 +6435,7 @@ var _ = ginkgo.Describe("MCP transport validation", func() {
 })
 
 var _ = ginkgo.Describe("HTTP router option building", func() {
-	ginkgo.It("propagates MCP enablement", func() {
+	ginkgo.It("propagates MCP enablement", ginkgo.Label("integration"), func() {
 		opts := buildHTTPRouterOptions(httpRouterOptionsInput{
 			publicAccess:        true,
 			authDisabled:        true,
@@ -6451,7 +6452,7 @@ var _ = ginkgo.Describe("HTTP router option building", func() {
 })
 
 var _ = ginkgo.Describe("listen address building", func() {
-	ginkgo.It("handles i pv6 loopback", func() {
+	ginkgo.It("handles i pv6 loopback", ginkgo.Label("unit"), func() {
 		got := buildListenAddress("::1", "8080")
 		Expect(got).To(Equal("[::1]:8080"), fmt.Sprintf("buildListenAddress(::1, 8080) = %q, want %q", got, "[::1]:8080"))
 
@@ -6459,7 +6460,7 @@ var _ = ginkgo.Describe("listen address building", func() {
 })
 
 var _ = ginkgo.Describe("CLI flag registration", func() {
-	ginkgo.It("accepts single dash long flags", func() {
+	ginkgo.It("accepts single dash long flags", ginkgo.Label("unit"), func() {
 		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
 		var errOut bytes.Buffer
 		fs.SetOutput(&errOut)
@@ -6480,7 +6481,7 @@ var _ = ginkgo.Describe("CLI flag registration", func() {
 })
 
 var _ = ginkgo.Describe("HTTP remote-user configuration", func() {
-	ginkgo.It("requires trusted proxy IPs only when remote-user auth is enabled", func() {
+	ginkgo.It("requires trusted proxy IPs only when remote-user auth is enabled", ginkgo.Label("unit"), func() {
 		tests := []struct {
 			name            string
 			enabled         bool
@@ -6509,7 +6510,7 @@ var _ = ginkgo.Describe("HTTP remote-user configuration", func() {
 })
 
 var _ = ginkgo.Describe("CLI flag registration", func() {
-	ginkgo.It("accepts double dash long flags", func() {
+	ginkgo.It("accepts double dash long flags", ginkgo.Label("unit"), func() {
 		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
 		var errOut bytes.Buffer
 		fs.SetOutput(&errOut)
@@ -6530,7 +6531,7 @@ var _ = ginkgo.Describe("CLI flag registration", func() {
 })
 
 var _ = ginkgo.Describe("CLI flag registration", func() {
-	ginkgo.It("accepts root dir flag", func() {
+	ginkgo.It("accepts root dir flag", ginkgo.Label("unit"), func() {
 		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
 		var errOut bytes.Buffer
 		fs.SetOutput(&errOut)
@@ -6545,7 +6546,7 @@ var _ = ginkgo.Describe("CLI flag registration", func() {
 })
 
 var _ = ginkgo.Describe("CLI flag registration", func() {
-	ginkgo.It("accepts logging flags", func() {
+	ginkgo.It("accepts logging flags", ginkgo.Label("unit"), func() {
 		fs := flag.NewFlagSet("leafwiki", flag.ContinueOnError)
 		var errOut bytes.Buffer
 		fs.SetOutput(&errOut)
@@ -7926,6 +7927,7 @@ func expectAgentHookConfigRejection(args []string) {
 
 var _ = ginkgo.Describe("visible legacy subcases", func() {
 	ginkgo.DescribeTable("rejects removed startup flags",
+		ginkgo.Label("unit"),
 		func(arg string) {
 			flagName := removedStartupFlagName(arg)
 			fs := flag.NewFlagSet("leafwiki-test", flag.ContinueOnError)
@@ -7944,6 +7946,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("rejects removed runtime env",
+		ginkgo.Label("unit"),
 		func(name string) {
 			leafwikiSetenv(name, "")
 
@@ -7959,6 +7962,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("caps grant by current user role",
+		ginkgo.Label("unit"),
 		func(userRole wikid.GrantRole, grant wikid.GrantRole, want wikid.GrantRole) {
 			Expect(effectiveWorkspaceGrantRole(userRole, grant)).To(Equal(want))
 		},
@@ -7975,6 +7979,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	}
 
 	ginkgo.DescribeTable("rejects invalid keys and values",
+		ginkgo.Label("unit"),
 		func(tc configFileErrorCase) {
 			configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 			writeTestConfig(configPath, tc.yaml)
@@ -7999,6 +8004,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("rejects config mixed with subcommand trailing CLI flag",
+		ginkgo.Label("unit"),
 		func(args []string, wantErr error) {
 			configPath := filepath.Join(leafwikiTempDir(), "leafwiki.yml")
 			writeTestConfig(configPath, "data-dir: ./data\n")
@@ -8016,6 +8022,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("config agent hook rejects empty config path without fail open",
+		ginkgo.Label("e2e"),
 		func(args []string) {
 			payload := `{"hook_event_name":"SessionStart","session_id":"empty-config-secret"}`
 
@@ -8035,6 +8042,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("agent hook provider allow responses fail open",
+		ginkgo.Label("e2e"),
 		func(provider agenthooks.ProviderID, payload string, wantStdout types.GomegaMatcher) {
 			baseDir := leafwikiTempDir()
 			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
@@ -8057,6 +8065,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("control record failures fail open",
+		ginkgo.Label("integration"),
 		func(recordHandler func(http.ResponseWriter, *http.Request), parentTimeout time.Duration, wantErr types.GomegaMatcher) {
 			cfg, cleanup := testRuntimeConfigWithHealthyControlDescriptor(recordHandler)
 			defer cleanup()
@@ -8083,6 +8092,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("removed revision and workspace sync flags fail unknown",
+		ginkgo.Label("e2e"),
 		func(removedFlag string) {
 			baseDir := leafwikiTempDir()
 			stdout, stderr, err := runLeafwikiHelperWithTimeout([]string{
@@ -8104,6 +8114,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("legacy MCP flags fail unknown",
+		ginkgo.Label("e2e"),
 		func(removedFlag string) {
 			stdout, stderr, err := runLeafwikiHelperWithTimeout([]string{
 				removedFlag,
@@ -8123,6 +8134,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("daemon relevant descriptor fields",
+		ginkgo.Label("unit"),
 		func(field string, mut func(*projectdaemon.Config)) {
 			owner := completeDaemonCompareConfig()
 			requested := owner
@@ -8160,6 +8172,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("default env CLI and selector",
+		ginkgo.Label("unit"),
 		func(args []string, envValue *string, want mcpTransports) {
 			if envValue != nil {
 				leafwikiSetenv("LEAFWIKI_MCP", *envValue)
@@ -8179,6 +8192,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("rejects invalid values",
+		ginkgo.Label("unit"),
 		func(raw string, reason runtimeconfig.MCPTransportErrorReason) {
 			_, err := parseMCPTransports(raw)
 			Expect(err).To(MatchMCPTransportError(reason))
@@ -8195,6 +8209,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	}
 
 	ginkgo.DescribeTable("accepts compatible transport settings and rejects invalid STDIO authentication combinations",
+		ginkgo.Label("unit"),
 		func(tc mcpTransportOptionCase) {
 			err := validateMCPTransportOptions(tc.opts)
 			if tc.messageID == "" {
@@ -8212,6 +8227,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("requires trusted proxy IPs only when remote-user auth is enabled",
+		ginkgo.Label("unit"),
 		func(enabled bool, trustedProxyIPs string, wantErr bool) {
 			err := validateHTTPRemoteUserConfig(enabled, trustedProxyIPs)
 			Expect(err != nil).To(Equal(wantErr))
@@ -8227,6 +8243,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("preserves untrusted descriptor when any project lock is held",
+		ginkgo.Label("integration"),
 		func(lock func(dataDir string, rootDir string) func()) {
 			baseDir := leafwikiTempDir()
 			dataDir := filepath.Join(baseDir, "data")
@@ -8261,6 +8278,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("untrusted stale descriptor is replaced when locks are free",
+		ginkgo.Label("e2e"),
 		func(setup func(path string)) {
 			baseDir := leafwikiTempDir()
 			dataDir := filepath.Join(baseDir, "data")
@@ -8308,6 +8326,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 var _ = ginkgo.Describe("cmd leafwiki helper contracts", func() {
 	ginkgo.DescribeTable("renders config flag names for mixed configuration errors",
+		ginkgo.Label("unit"),
 		func(arg string, name string, want string) {
 			Expect(configModeFlagDisplay(arg, name)).To(Equal(want))
 		},
@@ -8317,6 +8336,7 @@ var _ = ginkgo.Describe("cmd leafwiki helper contracts", func() {
 	)
 
 	ginkgo.DescribeTable("rejects bare config path placeholders",
+		ginkgo.Label("unit"),
 		func(value string, want bool) {
 			Expect(isInvalidBareConfigPathValue(value)).To(Equal(want))
 		},
