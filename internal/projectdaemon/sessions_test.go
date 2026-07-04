@@ -28,7 +28,7 @@ var _ = ginkgo.Describe("session registry", ginkgo.Label("unit"), func() {
 		Expect(counts).To(Equal([]int{1}))
 
 		registry.Heartbeat(id)
-		Expect(registry).To(reportSeenSessionState(true, 1))
+		Expect(registry).To(reportSessionSeen(1))
 		now = now.Add(2 * time.Second)
 		Expect(registry.PruneExpired()).To(BeZero())
 		Expect(registry.PruneExpired()).To(BeZero())
@@ -54,20 +54,20 @@ var _ = ginkgo.Describe("session registry", ginkgo.Label("unit"), func() {
 
 		Expect(registry.PruneExpired()).To(Equal(1))
 		registry.Release(typed)
-		Expect(registry).To(reportSeenSessionState(true, 0))
+		Expect(registry).To(reportSessionSeen(0))
 	})
 
 	ginkgo.It("reports whether any session has been seen and how many are active", func() {
 		registry := NewSessionRegistry(time.Second, nil)
 
-		Expect(registry).To(reportSeenSessionState(false, 0))
+		Expect(registry).To(reportNoSessionSeen(0))
 
 		id, err := registry.Register()
 		Expect(err).NotTo(HaveOccurred())
-		Expect(registry).To(reportSeenSessionState(true, 1))
+		Expect(registry).To(reportSessionSeen(1))
 
 		registry.Release(id)
-		Expect(registry).To(reportSeenSessionState(true, 0))
+		Expect(registry).To(reportSessionSeen(0))
 	})
 
 	ginkgo.It("prunes expired sessions from the background expiry loop", func() {
@@ -100,17 +100,36 @@ var _ = ginkgo.Describe("session registry", ginkgo.Label("unit"), func() {
 	})
 })
 
-func reportSeenSessionState(seen bool, count int) types.GomegaMatcher {
+func reportSessionSeen(count int) types.GomegaMatcher {
+	return reportSessionObservation(sessionObserved, count)
+}
+
+func reportNoSessionSeen(count int) types.GomegaMatcher {
+	return reportSessionObservation(sessionUnobserved, count)
+}
+
+func reportSessionObservation(outcome sessionObservationOutcome, count int) types.GomegaMatcher {
 	return WithTransform(func(registry *SessionRegistry) sessionRegistrySeenState {
 		ginkgo.GinkgoHelper()
 		gotSeen, gotCount := registry.SeenSessionCount()
-		return sessionRegistrySeenState{seen: gotSeen, count: gotCount}
-	}, Equal(sessionRegistrySeenState{seen: seen, count: count}))
+		gotOutcome := sessionUnobserved
+		if gotSeen {
+			gotOutcome = sessionObserved
+		}
+		return sessionRegistrySeenState{Outcome: gotOutcome, Count: gotCount}
+	}, Equal(sessionRegistrySeenState{Outcome: outcome, Count: count}))
 }
 
+type sessionObservationOutcome uint8
+
+const (
+	sessionUnobserved sessionObservationOutcome = iota
+	sessionObserved
+)
+
 type sessionRegistrySeenState struct {
-	seen  bool
-	count int
+	Outcome sessionObservationOutcome
+	Count   int
 }
 
 func lockedJoinCounts(mu *sync.Mutex, counts *[]int) string {

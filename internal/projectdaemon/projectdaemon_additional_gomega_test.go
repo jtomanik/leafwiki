@@ -230,7 +230,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 	ginkgo.It("uses default session registry TTLs and exits session expiry loops on cancellation", ginkgo.Label("unit"), func() {
 		registry := NewSessionRegistry(0, nil)
 		Expect(registry.ttl).To(Equal(DefaultHeartbeatTTL))
-		Expect(registry).To(reportSeenSessionState(false, 0))
+		Expect(registry).To(reportNoSessionSeen(0))
 
 		random, err := randomID()
 		Expect(err).NotTo(HaveOccurred())

@@ -77,12 +77,12 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 
 	ginkgo.It("reports seen state after accepted events", func() {
 		registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
-		Expect(registry).To(reportSeenPresenceState(false, 0))
+		Expect(registry).To(reportNoAgentPresenceSeen(0))
 
 		event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session"}`)
 		registry.Record(event)
 
-		Expect(registry).To(reportSeenPresenceState(true, 1))
+		Expect(registry).To(reportAgentPresenceSeen(1))
 	})
 
 	ginkgo.It("updates lifecycle metadata and expires idle sessions", func() {
@@ -146,7 +146,7 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 
 			registry.Record(event)
 
-			Expect(registry).To(reportSeenPresenceState(false, 0))
+			Expect(registry).To(reportNoAgentPresenceSeen(0))
 			Expect(counts).To(BeEmpty())
 		},
 		ginkgo.Entry("claude session end", agenthooks.ProviderClaude, `{"hook_event_name":"SessionEnd","session_id":"claude-ended-before-start"}`),
@@ -162,7 +162,7 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 
 			registry.Record(eventFactory())
 
-			Expect(registry).To(reportSeenPresenceState(false, 0))
+			Expect(registry).To(reportNoAgentPresenceSeen(0))
 			Expect(counts).To(BeEmpty())
 		},
 		ginkgo.Entry("raw session id", func() agenthooks.Event {
@@ -234,15 +234,34 @@ func matchAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
-func reportSeenPresenceState(seen bool, count int) types.GomegaMatcher {
+func reportAgentPresenceSeen(count int) types.GomegaMatcher {
+	return reportAgentPresenceObservation(agentPresenceObserved, count)
+}
+
+func reportNoAgentPresenceSeen(count int) types.GomegaMatcher {
+	return reportAgentPresenceObservation(agentPresenceUnobserved, count)
+}
+
+func reportAgentPresenceObservation(outcome agentPresenceObservationOutcome, count int) types.GomegaMatcher {
 	return WithTransform(func(registry *AgentPresenceRegistry) agentPresenceSeenState {
 		ginkgo.GinkgoHelper()
 		gotSeen, gotCount := registry.SeenPresenceCount()
-		return agentPresenceSeenState{seen: gotSeen, count: gotCount}
-	}, Equal(agentPresenceSeenState{seen: seen, count: count}))
+		gotOutcome := agentPresenceUnobserved
+		if gotSeen {
+			gotOutcome = agentPresenceObserved
+		}
+		return agentPresenceSeenState{Outcome: gotOutcome, Count: gotCount}
+	}, Equal(agentPresenceSeenState{Outcome: outcome, Count: count}))
 }
 
+type agentPresenceObservationOutcome uint8
+
+const (
+	agentPresenceUnobserved agentPresenceObservationOutcome = iota
+	agentPresenceObserved
+)
+
 type agentPresenceSeenState struct {
-	seen  bool
-	count int
+	Outcome agentPresenceObservationOutcome
+	Count   int
 }
