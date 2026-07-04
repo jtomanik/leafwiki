@@ -385,7 +385,7 @@ var _ = Describe("git revision store", func() {
 			Actor:  PublicEditorActor(),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(prune.Created).To(BeTrue())
+		Expect(prune).To(matchCreatedRevisionCommitWithMarkdownPaths(".obsidian/local.md"))
 
 		prunedCommit, err := store.repo.CommitObject(PlumbingHashFromCommitHash(prune.Hash))
 		Expect(err).NotTo(HaveOccurred())

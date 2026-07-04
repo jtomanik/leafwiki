@@ -17,10 +17,37 @@ import (
 	gitstorage "github.com/go-git/go-git/v6/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/identity"
 )
+
+func matchCreatedRevisionCommit(hash identity.CommitHash) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(commit *Commit) (bool, error) {
+		return commit != nil &&
+			commit.Created &&
+			commit.Hash == hash, nil
+	}).WithMessage("create a revision commit")
+}
+
+func matchCreatedRevisionCommitWithMarkdownPaths(paths ...string) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(commit *Commit) (bool, error) {
+		if commit == nil || !commit.Created || commit.ChangedMarkdownCount != len(paths) {
+			return false, nil
+		}
+		return ConsistOf(paths).Match(commit.ChangedMarkdownPaths)
+	}).WithMessage("create a revision commit for changed markdown paths")
+}
+
+func matchReusedRevisionHead(hash identity.CommitHash) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(commit *Commit) (bool, error) {
+		return commit != nil &&
+			!commit.Created &&
+			commit.Hash == hash, nil
+	}).WithMessage("reuse the current revision HEAD")
+}
 
 var _ = Describe("git revision edge behavior", func() {
 	It("handles helper defaults and parser fallbacks", func() {
@@ -227,10 +254,7 @@ var _ = Describe("git revision edge behavior", func() {
 		})
 		commit, err := store.Capture(context.Background(), CommitRequest{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commit).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Created": BeTrue(),
-			"Hash":    Equal(identity.CommitHashFromString(hash.String())),
-		})))
+		Expect(commit).To(matchCreatedRevisionCommit(identity.CommitHashFromString(hash.String())))
 		restoreHead()
 		restoreCommit()
 
@@ -276,10 +300,7 @@ var _ = Describe("git revision edge behavior", func() {
 		})
 		commit, err = store.Capture(context.Background(), CommitRequest{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commit).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Created": BeFalse(),
-			"Hash":    Equal(identity.CommitHashFromString(hash.String())),
-		})))
+		Expect(commit).To(matchReusedRevisionHead(identity.CommitHashFromString(hash.String())))
 		restoreHead()
 		restoreCommit()
 
@@ -795,16 +816,17 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreCollect = setGitRevisionSeam(&gitRevisionCollectMarkdownPaths, func(string) ([]string, error) {
 			return nil, nil
 		})
+		restoredWorkspaceHash := identity.CommitHashFromString("2222222222222222222222222222222222222222")
 		restoreCapture := setGitRevisionSeam(&gitRevisionStoreCapture, func(_ *Store, _ context.Context, req CommitRequest) (*Commit, error) {
 			Expect(req).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 				"Reason": Equal(ReasonRestore),
 				"Source": Equal(SourceSystem),
 			}))
-			return &Commit{Created: true}, nil
+			return &Commit{Created: true, Hash: restoredWorkspaceHash}, nil
 		})
 		commit, err := store.RestoreWorkspace(context.Background(), hash, CommitRequest{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commit.Created).To(BeTrue())
+		Expect(commit).To(matchCreatedRevisionCommit(restoredWorkspaceHash))
 		restoreCapture()
 		restoreCollect()
 		restoreFilesAt()
@@ -820,16 +842,17 @@ var _ = Describe("git revision edge behavior", func() {
 		restoreWrite = setGitRevisionSeam(&gitRevisionWriteFile, func(string, []byte, os.FileMode) error {
 			return nil
 		})
+		restoredDocumentHash := identity.CommitHashFromString("3333333333333333333333333333333333333333")
 		restoreCapture = setGitRevisionSeam(&gitRevisionStoreCapture, func(_ *Store, _ context.Context, req CommitRequest) (*Commit, error) {
 			Expect(req).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 				"Reason": Equal(ReasonRestore),
 				"Source": Equal(SourceSystem),
 			}))
-			return &Commit{Created: true}, nil
+			return &Commit{Created: true, Hash: restoredDocumentHash}, nil
 		})
 		commit, err = store.RestoreDocumentContentToPath(context.Background(), "page.md", "# Page\n", CommitRequest{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commit.Created).To(BeTrue())
+		Expect(commit).To(matchCreatedRevisionCommit(restoredDocumentHash))
 		restoreCapture()
 		restoreWrite()
 
