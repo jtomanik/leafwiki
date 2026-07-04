@@ -765,7 +765,7 @@ func createZipFromDir(root string) []byte {
 	return body.Bytes()
 }
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("handles disabled request logging without crashing", func() {
 
 		logs := captureDefaultLogs()
@@ -788,7 +788,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("writes request logs to the default slog sink", func() {
 
 		logs := captureDefaultLogs()
@@ -819,7 +819,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("writes recovery logs to the default slog sink", func() {
 
 		logs := captureDefaultLogs()
@@ -839,7 +839,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns a null current user for unauthenticated requests", func() {
 
 		w := createWikiTestInstance()
@@ -859,7 +859,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns the authenticated current user", func() {
 
 		w := createWikiTestInstance()
@@ -882,7 +882,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = DescribeTable("current-user responses are uncacheable",
+var _ = DescribeTable("current-user responses are uncacheable", Label("integration"),
 	func(authenticated bool) {
 
 		w := createWikiTestInstance()
@@ -918,7 +918,7 @@ var _ = DescribeTable("current-user responses are uncacheable",
 	Entry("authenticated", true),
 )
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("creates a page through the authenticated router", func() {
 
 		w := createWikiTestInstance()
@@ -947,7 +947,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("explains the insecure-transport requirement in the config route", func() {
 
 		w := createWikiTestInstance()
@@ -963,7 +963,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("explains the insecure-transport requirement during login", func() {
 
 		w := createWikiTestInstance()
@@ -981,7 +981,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page creation when the title is missing", func() {
 
 		w := createWikiTestInstance()
@@ -995,7 +995,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page creation with invalid JSON", func() {
 
 		w := createWikiTestInstance()
@@ -1009,7 +1009,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page creation when the route already exists", func() {
 
 		w := createWikiTestInstance()
@@ -1026,7 +1026,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns the page tree", func() {
 
 		w := createWikiTestInstance()
@@ -1051,7 +1051,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("publishes the configured maximum asset upload size", func() {
 
 		w := createWikiTestInstance()
@@ -1084,7 +1084,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("publishes whether link refactoring is enabled", func() {
 
 		w := createWikiTestInstance()
@@ -1117,7 +1117,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("publishes the markdown link root prefix", func() {
 
 		w := createWikiTestInstance()
@@ -1149,7 +1149,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("reports workspace sync as disabled when no sync root is configured", func() {
 
 		w := createWikiTestInstance()
@@ -1181,7 +1181,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns workspace sync status when sync is enabled", func() {
 
 		dataDir := httpTestTempDir()
@@ -1238,7 +1238,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("refreshes workspace sync after markdown is created on disk", func() {
 
 		dataDir := httpTestTempDir()
@@ -1304,7 +1304,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("lists workspace sync snapshots when sync is enabled", func() {
 
 		dataDir := httpTestTempDir()
@@ -1359,7 +1359,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("limits workspace sync snapshots to the requested page size", func() {
 
 		dataDir := httpTestTempDir()
@@ -1449,7 +1449,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("keeps workspace sync snapshot cursors stable after newer commits", func() {
 
 		dataDir := httpTestTempDir()
@@ -1559,7 +1559,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("allows unauthenticated workspace sync status reads in public mode", func() {
 
 		dataDir := httpTestTempDir()
@@ -1601,7 +1601,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("restores markdown files from a workspace sync snapshot", func() {
 
 		dataDir := httpTestTempDir()
@@ -1682,7 +1682,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns page revision history from the git-backed store", func() {
 
 		dataDir := filepath.Join(httpTestTempDir(), "data")
@@ -1750,7 +1750,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("serves revision snapshots and restores them through the git backend", func() {
 
 		dataDir := filepath.Join(httpTestTempDir(), "data")
@@ -1870,7 +1870,7 @@ previous content`
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns the frontend JSON shape for refactor previews", func() {
 
 		w := createWikiTestInstance()
@@ -1915,7 +1915,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects refactor previews when the feature flag is disabled", func() {
 
 		w := createWikiTestInstance()
@@ -1940,7 +1940,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("records refactor application through git history without legacy revisions", func() {
 
 		w := createWikiTestInstanceWithRevisionFlag(false)
@@ -1988,7 +1988,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects asset uploads that exceed the configured size limit", func() {
 
 		w := createWikiTestInstance()
@@ -2063,7 +2063,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("suggests a slug for a page title", func() {
 
 		w := createWikiTestInstance()
@@ -2083,7 +2083,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("cancels the current import plan", func() {
 
 		w := createWikiTestInstance()
@@ -2162,7 +2162,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("imports pages links and assets from an uploaded zip", func() {
 
 		w := createWikiTestInstance()
@@ -2296,7 +2296,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("applies the configured asset upload limit during import execution", func() {
 
 		w := createWikiTestInstance()
@@ -2419,7 +2419,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects slug suggestions when the title is missing", func() {
 
 		w := createWikiTestInstance()
@@ -2432,7 +2432,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("deletes a page through the authenticated router", func() {
 
 		w := createWikiTestInstance()
@@ -2449,7 +2449,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns not found when deleting a missing page", func() {
 
 		w := createWikiTestInstance()
@@ -2462,7 +2462,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects deleting a page that has children", func() {
 
 		w := createWikiTestInstance()
@@ -2478,7 +2478,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("deletes a page tree recursively when requested", func() {
 
 		w := createWikiTestInstance()
@@ -2497,7 +2497,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("updates page content through the authenticated router", func() {
 
 		w := createWikiTestInstance()
@@ -2529,7 +2529,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("writes page tags and string properties", func() {
 
 		w := createWikiTestInstance()
@@ -2573,7 +2573,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("removes page tags when an empty tag list is sent", func() {
 
 		w := createWikiTestInstance()
@@ -2639,7 +2639,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("preserves omitted tags and properties while clearing explicit empty values", func() {
 
 		w := createWikiTestInstance()
@@ -2767,7 +2767,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("indexes updated page tags for the tags route", func() {
 
 		w := createWikiTestInstance()
@@ -2801,7 +2801,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("counts tag suggestions within the selected tags", func() {
 
 		w := createWikiTestInstance()
@@ -2846,7 +2846,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("accepts repeated selected tag parameters", func() {
 
 		w := createWikiTestInstance()
@@ -2881,7 +2881,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("filters search results by selected tags", func() {
 
 		w := createWikiTestInstance()
@@ -2938,7 +2938,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns tag matches without a text query", func() {
 
 		w := createWikiTestInstance()
@@ -2994,7 +2994,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("normalizes pagination bounds for tag-only searches", func() {
 
 		w := createWikiTestInstance()
@@ -3039,7 +3039,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("shrinks tag facets as additional filters are applied", func() {
 
 		w := createWikiTestInstance()
@@ -3116,7 +3116,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns excerpts for pages matched by tags", func() {
 
 		w := createWikiTestInstance()
@@ -3158,7 +3158,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("accepts repeated tag parameters when listing tagged pages", func() {
 
 		w := createWikiTestInstance()
@@ -3200,7 +3200,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns not found when updating a missing page", func() {
 
 		w := createWikiTestInstance()
@@ -3214,7 +3214,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("keeps a page slug when the update does not change it", func() {
 
 		w := createWikiTestInstance()
@@ -3246,7 +3246,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page updates that would collide with an existing route", func() {
 
 		w := createWikiTestInstance()
@@ -3270,7 +3270,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page updates with invalid JSON", func() {
 
 		w := createWikiTestInstance()
@@ -3284,7 +3284,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page updates when the title is missing", func() {
 
 		w := createWikiTestInstance()
@@ -3298,7 +3298,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page updates when the slug is missing", func() {
 
 		w := createWikiTestInstance()
@@ -3312,7 +3312,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page updates with invalid properties", func() {
 
 		w := createWikiTestInstance()
@@ -3357,7 +3357,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns a page by id", func() {
 
 		dataDir := filepath.Join(httpTestTempDir(), "data")
@@ -3417,7 +3417,7 @@ Body
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns not found for a missing page id", func() {
 
 		w := createWikiTestInstance()
@@ -3430,7 +3430,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page reads when the id is missing", func() {
 
 		w := createWikiTestInstance()
@@ -3443,7 +3443,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page-by-path reads when the path is missing", func() {
 
 		w := createWikiTestInstance()
@@ -3456,7 +3456,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns the root section for an explicit empty path", func() {
 
 		dataDir := httpTestTempDir()
@@ -3499,7 +3499,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns not found for a missing page path", func() {
 
 		w := createWikiTestInstance()
@@ -3512,7 +3512,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("omits children when page-by-path resolves to a page", func() {
 
 		w := createWikiTestInstance()
@@ -3539,7 +3539,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns only direct children when page-by-path resolves to a section", func() {
 
 		w := createWikiTestInstance()
@@ -3567,7 +3567,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("uses the requested kind to distinguish same-basename pages and sections", func() {
 
 		dataDir := httpTestTempDir()
@@ -3642,7 +3642,7 @@ var _ = Describe("HTTP router", func() {
 })
 
 // - Explicit README.md page link stays a page when index.md exists
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("serves README.md as a section fallback only when no explicit page exists", func() {
 
 		dataDir := httpTestTempDir()
@@ -3730,7 +3730,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("prefers case-insensitive index files when building tree content paths", func() {
 
 		dataDir := httpTestTempDir()
@@ -3771,7 +3771,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("creates a section twin when a page route already exists", func() {
 
 		w := createWikiTestInstance()
@@ -3819,7 +3819,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns the current path for a page permalink", func() {
 
 		w := createWikiTestInstance()
@@ -3851,7 +3851,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("allows unauthenticated permalink reads in public mode", func() {
 
 		w := createWikiTestInstance()
@@ -3886,7 +3886,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("moves a page to a new parent", func() {
 
 		w := createWikiTestInstance()
@@ -3908,7 +3908,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns not found when moving a missing page", func() {
 
 		w := createWikiTestInstance()
@@ -3921,7 +3921,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page moves with invalid JSON", func() {
 
 		w := createWikiTestInstance()
@@ -3934,7 +3934,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page moves when the parent id is missing", func() {
 
 		w := createWikiTestInstance()
@@ -3947,7 +3947,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page moves when the parent is missing", func() {
 
 		w := createWikiTestInstance()
@@ -3964,7 +3964,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page moves that would create a cycle", func() {
 
 		w := createWikiTestInstance()
@@ -3981,7 +3981,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects page moves when the target already has the same slug", func() {
 
 		w := createWikiTestInstance()
@@ -4001,7 +4001,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("allows moving a page to its current location", func() {
 
 		w := createWikiTestInstance()
@@ -4016,7 +4016,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("sorts sibling pages in the requested order", func() {
 
 		w := createWikiTestInstance()
@@ -4056,7 +4056,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("logs in with valid credentials", func() {
 
 		w := createWikiTestInstance()
@@ -4076,7 +4076,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects login with invalid credentials", func() {
 
 		w := createWikiTestInstance()
@@ -4094,7 +4094,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("refreshes an authenticated session token", func() {
 
 		w := createWikiTestInstance()
@@ -4148,7 +4148,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("creates a user as an administrator", func() {
 
 		w := createWikiTestInstance()
@@ -4162,7 +4162,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects duplicate user email or username", func() {
 
 		w := createWikiTestInstance()
@@ -4186,7 +4186,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects user creation with an invalid role", func() {
 
 		w := createWikiTestInstance()
@@ -4200,7 +4200,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("creates a viewer user", func() {
 
 		w := createWikiTestInstance()
@@ -4214,7 +4214,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("updates a user role to viewer", func() {
 
 		w := createWikiTestInstance()
@@ -4240,7 +4240,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("prevents a viewer from creating pages", func() {
 
 		w := createWikiTestInstance()
@@ -4259,7 +4259,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("prevents a viewer from uploading assets", func() {
 
 		w := createWikiTestInstance()
@@ -4284,7 +4284,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("prevents a viewer from updating pages", func() {
 
 		w := createWikiTestInstance()
@@ -4310,7 +4310,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("prevents a viewer from deleting pages", func() {
 
 		w := createWikiTestInstance()
@@ -4335,7 +4335,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("lists users for administrators", func() {
 
 		w := createWikiTestInstance()
@@ -4358,7 +4358,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("updates a user as an administrator", func() {
 
 		w := createWikiTestInstance()
@@ -4384,7 +4384,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("changes the current user's password", func() {
 
 		w := createWikiTestInstance()
@@ -4425,7 +4425,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("lets administrators create list and revoke user mcp api keys", func() {
 
 		w := createWikiTestInstance()
@@ -4500,7 +4500,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("enforces permissions and validation for mcp api key routes", func() {
 
 		w := createWikiTestInstance()
@@ -4553,7 +4553,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("requires the current password and mcp scope for self-service api keys", func() {
 
 		w := createWikiTestInstance()
@@ -4614,7 +4614,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rate limits self-service mcp api key creation", func() {
 
 		w := createWikiTestInstance()
@@ -4635,7 +4635,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("disables self-service mcp api key creation for remote users", func() {
 
 		w := createWikiTestInstance()
@@ -4708,7 +4708,7 @@ type authDisabledSelfAPIKeyRoute struct {
 	body   string
 }
 
-var _ = DescribeTable("self-service mcp api key routes are blocked when auth is disabled",
+var _ = DescribeTable("self-service mcp api key routes are blocked when auth is disabled", Label("integration"),
 	func(tc authDisabledSelfAPIKeyRoute) {
 
 		w := createWikiTestInstance()
@@ -4768,7 +4768,7 @@ var _ = DescribeTable("self-service mcp api key routes are blocked when auth is 
 	Entry("revoke", authDisabledSelfAPIKeyRoute{method: http.MethodDelete, path: "/api/users/me/mcp-api-keys/some-key"}),
 )
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("deletes a user as an administrator", func() {
 
 		w := createWikiTestInstance()
@@ -4788,7 +4788,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("prevents deleting the administrator account", func() {
 
 		w := createWikiTestInstance()
@@ -4824,7 +4824,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("allows administrators through the admin middleware", func() {
 
 		w := createWikiTestInstance()
@@ -4839,7 +4839,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("blocks admin middleware access when auth is disabled", func() {
 
 		w := createWikiTestInstance()
@@ -4879,7 +4879,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects unauthenticated requests in auth middleware", func() {
 
 		w := createWikiTestInstance()
@@ -4897,7 +4897,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects invalid tokens in auth middleware", func() {
 
 		w := createWikiTestInstance()
@@ -4915,7 +4915,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("serves asset endpoints through the authenticated router", func() {
 
 		w := createWikiTestInstance()
@@ -5029,7 +5029,7 @@ var _ = Describe("HTTP router", func() {
 })
 
 // Lets check the indexing status
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("returns indexing status", func() {
 
 		// Lets call /api/search/status
@@ -5173,7 +5173,7 @@ type assetAccessControlScenario struct {
 }
 
 // TestAssetAccessControl tests the access control for static asset routes
-var _ = DescribeTable("asset routes enforce access control",
+var _ = DescribeTable("asset routes enforce access control", Label("integration"),
 	func(tc assetAccessControlScenario) {
 
 		w := createWikiTestInstance()
@@ -5233,7 +5233,7 @@ var _ = DescribeTable("asset routes enforce access control",
 	}),
 )
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("unit"), func() {
 	It("build Custom Stylesheet Tag", func() {
 
 		tag := httpinternal.BuildCustomStylesheetTag("/wiki", "/tmp/custom.css")
@@ -5244,7 +5244,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("unit"), func() {
 	It("omits custom stylesheet tags for an empty path", func() {
 
 		tag := httpinternal.BuildCustomStylesheetTag("", "")
@@ -5253,7 +5253,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("unit"), func() {
 	It("injects configured markup into the document head", func() {
 
 		html := "<html><head></head><body></body></html>"
@@ -5264,7 +5264,7 @@ var _ = Describe("HTTP router", func() {
 })
 
 var _ = Describe("router edge behavior", func() {
-	It("sets Gin release mode in production", func() {
+	It("sets Gin release mode in production", Label("integration"), func() {
 		previous := httpinternal.Environment
 		httpinternal.Environment = "production"
 		DeferCleanup(func() {
@@ -5277,7 +5277,7 @@ var _ = Describe("router edge behavior", func() {
 		Expect(gin.Mode()).To(Equal(gin.ReleaseMode))
 	})
 
-	It("normalizes empty and relative custom stylesheet paths", func() {
+	It("normalizes empty and relative custom stylesheet paths", Label("unit"), func() {
 		storageDir := httpTestTempDir()
 
 		empty, err := httpinternal.NormalizeCustomStylesheetPath(storageDir, " \t\n ")
@@ -5289,13 +5289,13 @@ var _ = Describe("router edge behavior", func() {
 		Expect(relative).To(Equal(filepath.Join(storageDir, "styles", "custom.css")))
 	})
 
-	It("leaves HTML unchanged when injecting into a document without a head close tag", func() {
+	It("leaves HTML unchanged when injecting into a document without a head close tag", Label("unit"), func() {
 		html := "<html><body>content</body></html>"
 
 		Expect(httpinternal.InjectIntoHead(html, `<script src="/custom.js"></script>`)).To(Equal(html))
 	})
 
-	It("panics when the embedded frontend dist filesystem cannot be opened", func() {
+	It("panics when the embedded frontend dist filesystem cannot be opened", Label("integration"), func() {
 		previous := httpinternal.EmbedFrontend
 		httpinternal.EmbedFrontend = "true"
 		DeferCleanup(func() {
@@ -5310,7 +5310,7 @@ var _ = Describe("router edge behavior", func() {
 		}).To(PanicWith(ContainSubstring("failed to create sub FS: dist unavailable")))
 	})
 
-	It("panics when the embedded frontend static filesystem cannot be opened", func() {
+	It("panics when the embedded frontend static filesystem cannot be opened", Label("integration"), func() {
 		previous := httpinternal.EmbedFrontend
 		httpinternal.EmbedFrontend = "true"
 		DeferCleanup(func() {
@@ -5333,7 +5333,7 @@ var _ = Describe("router edge behavior", func() {
 		Expect(requestedDirs).To(Equal([]string{"dist", "dist/static"}))
 	})
 
-	It("returns 404 when the embedded SPA index cannot be read", func() {
+	It("returns 404 when the embedded SPA index cannot be read", Label("integration"), func() {
 		previous := httpinternal.EmbedFrontend
 		httpinternal.EmbedFrontend = "true"
 		DeferCleanup(func() {
@@ -5351,7 +5351,7 @@ var _ = Describe("router edge behavior", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 	})
 
-	It("returns the relative path error while validating a custom stylesheet", func() {
+	It("returns the relative path error while validating a custom stylesheet", Label("unit"), func() {
 		storageDir := httpTestTempDir()
 		relErr := errors.New("relative path failed")
 		DeferCleanup(httpinternal.SetCustomStylesheetRelPathForTest(func(base, path string) (string, error) {
@@ -5366,7 +5366,7 @@ var _ = Describe("router edge behavior", func() {
 		Expect(err).To(MatchError(relErr))
 	})
 
-	It("returns 404 for a configured custom stylesheet that is missing on disk", func() {
+	It("returns 404 for a configured custom stylesheet that is missing on disk", Label("integration"), func() {
 		storageDir := httpTestTempDir()
 		missingCSSPath := filepath.Join(storageDir, "missing.css")
 		router := httpinternal.NewRouter(nil, httpinternal.FrontendConfig{
@@ -5379,7 +5379,7 @@ var _ = Describe("router edge behavior", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 	})
 
-	It("returns 500 for a configured custom stylesheet that cannot be statted", func() {
+	It("returns 500 for a configured custom stylesheet that cannot be statted", Label("integration"), func() {
 		router := httpinternal.NewRouter(nil, httpinternal.FrontendConfig{
 			CustomStylesheetPath: "bad\x00stylesheet.css",
 		}, httpinternal.RouterOptions{DisableRequestLog: true})
@@ -5390,7 +5390,7 @@ var _ = Describe("router edge behavior", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 	})
 
-	It("applies base path SPA fallback routing and index rewrites", func() {
+	It("applies base path SPA fallback routing and index rewrites", Label("integration"), func() {
 		previous := httpinternal.EmbedFrontend
 		httpinternal.EmbedFrontend = "true"
 		DeferCleanup(func() {
@@ -5438,7 +5438,7 @@ type frontendFaviconHrefScenario struct {
 	want        string
 }
 
-var _ = DescribeTable("frontend favicon hrefs include the base path and branding file",
+var _ = DescribeTable("frontend favicon hrefs include the base path and branding file", Label("unit"),
 	func(tt frontendFaviconHrefScenario) {
 
 		got := httpinternal.BuildFrontendFaviconHref(tt.basePath, tt.faviconFile)
@@ -5464,7 +5464,7 @@ var _ = DescribeTable("frontend favicon hrefs include the base path and branding
 	}),
 )
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("serves configured custom stylesheets", func() {
 
 		w := createWikiTestInstance()
@@ -5501,7 +5501,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects custom stylesheet paths outside the storage directory", func() {
 
 		w := createWikiTestInstance()
@@ -5532,7 +5532,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects custom stylesheet paths that are not css files", func() {
 
 		w := createWikiTestInstance()
@@ -5563,7 +5563,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("disables client caching for branding assets", func() {
 
 		w := createWikiTestInstance()
@@ -5585,7 +5585,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("disables client caching for favicon assets", func() {
 
 		w := createWikiTestInstance()
@@ -5621,7 +5621,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("adds approval security headers to the oauth approval frontend route", func() {
 
 		w := createWikiTestInstance()
@@ -5664,7 +5664,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("serves the configured branding favicon from the ico route", func() {
 
 		w := createWikiTestInstance()
@@ -5691,7 +5691,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("falls back to the default svg favicon from the ico route", func() {
 
 		w := createWikiTestInstance()
@@ -5717,7 +5717,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("unit"), func() {
 	It("omits custom stylesheet tags for whitespace-only paths", func() {
 
 		tag := httpinternal.BuildCustomStylesheetTag("/wiki", "   ")
@@ -5726,7 +5726,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = DescribeTable("loopback host detection",
+var _ = DescribeTable("loopback host detection", Label("unit"),
 	func(host string, want bool) {
 		{
 
@@ -5745,7 +5745,7 @@ var _ = DescribeTable("loopback host detection",
 	Entry("malformed host", "not a host", false),
 )
 
-var _ = DescribeTable("loopback remote address detection",
+var _ = DescribeTable("loopback remote address detection", Label("unit"),
 	func(remoteAddr string, want bool) {
 		{
 
@@ -5763,7 +5763,7 @@ var _ = DescribeTable("loopback remote address detection",
 	Entry("malformed remote addr", "not a remote addr", false),
 )
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("allows loopback requests through the local-only handler", func() {
 
 		handler := httpinternal.LocalOnlyHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -5786,7 +5786,7 @@ var _ = Describe("HTTP router", func() {
 	})
 })
 
-var _ = Describe("HTTP router", func() {
+var _ = Describe("HTTP router", Label("integration"), func() {
 	It("rejects non-loopback requests before they reach the wrapped handler", func() {
 
 		handler := httpinternal.LocalOnlyHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
