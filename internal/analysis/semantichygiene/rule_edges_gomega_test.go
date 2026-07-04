@@ -661,6 +661,57 @@ var _ = ginkgo.Describe("brand behavior", func() {
 			))
 		})
 
+		ginkgo.It("reports Ginkgo spec names that preserve Go code symbols", func() {
+			h := newRuleHarness("/repo/internal/wikid/wikid_helpers_test.go", "github.com/perber/wiki/internal/wikid", `package wikid
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("wikid process supervision", func() {
+	ginkgo.It("Supervisor.Roles returns a snapshot of marked roles", func() {})
+})
+`)
+			call := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "Supervisor.Roles returns a snapshot of marked roles" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
+		ginkgo.It("reports helper behavior names as vague migration residue", func() {
+			h := newRuleHarness("/repo/internal/wikid/wikid_helpers_test.go", "github.com/perber/wiki/internal/wikid", `package wikid
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("wikid helper behavior", func() {})
+`)
+			call := h.findCall("Describe")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"Describe",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.vague-name: Ginkgo node name "wikid helper behavior" is too vague to document behavior; describe the observable outcome instead`,
+			))
+		})
+
 		ginkgo.It("reports Ginkgo container names that preserve migrated Test function names", func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 

@@ -163,6 +163,12 @@ func isCoverageBucketBranchPhrase(previous string, current string) bool {
 
 func ginkgoDescriptionIsVague(description string) bool {
 	normalized := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(description))), " ")
+	if normalized == "helper behavior" ||
+		normalized == "helper behaviour" ||
+		strings.HasSuffix(normalized, " helper behavior") ||
+		strings.HasSuffix(normalized, " helper behaviour") {
+		return true
+	}
 	switch normalized {
 	case "preserves behavior",
 		"preserves existing behavior",
@@ -218,6 +224,9 @@ func hasMigratedIdentifierFragment(field string) bool {
 	if field == "" {
 		return false
 	}
+	if isGoCodeSymbolFragment(field) {
+		return true
+	}
 	if strings.Contains(field, "_") {
 		parts := strings.FieldsFunc(field, func(r rune) bool {
 			return r == '_'
@@ -227,6 +236,48 @@ func hasMigratedIdentifierFragment(field string) bool {
 		}
 	}
 	return isLowerCamelIdentifierFragment(field)
+}
+
+func isGoCodeSymbolFragment(field string) bool {
+	parts := strings.Split(field, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	hasExportedOrCamelPart := false
+	for _, part := range parts {
+		if !isGoIdentifierLike(part) {
+			return false
+		}
+		if isExportedIdentifierFragment(part) || isLowerCamelIdentifierFragment(part) {
+			hasExportedOrCamelPart = true
+		}
+	}
+	return hasExportedOrCamelPart
+}
+
+func isGoIdentifierLike(field string) bool {
+	if field == "" {
+		return false
+	}
+	for i, r := range field {
+		if i == 0 {
+			if r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
+				continue
+			}
+			return false
+		}
+		if r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isExportedIdentifierFragment(field string) bool {
+	return len(field) >= 2 &&
+		field[0] >= 'A' && field[0] <= 'Z' &&
+		field[1] >= 'a' && field[1] <= 'z'
 }
 
 func isLowerCamelIdentifierFragment(field string) bool {
