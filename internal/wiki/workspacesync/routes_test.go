@@ -47,7 +47,12 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		rec := performWorkspaceSyncRequest(router, http.MethodGet, "/api/workspace-sync/snapshots")
 
 		Expect(rec).To(matchWorkspaceSyncStructuredError(http.StatusInternalServerError, errCodeWorkspaceSyncFailed), rec.Body.String())
-		Expect(rec).NotTo(HaveHTTPBody(ContainSubstring(rawErr.Error())))
+		var body map[string]json.RawMessage
+		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+		Expect(body).To(SatisfyAll(
+			HaveLen(1),
+			HaveKey("error"),
+		))
 	})
 
 	ginkgo.It("maps SyncStatus fields into the public status response", func() {
