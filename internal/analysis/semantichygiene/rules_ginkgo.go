@@ -171,7 +171,14 @@ func ginkgoDescriptionIsVague(description string) bool {
 		"works",
 		"handles cases",
 		"handles edge cases",
-		"does the right thing":
+		"does the right thing",
+		"missing required",
+		"parse",
+		"read",
+		"seed",
+		"marshal",
+		"write",
+		"write output":
 		return true
 	default:
 		return false

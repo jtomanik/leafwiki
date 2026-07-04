@@ -352,6 +352,10 @@ var _ = ginkgo.Describe("ginkgo and gomega quality regressions", func() {
 		func(row behaviorRecord) {},
 		ginkgo.Entry("setup row", rowFromSetup), // want "Ginkgo Entry arguments are evaluated at construction time; pass stable row data instead of setup-initialized variables"
 	)
+	ginkgo.DescribeTable("reports vague table entry descriptions",
+		func(row behaviorRecord) {},
+		ginkgo.Entry("parse", behaviorRecord{}), // want "Ginkgo node name \"parse\" is too vague to document behavior; describe the observable outcome instead"
+	)
 
 	ginkgo.It("uses context-aware async assertions", func(ctx context.Context) {
 		Eventually(func() error { return nil }).Should(Succeed()) // want "propagate the spec context into Eventually/Consistently with WithContext or positional context"
