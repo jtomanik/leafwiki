@@ -25,7 +25,7 @@ import (
 )
 
 var _ = ginkgo.Describe("revision routes", ginkgo.Label("integration"), func() {
-	ginkgo.It("RegisterRoutes wires revision API routes through the shared router", func() {
+	ginkgo.It("exposes revision API routes through the shared router", func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
