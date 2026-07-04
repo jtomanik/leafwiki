@@ -29,20 +29,14 @@ var _ = Describe("Tool descriptor contracts", func() {
 	It("keeps every tool descriptor description catalog-backed", func() {
 		for _, descriptor := range allToolDescriptors() {
 			rendered := localization.English.Render(descriptor.DescriptionID, "fallback")
-			Expect(rendered).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Missing": BeFalse(),
-				"Err":     Not(HaveOccurred()),
-			}), "%s description ID %s should be catalog-backed", descriptor.Name, descriptor.DescriptionID)
+			Expect(rendered).To(matchCatalogMessageRender(), "%s description ID %s should be catalog-backed", descriptor.Name, descriptor.DescriptionID)
 		}
 	})
 
 	It("serializes message outputs with stable message IDs", func() {
 		output := newMessageOutput(ToolMessageMovePageSuccess)
 		rendered := localization.English.Render(ToolMessageMovePageSuccess, "")
-		Expect(rendered).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Missing": BeFalse(),
-			"Err":     Not(HaveOccurred()),
-		}))
+		Expect(rendered).To(matchCatalogMessageRender())
 
 		encoded, err := json.Marshal(output)
 		Expect(err).NotTo(HaveOccurred())

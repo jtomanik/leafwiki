@@ -71,10 +71,7 @@ leafwiki_title: Sync Child
 		routePath := tree.RoutePathFromString(section.CalculatePath())
 		result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, tree.PageIDFromString(section.ID), section.Kind)
 
-		Expect(result).To(SatisfyAll(
-			HaveField("OK", BeTrue()),
-			HaveField("Issues", Not(ContainElement(matchMarkdownValidationIssue(wikivalidation.IssueCodeBrokenLink)))),
-		), "validateMarkdownContent = %#v", result)
+		Expect(result).To(matchMarkdownValidationWithoutIssue(wikivalidation.IssueCodeBrokenLink), "validateMarkdownContent = %#v", result)
 	})
 
 	It("resolves markdown link root prefixes while validating workspace files", func() {
@@ -100,10 +97,7 @@ leafwiki_title: Glossary
 
 		result := routes.validateWorkspaceMarkdownFiles(context.Background(), false)
 
-		Expect(result).To(SatisfyAll(
-			HaveField("OK", BeTrue()),
-			HaveField("Issues", Not(ContainElement(matchMarkdownValidationIssue(wikivalidation.IssueCodeBrokenLink)))),
-		), "validateWorkspaceMarkdownFiles = %#v", result)
+		Expect(result).To(matchMarkdownValidationWithoutIssue(wikivalidation.IssueCodeBrokenLink), "validateWorkspaceMarkdownFiles = %#v", result)
 	})
 
 	It("validates loaded tree content when no workspace root is available", func() {
@@ -116,8 +110,7 @@ leafwiki_title: Glossary
 
 		result := (&Routes{treeService: treeService}).validateLoadedTree(context.Background())
 
-		Expect(result.OK).To(BeFalse(), "validateLoadedTree = %#v", result)
-		Expect(validationIssueCodeCount(result, wikivalidation.IssueCodeBrokenLink)).To(BeNumerically(">", 0))
+		Expect(result).To(matchMarkdownValidationWithIssue(wikivalidation.IssueCodeBrokenLink), "validateLoadedTree = %#v", result)
 	})
 
 	It("preserves workspace sync validation status fields for wiki validation", func() {

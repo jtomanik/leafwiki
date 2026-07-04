@@ -471,12 +471,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			var input updatePageInput
 
 			Expect(json.Unmarshal([]byte(`{"id":"p1","tags":[],"properties":{}}`), &input)).To(Succeed())
-			Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"TagsPresent":       BeTrue(),
-				"PropertiesPresent": BeTrue(),
-				"Tags":              BeEmpty(),
-				"Properties":        BeEmpty(),
-			}))
+			Expect(input).To(matchUpdatePageInputWithExplicitEmptyPatchFields())
 
 			Expect(json.Unmarshal([]byte(`{"tags":{}}`), &input)).To(matchJSONTypeError())
 			Expect(json.Unmarshal([]byte(`{"properties":[]}`), &input)).To(matchJSONTypeError())

@@ -161,7 +161,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		}
 		wikiOut, err := routes.validateWikiTool(context.Background(), validateWikiInput{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(wikiOut.OK).To(BeFalse())
+		Expect(wikiOut).To(matchValidationOutputWithErrorCount(1))
 	})
 
 	It("reports tag and property tool backend failures and result counts", func() {
@@ -220,10 +220,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		}}}
 		out, err := routes.searchPagesTool(context.Background(), searchPagesInput{Query: "needle"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(out).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Limit":   Equal(20),
-			"HasMore": BeTrue(),
-		}))
+		Expect(out).To(matchSearchPagesOutputWithMoreResults(20))
 	})
 
 	It("reports refactor validation, backend failures, and applied page results", func() {

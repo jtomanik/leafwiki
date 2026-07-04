@@ -397,7 +397,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(validationContentLeafWikiID("---\n: bad\n---\n# Page\n")).To(BeEmpty())
 			Expect(validationContentLeafWikiID("<!-- leafwiki extra\nversion: 1\npage:\n  id: page-123\n-->\nBody")).To(BeEmpty())
 			Expect(validationContentLeafWikiID("---\nleafwiki_id: page-1\n---\n# Page\n")).To(Equal("page-1"))
-			Expect((&Routes{}).validateLoadedTree(context.Background()).OK).To(BeTrue())
+			Expect((&Routes{}).validateLoadedTree(context.Background())).To(matchSuccessfulMarkdownValidation())
 
 			_, _, err = routes.normalizeValidationContentPathInput("../bad", "")
 			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
@@ -535,9 +535,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(out).To(matchRefreshOutput(gstruct.Fields{
 				"LastCommitHash":     Equal("commit-1"),
 				"RecentChangedPaths": Equal([]string{"home.md"}),
-				"Validation": gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-					"OK": BeFalse(),
-				})),
+				"Validation":         gstruct.PointTo(matchValidationOutputWithErrorCount(1)),
 			}))
 		})
 	})

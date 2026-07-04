@@ -372,13 +372,7 @@ var _ = Describe("context tool helpers", func() {
 			},
 		})
 
-		Expect(validation).To(SatisfyAll(
-			HaveField("OK", BeTrue()),
-			HaveField("Summary", SatisfyAll(
-				HaveField("Errors", BeZero()),
-				HaveField("WarningCount", Equal(1)),
-			)),
-		))
+		Expect(validation).To(matchValidationOutputWithWarningCount(1))
 	})
 })
 
