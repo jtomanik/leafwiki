@@ -3,7 +3,7 @@ package errors_test
 import (
 	"fmt"
 
-	"github.com/onsi/gomega/gcustom"
+	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
@@ -17,25 +17,11 @@ type renderedFieldErrorExpectation struct {
 }
 
 func MatchRenderedFieldError(expected renderedFieldErrorExpectation) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual *sharederrors.FieldError) (bool, error) {
-		if actual == nil {
-			return false, nil
-		}
-		return actual.Field == expected.Field &&
-			actual.Code == expected.Code &&
-			actual.MessageID == expected.MessageID &&
-			actual.Message == expected.Message, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match rendered field error\n{{format .Data 1}}", expected)
+	return WithTransform(renderedFieldErrorFields, Equal(expected))
 }
 
-func MatchValidationErrorContract() types.GomegaMatcher {
-	expected := sharederrors.NewValidationErrors()
-	return gcustom.MakeMatcher(func(actual *sharederrors.ValidationErrors) (bool, error) {
-		if actual == nil {
-			return false, nil
-		}
-		return actual.Error() == expected.Error(), nil
-	}).WithMessage("match the validation error contract")
+func MatchValidationErrors(errorsMatcher types.GomegaMatcher) types.GomegaMatcher {
+	return WithTransform(validationFieldErrors, errorsMatcher)
 }
 
 type localizedRenderingExpectation struct {
@@ -44,43 +30,72 @@ type localizedRenderingExpectation struct {
 	Template  string
 }
 
-func HaveLocalizedRendering(expected localizedRenderingExpectation) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual any) (bool, error) {
-		got, ok, err := renderedLocalizedFields(actual)
-		if err != nil || !ok {
-			return false, err
-		}
-		return got == expected, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} have localized rendering\n{{format .Data 1}}", expected)
+type nilLocalizedErrorContract struct {
+	RenderedText string
+	WrappedCause error
 }
 
-func renderedLocalizedFields(actual any) (localizedRenderingExpectation, bool, error) {
+func HaveLocalizedRendering(expected localizedRenderingExpectation) types.GomegaMatcher {
+	return WithTransform(renderedLocalizedFields, Equal(expected))
+}
+
+func HaveNilLocalizedErrorContract() types.GomegaMatcher {
+	return WithTransform(nilLocalizedErrorFields, Equal(nilLocalizedErrorContract{}))
+}
+
+func renderedFieldErrorFields(actual *sharederrors.FieldError) (renderedFieldErrorExpectation, error) {
+	if actual == nil {
+		return renderedFieldErrorExpectation{}, fmt.Errorf("MatchRenderedFieldError expects a non-nil field error")
+	}
+	return renderedFieldErrorExpectation{
+		Field:     actual.Field,
+		Code:      actual.Code,
+		MessageID: actual.MessageID,
+		Message:   actual.Message,
+	}, nil
+}
+
+func validationFieldErrors(actual *sharederrors.ValidationErrors) ([]*sharederrors.FieldError, error) {
+	if actual == nil {
+		return nil, fmt.Errorf("MatchValidationErrors expects a non-nil validation error collection")
+	}
+	return actual.Errors, nil
+}
+
+func nilLocalizedErrorFields(actual *sharederrors.LocalizedError) nilLocalizedErrorContract {
+	return nilLocalizedErrorContract{
+		RenderedText: actual.Error(),
+		WrappedCause: actual.Unwrap(),
+	}
+}
+
+func renderedLocalizedFields(actual any) (localizedRenderingExpectation, error) {
 	switch value := actual.(type) {
 	case *sharederrors.LocalizedError:
 		if value == nil {
-			return localizedRenderingExpectation{}, false, nil
+			return localizedRenderingExpectation{}, fmt.Errorf("HaveLocalizedRendering expects a non-nil localized error")
 		}
 		return localizedRenderingExpectation{
 			MessageID: value.MessageID,
 			Message:   value.Message,
 			Template:  value.Template,
-		}, true, nil
+		}, nil
 	case sharederrors.LocalizedErrorDetail:
 		return localizedRenderingExpectation{
 			MessageID: value.MessageID,
 			Message:   value.Message,
 			Template:  value.Template,
-		}, true, nil
+		}, nil
 	case *sharederrors.LocalizedErrorDetail:
 		if value == nil {
-			return localizedRenderingExpectation{}, false, nil
+			return localizedRenderingExpectation{}, fmt.Errorf("HaveLocalizedRendering expects a non-nil localized error detail")
 		}
 		return localizedRenderingExpectation{
 			MessageID: value.MessageID,
 			Message:   value.Message,
 			Template:  value.Template,
-		}, true, nil
+		}, nil
 	default:
-		return localizedRenderingExpectation{}, false, fmt.Errorf("HaveLocalizedRendering expects a localized error or detail")
+		return localizedRenderingExpectation{}, fmt.Errorf("HaveLocalizedRendering expects a localized error or detail")
 	}
 }

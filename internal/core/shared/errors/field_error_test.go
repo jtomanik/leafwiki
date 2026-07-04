@@ -19,7 +19,7 @@ const (
 	testSlugValidationField       string                      = "slug"
 )
 
-var _ = Describe("field validation errors", func() {
+var _ = Describe("field validation errors", Label("unit"), func() {
 	It("serializes explicit field codes with stable field and message identifiers", func() {
 		validation := sharederrors.NewValidationErrors()
 		validation.AddWithCode(
@@ -67,15 +67,19 @@ var _ = Describe("field validation errors", func() {
 	})
 })
 
-var _ = Describe("field validation state", func() {
-	It("reports whether validation errors are present", func() {
+var _ = Describe("field validation state", Label("unit"), func() {
+	It("tracks empty and populated field-error collections", func() {
 		validation := sharederrors.NewValidationErrors()
 
-		Expect(validation.HasErrors()).To(BeFalse())
-		Expect(validation).To(MatchValidationErrorContract())
+		Expect(validation).To(MatchValidationErrors(BeEmpty()))
 
 		validation.Add(testSiteNameValidationField, testSiteNameRequiredFallback)
-		Expect(validation.HasErrors()).To(BeTrue())
+		Expect(validation).To(MatchValidationErrors(ConsistOf(MatchRenderedFieldError(renderedFieldErrorExpectation{
+			Field:     testSiteNameValidationField,
+			Code:      sharederrors.FieldValidationErrorCode,
+			MessageID: sharederrors.FieldValidationErrorMessageID,
+			Message:   renderedMessage(sharederrors.FieldValidationErrorMessageID, testSiteNameRequiredFallback),
+		}))))
 	})
 })
 

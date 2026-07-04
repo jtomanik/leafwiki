@@ -33,7 +33,7 @@ const (
 
 var errLocalizedErrorAbsent = stderrors.New("localized error absent")
 
-var _ = Describe("localized errors", func() {
+var _ = Describe("localized errors", Label("unit"), func() {
 	It("exposes typed codes and message IDs for defined errors", func() {
 		cause := stderrors.New("storage failed")
 		definition := sharederrors.ErrorDefinition{
@@ -127,7 +127,7 @@ var _ = Describe("localized errors", func() {
 	})
 })
 
-var _ = Describe("localized error derived contracts", func() {
+var _ = Describe("localized error derived contracts", Label("unit"), func() {
 	It("maps empty, un-namespaced, and namespaced codes to message IDs", func() {
 		Expect(sharederrors.MessageIDForCode("")).To(BeEmpty())
 		Expect(sharederrors.MessageIDForCode("  ")).To(BeEmpty())
@@ -138,8 +138,7 @@ var _ = Describe("localized error derived contracts", func() {
 	It("nil localized errors have empty Error text and no wrapped cause", func() {
 		var err *sharederrors.LocalizedError
 
-		Expect(err.Error()).To(BeEmpty())
-		Expect(err.Unwrap()).To(Succeed())
+		Expect(err).To(HaveNilLocalizedErrorContract())
 	})
 
 	It("localized errors keep their structured identity while wrapping a cause", func() {
