@@ -16,7 +16,7 @@ import (
 	"github.com/perber/wiki/internal/wiki"
 )
 
-var _ = ginkgo.Describe("workspaced routers", func() {
+var _ = ginkgo.Describe("workspaced routers", ginkgo.Label("integration"), func() {
 	ginkgo.DescribeTable("public identity and global routes",
 		func(method string, path string) {
 			w := newTestWiki()
@@ -35,16 +35,16 @@ var _ = ginkgo.Describe("workspaced routers", func() {
 			rec := request(router, method, path)
 			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), rec.Body.String())
 		},
-		ginkgo.Entry("hide the config endpoint", http.MethodGet, "/api/config"),
-		ginkgo.Entry("hide the current-user endpoint", http.MethodGet, "/api/auth/me"),
-		ginkgo.Entry("hide the login endpoint", http.MethodPost, "/api/auth/login"),
-		ginkgo.Entry("hide user administration endpoints", http.MethodGet, "/api/users"),
-		ginkgo.Entry("hide branding endpoints", http.MethodGet, "/api/branding"),
-		ginkgo.Entry("hide OAuth token endpoints", http.MethodPost, "/oauth/token"),
-		ginkgo.Entry("hide OAuth metadata endpoints", http.MethodGet, "/.well-known/oauth-protected-resource/mcp"),
+		ginkgo.Entry("hides the config endpoint", http.MethodGet, "/api/config"),
+		ginkgo.Entry("hides the current-user endpoint", http.MethodGet, "/api/auth/me"),
+		ginkgo.Entry("hides the login endpoint", http.MethodPost, "/api/auth/login"),
+		ginkgo.Entry("hides user administration endpoints", http.MethodGet, "/api/users"),
+		ginkgo.Entry("hides branding endpoints", http.MethodGet, "/api/branding"),
+		ginkgo.Entry("hides OAuth token endpoints", http.MethodPost, "/oauth/token"),
+		ginkgo.Entry("hides OAuth metadata endpoints", http.MethodGet, "/.well-known/oauth-protected-resource/mcp"),
 	)
 
-	ginkgo.It("keeps workspace routes available", func() {
+	ginkgo.It("keeps workspace API routes available", func() {
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
 			Expect(w.Close()).To(Succeed())
@@ -82,14 +82,14 @@ var _ = ginkgo.Describe("workspaced routers", func() {
 			rec := request(router, http.MethodGet, path)
 			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), rec.Body.String())
 		},
-		ginkgo.Entry("do not expose custom stylesheets from the workspaced router", workspacedRouterFactory, "/custom.css"),
-		ginkgo.Entry("do not expose favicons from the workspaced router", workspacedRouterFactory, "/favicon.svg"),
-		ginkgo.Entry("do not expose static assets from the workspaced router", workspacedRouterFactory, "/static/index-DYW7NERi.js"),
-		ginkgo.Entry("do not expose SPA fallbacks from the workspaced router", workspacedRouterFactory, "/workspace-spa-route"),
-		ginkgo.Entry("do not expose custom stylesheets from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/custom.css"),
-		ginkgo.Entry("do not expose favicons from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/favicon.svg"),
-		ginkgo.Entry("do not expose static assets from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/static/index-DYW7NERi.js"),
-		ginkgo.Entry("do not expose SPA fallbacks from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/workspace-spa-route"),
+		ginkgo.Entry("does not expose custom stylesheets from the workspaced router", workspacedRouterFactory, "/custom.css"),
+		ginkgo.Entry("does not expose favicons from the workspaced router", workspacedRouterFactory, "/favicon.svg"),
+		ginkgo.Entry("does not expose static assets from the workspaced router", workspacedRouterFactory, "/static/index-DYW7NERi.js"),
+		ginkgo.Entry("does not expose SPA fallbacks from the workspaced router", workspacedRouterFactory, "/workspace-spa-route"),
+		ginkgo.Entry("does not expose custom stylesheets from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/custom.css"),
+		ginkgo.Entry("does not expose favicons from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/favicon.svg"),
+		ginkgo.Entry("does not expose static assets from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/static/index-DYW7NERi.js"),
+		ginkgo.Entry("does not expose SPA fallbacks from the authenticated workspaced router", authenticatedWorkspacedRouterFactory, "/workspace-spa-route"),
 	)
 })
 

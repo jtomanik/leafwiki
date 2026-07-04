@@ -21,6 +21,7 @@ import (
 
 var _ = ginkgo.Describe("authenticated workspaced router", func() {
 	ginkgo.DescribeTable("private actor authentication",
+		ginkgo.Label("integration"),
 		func(token string, actor string, wantCode sharederrors.ErrorCode) {
 			now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 			w := newTestWiki()
@@ -49,7 +50,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		ginkgo.Entry("rejects requests without an actor context", "private-token", "", errCodePrivateActorContextInvalid),
 	)
 
-	ginkgo.It("rejects actor contexts for another workspace and serves a valid private actor", func() {
+	ginkgo.It("rejects actor contexts for another workspace and serves a valid private actor", ginkgo.Label("integration"), func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
@@ -101,7 +102,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
-	ginkgo.It("rejects an empty daemon token even when the request token is empty", func() {
+	ginkgo.It("rejects an empty daemon token even when the request token is empty", ginkgo.Label("integration"), func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
@@ -129,7 +130,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(rec).To(matchStructuredPrivateAuthError(errCodePrivateControlTokenInvalid))
 	})
 
-	ginkgo.It("rejects an expired actor context", func() {
+	ginkgo.It("rejects an expired actor context", ginkgo.Label("integration"), func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
@@ -157,13 +158,13 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(rec).To(matchStructuredPrivateAuthError(errCodePrivateActorContextInvalid))
 	})
 
-	ginkgo.It("carries workspace IDs as the semantic workspace type", func() {
+	ginkgo.It("carries workspace IDs as the semantic workspace type", ginkgo.Label("unit"), func() {
 		auth := PrivateAuthOptions{WorkspaceID: workspaceid.WorkspaceID("current")}
 
 		var _ workspaceid.WorkspaceID = auth.WorkspaceID
 	})
 
-	ginkgo.It("installs the actor context as the request user for workspace routes", func() {
+	ginkgo.It("installs the actor context as the request user for workspace routes", ginkgo.Label("integration"), func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
@@ -198,7 +199,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	})
 
-	ginkgo.It("allows private mutations without a public CSRF cookie", func() {
+	ginkgo.It("allows private mutations without a public CSRF cookie", ginkgo.Label("integration"), func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		w := newTestWiki()
 		ginkgo.DeferCleanup(func() {
@@ -231,7 +232,6 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		req.Body = io.NopCloser(strings.NewReader(`{"kind":"page","slug":"private-mutation","title":"Private Mutation"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := requestWithRequest(router, req)
-		Expect(rec).NotTo(SatisfyAll(HaveHTTPStatus(http.StatusForbidden), HaveHTTPBody(ContainSubstring("CSRF"))), "private actor-context mutation was blocked by public CSRF middleware: %s", rec.Body.String())
 		Expect(rec).To(HaveHTTPStatus(http.StatusCreated), rec.Body.String())
 	})
 })
