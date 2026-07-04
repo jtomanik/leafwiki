@@ -53,7 +53,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		})
 		manifestHash, err := store.SaveAssetManifest([]AssetRef{{Name: "asset.txt", SHA256: strings.Repeat("a", 64), SizeBytes: 5}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(store.AssetManifestExists(manifestHash)).To(BeTrue())
+		Expect(assetManifestObservationFor(store, manifestHash)).To(matchAssetManifestPresence(assetManifestPresent, Equal(manifestHash)))
 		restore()
 
 		manifestWriteFailedErr := errors.New("manifest write failed")

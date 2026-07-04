@@ -3,11 +3,9 @@ package revision
 import (
 	"errors"
 	"os"
-	"reflect"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -48,25 +46,20 @@ func haveCanonicalRevisionRawStorage() types.GomegaMatcher {
 }
 
 func matchLocalizedRevisionErrorDetails(code sharederrors.ErrorCode, args ...string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		localized, ok := sharederrors.AsLocalizedError(err)
-		return ok &&
-			localized.Code == code &&
-			localized.MessageID == sharederrors.MessageIDForCode(code) &&
-			reflect.DeepEqual(localized.Args, args), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match localized revision error details\n{{format .Data 1}}", code)
+	return WithTransform(localizedRevisionErrorObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":     Equal(localizedRevisionErrorPresent),
+		"Code":      Equal(code),
+		"MessageID": Equal(sharederrors.MessageIDForCode(code)),
+		"Args":      Equal(args),
+	}))
 }
 
 func matchRevisionErrorCause(want error) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return errors.Is(err, want), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} wrap revision error\n{{format .Data 1}}", want)
+	return MatchError(want)
 }
 
 func matchRevisionError(want error) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return errors.Is(err, want), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match revision error\n{{format .Data 1}}", want)
+	return MatchError(want)
 }
 
 func rejectRevisionValidation() types.GomegaMatcher {
@@ -74,21 +67,96 @@ func rejectRevisionValidation() types.GomegaMatcher {
 }
 
 func matchRevisionIntegrityIssue(code sharederrors.ErrorCode) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(issue RevisionIntegrityIssue) (bool, error) {
-		return issue.Code == code && issue.MessageID == sharederrors.MessageIDForCode(code), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match revision integrity issue\n{{format .Data 1}}", code)
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Code":      Equal(code),
+		"MessageID": Equal(sharederrors.MessageIDForCode(code)),
+	})
+}
+
+type localizedRevisionErrorState uint8
+
+const (
+	localizedRevisionErrorAbsent localizedRevisionErrorState = iota
+	localizedRevisionErrorPresent
+)
+
+type localizedRevisionErrorObservation struct {
+	State     localizedRevisionErrorState
+	Code      sharederrors.ErrorCode
+	MessageID sharederrors.MessageID
+	Args      []string
+}
+
+func localizedRevisionErrorObservationFor(err error) localizedRevisionErrorObservation {
+	localized, ok := sharederrors.AsLocalizedError(err)
+	if !ok {
+		return localizedRevisionErrorObservation{State: localizedRevisionErrorAbsent}
+	}
+	return localizedRevisionErrorObservation{
+		State:     localizedRevisionErrorPresent,
+		Code:      localized.Code,
+		MessageID: localized.MessageID,
+		Args:      localized.Args,
+	}
+}
+
+type assetManifestPresence uint8
+
+const (
+	assetManifestMissing assetManifestPresence = iota
+	assetManifestPresent
+)
+
+type assetManifestObservation struct {
+	Hash  string
+	State assetManifestPresence
+}
+
+func assetManifestObservationFor(store *FSStore, hash string) assetManifestObservation {
+	state := assetManifestMissing
+	if store != nil && store.AssetManifestExists(hash) {
+		state = assetManifestPresent
+	}
+	return assetManifestObservation{Hash: hash, State: state}
+}
+
+func matchAssetManifestPresence(state assetManifestPresence, hash types.GomegaMatcher) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Hash":  hash,
+		"State": Equal(state),
+	})
 }
 
 func matchRevisionContentDelta(baseContent, targetContent types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(comparison *RevisionComparison) (bool, error) {
-		if comparison == nil || comparison.Base == nil || comparison.Target == nil || !comparison.ContentChanged {
-			return false, nil
-		}
-		if matches, err := baseContent.Match(comparison.Base.Content); err != nil || !matches {
-			return matches, err
-		}
-		return targetContent.Match(comparison.Target.Content)
-	}).WithMessage("match revision comparison content delta")
+	return WithTransform(revisionContentDeltaObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":         Equal(revisionContentDeltaChanged),
+		"BaseContent":   baseContent,
+		"TargetContent": targetContent,
+	}))
+}
+
+type revisionContentDeltaState uint8
+
+const (
+	revisionContentDeltaAbsent revisionContentDeltaState = iota
+	revisionContentDeltaChanged
+)
+
+type revisionContentDeltaObservation struct {
+	State         revisionContentDeltaState
+	BaseContent   string
+	TargetContent string
+}
+
+func revisionContentDeltaObservationFor(comparison *RevisionComparison) revisionContentDeltaObservation {
+	if comparison == nil || comparison.Base == nil || comparison.Target == nil || !comparison.ContentChanged {
+		return revisionContentDeltaObservation{State: revisionContentDeltaAbsent}
+	}
+	return revisionContentDeltaObservation{
+		State:         revisionContentDeltaChanged,
+		BaseContent:   comparison.Base.Content,
+		TargetContent: comparison.Target.Content,
+	}
 }
 
 var (

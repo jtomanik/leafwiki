@@ -12,7 +12,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -83,17 +82,31 @@ func MatchLocalizedRevisionErrorCode(code sharederrors.ErrorCode) types.GomegaMa
 }
 
 func MatchJSONUnsupportedTypeError() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var typeErr *json.UnsupportedTypeError
-		return errors.As(err, &typeErr), nil
-	}).WithMessage("match JSON unsupported type error")
+	return WithTransform(jsonErrorKindFor, Equal(jsonErrorUnsupportedType))
 }
 
 func MatchJSONSyntaxError() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		var syntaxErr *json.SyntaxError
-		return errors.As(err, &syntaxErr), nil
-	}).WithMessage("match JSON syntax error")
+	return WithTransform(jsonErrorKindFor, Equal(jsonErrorSyntax))
+}
+
+type jsonErrorKind uint8
+
+const (
+	jsonErrorOther jsonErrorKind = iota
+	jsonErrorUnsupportedType
+	jsonErrorSyntax
+)
+
+func jsonErrorKindFor(err error) jsonErrorKind {
+	var typeErr *json.UnsupportedTypeError
+	if errors.As(err, &typeErr) {
+		return jsonErrorUnsupportedType
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return jsonErrorSyntax
+	}
+	return jsonErrorOther
 }
 
 var _ = Describe("revision edge behavior", func() {
@@ -198,7 +211,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(err).To(MatchError(os.ErrNotExist))
 		_, err = store.OpenAssetBlob(" ")
 		Expect(err).To(MatchError(ErrAssetHashRequired))
-		Expect(store.AssetManifestExists("")).To(BeFalse())
+		Expect(assetManifestObservationFor(store, "")).To(matchAssetManifestPresence(assetManifestMissing, Equal("")))
 		Expect(store.DeletePageRevisions(newFixturePageID("../bad"))).To(Succeed())
 
 		Expect(cloneAndSortAssetRefs([]AssetRef{
