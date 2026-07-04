@@ -2,11 +2,11 @@ package dto
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -34,16 +34,42 @@ func matchAPINodeID(expected tree.PageID) types.GomegaMatcher {
 
 func matchReadmeFallbackContentPath(path string) types.GomegaMatcher {
 	GinkgoHelper()
-	return gcustom.MakeMatcher(func(node *Node) (bool, error) {
-		return node != nil && node.ContentPath == path && node.ReadmeFallback, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} expose README fallback content path\n{{format .Data 1}}", path)
+	return WithTransform(apiNodeContentPathFor, Equal(apiNodeContentPath{
+		Path:   path,
+		Source: readmeFallbackContentPath,
+	}))
 }
 
 func matchDirectContentPath(path string) types.GomegaMatcher {
 	GinkgoHelper()
-	return gcustom.MakeMatcher(func(node *Node) (bool, error) {
-		return node != nil && node.ContentPath == path && !node.ReadmeFallback, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} expose direct content path\n{{format .Data 1}}", path)
+	return WithTransform(apiNodeContentPathFor, Equal(apiNodeContentPath{
+		Path:   path,
+		Source: directContentPath,
+	}))
+}
+
+type contentPathSource int
+
+const (
+	missingContentPathNode contentPathSource = iota + 1
+	directContentPath
+	readmeFallbackContentPath
+)
+
+type apiNodeContentPath struct {
+	Path   string
+	Source contentPathSource
+}
+
+func apiNodeContentPathFor(node *Node) apiNodeContentPath {
+	if node == nil {
+		return apiNodeContentPath{Source: missingContentPathNode}
+	}
+	source := directContentPath
+	if node.ReadmeFallback {
+		source = readmeFallbackContentPath
+	}
+	return apiNodeContentPath{Path: node.ContentPath, Source: source}
 }
 
 func matchPropertyPage(fields gstruct.Fields) types.GomegaMatcher {
@@ -57,7 +83,7 @@ func matchTaggedPage(fields gstruct.Fields) types.GomegaMatcher {
 }
 
 var _ = Describe("page DTO mapping", func() {
-	It("maps a full page with metadata, content, path, and initialized collections", func() {
+	It("maps a full page with metadata, content, path, and initialized collections", Label("integration"), func() {
 		root, child, _ := dtoTestTree()
 		resolver := newDTOUserResolver(root, child)
 
@@ -79,7 +105,7 @@ var _ = Describe("page DTO mapping", func() {
 		}))
 	})
 
-	It("prunes page children when converting a page with depth zero", func() {
+	It("prunes page children when converting a page with depth zero", Label("unit"), func() {
 		root, _, _ := dtoTestTree()
 
 		page := ToAPIPageWithDepth(&tree.Page{PageNode: root, Content: "# Docs"}, nil, 0)
@@ -87,7 +113,7 @@ var _ = Describe("page DTO mapping", func() {
 		Expect(page.Children).To(BeEmpty())
 	})
 
-	It("maps node children, content paths, and README fallback state", func() {
+	It("maps node children, content paths, and README fallback state", Label("unit"), func() {
 		root, child, _ := dtoTestTree()
 
 		apiNode := ToAPINodeWithContentPaths(root, "", nil, func(node *tree.PageNode) (string, error) {
@@ -111,7 +137,7 @@ var _ = Describe("page DTO mapping", func() {
 		))
 	})
 
-	It("omits content paths when the resolver fails", func() {
+	It("omits content paths when the resolver fails", Label("unit"), func() {
 		root, _, _ := dtoTestTree()
 
 		apiNode := ToAPINodeWithContentPaths(root, "", nil, func(*tree.PageNode) (string, error) {
@@ -121,7 +147,7 @@ var _ = Describe("page DTO mapping", func() {
 		Expect(apiNode.ContentPath).To(BeEmpty())
 	})
 
-	It("applies node depth limits and allows unlimited depth", func() {
+	It("applies node depth limits and allows unlimited depth", Label("unit"), func() {
 		root, child, grandchild := dtoTestTree()
 
 		depthOne := ToAPINodeWithDepth(root, "", nil, 1)
@@ -154,7 +180,7 @@ var _ = Describe("page DTO mapping", func() {
 		}))
 	})
 
-	It("handles nil and unlimited pruning defensively", func() {
+	It("handles nil and unlimited pruning defensively", Label("unit"), func() {
 		root, _, _ := dtoTestTree()
 		apiNode := ToAPINode(root, "", nil)
 
@@ -165,7 +191,7 @@ var _ = Describe("page DTO mapping", func() {
 		Expect(apiNode.Children).To(HaveLen(1))
 	})
 
-	It("formats API times with empty zero values", func() {
+	It("formats API times with empty zero values", Label("unit"), func() {
 		updated := time.Date(2026, 6, 26, 12, 34, 56, 0, time.UTC)
 
 		Expect(FormatAPITime(time.Time{})).To(BeEmpty())
@@ -174,7 +200,7 @@ var _ = Describe("page DTO mapping", func() {
 })
 
 var _ = Describe("property and tag DTO mapping", func() {
-	It("maps property pages with copied properties and author labels", func() {
+	It("maps property pages with copied properties and author labels", Label("integration"), func() {
 		root, child, _ := dtoTestTree()
 		resolver := newDTOUserResolver(root, child)
 
@@ -195,7 +221,7 @@ var _ = Describe("property and tag DTO mapping", func() {
 		}))
 	})
 
-	It("leaves optional property timestamps empty when metadata times are zero", func() {
+	It("leaves optional property timestamps empty when metadata times are zero", Label("unit"), func() {
 		node := &tree.PageNode{ID: "untimed", Title: "Untimed", Slug: "untimed", Kind: tree.NodeKindPage}
 
 		page := ToPropertyPage(node, nil, nil)
@@ -207,7 +233,7 @@ var _ = Describe("property and tag DTO mapping", func() {
 		}))
 	})
 
-	It("maps tagged pages and normalizes nil tags to an empty slice", func() {
+	It("maps tagged pages and normalizes nil tags to an empty slice", Label("integration"), func() {
 		root, child, _ := dtoTestTree()
 		resolver := newDTOUserResolver(root, child)
 
@@ -271,7 +297,7 @@ func dtoTestTree() (*tree.PageNode, *tree.PageNode, *tree.PageNode) {
 
 func newDTOUserResolver(nodes ...*tree.PageNode) *coreauth.UserResolver {
 	GinkgoHelper()
-	store, err := coreauth.NewUserStore(GinkgoT().TempDir())
+	store, err := coreauth.NewUserStore(dtoTempDir())
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func() {
 		Expect(store.Close()).To(Succeed())
@@ -288,4 +314,12 @@ func newDTOUserResolver(nodes ...*tree.PageNode) *coreauth.UserResolver {
 	resolver, err := coreauth.NewUserResolver(service)
 	Expect(err).NotTo(HaveOccurred())
 	return resolver
+}
+
+func dtoTempDir() string {
+	GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-http-dto-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
