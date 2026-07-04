@@ -22,6 +22,8 @@ import (
 	"github.com/perber/wiki/internal/http/dto"
 	coreprop "github.com/perber/wiki/internal/properties"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 func matchLocalizedPropertiesError(code sharederrors.ErrorCode) types.GomegaMatcher {
@@ -30,6 +32,17 @@ func matchLocalizedPropertiesError(code sharederrors.ErrorCode) types.GomegaMatc
 
 func matchPropertiesStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
 	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+func matchPropertiesUseCaseSQLitePrimaryError(code int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(err error) int {
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) {
+			return -1
+		}
+		return sqliteErr.Code() & 0xFF
+	}, Equal(code))
 }
 
 func matchPropertyPageID(want tree.PageID) types.GomegaMatcher {
@@ -220,11 +233,11 @@ var _ = ginkgo.Describe("properties use cases", func() {
 
 		keys, err := NewGetPropertyKeysUseCase(propertiesService).Execute(context.Background(), GetPropertyKeysInput{PageSize: 10})
 		Expect(keys).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchPropertiesUseCaseSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 		pages, err := NewGetPagesByPropertyUseCase(propertiesService, nil, nil).Execute(context.Background(), GetPagesByPropertyInput{Key: "status", Value: "draft"})
 		Expect(pages).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchPropertiesUseCaseSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
 	ginkgo.It("returns property detail lookup errors after matching page IDs", func() {
@@ -234,7 +247,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 		pages, err := NewGetPagesByPropertyUseCase(propertiesService, nil, nil).Execute(context.Background(), GetPagesByPropertyInput{Key: "status", Value: "draft"})
 
 		Expect(pages).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchPropertiesUseCaseSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 	})
 
 	ginkgo.It("returns structured route errors when property key listing fails", func() {
