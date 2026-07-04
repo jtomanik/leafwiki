@@ -10,6 +10,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -213,18 +214,22 @@ func evaluateRequiredRoles(required []projectdaemon.RoleName, roles []projectdae
 
 func reportHealthyHealthChecks(checks types.GomegaMatcher) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Healthy": BeTrue(),
-		"Checks":  checks,
-	})
+	return gcustom.MakeMatcher(func(actual healthEvaluation) (bool, error) {
+		if !actual.Healthy {
+			return false, nil
+		}
+		return checks.Match(actual.Checks)
+	}).WithMessage("report healthy health checks")
 }
 
 func reportUnhealthyHealthChecks(checks types.GomegaMatcher) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Healthy": BeFalse(),
-		"Checks":  checks,
-	})
+	return gcustom.MakeMatcher(func(actual healthEvaluation) (bool, error) {
+		if actual.Healthy {
+			return false, nil
+		}
+		return checks.Match(actual.Checks)
+	}).WithMessage("report unhealthy health checks")
 }
 
 func performHealthRequest(router http.Handler) *httptest.ResponseRecorder {
