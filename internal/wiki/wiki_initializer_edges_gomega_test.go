@@ -32,10 +32,10 @@ var (
 	errFixtureWikiCloseFailed   = errors.New("close failed")
 )
 
-var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
+var _ = ginkgo.Describe("wiki startup initialization behavior", func() {
 	ginkgo.It("returns each NewWiki startup orchestration error", func() {
 		_, err := NewWiki(&WikiOptions{
-			StorageDir:       ginkgo.GinkgoT().TempDir(),
+			StorageDir:       wikiTestTempDir(),
 			WorkspaceOnly:    true,
 			ControlPlaneOnly: true,
 		})
@@ -246,7 +246,7 @@ var _ = ginkgo.Describe("wiki initializer edge coverage", func() {
 		})).To(MatchError(errFixtureWikiEdgeFailed))
 	})
 
-	ginkgo.It("covers rebuild tag/property warning branches and close error paths", func() {
+	ginkgo.It("ignores per-page tag and property rebuild failures while preserving fatal rebuild and close errors", func() {
 		expected := errors.New("edge failed")
 		restore := restoreWikiTestSeams()
 		ginkgo.DeferCleanup(restore)
@@ -400,7 +400,7 @@ func runNewWikiStartupError(configure func(error), mutateOptions ...func(*WikiOp
 	configure(errFixtureWikiStartupFailed)
 
 	options := &WikiOptions{
-		StorageDir:          ginkgo.GinkgoT().TempDir(),
+		StorageDir:          wikiTestTempDir(),
 		AdminPassword:       "admin",
 		JWTSecret:           "secret",
 		AccessTokenTimeout:  time.Minute,
@@ -466,8 +466,8 @@ func runCloseError(build func(error) *Wiki) error {
 func newInitializerWiki() *Wiki {
 	ginkgo.GinkgoHelper()
 
-	storageDir := ginkgo.GinkgoT().TempDir()
-	rootDir := filepath.Join(ginkgo.GinkgoT().TempDir(), "root")
+	storageDir := wikiTestTempDir()
+	rootDir := filepath.Join(wikiTestTempDir(), "root")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: storageDir, RootDir: rootDir})
 	Expect(treeService.LoadTree()).To(Succeed())
 	slugService := tree.NewSlugService()
@@ -497,8 +497,8 @@ func newInitializerWiki() *Wiki {
 func newLoadedInitializerTree() *tree.TreeService {
 	ginkgo.GinkgoHelper()
 
-	storageDir := ginkgo.GinkgoT().TempDir()
-	rootDir := filepath.Join(ginkgo.GinkgoT().TempDir(), "root")
+	storageDir := wikiTestTempDir()
+	rootDir := filepath.Join(wikiTestTempDir(), "root")
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: storageDir, RootDir: rootDir})
 	Expect(treeService.LoadTree()).To(Succeed())
 	return treeService

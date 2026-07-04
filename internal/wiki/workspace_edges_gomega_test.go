@@ -11,8 +11,7 @@ import (
 
 var _ = ginkgo.Describe("workspace validation edges", func() {
 	ginkgo.It("rejects missing data and equal root/data directories", func() {
-		t := ginkgo.GinkgoT()
-		sameDir := filepath.Join(t.TempDir(), "same")
+		sameDir := filepath.Join(wikiTestTempDir(), "same")
 
 		Expect(ValidateWorkspace(Workspace{ID: "default"})).To(MatchError(ErrWorkspaceDataDirRequired))
 		Expect(ValidateWorkspace(Workspace{ID: "default", DataDir: sameDir, RootDir: sameDir})).To(MatchError(ErrWorkspaceRootDirEqualsDataDir))
@@ -30,9 +29,8 @@ var _ = ginkgo.Describe("workspace validation edges", func() {
 	})
 
 	ginkgo.It("surfaces data and root path resolution errors", func() {
-		t := ginkgo.GinkgoT()
-		dataDir := filepath.Join(t.TempDir(), "data")
-		rootDir := filepath.Join(t.TempDir(), "root")
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "root")
 		dataErr := errors.New("data resolution failed")
 		rootErr := errors.New("root resolution failed")
 		restoreWorkspacePathSeams()
@@ -100,9 +98,7 @@ var _ = ginkgo.Describe("workspace validation edges", func() {
 	})
 
 	ginkgo.It("treats paths with no relative form as not contained", func() {
-		t := ginkgo.GinkgoT()
-
-		Expect(pathContains(filepath.Join(t.TempDir(), "parent"), "relative-child")).To(BeFalse())
+		Expect(pathContains(filepath.Join(wikiTestTempDir(), "parent"), "relative-child")).To(BeFalse())
 	})
 })
 

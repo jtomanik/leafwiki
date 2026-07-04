@@ -18,14 +18,17 @@ import (
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/shared"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = ginkgo.Describe("wiki facade coverage", func() {
+var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 	ginkgo.It("workspace sync page and restore facade methods fail clearly when sync is disabled", func() {
 		w := &Wiki{}
 		ctx := context.Background()
@@ -64,8 +67,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	})
 
 	ginkgo.It("workspace sync facade methods delegate to the configured sync service", func() {
-		t := ginkgo.GinkgoT()
-		treeService := tree.NewTreeService(t.TempDir())
+		treeService := tree.NewTreeService(wikiTestTempDir())
 		Expect(treeService.LoadTree()).To(Succeed())
 		kind := tree.NodeKindPage
 		pageID, err := treeService.CreateNode(tree.UserIDFromString("author"), nil, "Synced", tree.SlugFromString("synced"), &kind)
@@ -135,9 +137,8 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	})
 
 	ginkgo.It("route registrar accessors expose the expected route groups", func() {
-		t := ginkgo.GinkgoT()
-		w := createWikiTestInstance(t)
-		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
 		Expect(w.Registrars()).To(HaveLen(15))
 		Expect(w.FrontdRegistrars()).To(HaveLen(4))
@@ -145,9 +146,8 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	})
 
 	ginkgo.It("MCP handlers and presence accessors are available through the facade", func() {
-		t := ginkgo.GinkgoT()
-		w := createWikiTestInstance(t)
-		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
 		Expect(w.MCPHTTPHandler(httpinternal.RouterOptions{})).NotTo(BeNil())
 		Expect(w.PrivateMCPHTTPHandler(httpinternal.RouterOptions{})).NotTo(BeNil())
@@ -213,10 +213,8 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		ginkgo.DeferCleanup(func() {
 			createImporterStateDir = originalCreateImporterStateDir
 		})
-
-		t := ginkgo.GinkgoT()
 		w := &Wiki{
-			storageDir: t.TempDir(),
+			storageDir: wikiTestTempDir(),
 			log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}
 
@@ -225,9 +223,8 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	})
 
 	ginkgo.It("workspace sync actor lookup preserves IDs and enriches known users", func() {
-		t := ginkgo.GinkgoT()
-		w := createWikiTestInstance(t)
-		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
 		externalUserID := tree.UserIDFromString("external-user")
 		actor := (&Wiki{}).workspaceSyncActorForUser(externalUserID)
@@ -249,9 +246,8 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 	})
 
 	ginkgo.It("import adapter delegates tree, page, and asset operations", func() {
-		t := ginkgo.GinkgoT()
-		w := createWikiTestInstance(t)
-		ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 		adapter := NewWikiImportAdapter(w)
 
 		Expect(adapter.TreeHash()).NotTo(BeEmpty())
@@ -265,16 +261,16 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(sectionRootLookup.Path).To(BeEmpty())
 
 		_, err = adapter.LookupPagePath("../escape")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 		_, err = adapter.LookupPagePathForKind("../escape", tree.NodeKindPage)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 
 		pageKind := tree.NodeKindPage
 		_, err = adapter.EnsurePath(tree.UserIDFromString("importer"), "../escape", "Escaped", &pageKind)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 
 		_, err = adapter.EnsurePath(tree.UserIDFromString("importer"), "docs/untitled", " ", &pageKind)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(havePageValidationFieldError("title", wikipages.FieldCodePageTitleRequired, wikipages.MessageIDPageTitleRequired))
 
 		page, err := adapter.EnsurePath(tree.UserIDFromString("importer"), "docs/imported", "Imported", &pageKind)
 		Expect(err).NotTo(HaveOccurred())
@@ -293,13 +289,13 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(found.ID).To(Equal(page.ID))
 
 		_, err = adapter.FindByPath(" ")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(havePageValidationFieldError("path", wikipages.FieldCodePagePathRequired, wikipages.MessageIDPagePathRequired))
 
 		_, err = adapter.UpdatePage(tree.UserIDFromString("importer"), tree.PageIDFromString("missing"), "Missing", tree.SlugFromString("missing"), nil, &pageKind)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 		_, err = adapter.UpdatePage(tree.UserIDFromString("importer"), page.ID, "", tree.SlugFromString("imported"), nil, &pageKind)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(havePageValidationFieldError("title", wikipages.FieldCodePageTitleRequired, wikipages.MessageIDPageTitleRequired))
 
 		body := "Imported body"
 		updated, err := adapter.UpdatePage(tree.UserIDFromString("importer"), page.ID, "Imported", tree.SlugFromString("imported"), &body, &pageKind)
@@ -307,9 +303,9 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(updated.Content).To(Equal(body))
 
 		_, err = adapter.ListAssets(tree.PageIDFromString("missing"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
-		assetPath := filepath.Join(t.TempDir(), "asset.txt")
+		assetPath := filepath.Join(wikiTestTempDir(), "asset.txt")
 		Expect(os.WriteFile(assetPath, []byte("asset"), 0o644)).To(Succeed())
 		file, err := os.Open(assetPath)
 		Expect(err).NotTo(HaveOccurred())
@@ -326,7 +322,7 @@ var _ = ginkgo.Describe("wiki facade coverage", func() {
 		Expect(assets).To(ContainElement(ContainSubstring("asset.txt")))
 
 		_, err = adapter.UploadAsset(tree.UserIDFromString("importer"), tree.PageIDFromString("missing"), file, tree.AssetNameFromString("missing.txt"), shared.MaxBytes(1024))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 })
 
@@ -440,6 +436,17 @@ func haveWikiPathLookup(path tree.RoutePath, exists types.GomegaMatcher) types.G
 func matchWorkspaceSyncDisabled() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return MatchError(expectedWorkspaceSyncDisabledError)
+}
+
+func havePageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(err error) *sharederrors.ValidationErrors {
+		var validation *sharederrors.ValidationErrors
+		if !errors.As(err, &validation) {
+			return nil
+		}
+		return validation
+	}, testmatchers.ContainFieldError(field, code, messageID))
 }
 
 func expectWebPresenceUnavailable(err error) {

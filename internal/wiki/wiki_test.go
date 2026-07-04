@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,45 +14,191 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
+	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
+	wikihealth "github.com/perber/wiki/internal/wiki/health"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
+	"github.com/perber/wiki/internal/workspaceid"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-type wikiTestT interface {
-	Helper()
-	TempDir() string
-	Fatal(args ...any)
-	Fatalf(format string, args ...any)
-	Error(args ...any)
-	Errorf(format string, args ...any)
+func closeWithErrorCheckForTest(closer func() error) {
+	ginkgo.GinkgoHelper()
+
+	Expect(closer()).To(Succeed())
 }
 
-func closeWithErrorCheckForTest(t wikiTestT, closer func() error) {
-	t.Helper()
-	if err := closer(); err != nil {
-		t.Fatalf("close failed: %v", err)
+func existAsFileSystemPath() types.GomegaMatcher {
+	return WithTransform(func(path string) error {
+		_, err := os.Stat(path)
+		return err
+	}, Succeed())
+}
+
+func beMissingFileSystemPath() types.GomegaMatcher {
+	return WithTransform(func(path string) error {
+		_, err := os.Stat(path)
+		return err
+	}, MatchError(os.ErrNotExist))
+}
+
+type wikiServiceSet struct {
+	User          any
+	Auth          any
+	APIKeys       any
+	OAuth         any
+	Branding      any
+	Tree          any
+	Asset         any
+	Search        any
+	Links         any
+	Tags          any
+	Properties    any
+	WorkspaceSync any
+}
+
+func haveControlPlaneOnlyServices() types.GomegaMatcher {
+	return WithTransform(func(w *Wiki) wikiServiceSet {
+		return wikiServiceSet{
+			User:          w.user,
+			Auth:          w.auth,
+			APIKeys:       w.apiKeys,
+			OAuth:         w.oauth,
+			Branding:      w.branding,
+			Tree:          w.tree,
+			Asset:         w.asset,
+			Search:        w.searchIndex,
+			Links:         w.links,
+			Tags:          w.tags,
+			Properties:    w.props,
+			WorkspaceSync: w.workspaceSync,
+		}
+	}, gstruct.MatchAllFields(gstruct.Fields{
+		"User":          Not(BeNil()),
+		"Auth":          Not(BeNil()),
+		"APIKeys":       Not(BeNil()),
+		"OAuth":         Not(BeNil()),
+		"Branding":      Not(BeNil()),
+		"Tree":          BeNil(),
+		"Asset":         BeNil(),
+		"Search":        BeNil(),
+		"Links":         BeNil(),
+		"Tags":          BeNil(),
+		"Properties":    BeNil(),
+		"WorkspaceSync": BeNil(),
+	}))
+}
+
+func haveWorkspaceSyncValidationPath(path types.GomegaMatcher) types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("LastCommitHash", Not(BeEmpty())),
+		HaveField("ValidationErrors", ContainElement(HaveField("Path", path))),
+	)
+}
+
+type runtimeHealthWireSnapshot struct {
+	Healthy bool
+	Checks  map[string]string
+}
+
+func runtimeHealthWireSnapshotFor(required []projectdaemon.RoleName, roles []projectdaemon.RoleHealth) runtimeHealthWireSnapshot {
+	ginkgo.GinkgoHelper()
+
+	useCase := wikihealth.NewHealthUseCase(nil, nil, wikiTestTempDir(), wikihealth.HealthUseCaseOptions{
+		RequiredRoles: required,
+		RoleHealth: func() []projectdaemon.RoleHealth {
+			return roles
+		},
+	})
+	healthy, checks := useCase.Execute()
+	return runtimeHealthWireSnapshot{
+		Healthy: healthy,
+		Checks:  checks.HTTPMap(),
 	}
 }
 
-func createWikiTestInstance(t wikiTestT) *Wiki {
+func haveRuntimeRoleHealth(role projectdaemon.RoleName, state projectdaemon.RoleState) types.GomegaMatcher {
+	base := runtimeHealthWireSnapshotFor(nil, nil)
+	withRole := runtimeHealthWireSnapshotFor([]projectdaemon.RoleName{role}, []projectdaemon.RoleHealth{{Name: role, State: state}})
+
+	matchers := make([]types.GomegaMatcher, 0, len(withRole.Checks))
+	for key, value := range withRole.Checks {
+		if _, ok := base.Checks[key]; ok {
+			continue
+		}
+		matchers = append(matchers, HaveKeyWithValue(key, value))
+	}
+	return SatisfyAll(matchers...)
+}
+
+type mcpToolSuccessMatcher struct {
+	structuredContent types.GomegaMatcher
+}
+
+func haveSuccessfulMCPToolResult(structuredContent types.GomegaMatcher) types.GomegaMatcher {
+	return mcpToolSuccessMatcher{structuredContent: structuredContent}
+}
+
+func (matcher mcpToolSuccessMatcher) Match(actual any) (bool, error) {
+	result, ok := actual.(*sdkmcp.CallToolResult)
+	if !ok {
+		return false, fmt.Errorf("expected *mcp.CallToolResult, got %T", actual)
+	}
+	if result == nil || result.IsError {
+		return false, nil
+	}
+	return matcher.structuredContent.Match(result.StructuredContent)
+}
+
+func (matcher mcpToolSuccessMatcher) FailureMessage(actual any) string {
+	return fmt.Sprintf("Expected\n\t%#v\nto be a successful MCP tool result with matching structured content", actual)
+}
+
+func (matcher mcpToolSuccessMatcher) NegatedFailureMessage(actual any) string {
+	return fmt.Sprintf("Expected\n\t%#v\nnot to be a successful MCP tool result with matching structured content", actual)
+}
+
+func haveSuccessfulMCPRevisionHistory(count int) types.GomegaMatcher {
+	return haveSuccessfulMCPToolResult(HaveKeyWithValue("revisions", HaveLen(count)))
+}
+
+func mcpCreatedPageID(result *sdkmcp.CallToolResult) tree.PageID {
+	content, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		return ""
+	}
+	page, ok := content["page"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, ok := page["id"].(string)
+	if !ok {
+		return ""
+	}
+	return tree.PageIDFromString(id)
+}
+
+func createWikiTestInstance() *Wiki {
+	ginkgo.GinkgoHelper()
+
 	wikiInstance, err := NewWiki(&WikiOptions{
-		StorageDir:          t.TempDir(),
+		StorageDir:          wikiTestTempDir(),
 		AdminPassword:       "admin",
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance: %v", err)
-	}
+	Expect(err).To(Succeed())
 	return wikiInstance
 }
 
-func createWikiTestInstanceWithWorkspace(t wikiTestT, workspace Workspace) *Wiki {
-	t.Helper()
+func createWikiTestInstanceWithWorkspace(workspace Workspace) *Wiki {
+	ginkgo.GinkgoHelper()
+
 	wikiInstance, err := NewWiki(&WikiOptions{
 		Workspace:           workspace,
 		AdminPassword:       "admin",
@@ -59,9 +206,7 @@ func createWikiTestInstanceWithWorkspace(t wikiTestT, workspace Workspace) *Wiki
 		AccessTokenTimeout:  15 * time.Minute,
 		RefreshTokenTimeout: 7 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance: %v", err)
-	}
+	Expect(err).To(Succeed())
 	return wikiInstance
 }
 
@@ -74,532 +219,394 @@ func pageIDPtr(id tree.PageID) *tree.PageID {
 	return &id
 }
 
-func createPageForTest(t wikiTestT, w *Wiki, userID string, parentID *tree.PageID, title, slug string, kind *tree.NodeKind) *tree.Page {
-	t.Helper()
+func createPageForTest(w *Wiki, userID string, parentID *tree.PageID, title, slug string, kind *tree.NodeKind) *tree.Page {
+	ginkgo.GinkgoHelper()
 
 	out, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
 		wikipages.CreatePageInput{UserID: newFixtureUserID(userID), ParentID: parentID, Title: title, Slug: newFixtureSlug(slug), Kind: kind},
 	)
-	if err != nil {
-		t.Fatalf("CreatePage failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 	return out.Page
 }
 
-func updatePageForTest(t wikiTestT, w *Wiki, userID string, id tree.PageID, title, slug string, content *string, kind *tree.NodeKind) *tree.Page {
-	t.Helper()
+func updatePageForTest(w *Wiki, userID string, id tree.PageID, title, slug string, content *string, kind *tree.NodeKind) *tree.Page {
+	ginkgo.GinkgoHelper()
 
 	current, err := w.tree.GetPage(id)
-	if err != nil {
-		t.Fatalf("GetPage before update failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 
 	out, err := wikipages.NewUpdatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
 		wikipages.UpdatePageInput{UserID: newFixtureUserID(userID), ID: id, Version: newFixturePageVersion(current.Version()), Title: title, Slug: newFixtureSlug(slug), Content: content, Kind: kind},
 	)
-	if err != nil {
-		t.Fatalf("UpdatePage failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 	return out.Page
 }
 
-func deletePageForTest(t wikiTestT, w *Wiki, userID string, id tree.PageID, recursive bool) {
-	t.Helper()
+func deletePageForTest(w *Wiki, userID string, id tree.PageID, recursive bool) {
+	ginkgo.GinkgoHelper()
 
 	current, err := w.tree.GetPage(id)
-	if err != nil {
-		t.Fatalf("GetPage before delete failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 
-	if err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
+	err = wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
 		wikipages.DeletePageInput{UserID: newFixtureUserID(userID), ID: id, Version: newFixturePageVersion(current.Version()), Recursive: recursive},
-	); err != nil {
-		t.Fatalf("DeletePage failed: %v", err)
-	}
+	)
+	Expect(err).To(Succeed())
 }
 
-var _ = ginkgo.It("TestWiki_DeletePage_Simple", func() {
-	t := ginkgo.GinkgoT()
-	w := createWikiTestInstance(t)
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-	page := createPageForTest(t, w, "system", nil, "Trash", "trash", pageNodeKind())
-	deletePageForTest(t, w, "system", page.ID, false)
-	if _, err := w.tree.GetPage(page.ID); err == nil {
-		t.Fatalf("expected deleted page to be gone")
-	}
-})
+func mcpServerStoppedSuccessfully(err error) bool {
+	return err == nil || errors.Is(err, context.Canceled)
+}
 
-var _ = ginkgo.It("TestWiki_DefaultWorkspaceKeepsExistingStorageLayout", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := t.TempDir()
-	wikiInstance, err := NewWiki(&WikiOptions{
-		StorageDir:          dataDir,
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+var _ = ginkgo.Describe("wiki runtime behavior", func() {
+	ginkgo.It("removes a leaf page from the tree", func() {
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+		page := createPageForTest(w, "system", nil, "Trash", "trash", pageNodeKind())
+		deletePageForTest(w, "system", page.ID, false)
+		_, err := w.tree.GetPage(page.ID)
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
-	if got := wikiInstance.GetStorageDir(); got != dataDir {
-		t.Fatalf("GetStorageDir() = %q, want %q", got, dataDir)
-	}
-	if got, want := wikiInstance.GetRootDir(), filepath.Join(dataDir, "root"); got != want {
-		t.Fatalf("GetRootDir() = %q, want %q", got, want)
-	}
-	if got := wikiInstance.Workspace(); got.ID != "default" || got.DataDir != dataDir || got.RootDir != filepath.Join(dataDir, "root") {
-		t.Fatalf("unexpected default workspace: %#v", got)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, "root", "welcome-to-leafwiki.md")); err != nil {
-		t.Fatalf("expected welcome page in default root dir: %v", err)
-	}
-})
+	ginkgo.It("keeps the legacy storage directory layout for the default workspace", func() {
+		dataDir := wikiTestTempDir()
+		wikiInstance, err := NewWiki(&WikiOptions{
+			StorageDir:          dataDir,
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, wikiInstance.Close)
 
-var _ = ginkgo.It("TestWiki_ExplicitWorkspaceStoresContentInRootDirAndStateInDataDir", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := createWikiTestInstanceWithWorkspace(t, Workspace{
-		ID:      "default",
-		DataDir: dataDir,
-		RootDir: rootDir,
+		Expect(wikiInstance.GetStorageDir()).To(Equal(dataDir))
+		Expect(wikiInstance.GetRootDir()).To(Equal(filepath.Join(dataDir, "root")))
+		Expect(wikiInstance.Workspace()).To(SatisfyAll(
+			HaveField("ID", Equal(workspaceid.WorkspaceID("default"))),
+			HaveField("DataDir", Equal(dataDir)),
+			HaveField("RootDir", Equal(filepath.Join(dataDir, "root"))),
+		))
+		Expect(filepath.Join(dataDir, "root", "welcome-to-leafwiki.md")).To(existAsFileSystemPath())
 	})
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
-	if got := w.GetStorageDir(); got != dataDir {
-		t.Fatalf("GetStorageDir() = %q, want %q", got, dataDir)
-	}
-	if got := w.GetRootDir(); got != rootDir {
-		t.Fatalf("GetRootDir() = %q, want %q", got, rootDir)
-	}
-	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); err != nil {
-		t.Fatalf("expected welcome page in explicit root dir: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, "root", "welcome-to-leafwiki.md")); !os.IsNotExist(err) {
-		t.Fatalf("expected no welcome page in data dir root, got err=%v", err)
-	}
-	for _, rel := range []string{
-		"users.db",
-		"sessions.db",
-		"search.db",
-		"links.db",
-		"tags.db",
-		"properties.db",
-		"assets",
-		".leafwiki",
-		".importer",
-		"branding",
-	} {
-		if _, err := os.Stat(filepath.Join(dataDir, rel)); err != nil {
-			t.Fatalf("expected app state %s in data dir: %v", rel, err)
-		}
-	}
-
-	if err := w.branding.UpdateBranding("Workspace Wiki"); err != nil {
-		t.Fatalf("UpdateBranding failed: %v", err)
-	}
-	logo, err := os.CreateTemp(t.TempDir(), "logo-*.png")
-	if err != nil {
-		t.Fatalf("CreateTemp logo failed: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, logo.Close)
-	if _, err := logo.Write([]byte("png")); err != nil {
-		t.Fatalf("Write logo failed: %v", err)
-	}
-	if _, err := logo.Seek(0, 0); err != nil {
-		t.Fatalf("Seek logo failed: %v", err)
-	}
-	if _, err := w.branding.UploadLogo(logo, "logo.png"); err != nil {
-		t.Fatalf("UploadLogo failed: %v", err)
-	}
-	for _, rel := range []string{
-		"branding.json",
-		filepath.Join("branding", "logo.png"),
-	} {
-		if _, err := os.Stat(filepath.Join(dataDir, rel)); err != nil {
-			t.Fatalf("expected branding state %s in data dir: %v", rel, err)
-		}
-		if _, err := os.Stat(filepath.Join(rootDir, rel)); !os.IsNotExist(err) {
-			t.Fatalf("expected no branding state %s in root dir, got err=%v", rel, err)
-		}
-	}
-})
-
-var _ = ginkgo.It("TestWiki_WorkspaceOnlyDoesNotCreateIdentityOAuthOrBrandingStores", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := NewWiki(&WikiOptions{
-		Workspace: Workspace{
-			ID:      "current",
+	ginkgo.It("stores workspace content in the root directory and service state in the data directory", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w := createWikiTestInstanceWithWorkspace(Workspace{
+			ID:      "default",
 			DataDir: dataDir,
 			RootDir: rootDir,
-		},
-		WorkspaceOnly:       true,
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("NewWiki workspace-only failed: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
+		})
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-	if w.UserService() != nil || w.AuthService() != nil || w.APIKeyService() != nil || w.OAuthService() != nil {
-		t.Fatalf("workspace-only wiki owns identity services: user=%v auth=%v apiKeys=%v oauth=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService())
-	}
-	for _, rel := range []string{
-		"users.db",
-		"sessions.db",
-		"api_keys.db",
-		"oauth",
-		"branding",
-		"branding.json",
-	} {
-		if _, err := os.Stat(filepath.Join(dataDir, rel)); !os.IsNotExist(err) {
-			t.Fatalf("workspace-only state %s stat err = %v, want not exist", rel, err)
+		Expect(w.GetStorageDir()).To(Equal(dataDir))
+		Expect(w.GetRootDir()).To(Equal(rootDir))
+		Expect(filepath.Join(rootDir, "welcome-to-leafwiki.md")).To(existAsFileSystemPath())
+		Expect(filepath.Join(dataDir, "root", "welcome-to-leafwiki.md")).To(beMissingFileSystemPath())
+		for _, rel := range []string{
+			"users.db",
+			"sessions.db",
+			"search.db",
+			"links.db",
+			"tags.db",
+			"properties.db",
+			"assets",
+			".leafwiki",
+			".importer",
+			"branding",
+		} {
+			Expect(filepath.Join(dataDir, rel)).To(existAsFileSystemPath())
 		}
-	}
-	for _, rel := range []string{
-		"search.db",
-		"links.db",
-		"tags.db",
-		"properties.db",
-		"assets",
-	} {
-		if _, err := os.Stat(filepath.Join(dataDir, rel)); err != nil {
-			t.Fatalf("expected workspace state %s: %v", rel, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); err != nil {
-		t.Fatalf("expected workspace content in root dir: %v", err)
-	}
-})
 
-var _ = ginkgo.It("TestWiki_ControlPlaneOnlyDoesNotCreateWorkspaceStores", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := NewWiki(&WikiOptions{
-		Workspace: Workspace{
-			ID:      "current",
-			DataDir: dataDir,
-			RootDir: rootDir,
-		},
-		ControlPlaneOnly:    true,
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("NewWiki control-plane-only failed: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-
-	if w.UserService() == nil || w.AuthService() == nil || w.APIKeyService() == nil || w.OAuthService() == nil || w.branding == nil {
-		t.Fatalf("control-plane-only wiki did not own identity/branding services: user=%v auth=%v apiKeys=%v oauth=%v branding=%v", w.UserService(), w.AuthService(), w.APIKeyService(), w.OAuthService(), w.branding)
-	}
-	if w.tree != nil || w.asset != nil || w.searchIndex != nil || w.links != nil || w.tags != nil || w.props != nil || w.workspaceSync != nil {
-		t.Fatalf("control-plane-only wiki owns workspace services: tree=%v asset=%v search=%v links=%v tags=%v props=%v sync=%v", w.tree, w.asset, w.searchIndex, w.links, w.tags, w.props, w.workspaceSync)
-	}
-	for _, rel := range []string{
-		"search.db",
-		"links.db",
-		"tags.db",
-		"properties.db",
-		"assets",
-		".importer",
-	} {
-		if _, err := os.Stat(filepath.Join(dataDir, rel)); !os.IsNotExist(err) {
-			t.Fatalf("control-plane-only workspace state %s stat err = %v, want not exist", rel, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); !os.IsNotExist(err) {
-		t.Fatalf("control-plane-only root welcome stat err = %v, want not exist", err)
-	}
-})
-
-var _ = ginkgo.It("TestWiki_ControlPlaneHealthIncludesRuntimeRoleHealth", func() {
-	t := ginkgo.GinkgoT()
-	w, err := NewWiki(&WikiOptions{
-		Workspace: Workspace{
-			ID:      "current",
-			DataDir: filepath.Join(t.TempDir(), "data"),
-			RootDir: filepath.Join(t.TempDir(), "content"),
-		},
-		AuthStorageDir:      t.TempDir(),
-		ControlPlaneOnly:    true,
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("NewWiki control-plane-only failed: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-
-	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
-	w.SetRuntimeRoleHealth([]projectdaemon.RoleName{
-		projectdaemon.RoleWikid,
-		projectdaemon.RoleFrontd,
-		projectdaemon.RoleWorkspaced,
-	}, func() []projectdaemon.RoleHealth {
-		return []projectdaemon.RoleHealth{
-			{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateReady, PID: 1, UpdatedAt: now},
-			{Name: projectdaemon.RoleFrontd, State: projectdaemon.RoleStateReady, PID: 2, UpdatedAt: now},
-			{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateCrashed, PID: 3, Error: "restart exhausted", UpdatedAt: now},
+		Expect(w.branding.UpdateBranding("Workspace Wiki")).To(Succeed())
+		logo, err := os.CreateTemp(wikiTestTempDir(), "logo-*.png")
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, logo.Close)
+		_, err = logo.Write([]byte("png"))
+		Expect(err).To(Succeed())
+		_, err = logo.Seek(0, 0)
+		Expect(err).To(Succeed())
+		logoFile, err := w.branding.UploadLogo(logo, "logo.png")
+		Expect(err).To(Succeed())
+		Expect(logoFile).To(Equal("logo.png"))
+		for _, rel := range []string{
+			"branding.json",
+			filepath.Join("branding", "logo.png"),
+		} {
+			Expect(filepath.Join(dataDir, rel)).To(existAsFileSystemPath())
+			Expect(filepath.Join(rootDir, rel)).To(beMissingFileSystemPath())
 		}
 	})
-	router := httpinternal.NewRouter(w.FrontdRegistrars(), w.FrontendConfig(), httpinternal.RouterOptions{})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	ginkgo.It("starts workspace services without owning identity or branding stores", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w, err := NewWiki(&WikiOptions{
+			Workspace: Workspace{
+				ID:      "current",
+				DataDir: dataDir,
+				RootDir: rootDir,
+			},
+			WorkspaceOnly:       true,
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("GET /api/health status = %d, want 503: %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Checks map[string]string `json:"checks"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode health response: %v", err)
-	}
-	if body.Checks["role_workspaced"] != "crashed" {
-		t.Fatalf("role_workspaced = %q, want crashed; checks=%#v", body.Checks["role_workspaced"], body.Checks)
-	}
-})
-
-var _ = ginkgo.It("TestWiki_WorkspaceSyncDoesNotFailStartupOnInvalidMarkdown", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatalf("create root dir: %v", err)
-	}
-	invalidA := "---\nleafwiki_id: duplicate\nleafwiki_title: A\n---\n# A\n"
-	invalidB := "---\nleafwiki_id: duplicate\nleafwiki_title: B\n---\n# B\n"
-	if err := os.WriteFile(filepath.Join(rootDir, "a.md"), []byte(invalidA), 0o644); err != nil {
-		t.Fatalf("write a.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "b.md"), []byte(invalidB), 0o644); err != nil {
-		t.Fatalf("write b.md: %v", err)
-	}
-
-	w, err := NewWiki(&WikiOptions{
-		Workspace: Workspace{
-			DataDir: dataDir,
-			RootDir: rootDir,
-		},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("NewWiki with invalid workspace sync state returned error: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-
-	status := w.WorkspaceSyncStatus()
-	if status.LastCommitHash == "" {
-		t.Fatalf("workspace sync status missing commit hash: %#v", status)
-	}
-	if len(status.ValidationErrors) == 0 {
-		t.Fatalf("workspace sync status missing validation errors: %#v", status)
-	}
-	var hasPath bool
-	for _, validationErr := range status.ValidationErrors {
-		if validationErr.Path == "a.md" || validationErr.Path == "b.md" {
-			hasPath = true
-			break
+		Expect(w.UserService()).To(BeNil())
+		Expect(w.AuthService()).To(BeNil())
+		Expect(w.APIKeyService()).To(BeNil())
+		Expect(w.OAuthService()).To(BeNil())
+		for _, rel := range []string{
+			"users.db",
+			"sessions.db",
+			"api_keys.db",
+			"oauth",
+			"branding",
+			"branding.json",
+		} {
+			Expect(filepath.Join(dataDir, rel)).To(beMissingFileSystemPath())
 		}
-	}
-	if !hasPath {
-		t.Fatalf("workspace sync validation errors missing markdown path: %#v", status.ValidationErrors)
-	}
-})
+		for _, rel := range []string{
+			"search.db",
+			"links.db",
+			"tags.db",
+			"properties.db",
+			"assets",
+		} {
+			Expect(filepath.Join(dataDir, rel)).To(existAsFileSystemPath())
+		}
+		Expect(filepath.Join(rootDir, "welcome-to-leafwiki.md")).To(existAsFileSystemPath())
+	})
 
-var _ = ginkgo.It("TestWiki_MarkdownLinkRootPrefixFlowsToWorkspaceSyncAndLinkIndex", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "repo", "docs")
-	if err := os.MkdirAll(filepath.Join(rootDir, "sync"), 0o755); err != nil {
-		t.Fatalf("create sync dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "source.md"), []byte(`---
+	ginkgo.It("starts control-plane services without creating workspace stores", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w, err := NewWiki(&WikiOptions{
+			Workspace: Workspace{
+				ID:      "current",
+				DataDir: dataDir,
+				RootDir: rootDir,
+			},
+			ControlPlaneOnly:    true,
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+
+		Expect(w).To(haveControlPlaneOnlyServices())
+		for _, rel := range []string{
+			"search.db",
+			"links.db",
+			"tags.db",
+			"properties.db",
+			"assets",
+			".importer",
+		} {
+			Expect(filepath.Join(dataDir, rel)).To(beMissingFileSystemPath())
+		}
+		Expect(filepath.Join(rootDir, "welcome-to-leafwiki.md")).To(beMissingFileSystemPath())
+	})
+
+	ginkgo.It("reports crashed runtime roles through control-plane health", func() {
+		w, err := NewWiki(&WikiOptions{
+			Workspace: Workspace{
+				ID:      "current",
+				DataDir: filepath.Join(wikiTestTempDir(), "data"),
+				RootDir: filepath.Join(wikiTestTempDir(), "content"),
+			},
+			AuthStorageDir:      wikiTestTempDir(),
+			ControlPlaneOnly:    true,
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+
+		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+		w.SetRuntimeRoleHealth([]projectdaemon.RoleName{
+			projectdaemon.RoleWikid,
+			projectdaemon.RoleFrontd,
+			projectdaemon.RoleWorkspaced,
+		}, func() []projectdaemon.RoleHealth {
+			return []projectdaemon.RoleHealth{
+				{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateReady, PID: 1, UpdatedAt: now},
+				{Name: projectdaemon.RoleFrontd, State: projectdaemon.RoleStateReady, PID: 2, UpdatedAt: now},
+				{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateCrashed, PID: 3, Error: "restart exhausted", UpdatedAt: now},
+			}
+		})
+		router := httpinternal.NewRouter(w.FrontdRegistrars(), w.FrontendConfig(), httpinternal.RouterOptions{})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusServiceUnavailable))
+		var body struct {
+			Checks map[string]string `json:"checks"`
+		}
+		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+		Expect(body.Checks).To(haveRuntimeRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateCrashed))
+	})
+
+	ginkgo.It("starts while reporting markdown validation errors from workspace sync", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
+		invalidA := "---\nleafwiki_id: duplicate\nleafwiki_title: A\n---\n# A\n"
+		invalidB := "---\nleafwiki_id: duplicate\nleafwiki_title: B\n---\n# B\n"
+		Expect(os.WriteFile(filepath.Join(rootDir, "a.md"), []byte(invalidA), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "b.md"), []byte(invalidB), 0o644)).To(Succeed())
+
+		w, err := NewWiki(&WikiOptions{
+			Workspace: Workspace{
+				DataDir: dataDir,
+				RootDir: rootDir,
+			},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+
+		Expect(w.WorkspaceSyncStatus()).To(haveWorkspaceSyncValidationPath(SatisfyAny(Equal("a.md"), Equal("b.md"))))
+	})
+
+	ginkgo.It("applies the markdown link root prefix to sync validation and link indexing", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "repo", "docs")
+		Expect(os.MkdirAll(filepath.Join(rootDir, "sync"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "source.md"), []byte(`---
 leafwiki_id: source
 leafwiki_title: Source
 ---
 # Source
 
 [Glossary](/docs/sync/glossary.md)
-`), 0o644); err != nil {
-		t.Fatalf("write source.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "sync", "glossary.md"), []byte(`---
+`), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "sync", "glossary.md"), []byte(`---
 leafwiki_id: glossary
 leafwiki_title: Glossary
 ---
 # Glossary
-`), 0o644); err != nil {
-		t.Fatalf("write glossary.md: %v", err)
-	}
+`), 0o644)).To(Succeed())
 
-	w, err := NewWiki(&WikiOptions{
-		Workspace:              Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:          "admin",
-		JWTSecret:              "secretkey",
-		AccessTokenTimeout:     15 * time.Minute,
-		RefreshTokenTimeout:    7 * 24 * time.Hour,
-		MarkdownLinkRootPrefix: "/docs",
+		w, err := NewWiki(&WikiOptions{
+			Workspace:              Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:          "admin",
+			JWTSecret:              "secretkey",
+			AccessTokenTimeout:     15 * time.Minute,
+			RefreshTokenTimeout:    7 * 24 * time.Hour,
+			MarkdownLinkRootPrefix: "/docs",
+		})
+		Expect(err).To(Succeed())
+		Expect(w.WorkspaceSyncStatus().ValidationErrors).To(BeEmpty())
+		source, err := w.tree.GetPage("source")
+		Expect(err).To(Succeed())
+		outgoing, err := w.links.GetOutgoingLinksForPage(source.ID)
+		Expect(err).To(Succeed())
+		Expect(outgoing).To(SatisfyAll(
+			HaveField("Count", Equal(1)),
+			HaveField("Outgoings", ContainElement(SatisfyAll(
+				HaveField("ToPath", Equal(tree.RoutePath("/sync/glossary"))),
+				HaveField("Broken", BeFalse()),
+			))),
+		))
+		closeWithErrorCheckForTest(w.Close)
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	if status := w.WorkspaceSyncStatus(); len(status.ValidationErrors) != 0 {
-		t.Fatalf("ValidationErrors = %#v, want prefix-aware validation", status.ValidationErrors)
-	}
-	source, err := w.tree.GetPage("source")
-	if err != nil {
-		t.Fatalf("GetPage source: %v", err)
-	}
-	outgoing, err := w.links.GetOutgoingLinksForPage(source.ID)
-	if err != nil {
-		t.Fatalf("GetOutgoingLinksForPage: %v", err)
-	}
-	if outgoing.Count != 1 || outgoing.Outgoings[0].ToPath != "/sync/glossary" || outgoing.Outgoings[0].Broken {
-		t.Fatalf("outgoing = %#v, want resolved /sync/glossary", outgoing)
-	}
-	closeWithErrorCheckForTest(t, w.Close)
-})
 
-var _ = ginkgo.It("TestWiki_WorkspaceSyncCommitsWebPageCreates", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+	ginkgo.It("records web-created pages in workspace sync revisions", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+		before := w.WorkspaceSyncStatus().LastCommitHash
+		Expect(before).NotTo(BeEmpty())
+
+		page := createPageForTest(w, "alice", nil, "Synced Web Page", "synced-web-page", pageNodeKind())
+
+		after := w.WorkspaceSyncStatus().LastCommitHash
+		Expect(after).NotTo(BeEmpty())
+		Expect(after).NotTo(Equal(before))
+		result, err := w.WorkspaceSyncPageRevisions(context.Background(), page, "", 10)
+		Expect(err).To(Succeed())
+		revisions := result.Revisions
+		Expect(revisions).To(ContainElement(HaveField("AuthorID", Equal("alice"))))
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-	before := w.WorkspaceSyncStatus().LastCommitHash
-	if before == "" {
-		t.Fatalf("initial workspace sync commit hash is empty")
-	}
 
-	page := createPageForTest(t, w, "alice", nil, "Synced Web Page", "synced-web-page", pageNodeKind())
+	ginkgo.It("records imported page changes in workspace sync snapshots", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+		before := w.WorkspaceSyncStatus().LastCommitHash
+		Expect(before).NotTo(BeEmpty())
 
-	after := w.WorkspaceSyncStatus().LastCommitHash
-	if after == "" || after == before {
-		t.Fatalf("workspace sync commit hash after create = %q, before %q", after, before)
-	}
-	result, err := w.WorkspaceSyncPageRevisions(context.Background(), page, "", 10)
-	if err != nil {
-		t.Fatalf("WorkspaceSyncPageRevisions: %v", err)
-	}
-	revisions := result.Revisions
-	if len(revisions) == 0 {
-		t.Fatalf("workspace sync revisions missing for web-created page")
-	}
-	if revisions[0].AuthorID != "alice" {
-		t.Fatalf("workspace sync revision author = %q, want alice", revisions[0].AuthorID)
-	}
-})
+		adapter := NewWikiImportAdapter(w)
+		page, err := adapter.EnsurePath("importer-user", "imported-page", "Imported Page", pageNodeKind())
+		Expect(err).To(Succeed())
+		content := "Imported body\n"
+		page, err = adapter.UpdatePage("importer-user", page.ID, page.Title, page.Slug, &content, &page.Kind)
+		Expect(err).To(Succeed())
 
-var _ = ginkgo.It("TestWiki_WorkspaceSyncCommitsImportedPages", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		after := w.WorkspaceSyncStatus().LastCommitHash
+		Expect(after).NotTo(BeEmpty())
+		Expect(after).NotTo(Equal(before))
+		result, err := w.WorkspaceSyncPageRevisions(context.Background(), page, "", 10)
+		Expect(err).To(Succeed())
+		revisions := result.Revisions
+		Expect(revisions).To(ContainElement(HaveField("AuthorID", Equal("importer-user"))))
+		snapshots, err := w.WorkspaceSyncSnapshots(context.Background(), 5)
+		Expect(err).To(Succeed())
+		Expect(snapshots).To(ContainElement(SatisfyAll(
+			HaveField("ID", Equal(after)),
+			HaveField("AuthorID", Equal(workspacesync.ActorID("importer-user"))),
+			HaveField("Source", Equal(string(workspacesync.SourceWeb))),
+		)))
 	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-	before := w.WorkspaceSyncStatus().LastCommitHash
-	if before == "" {
-		t.Fatalf("initial workspace sync commit hash is empty")
-	}
 
-	adapter := NewWikiImportAdapter(w)
-	page, err := adapter.EnsurePath("importer-user", "imported-page", "Imported Page", pageNodeKind())
-	if err != nil {
-		t.Fatalf("EnsurePath: %v", err)
-	}
-	content := "Imported body\n"
-	page, err = adapter.UpdatePage("importer-user", page.ID, page.Title, page.Slug, &content, &page.Kind)
-	if err != nil {
-		t.Fatalf("UpdatePage: %v", err)
-	}
+	ginkgo.It("rebuilds derived indexes from refreshed workspace markdown", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-	after := w.WorkspaceSyncStatus().LastCommitHash
-	if after == "" || after == before {
-		t.Fatalf("workspace sync commit hash after import = %q, before %q", after, before)
-	}
-	result, err := w.WorkspaceSyncPageRevisions(context.Background(), page, "", 10)
-	if err != nil {
-		t.Fatalf("WorkspaceSyncPageRevisions: %v", err)
-	}
-	revisions := result.Revisions
-	if len(revisions) == 0 {
-		t.Fatalf("workspace sync revisions missing for imported page")
-	}
-	if revisions[0].AuthorID != "importer-user" {
-		t.Fatalf("workspace sync revision author = %q, want importer-user", revisions[0].AuthorID)
-	}
-	snapshots, err := w.WorkspaceSyncSnapshots(context.Background(), 5)
-	if err != nil {
-		t.Fatalf("WorkspaceSyncSnapshots: %v", err)
-	}
-	if len(snapshots) == 0 || snapshots[0].ID != after {
-		t.Fatalf("latest workspace snapshot = %#v, want commit %s", snapshots, after)
-	}
-	if snapshots[0].AuthorID != "importer-user" {
-		t.Fatalf("latest workspace snapshot author = %q, want importer-user", snapshots[0].AuthorID)
-	}
-	if snapshots[0].Source != string(workspacesync.SourceWeb) {
-		t.Fatalf("latest workspace snapshot source = %q, want web", snapshots[0].Source)
-	}
-})
-
-var _ = ginkgo.It("TestWiki_WorkspaceSyncRefreshRebuildsDerivedIndexes", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("NewWiki: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-
-	raw := `---
+		raw := `---
 leafwiki_id: indexed-page
 leafwiki_title: Indexed Page
 tags:
@@ -610,48 +617,29 @@ status: draft
 # Indexed Page
 
 workspace-sync-search-token`
-	if err := os.WriteFile(filepath.Join(rootDir, "indexed-page.md"), []byte(raw), 0o644); err != nil {
-		t.Fatalf("write direct markdown: %v", err)
-	}
+		Expect(os.WriteFile(filepath.Join(rootDir, "indexed-page.md"), []byte(raw), 0o644)).To(Succeed())
 
-	status, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
-		Reason: workspacesync.ReasonExplicit,
-		Source: workspacesync.SourceFilesystem,
-		Actor:  workspacesync.PublicEditorActor(),
-	})
-	if err != nil {
-		t.Fatalf("WorkspaceSyncRefresh: %v", err)
-	}
-	if status.LastCommitHash == "" {
-		t.Fatalf("sync status missing commit hash: %#v", status)
-	}
+		status, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+			Reason: workspacesync.ReasonExplicit,
+			Source: workspacesync.SourceFilesystem,
+			Actor:  workspacesync.PublicEditorActor(),
+		})
+		Expect(err).To(Succeed())
+		Expect(status.LastCommitHash).NotTo(BeEmpty())
 
-	if _, err := w.tree.GetPage("indexed-page"); err != nil {
-		t.Fatalf("GetPage indexed-page: %v", err)
-	}
-	tagged, err := w.tags.GetPageIDsByTags([]string{"synced"})
-	if err != nil {
-		t.Fatalf("GetPageIDsByTags: %v", err)
-	}
-	if len(tagged) != 1 || tagged[0] != "indexed-page" {
-		t.Fatalf("tagged pages = %#v, want indexed-page", tagged)
-	}
-	props, err := w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages: %v", err)
-	}
-	if props[newFixturePageID("indexed-page")]["status"].Value != "draft" {
-		t.Fatalf("properties = %#v, want status draft", props)
-	}
-	result, err := w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if result.Count == 0 {
-		t.Fatalf("search result count = 0, want indexed direct markdown")
-	}
+		_, err = w.tree.GetPage("indexed-page")
+		Expect(err).To(Succeed())
+		tagged, err := w.tags.GetPageIDsByTags([]string{"synced"})
+		Expect(err).To(Succeed())
+		Expect(tagged).To(ConsistOf(tree.PageID("indexed-page")))
+		props, err := w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
+		Expect(err).To(Succeed())
+		Expect(props[newFixturePageID("indexed-page")]["status"].Value).To(Equal("draft"))
+		result, err := w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
+		Expect(err).To(Succeed())
+		Expect(result.Count).To(BeNumerically(">", 0))
 
-	updatedRaw := `---
+		updatedRaw := `---
 leafwiki_id: indexed-page
 leafwiki_title: Indexed Page
 tags:
@@ -662,509 +650,347 @@ status: published
 # Indexed Page
 
 workspace-sync-updated-token`
-	if err := os.WriteFile(filepath.Join(rootDir, "indexed-page.md"), []byte(updatedRaw), 0o644); err != nil {
-		t.Fatalf("write updated direct markdown: %v", err)
-	}
-	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
-		Reason: workspacesync.ReasonExplicit,
-		Source: workspacesync.SourceFilesystem,
-		Actor:  workspacesync.PublicEditorActor(),
-	}); err != nil {
-		t.Fatalf("WorkspaceSyncRefresh after update: %v", err)
-	}
-	tagged, err = w.tags.GetPageIDsByTags([]string{"synced"})
-	if err != nil {
-		t.Fatalf("GetPageIDsByTags synced after update: %v", err)
-	}
-	if len(tagged) != 0 {
-		t.Fatalf("synced tagged pages after update = %#v, want none", tagged)
-	}
-	tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
-	if err != nil {
-		t.Fatalf("GetPageIDsByTags resynced after update: %v", err)
-	}
-	if len(tagged) != 1 || tagged[0] != "indexed-page" {
-		t.Fatalf("resynced tagged pages = %#v, want indexed-page", tagged)
-	}
-	props, err = w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
-	if err != nil {
-		t.Fatalf("GetPropertiesForPages after update: %v", err)
-	}
-	if props[newFixturePageID("indexed-page")]["status"].Value != "published" {
-		t.Fatalf("properties after update = %#v, want status published", props)
-	}
-	result, err = w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search old token after update: %v", err)
-	}
-	if result.Count != 0 {
-		t.Fatalf("old search result count = %d, want 0", result.Count)
-	}
-	result, err = w.searchIndex.Search("workspace-sync-updated-token", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search updated token: %v", err)
-	}
-	if result.Count == 0 {
-		t.Fatalf("updated search result count = 0, want indexed updated markdown")
-	}
+		Expect(os.WriteFile(filepath.Join(rootDir, "indexed-page.md"), []byte(updatedRaw), 0o644)).To(Succeed())
+		_, err = w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+			Reason: workspacesync.ReasonExplicit,
+			Source: workspacesync.SourceFilesystem,
+			Actor:  workspacesync.PublicEditorActor(),
+		})
+		Expect(err).To(Succeed())
+		tagged, err = w.tags.GetPageIDsByTags([]string{"synced"})
+		Expect(err).To(Succeed())
+		Expect(tagged).To(BeEmpty())
+		tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
+		Expect(err).To(Succeed())
+		Expect(tagged).To(ConsistOf(tree.PageID("indexed-page")))
+		props, err = w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
+		Expect(err).To(Succeed())
+		Expect(props[newFixturePageID("indexed-page")]["status"].Value).To(Equal("published"))
+		result, err = w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
+		Expect(err).To(Succeed())
+		Expect(result.Count).To(BeZero())
+		result, err = w.searchIndex.Search("workspace-sync-updated-token", nil, 0, 10)
+		Expect(err).To(Succeed())
+		Expect(result.Count).To(BeNumerically(">", 0))
 
-	if err := os.Remove(filepath.Join(rootDir, "indexed-page.md")); err != nil {
-		t.Fatalf("remove direct markdown: %v", err)
-	}
-	if _, err := w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
-		Reason: workspacesync.ReasonExplicit,
-		Source: workspacesync.SourceFilesystem,
-		Actor:  workspacesync.PublicEditorActor(),
-	}); err != nil {
-		t.Fatalf("WorkspaceSyncRefresh after delete: %v", err)
-	}
-	if _, err := w.tree.GetPage("indexed-page"); err == nil {
-		t.Fatalf("GetPage indexed-page after delete succeeded, want missing page")
-	}
-	tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
-	if err != nil {
-		t.Fatalf("GetPageIDsByTags resynced after delete: %v", err)
-	}
-	if len(tagged) != 0 {
-		t.Fatalf("resynced tagged pages after delete = %#v, want none", tagged)
-	}
-	result, err = w.searchIndex.Search("workspace-sync-updated-token", nil, 0, 10)
-	if err != nil {
-		t.Fatalf("Search updated token after delete: %v", err)
-	}
-	if result.Count != 0 {
-		t.Fatalf("deleted search result count = %d, want 0", result.Count)
-	}
-})
-
-var _ = ginkgo.It("TestWiki_RunMCPStdioUsesDisabledAuthPublicEditor", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
-	})
-	if err != nil {
-		t.Fatalf("NewWiki failed: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-
-	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	ginkgo.DeferCleanup(cancel)
-	serverDone := make(chan error, 1)
-	go func() {
-		serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
-			PublicAccess:            true,
-			AuthDisabled:            true,
-			MaxAssetUploadSizeBytes: 50 * 1024 * 1024,
-		}, serverTransport)
-	}()
-
-	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
-	session, err := client.Connect(ctx, clientTransport, nil)
-	if err != nil {
-		t.Fatalf("Connect MCP client failed: %v", err)
-	}
-	ginkgo.DeferCleanup(func() {
-		_ = session.Close()
+		Expect(os.Remove(filepath.Join(rootDir, "indexed-page.md"))).To(Succeed())
+		_, err = w.WorkspaceSyncRefresh(context.Background(), workspacesync.SyncRequest{
+			Reason: workspacesync.ReasonExplicit,
+			Source: workspacesync.SourceFilesystem,
+			Actor:  workspacesync.PublicEditorActor(),
+		})
+		Expect(err).To(Succeed())
+		_, err = w.tree.GetPage("indexed-page")
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
+		tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
+		Expect(err).To(Succeed())
+		Expect(tagged).To(BeEmpty())
+		result, err = w.searchIndex.Search("workspace-sync-updated-token", nil, 0, 10)
+		Expect(err).To(Succeed())
+		Expect(result.Count).To(BeZero())
 	})
 
-	tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
-	if err != nil {
-		t.Fatalf("ListTools failed: %v", err)
-	}
-	if !mcpToolNamesContain(tools.Tools, "wiki_create_page") || !mcpToolNamesContain(tools.Tools, "wiki_get_current_user") {
-		t.Fatalf("native stdio tools = %#v, want shared LeafWiki tools", tools.Tools)
-	}
+	ginkgo.It("serves native stdio tools as the public editor when auth is disabled", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-	current, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "wiki_get_current_user"})
-	if err != nil {
-		t.Fatalf("get_current_user failed: %v", err)
-	}
-	currentUser, ok := current.StructuredContent.(map[string]any)["user"].(map[string]any)
-	if !ok {
-		t.Fatalf("get_current_user structured content = %#v, want user map", current.StructuredContent)
-	}
-	if currentUser["username"] != "public-editor" || currentUser["role"] != "editor" {
-		t.Fatalf("native stdio current user = %#v, want public-editor editor", currentUser)
-	}
+		serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ginkgo.DeferCleanup(cancel)
+		serverDone := make(chan error, 1)
+		go func() {
+			serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
+				PublicAccess:            true,
+				AuthDisabled:            true,
+				MaxAssetUploadSizeBytes: 50 * 1024 * 1024,
+			}, serverTransport)
+		}()
 
-	if err := session.Close(); err != nil {
-		t.Fatalf("Close MCP session failed: %v", err)
-	}
-	Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
-})
+		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
+		session, err := client.Connect(ctx, clientTransport, nil)
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(func() {
+			_ = session.Close()
+		})
 
-var _ = ginkgo.It("TestWiki_RunMCPStdioWorkspaceSyncMarksSourceAndServesGitHistory", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
-		AuthDisabled:        true,
-	})
-	if err != nil {
-		t.Fatalf("NewWiki failed: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
+		tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+		Expect(err).To(Succeed())
+		Expect(tools.Tools).To(SatisfyAll(
+			ContainElement(HaveField("Name", Equal("wiki_create_page"))),
+			ContainElement(HaveField("Name", Equal("wiki_get_current_user"))),
+		))
 
-	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	ginkgo.DeferCleanup(cancel)
-	serverDone := make(chan error, 1)
-	go func() {
-		serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
-			PublicAccess:            true,
-			AuthDisabled:            true,
-			MaxAssetUploadSizeBytes: 50 * 1024 * 1024,
-		}, serverTransport)
-	}()
+		current, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "wiki_get_current_user"})
+		Expect(err).To(Succeed())
+		Expect(current.StructuredContent).To(HaveKeyWithValue("user", SatisfyAll(
+			HaveKeyWithValue("username", "public-editor"),
+			HaveKeyWithValue("role", "editor"),
+		)))
 
-	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
-	session, err := client.Connect(ctx, clientTransport, nil)
-	if err != nil {
-		t.Fatalf("Connect MCP client failed: %v", err)
-	}
-	ginkgo.DeferCleanup(func() {
-		_ = session.Close()
+		Expect(session.Close()).To(Succeed())
+		Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
 	})
 
-	tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
-	if err != nil {
-		t.Fatalf("ListTools failed: %v", err)
-	}
-	if !mcpToolNamesContain(tools.Tools, "wiki_list_revisions") {
-		t.Fatalf("workspace sync MCP tools missing list_revisions: %#v", tools.Tools)
-	}
+	ginkgo.It("marks MCP writes as workspace sync revisions and serves revision history", func() {
+		dataDir := filepath.Join(wikiTestTempDir(), "data")
+		rootDir := filepath.Join(wikiTestTempDir(), "content")
+		w, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+			AuthDisabled:        true,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-	created, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name: "wiki_create_page",
-		Arguments: map[string]any{
-			"title": "MCP Synced",
-			"slug":  "mcp-synced",
-			"kind":  "page",
-		},
+		serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ginkgo.DeferCleanup(cancel)
+		serverDone := make(chan error, 1)
+		go func() {
+			serverDone <- w.RunMCPStdio(ctx, httpinternal.RouterOptions{
+				PublicAccess:            true,
+				AuthDisabled:            true,
+				MaxAssetUploadSizeBytes: 50 * 1024 * 1024,
+			}, serverTransport)
+		}()
+
+		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "leafwiki-test", Version: "test"}, nil)
+		session, err := client.Connect(ctx, clientTransport, nil)
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(func() {
+			_ = session.Close()
+		})
+
+		tools, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+		Expect(err).To(Succeed())
+		Expect(tools.Tools).To(ContainElement(HaveField("Name", Equal("wiki_list_revisions"))))
+
+		created, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+			Name: "wiki_create_page",
+			Arguments: map[string]any{
+				"title": "MCP Synced",
+				"slug":  "mcp-synced",
+				"kind":  "page",
+			},
+		})
+		Expect(err).To(Succeed())
+		Expect(created).To(haveSuccessfulMCPToolResult(HaveKeyWithValue("page", HaveKey("id"))))
+		pageID := mcpCreatedPageID(created)
+		createdTreePage, err := w.tree.GetPage(pageID)
+		Expect(err).To(Succeed())
+		Expect(createdTreePage.Title).To(Equal("MCP Synced"))
+
+		snapshots, err := w.WorkspaceSyncSnapshots(ctx, 5)
+		Expect(err).To(Succeed())
+		Expect(snapshots).To(ContainElement(HaveField("Source", Equal(string(workspacesync.SourceMCP)))))
+
+		revisions, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+			Name: "wiki_list_revisions",
+			Arguments: map[string]any{
+				"pageId": pageID.MetadataValue(),
+			},
+		})
+		Expect(err).To(Succeed())
+		Expect(revisions).To(haveSuccessfulMCPRevisionHistory(1))
+
+		Expect(session.Close()).To(Succeed())
+		Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
 	})
-	if err != nil {
-		t.Fatalf("create_page failed: %v", err)
-	}
-	if created.IsError {
-		t.Fatalf("create_page returned tool error: %#v", created.Content)
-	}
-	createdPage, ok := created.StructuredContent.(map[string]any)["page"].(map[string]any)
-	if !ok {
-		t.Fatalf("create_page structured content = %#v, want page map", created.StructuredContent)
-	}
-	pageID, _ := createdPage["id"].(string)
-	if pageID == "" {
-		t.Fatalf("created page missing id: %#v", createdPage)
-	}
 
-	snapshots, err := w.WorkspaceSyncSnapshots(ctx, 5)
-	if err != nil {
-		t.Fatalf("WorkspaceSyncSnapshots: %v", err)
-	}
-	if len(snapshots) == 0 || snapshots[0].Source != string(workspacesync.SourceMCP) {
-		t.Fatalf("latest workspace snapshot = %#v, want source mcp", snapshots)
-	}
+	ginkgo.It("rejects workspaces whose data and content directories are the same", func() {
+		dir := wikiTestTempDir()
 
-	revisions, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name: "wiki_list_revisions",
-		Arguments: map[string]any{
-			"pageId": pageID,
-		},
+		_, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{ID: "default", DataDir: dir, RootDir: filepath.Clean(filepath.Join(dir, "."))},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(MatchError(ErrWorkspaceRootDirEqualsDataDir))
 	})
-	if err != nil {
-		t.Fatalf("list_revisions failed: %v", err)
-	}
-	if revisions.IsError {
-		t.Fatalf("list_revisions returned tool error: %#v", revisions.Content)
-	}
-	revisionsContent, ok := revisions.StructuredContent.(map[string]any)["revisions"].([]any)
-	if !ok || len(revisionsContent) == 0 {
-		t.Fatalf("list_revisions structured content = %#v, want non-empty revisions", revisions.StructuredContent)
-	}
 
-	if err := session.Close(); err != nil {
-		t.Fatalf("Close MCP session failed: %v", err)
-	}
-	Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
-})
+	ginkgo.It("rejects workspaces whose content directory contains service state", func() {
+		rootDir := filepath.Join(wikiTestTempDir(), "wiki")
+		dataDir := filepath.Join(rootDir, "data")
 
-func mcpServerStoppedSuccessfully(err error) bool {
-	return err == nil || errors.Is(err, context.Canceled)
-}
-
-func mcpToolNamesContain(tools []*sdkmcp.Tool, name string) bool {
-	for _, tool := range tools {
-		if tool.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-var _ = ginkgo.It("TestWiki_RejectsWorkspaceWithSameDataAndRootDir", func() {
-	t := ginkgo.GinkgoT()
-	dir := t.TempDir()
-
-	_, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{ID: "default", DataDir: dir, RootDir: filepath.Clean(filepath.Join(dir, "."))},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		_, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(MatchError(ErrWorkspaceRootDirContainsDataDir))
+		Expect(rootDir).To(beMissingFileSystemPath())
 	})
-	if err == nil {
-		t.Fatalf("expected same data/root dir to be rejected")
-	}
-	if !errors.Is(err, ErrWorkspaceRootDirEqualsDataDir) {
-		t.Fatalf("unexpected error: %v", err)
-	}
-})
 
-var _ = ginkgo.It("TestWiki_RejectsWorkspaceWhenRootDirContainsDataDir", func() {
-	t := ginkgo.GinkgoT()
-	rootDir := filepath.Join(t.TempDir(), "wiki")
-	dataDir := filepath.Join(rootDir, "data")
+	ginkgo.It("normalizes workspace paths before services create state", func() {
+		baseDir := wikiTestTempDir()
+		dataDir := filepath.Join(baseDir, "data")
+		rootDir := filepath.Join(baseDir, "content")
 
-	_, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		w, err := NewWiki(&WikiOptions{
+			Workspace:           Workspace{ID: "default", DataDir: " " + dataDir + string(os.PathSeparator) + "." + " ", RootDir: " " + rootDir + string(os.PathSeparator) + "." + " "},
+			AdminPassword:       "admin",
+			JWTSecret:           "secretkey",
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+
+		Expect(w.GetStorageDir()).To(Equal(dataDir))
+		Expect(w.GetRootDir()).To(Equal(rootDir))
+		Expect(filepath.Join(dataDir, "users.db")).To(existAsFileSystemPath())
+		Expect(filepath.Join(rootDir, "welcome-to-leafwiki.md")).To(existAsFileSystemPath())
 	})
-	if err == nil {
-		t.Fatalf("expected root dir containing data dir to be rejected")
-	}
-	if !errors.Is(err, ErrWorkspaceRootDirContainsDataDir) {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, statErr := os.Stat(rootDir); !os.IsNotExist(statErr) {
-		t.Fatalf("expected invalid root dir not to be created before startup, got err=%v", statErr)
-	}
-})
 
-var _ = ginkgo.It("TestWiki_NormalizesWorkspacePathsBeforeInitializingServices", func() {
-	t := ginkgo.GinkgoT()
-	baseDir := t.TempDir()
-	dataDir := filepath.Join(baseDir, "data")
-	rootDir := filepath.Join(baseDir, "content")
+	ginkgo.It("refuses non-recursive deletion of a page with children", func() {
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+		parent := createPageForTest(w, "system", nil, "Parent", "parent", pageNodeKind())
+		createPageForTest(w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
-	w, err := NewWiki(&WikiOptions{
-		Workspace:           Workspace{ID: "default", DataDir: " " + dataDir + string(os.PathSeparator) + "." + " ", RootDir: " " + rootDir + string(os.PathSeparator) + "." + " "},
-		AdminPassword:       "admin",
-		JWTSecret:           "secretkey",
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
+			context.Background(),
+			wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: newFixturePageVersion(parent.Version()), Recursive: false},
+		)
+		Expect(err).To(MatchError(tree.ErrPageHasChildren))
 	})
-	if err != nil {
-		t.Fatalf("NewWiki failed: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
 
-	if got := w.GetStorageDir(); got != dataDir {
-		t.Fatalf("GetStorageDir() = %q, want normalized %q", got, dataDir)
-	}
-	if got := w.GetRootDir(); got != rootDir {
-		t.Fatalf("GetRootDir() = %q, want normalized %q", got, rootDir)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, "users.db")); err != nil {
-		t.Fatalf("expected auth state in normalized data dir: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(rootDir, "welcome-to-leafwiki.md")); err != nil {
-		t.Fatalf("expected content in normalized root dir: %v", err)
-	}
-})
+	ginkgo.It("removes a page subtree recursively", func() {
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
+		parent := createPageForTest(w, "system", nil, "Parent", "parent", pageNodeKind())
+		child := createPageForTest(w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
 
-var _ = ginkgo.It("TestWiki_DeletePage_WithChildren", func() {
-	t := ginkgo.GinkgoT()
-	w := createWikiTestInstance(t)
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
-	createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
-
-	err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
-		context.Background(),
-		wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: newFixturePageVersion(parent.Version()), Recursive: false},
-	)
-	if err == nil {
-		t.Error("Expected error when deleting parent with children")
-	}
-})
-
-var _ = ginkgo.It("TestWiki_DeletePage_Recursive", func() {
-	t := ginkgo.GinkgoT()
-	w := createWikiTestInstance(t)
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-	parent := createPageForTest(t, w, "system", nil, "Parent", "parent", pageNodeKind())
-	child := createPageForTest(t, w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
-
-	deletePageForTest(t, w, "system", parent.ID, true)
-	if _, err := w.tree.GetPage(parent.ID); err == nil {
-		t.Fatalf("expected deleted parent to be gone")
-	}
-	if _, err := w.tree.GetPage(child.ID); err == nil {
-		t.Fatalf("expected deleted child to be gone")
-	}
-})
-
-var _ = ginkgo.It("TestWiki_InitDefaultAdmin_UsesGivenPassword", func() {
-	t := ginkgo.GinkgoT()
-	w := createWikiTestInstance(t)
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-
-	_, err := w.user.GetUserByEmailOrUsernameAndPassword("admin", "admin")
-	if err != nil {
-		t.Fatalf("Admin user not found: %v", err)
-	}
-})
-
-var _ = ginkgo.It("TestWiki_Login_SuccessAndFailure", func() {
-	t := ginkgo.GinkgoT()
-	w := createWikiTestInstance(t)
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, w.Close)
-
-	authSvc := w.auth
-	if authSvc == nil {
-		t.Fatal("expected auth service to be initialized")
-	}
-
-	token, err := authSvc.Login("admin", "admin")
-	if err != nil || token == nil {
-		t.Error("Expected login to succeed with default admin password")
-	}
-
-	_, err = authSvc.Login("admin", "wrong")
-	if err == nil {
-		t.Error("Expected login to fail with wrong password")
-	}
-})
-
-var _ = ginkgo.It("TestWiki_AuthDisabled_Initialization", func() {
-	t := ginkgo.GinkgoT()
-	// Create a wiki instance with AuthDisabled set to true
-	wikiInstance, err := NewWiki(&WikiOptions{
-		StorageDir:          t.TempDir(),
-		AdminPassword:       "",
-		JWTSecret:           "",
-		AccessTokenTimeout:  0,
-		RefreshTokenTimeout: 0,
-		AuthDisabled:        true,
+		deletePageForTest(w, "system", parent.ID, true)
+		_, err := w.tree.GetPage(parent.ID)
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
+		_, err = w.tree.GetPage(child.ID)
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
-	// Verify that the auth service is nil
-	if wikiInstance.auth != nil {
-		t.Error("Expected auth service to be nil when AuthDisabled is true")
-	}
-})
+	ginkgo.It("creates the default administrator with the configured password", func() {
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-var _ = ginkgo.It("TestWiki_AuthDisabled_LoginUnavailable", func() {
-	t := ginkgo.GinkgoT()
-	// Create a wiki instance with AuthDisabled set to true
-	wikiInstance, err := NewWiki(&WikiOptions{
-		StorageDir:   t.TempDir(),
-		AuthDisabled: true,
+		_, err := w.user.GetUserByEmailOrUsernameAndPassword("admin", "admin")
+		Expect(err).To(Succeed())
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
-	// Auth operations are unavailable when auth is disabled.
-	if wikiInstance.auth != nil {
-		t.Error("Expected auth service to be nil when AuthDisabled is true")
-	}
-})
+	ginkgo.It("accepts default admin credentials and rejects invalid credentials", func() {
+		w := createWikiTestInstance()
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-var _ = ginkgo.It("TestWiki_AuthDisabled_LogoutUnavailable", func() {
-	t := ginkgo.GinkgoT()
-	// Create a wiki instance with AuthDisabled set to true
-	wikiInstance, err := NewWiki(&WikiOptions{
-		StorageDir:   t.TempDir(),
-		AuthDisabled: true,
+		authSvc := w.auth
+		Expect(authSvc).NotTo(BeNil())
+
+		token, err := authSvc.Login("admin", "admin")
+		Expect(err).To(Succeed())
+		Expect(token).NotTo(BeNil())
+
+		_, err = authSvc.Login("admin", "wrong")
+		Expect(err).To(MatchError(coreauth.ErrUserInvalidCredentials))
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
-	// Auth operations are unavailable when auth is disabled.
-	if wikiInstance.auth != nil {
-		t.Error("Expected auth service to be nil when AuthDisabled is true")
-	}
-})
+	ginkgo.It("starts without an auth service when authentication is disabled", func() {
+		// Create a wiki instance with AuthDisabled set to true
+		wikiInstance, err := NewWiki(&WikiOptions{
+			StorageDir:          wikiTestTempDir(),
+			AdminPassword:       "",
+			JWTSecret:           "",
+			AccessTokenTimeout:  0,
+			RefreshTokenTimeout: 0,
+			AuthDisabled:        true,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, wikiInstance.Close)
 
-var _ = ginkgo.It("TestWiki_AuthDisabled_RefreshTokenUnavailable", func() {
-	t := ginkgo.GinkgoT()
-	// Create a wiki instance with AuthDisabled set to true
-	wikiInstance, err := NewWiki(&WikiOptions{
-		StorageDir:   t.TempDir(),
-		AuthDisabled: true,
+		// Verify that the auth service is nil
+		Expect(wikiInstance.auth).To(BeNil())
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
-	// Auth operations are unavailable when auth is disabled.
-	if wikiInstance.auth != nil {
-		t.Error("Expected auth service to be nil when AuthDisabled is true")
-	}
-})
+	ginkgo.It("keeps login unavailable when authentication is disabled", func() {
+		// Create a wiki instance with AuthDisabled set to true
+		wikiInstance, err := NewWiki(&WikiOptions{
+			StorageDir:   wikiTestTempDir(),
+			AuthDisabled: true,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, wikiInstance.Close)
 
-var _ = ginkgo.It("TestWiki_AuthDisabled_CoreFunctionalityWorks", func() {
-	t := ginkgo.GinkgoT()
-	// Create a wiki instance with AuthDisabled set to true
-	wikiInstance, err := NewWiki(&WikiOptions{
-		StorageDir:   t.TempDir(),
-		AuthDisabled: true,
+		// Auth operations are unavailable when auth is disabled.
+		Expect(wikiInstance.auth).To(BeNil())
 	})
-	if err != nil {
-		t.Fatalf("Failed to create wiki instance with AuthDisabled: %v", err)
-	}
-	ginkgo.DeferCleanup(closeWithErrorCheckForTest, t, wikiInstance.Close)
 
-	// Test creating a page
-	page := createPageForTest(t, wikiInstance, "system", nil, "Test Page", "test-page", pageNodeKind())
+	ginkgo.It("keeps logout unavailable when authentication is disabled", func() {
+		// Create a wiki instance with AuthDisabled set to true
+		wikiInstance, err := NewWiki(&WikiOptions{
+			StorageDir:   wikiTestTempDir(),
+			AuthDisabled: true,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, wikiInstance.Close)
 
-	if page.Title != "Test Page" {
-		t.Errorf("Expected title 'Test Page', got %q", page.Title)
-	}
+		// Auth operations are unavailable when auth is disabled.
+		Expect(wikiInstance.auth).To(BeNil())
+	})
 
-	// Test updating a page
-	var updatedContent = "# Content"
-	updatedPage := updatePageForTest(t, wikiInstance, "system", page.ID, "Updated Title", "updated-slug", &updatedContent, pageNodeKind())
+	ginkgo.It("keeps refresh tokens unavailable when authentication is disabled", func() {
+		// Create a wiki instance with AuthDisabled set to true
+		wikiInstance, err := NewWiki(&WikiOptions{
+			StorageDir:   wikiTestTempDir(),
+			AuthDisabled: true,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, wikiInstance.Close)
 
-	if updatedPage.Title != "Updated Title" {
-		t.Errorf("Expected title 'Updated Title', got %q", updatedPage.Title)
-	}
+		// Auth operations are unavailable when auth is disabled.
+		Expect(wikiInstance.auth).To(BeNil())
+	})
 
-	// Test getting a page
-	retrievedPage, err := wikiInstance.tree.GetPage(page.ID)
-	if err != nil {
-		t.Fatalf("Failed to get page with AuthDisabled: %v", err)
-	}
+	ginkgo.It("allows page workflows when authentication is disabled", func() {
+		// Create a wiki instance with AuthDisabled set to true
+		wikiInstance, err := NewWiki(&WikiOptions{
+			StorageDir:   wikiTestTempDir(),
+			AuthDisabled: true,
+		})
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(closeWithErrorCheckForTest, wikiInstance.Close)
 
-	if retrievedPage.ID != page.ID {
-		t.Errorf("Expected ID %q, got %q", page.ID, retrievedPage.ID)
-	}
+		// Test creating a page
+		page := createPageForTest(wikiInstance, "system", nil, "Test Page", "test-page", pageNodeKind())
 
-	// Test deleting a page
-	deletePageForTest(t, wikiInstance, "system", page.ID, false)
+		Expect(page.Title).To(Equal("Test Page"))
+
+		// Test updating a page
+		var updatedContent = "# Content"
+		updatedPage := updatePageForTest(wikiInstance, "system", page.ID, "Updated Title", "updated-slug", &updatedContent, pageNodeKind())
+
+		Expect(updatedPage.Title).To(Equal("Updated Title"))
+
+		// Test getting a page
+		retrievedPage, err := wikiInstance.tree.GetPage(page.ID)
+		Expect(err).To(Succeed())
+
+		Expect(retrievedPage.ID).To(Equal(page.ID))
+
+		// Test deleting a page
+		deletePageForTest(wikiInstance, "system", page.ID, false)
+	})
 })
