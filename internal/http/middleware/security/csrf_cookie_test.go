@@ -210,7 +210,7 @@ var _ = Describe("CSRF cookie", func() {
 			router.GET("/test", func(c *gin.Context) {
 				token, err := csrf.Read(c)
 				Expect(token).To(BeEmpty())
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(http.ErrNoCookie))
 				c.Status(http.StatusBadRequest)
 			})
 
