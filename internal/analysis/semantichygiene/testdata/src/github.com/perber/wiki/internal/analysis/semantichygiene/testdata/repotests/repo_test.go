@@ -471,9 +471,10 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(err).To(MatchError(ContainSubstring("boom")))               // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 	Expect(err).To(MatchError(ContainSubstring(messageFixture)))       // want "assert error semantics with a typed/domain matcher or injected error value instead of raw string MatchError"
 	_ = hiddenRawStringErrorMatcher()
-	Expect(len(items)).To(Equal(1)) // want "use HaveLen matcher instead of asserting len\\(\\) with Equal"
-	Expect(count == 1).To(BeTrue()) // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
-	Expect(count > 0).To(BeTrue())  // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
+	Expect(len(items)).To(Equal(1))               // want "use HaveLen or a collection matcher instead of asserting len\\(\\) directly"
+	Expect(len(items)).To(BeNumerically(">=", 1)) // want "use HaveLen or a collection matcher instead of asserting len\\(\\) directly"
+	Expect(count == 1).To(BeTrue())               // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
+	Expect(count > 0).To(BeTrue())                // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
 	decoded, ok := any(text).(string)
 	Expect(ok).To(BeTrue()) // want "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
 	_ = decoded
@@ -566,10 +567,10 @@ func TestRepoTestNewSemanticStringerShortcutsAreRejected(t *testing.T) {
 }
 
 func TestRepoTestGomegaInlineErrorShortcutsAreRejected(t *testing.T) {
-	Expect(returnError()).NotTo(HaveOccurred())       // want "use Succeed matcher for inline single-error calls instead of NotTo\\(HaveOccurred\\(\\)\\)"
-	Expect(returnValueAndError()).To(Succeed())       // want "use Error\\(\\) or a captured error variable when asserting multi-return functions with HaveOccurred/Succeed"
-	Expect(returnValueAndError()).To(HaveOccurred())  // want "use Error\\(\\) or a captured error variable when asserting multi-return functions with HaveOccurred/Succeed"
-	Expect(returnValueAndError()).Error().To(BeNil()) // want "use HaveOccurred matcher instead of nil assertions on error values"
+	Expect(returnError()).NotTo(HaveOccurred())              // want "use Succeed matcher for inline single-error calls instead of NotTo\\(HaveOccurred\\(\\)\\)"
+	Expect(returnValueAndError()).To(Succeed())              // want "use Error\\(\\) or a captured error variable when asserting multi-return functions with HaveOccurred/Succeed"
+	Expect(returnValueAndError()).To(HaveOccurred())         // want "use Error\\(\\) or a captured error variable when asserting multi-return functions with HaveOccurred/Succeed"
+	Expect(returnValueAndError()).Error().To(BeNil())        // want "use HaveOccurred matcher instead of nil assertions on error values"
 	Expect(returnValueAndError()).Error().To(HaveOccurred()) // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
 
 	err := returnError()

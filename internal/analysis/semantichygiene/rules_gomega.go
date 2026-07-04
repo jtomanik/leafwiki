@@ -1286,7 +1286,7 @@ func assertionUsesControlStatus(assertion gomegaAssertion) bool {
 
 func assertionUsesLenEqual(assertion gomegaAssertion) bool {
 	call, ok := assertion.actual.(*ast.CallExpr)
-	return ok && callName(call) == "len" && isMatcherNamed(assertion.matcher, "Equal")
+	return ok && callName(call) == "len" && isMatcherNamed(assertion.matcher, "Equal", "BeNumerically")
 }
 
 func assertionUsesBinaryBoolean(assertion gomegaAssertion) bool {

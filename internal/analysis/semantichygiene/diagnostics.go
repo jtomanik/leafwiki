@@ -199,7 +199,7 @@ func gomegaRegexpMatchStringDiagnostic() string {
 }
 
 func gomegaLenMatcherDiagnostic() string {
-	return "use HaveLen matcher instead of asserting len() with Equal"
+	return "use HaveLen or a collection matcher instead of asserting len() directly"
 }
 
 func gomegaMapIndexMatcherDiagnostic() string {

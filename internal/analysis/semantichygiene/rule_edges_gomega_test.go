@@ -116,7 +116,7 @@ func (h *ruleHarness) findCalls(name string) []*ast.CallExpr {
 		}
 		return true
 	})
-	Expect(len(found)).To(BeNumerically(">", 0), "call %q should exist", name)
+	Expect(found).To(ContainElement(Not(BeNil())), "call %q should exist", name)
 	return found
 }
 
