@@ -30,7 +30,7 @@ import (
 )
 
 var _ = ginkgo.Describe("importer use cases", func() {
-	ginkgo.It("creates an import plan from an uploaded zip", func() {
+	ginkgo.It("creates an import plan from an uploaded zip", ginkgo.Label("integration"), func() {
 		svc, _ := newImporterServiceFixture()
 		uc := NewCreateImportPlanUseCase(svc)
 
@@ -44,7 +44,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(out.Plan).To(haveImporterPlanWithTargetItem(coreimporter.ExecutionStatusPlanned, tree.RoutePathFromString("docs/imported")))
 	})
 
-	ginkgo.It("returns plan creation errors from invalid uploads", func() {
+	ginkgo.It("returns plan creation errors from invalid uploads", ginkgo.Label("integration"), func() {
 		svc, _ := newImporterServiceFixture()
 		uc := NewCreateImportPlanUseCase(svc)
 
@@ -54,7 +54,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(err).To(MatchError(zip.ErrFormat))
 	})
 
-	ginkgo.It("returns current-plan lookup errors after successful plan creation", func() {
+	ginkgo.It("returns current-plan lookup errors after successful plan creation", ginkgo.Label("unit"), func() {
 		getErr := errors.New("get current plan failed")
 		uc := &CreateImportPlanUseCase{svc: fakeImporterPlanCreator{getErr: getErr}}
 
@@ -64,7 +64,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(err).To(MatchError(getErr))
 	})
 
-	ginkgo.It("gets the current plan or maps a missing plan to a localized error", func() {
+	ginkgo.It("gets the current plan or maps a missing plan to a localized error", ginkgo.Label("integration"), func() {
 		svc, store := newImporterServiceFixture()
 		uc := NewGetImportPlanUseCase(svc)
 
@@ -78,7 +78,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(out.Plan.ID).To(Equal("plan-1"))
 	})
 
-	ginkgo.It("returns non-missing plan lookup errors unchanged", func() {
+	ginkgo.It("returns non-missing plan lookup errors unchanged", ginkgo.Label("integration"), func() {
 		svc := newImporterServiceWithStore(importerUnavailablePlanStore())
 		uc := NewGetImportPlanUseCase(svc)
 
@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(err).To(MatchError(coreimporter.ErrImportStateUnavailable))
 	})
 
-	ginkgo.It("starts planned imports and maps execution errors", func() {
+	ginkgo.It("starts planned imports and maps execution errors", ginkgo.Label("integration"), func() {
 		svc, store := newImporterServiceFixture()
 		uc := NewExecuteImportUseCase(svc)
 
@@ -112,7 +112,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(err).To(matchLocalizedImporterError(ErrCodeImporterStateUnavailable))
 	})
 
-	ginkgo.It("returns raw execution errors unchanged", func() {
+	ginkgo.It("returns raw execution errors unchanged", ginkgo.Label("unit"), func() {
 		executeErr := errors.New("execute failed")
 		uc := &ExecuteImportUseCase{svc: fakeImporterExecutor{err: executeErr}}
 
@@ -122,7 +122,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(err).To(MatchError(executeErr))
 	})
 
-	ginkgo.It("clears planned imports, requests cancellation for running imports, and maps state errors", func() {
+	ginkgo.It("clears planned imports, requests cancellation for running imports, and maps state errors", ginkgo.Label("integration"), func() {
 		svc, store := newImporterServiceFixture()
 		uc := NewClearImportPlanUseCase(svc)
 
@@ -149,7 +149,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(err).To(matchLocalizedImporterError(ErrCodeImporterStateUnavailable))
 	})
 
-	ginkgo.It("returns raw cancellation and clear errors unchanged", func() {
+	ginkgo.It("returns raw cancellation and clear errors unchanged", ginkgo.Label("unit"), func() {
 		cancelErr := errors.New("cancel failed")
 		uc := &ClearImportPlanUseCase{svc: fakeImporterClearer{cancelErr: cancelErr}}
 
@@ -165,7 +165,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		Expect(err).To(MatchError(clearErr))
 	})
 
-	ginkgo.It("returns final clear errors after a cancel check succeeds", func() {
+	ginkgo.It("returns final clear errors after a cancel check succeeds", ginkgo.Label("integration"), func() {
 		stateFile := filepath.Join(tempImporterDir(), "current-plan.json")
 		store := coreimporter.NewPlanStore(stateFile)
 		svc := newImporterServiceWithStore(store)
@@ -181,7 +181,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 	})
 })
 
-var _ = ginkgo.Describe("importer route handlers", func() {
+var _ = ginkgo.Describe("importer route handlers", ginkgo.Label("integration"), func() {
 	ginkgo.It("serves current plan state through the authenticated route", func() {
 		svc, store := newImporterServiceFixture()
 		seedImporterPlan(store, coreimporter.ExecutionStatusPlanned)

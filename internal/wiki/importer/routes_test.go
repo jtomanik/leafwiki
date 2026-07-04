@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,7 @@ import (
 )
 
 var _ = ginkgo.Describe("importer routes", func() {
-	ginkgo.It("requires authentication before reading import plans", func() {
+	ginkgo.It("requires authentication before reading import plans", ginkgo.Label("integration"), func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
@@ -29,7 +30,7 @@ var _ = ginkgo.Describe("importer routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 	})
 
-	ginkgo.It("requires CSRF protection before mutating import plans", func() {
+	ginkgo.It("requires CSRF protection before mutating import plans", ginkgo.Label("integration"), func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
@@ -49,7 +50,7 @@ var _ = ginkgo.Describe("importer routes", func() {
 })
 
 var _ = ginkgo.Describe("importer error responses", func() {
-	ginkgo.It("maps importer error codes to HTTP statuses", func() {
+	ginkgo.It("maps importer error codes to HTTP statuses", ginkgo.Label("unit"), func() {
 		Expect(importerErrorStatus(ErrCodeImporterNoPlan)).To(Equal(http.StatusNotFound))
 		Expect(importerErrorStatus(ErrCodeImporterExecutionRunning)).To(Equal(http.StatusConflict))
 		Expect(importerErrorStatus(ErrCodeImporterStateUnavailable)).To(Equal(http.StatusInternalServerError))
@@ -59,7 +60,7 @@ var _ = ginkgo.Describe("importer error responses", func() {
 		Expect(importerErrorStatus(ErrCodeImporterInternalError)).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("renders explicit status errors as structured localized responses", func() {
+	ginkgo.It("renders explicit status errors as structured localized responses", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithImporterStatusError(ctx, http.StatusBadRequest, ErrCodeImporterMissingFile, "ignored", "ignored")
@@ -67,7 +68,7 @@ var _ = ginkgo.Describe("importer error responses", func() {
 		Expect(rec).To(haveImporterStructuredError(http.StatusBadRequest, ErrCodeImporterMissingFile), rec.Body.String())
 	})
 
-	ginkgo.It("renders localized importer errors with their mapped status", func() {
+	ginkgo.It("renders localized importer errors with their mapped status", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithImporterError(ctx, sharederrors.NewLocalizedErrorFromCode(ErrCodeImporterNoPlan, nil))
@@ -75,13 +76,17 @@ var _ = ginkgo.Describe("importer error responses", func() {
 		Expect(rec).To(haveImporterStructuredError(http.StatusNotFound, ErrCodeImporterNoPlan), rec.Body.String())
 	})
 
-	ginkgo.It("sanitizes unknown importer errors as internal failures", func() {
+	ginkgo.It("sanitizes unknown importer errors as internal failures", ginkgo.Label("integration"), func() {
 		ctx, rec := ginTestContext()
 
 		respondWithImporterError(ctx, errors.New("zip path /tmp/private failed"))
 
 		Expect(rec).To(haveImporterStructuredError(http.StatusInternalServerError, ErrCodeImporterInternalError), rec.Body.String())
-		Expect(rec).NotTo(HaveHTTPBody(ContainSubstring("/tmp/private")))
+		expectedBody, err := json.Marshal(ImporterErrorResponse{
+			Error: sharederrors.NewLocalizedErrorDetailFromCode(ErrCodeImporterInternalError),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rec).To(HaveHTTPBody(MatchJSON(expectedBody)))
 	})
 })
 
