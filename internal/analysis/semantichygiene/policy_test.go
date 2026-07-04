@@ -9,31 +9,230 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("policy helpers", func() {
-	type fileBoundaryCase struct {
-		input             string
-		testFile          bool
-		generatedVendored bool
-		persistence       bool
-		edge              bool
-	}
+type fileBoundaryCase struct {
+	input             string
+	testFile          bool
+	generatedVendored bool
+	persistence       bool
+	edge              bool
+}
 
+type ruleMetadataRegistrationState uint8
+
+const (
+	ruleMetadataMissing ruleMetadataRegistrationState = iota
+	ruleMetadataRegistered
+)
+
+type ruleMetadataObservation struct {
+	State    ruleMetadataRegistrationState
+	Metadata ruleMetadata
+}
+
+func observeRuleMetadata(id ruleID) ruleMetadataObservation {
+	metadata, ok := metadataForRule(id)
+	if !ok {
+		return ruleMetadataObservation{State: ruleMetadataMissing}
+	}
+	return ruleMetadataObservation{State: ruleMetadataRegistered, Metadata: metadata}
+}
+
+type waiverBudgetRegistrationState uint8
+
+const (
+	waiverBudgetMissing waiverBudgetRegistrationState = iota
+	waiverBudgetConfigured
+)
+
+type waiverBudgetObservation struct {
+	State  waiverBudgetRegistrationState
+	Budget int
+}
+
+func observeWaiverBudget(id ruleID) waiverBudgetObservation {
+	budget, ok := waiverBudgetForRule(id)
+	if !ok {
+		return waiverBudgetObservation{State: waiverBudgetMissing}
+	}
+	return waiverBudgetObservation{State: waiverBudgetConfigured, Budget: budget}
+}
+
+type waiverBudgetHealth uint8
+
+const (
+	waiverBudgetAbsent waiverBudgetHealth = iota
+	waiverBudgetNonPositive
+	waiverBudgetPositive
+)
+
+func classifyWaiverBudget(id ruleID) waiverBudgetHealth {
+	budget := observeWaiverBudget(id)
+	if budget.State != waiverBudgetConfigured {
+		return waiverBudgetAbsent
+	}
+	if budget.Budget <= 0 {
+		return waiverBudgetNonPositive
+	}
+	return waiverBudgetPositive
+}
+
+type semanticTypeLookupState uint8
+
+const (
+	semanticTypeMissing semanticTypeLookupState = iota
+	semanticTypeResolved
+)
+
+type semanticTypeLookupObservation struct {
+	State semanticTypeLookupState
+	Type  string
+}
+
+func semanticTypeObservation(got string, ok bool) semanticTypeLookupObservation {
+	if !ok {
+		return semanticTypeLookupObservation{State: semanticTypeMissing}
+	}
+	return semanticTypeLookupObservation{State: semanticTypeResolved, Type: got}
+}
+
+type semanticPrimitiveRecognitionState uint8
+
+const (
+	semanticPrimitiveRejected semanticPrimitiveRecognitionState = iota
+	semanticPrimitiveRecognized
+)
+
+func classifySemanticPrimitiveInContext(name string, context string) semanticPrimitiveRecognitionState {
+	if semanticPrimitiveNameInContext(name, context) {
+		return semanticPrimitiveRecognized
+	}
+	return semanticPrimitiveRejected
+}
+
+func classifySemanticPrimitive(name string) semanticPrimitiveRecognitionState {
+	if semanticPrimitiveName(name) {
+		return semanticPrimitiveRecognized
+	}
+	return semanticPrimitiveRejected
+}
+
+type messageBearingStructState uint8
+
+const (
+	messageBearingStructAbsent messageBearingStructState = iota
+	messageBearingStructPresent
+)
+
+func classifyMessageBearingStruct(named *types.Named, strct *types.Struct) messageBearingStructState {
+	if namedStructIsMessageBearing(named, strct) {
+		return messageBearingStructPresent
+	}
+	return messageBearingStructAbsent
+}
+
+type messageIDFieldState uint8
+
+const (
+	messageIDFieldAbsent messageIDFieldState = iota
+	messageIDFieldPresent
+)
+
+func classifyMessageIDField(named *types.Named, strct *types.Struct) messageIDFieldState {
+	if namedStructHasMessageID(named, strct) {
+		return messageIDFieldPresent
+	}
+	return messageIDFieldAbsent
+}
+
+type stableStringLiteralState uint8
+
+const (
+	stableStringLiteralRejected stableStringLiteralState = iota
+	stableStringLiteralEmptyOrRoot
+)
+
+func classifyEmptyOrRootString(lit *ast.BasicLit) stableStringLiteralState {
+	if isEmptyOrRootString(lit) {
+		return stableStringLiteralEmptyOrRoot
+	}
+	return stableStringLiteralRejected
+}
+
+type stableContractContextState uint8
+
+const (
+	stableContractContextRejected stableContractContextState = iota
+	stableContractContextSuggested
+)
+
+func classifyAssignStableContractContext(assign *ast.AssignStmt, lit *ast.BasicLit) stableContractContextState {
+	if assignStmtValueNameSuggestsStableContract(assign, lit) {
+		return stableContractContextSuggested
+	}
+	return stableContractContextRejected
+}
+
+func classifyValueSpecStableContractContext(spec *ast.ValueSpec, lit *ast.BasicLit) stableContractContextState {
+	if valueSpecNameSuggestsStableContract(spec, lit) {
+		return stableContractContextSuggested
+	}
+	return stableContractContextRejected
+}
+
+type callArgumentContainmentState uint8
+
+const (
+	callArgumentAbsent callArgumentContainmentState = iota
+	callArgumentContained
+)
+
+func classifyCallArgumentContainment(call *ast.CallExpr, target ast.Expr) callArgumentContainmentState {
+	if callContainsArg(call, target) {
+		return callArgumentContained
+	}
+	return callArgumentAbsent
+}
+
+func classifyFirstCallArgumentContainment(call *ast.CallExpr, target ast.Expr) callArgumentContainmentState {
+	if callContainsFirstArg(call, target) {
+		return callArgumentContained
+	}
+	return callArgumentAbsent
+}
+
+type mapKeyTypeState uint8
+
+const (
+	mapKeyTypeOther mapKeyTypeState = iota
+	mapKeyTypeString
+)
+
+func classifyMapKeyType(typ types.Type) mapKeyTypeState {
+	if isStringKeyedMap(typ) {
+		return mapKeyTypeString
+	}
+	return mapKeyTypeOther
+}
+
+var _ = ginkgo.Describe("policy helpers", ginkgo.Label("unit"), func() {
 	ginkgo.Describe("rule metadata", func() {
 		ginkgo.It("classifies hard semantic rules and the first waivable BDD rule", func() {
-			hard, metadataRegistered := metadataForRule(ruleDirectCast)
-			Expect(metadataRegistered).To(BeTrue())
-			Expect(hard).To(Equal(ruleMetadata{
-				messagePrefix: string(ruleDirectCast),
-				waivable:      false,
-				scope:         waiverScopeNone,
+			Expect(observeRuleMetadata(ruleDirectCast)).To(Equal(ruleMetadataObservation{
+				State: ruleMetadataRegistered,
+				Metadata: ruleMetadata{
+					messagePrefix: string(ruleDirectCast),
+					waivable:      false,
+					scope:         waiverScopeNone,
+				},
 			}))
 
-			waivable, metadataRegistered := metadataForRule(ruleGinkgoTopLevelIt)
-			Expect(metadataRegistered).To(BeTrue())
-			Expect(waivable).To(Equal(ruleMetadata{
-				messagePrefix: string(ruleGinkgoTopLevelIt),
-				waivable:      true,
-				scope:         waiverScopeCall,
+			Expect(observeRuleMetadata(ruleGinkgoTopLevelIt)).To(Equal(ruleMetadataObservation{
+				State: ruleMetadataRegistered,
+				Metadata: ruleMetadata{
+					messagePrefix: string(ruleGinkgoTopLevelIt),
+					waivable:      true,
+					scope:         waiverScopeCall,
+				},
 			}))
 		})
 
@@ -42,26 +241,24 @@ var _ = ginkgo.Describe("policy helpers", func() {
 				if !metadata.waivable {
 					continue
 				}
-				budget, budgetConfigured := waiverBudgetForRule(id)
-				Expect(budgetConfigured).To(BeTrue(), "waivable rule %s should have an explicit budget", id)
-				Expect(budget).To(BeNumerically(">", 0), "waivable rule %s should have a positive budget", id)
+				Expect(classifyWaiverBudget(id)).To(Equal(waiverBudgetPositive), "waivable rule %s should have an explicit positive budget", id)
 			}
 		})
 
 		ginkgo.It("rejects unknown rule IDs", func() {
-			_, metadataRegistered := metadataForRule(ruleID("unknown.rule"))
-			Expect(metadataRegistered).To(BeFalse())
+			Expect(observeRuleMetadata(ruleID("unknown.rule"))).To(Equal(ruleMetadataObservation{State: ruleMetadataMissing}))
 		})
 
 		ginkgo.DescribeTable("registers the checker rule taxonomy",
 			func(id ruleID, waivable bool, scope waiverScopeKind) {
-				metadata, metadataRegistered := metadataForRule(id)
-				Expect(metadataRegistered).To(BeTrue(), "rule %s should be registered", id)
-				Expect(metadata).To(Equal(ruleMetadata{
-					messagePrefix: string(id),
-					waivable:      waivable,
-					scope:         scope,
-				}))
+				Expect(observeRuleMetadata(id)).To(Equal(ruleMetadataObservation{
+					State: ruleMetadataRegistered,
+					Metadata: ruleMetadata{
+						messagePrefix: string(id),
+						waivable:      waivable,
+						scope:         scope,
+					},
+				}), "rule %s should be registered", id)
 			},
 			ginkgo.Entry("semantic string leak", ruleID("semantic.string-leak"), false, waiverScopeNone),
 			ginkgo.Entry("semantic direct cast", ruleID("semantic.direct-cast"), false, waiverScopeNone),
@@ -163,14 +360,15 @@ var _ = ginkgo.Describe("policy helpers", func() {
 				ruleID("gomega.numeric-equivalent"),
 				ruleID("gomega.time-equal"),
 			} {
-				budget, budgetConfigured := waiverBudgetForRule(id)
-				Expect(budgetConfigured).To(BeTrue(), "rule %s should have an explicit budget", id)
-				Expect(budget).To(Equal(3), "rule %s should use the initial per-rule budget", id)
+				Expect(observeWaiverBudget(id)).To(Equal(waiverBudgetObservation{
+					State:  waiverBudgetConfigured,
+					Budget: 3,
+				}), "rule %s should use the initial per-rule budget", id)
 			}
 		})
 	})
 
-	ginkgo.DescribeTable("canonicalName normalizes semantic identifiers",
+	ginkgo.DescribeTable("semantic identifiers canonicalize across naming separators",
 		func(input string, want string) {
 			Expect(canonicalName(input)).To(Equal(want))
 		},
@@ -180,77 +378,74 @@ var _ = ginkgo.Describe("policy helpers", func() {
 		ginkgo.Entry("mixed delimiters", "Workspace-Source_Path", "workspacesourcepath"),
 	)
 
-	ginkgo.DescribeTable("semanticTypeForFieldName recognizes direct and contextual names",
-		func(fieldName string, typeName string, wantType string, wantOK bool) {
+	ginkgo.DescribeTable("field names expose semantic identity types from direct and contextual carriers",
+		func(fieldName string, typeName string, want semanticTypeLookupObservation) {
 			got, ok := semanticTypeForFieldName(fieldName, typeName)
-			Expect(ok).To(Equal(wantOK))
-			Expect(got).To(Equal(wantType))
+			Expect(semanticTypeObservation(got, ok)).To(Equal(want))
 		},
-		ginkgo.Entry("direct workspace id", "WorkspaceID", "", "WorkspaceID", true),
-		ginkgo.Entry("direct route path plural", "route_paths", "", "RoutePath", true),
-		ginkgo.Entry("page context bare id", "ID", "PageStatus", "PageID", true),
-		ginkgo.Entry("node context bare id", "ID", "TreeNode", "PageID", true),
-		ginkgo.Entry("permalink context bare id", "ID", "PermalinkRecord", "PageID", true),
-		ginkgo.Entry("non-semantic field", "Name", "UserProfile", "", false),
+		ginkgo.Entry("direct workspace id", "WorkspaceID", "", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "WorkspaceID"}),
+		ginkgo.Entry("direct route path plural", "route_paths", "", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "RoutePath"}),
+		ginkgo.Entry("page context bare id", "ID", "PageStatus", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "PageID"}),
+		ginkgo.Entry("node context bare id", "ID", "TreeNode", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "PageID"}),
+		ginkgo.Entry("permalink context bare id", "ID", "PermalinkRecord", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "PageID"}),
+		ginkgo.Entry("non-semantic field", "Name", "UserProfile", semanticTypeLookupObservation{State: semanticTypeMissing}),
 	)
 
-	ginkgo.DescribeTable("semanticTypeForParamName recognizes parameter and function context",
-		func(paramName string, funcName string, wantType string, wantOK bool) {
+	ginkgo.DescribeTable("parameter names expose semantic identity types from function context",
+		func(paramName string, funcName string, want semanticTypeLookupObservation) {
 			got, ok := semanticTypeForParamName(paramName, funcName)
-			Expect(ok).To(Equal(wantOK))
-			Expect(got).To(Equal(wantType))
+			Expect(semanticTypeObservation(got, ok)).To(Equal(want))
 		},
-		ginkgo.Entry("direct user id", "userID", "", "UserID", true),
-		ginkgo.Entry("workspace bare id", "id", "LoadWorkspace", "WorkspaceID", true),
-		ginkgo.Entry("revision bare id", "id", "RestoreRevision", "RevisionID", true),
-		ginkgo.Entry("user bare id", "id", "FindUser", "UserID", true),
-		ginkgo.Entry("tool bare id", "id", "RunTool", "ToolID", true),
-		ginkgo.Entry("page bare id", "id", "GetPage", "PageID", true),
-		ginkgo.Entry("byID suffix", "id", "FindByID", "PageID", true),
-		ginkgo.Entry("non-semantic miss", "name", "FindProfile", "", false),
+		ginkgo.Entry("direct user id", "userID", "", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "UserID"}),
+		ginkgo.Entry("workspace bare id", "id", "LoadWorkspace", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "WorkspaceID"}),
+		ginkgo.Entry("revision bare id", "id", "RestoreRevision", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "RevisionID"}),
+		ginkgo.Entry("user bare id", "id", "FindUser", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "UserID"}),
+		ginkgo.Entry("tool bare id", "id", "RunTool", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "ToolID"}),
+		ginkgo.Entry("page bare id", "id", "GetPage", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "PageID"}),
+		ginkgo.Entry("lookup suffix resolves page identity", "id", "FindByID", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "PageID"}),
+		ginkgo.Entry("non-semantic miss", "name", "FindProfile", semanticTypeLookupObservation{State: semanticTypeMissing}),
 	)
 
-	ginkgo.DescribeTable("semanticTypeForBareIDContext resolves stable ID contexts",
-		func(context string, wantType string, wantOK bool) {
+	ginkgo.DescribeTable("bare ID contexts expose stable semantic identity types",
+		func(context string, want semanticTypeLookupObservation) {
 			got, ok := semanticTypeForBareIDContext(context)
-			Expect(ok).To(Equal(wantOK))
-			Expect(got).To(Equal(wantType))
+			Expect(semanticTypeObservation(got, ok)).To(Equal(want))
 		},
-		ginkgo.Entry("api key", "LookupAPIKey", "APIKeyID", true),
-		ginkgo.Entry("workspace", "WorkspaceStatus", "WorkspaceID", true),
-		ginkgo.Entry("revision", "RevisionBackend", "RevisionID", true),
-		ginkgo.Entry("author", "AuthorProfile", "UserID", true),
-		ginkgo.Entry("tool", "ToolDescriptor", "ToolID", true),
-		ginkgo.Entry("node page context", "NodeBySlug", "PageID", true),
-		ginkgo.Entry("miss", "Profile", "", false),
+		ginkgo.Entry("api key", "LookupAPIKey", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "APIKeyID"}),
+		ginkgo.Entry("workspace", "WorkspaceStatus", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "WorkspaceID"}),
+		ginkgo.Entry("revision", "RevisionBackend", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "RevisionID"}),
+		ginkgo.Entry("author", "AuthorProfile", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "UserID"}),
+		ginkgo.Entry("tool", "ToolDescriptor", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "ToolID"}),
+		ginkgo.Entry("node page context", "NodeBySlug", semanticTypeLookupObservation{State: semanticTypeResolved, Type: "PageID"}),
+		ginkgo.Entry("miss", "Profile", semanticTypeLookupObservation{State: semanticTypeMissing}),
 	)
 
-	ginkgo.DescribeTable("semanticPrimitiveNameInContext requires contextual hints",
-		func(name string, context string, want bool) {
-			Expect(semanticPrimitiveNameInContext(name, context)).To(Equal(want))
+	ginkgo.DescribeTable("contextual primitive names require surrounding domain hints",
+		func(name string, context string, want semanticPrimitiveRecognitionState) {
+			Expect(classifySemanticPrimitiveInContext(name, context)).To(Equal(want))
 		},
-		ginkgo.Entry("offset in search context", "offset", "SearchRequest", true),
-		ginkgo.Entry("offset in page context", "offset", "PageQuery", true),
-		ginkgo.Entry("offset outside hinted context", "offset", "WorkspaceRequest", false),
-		ginkgo.Entry("limit in revision context", "limit", "RevisionList", true),
-		ginkgo.Entry("limit in page context", "limit", "PageSearch", true),
-		ginkgo.Entry("maxBytes in asset context", "maxBytes", "AssetUpload", true),
-		ginkgo.Entry("maxBytes in stream context", "max_bytes", "WriteStream", true),
-		ginkgo.Entry("depth in tree context", "depth", "SubtreeNavigation", true),
-		ginkgo.Entry("unknown primitive", "count", "SearchRequest", false),
+		ginkgo.Entry("offset in search context", "offset", "SearchRequest", semanticPrimitiveRecognized),
+		ginkgo.Entry("offset in page context", "offset", "PageQuery", semanticPrimitiveRecognized),
+		ginkgo.Entry("offset outside hinted context", "offset", "WorkspaceRequest", semanticPrimitiveRejected),
+		ginkgo.Entry("limit in revision context", "limit", "RevisionList", semanticPrimitiveRecognized),
+		ginkgo.Entry("limit in page context", "limit", "PageSearch", semanticPrimitiveRecognized),
+		ginkgo.Entry("asset upload byte limit", "maxBytes", "AssetUpload", semanticPrimitiveRecognized),
+		ginkgo.Entry("stream byte limit", "max_bytes", "WriteStream", semanticPrimitiveRecognized),
+		ginkgo.Entry("depth in tree context", "depth", "SubtreeNavigation", semanticPrimitiveRecognized),
+		ginkgo.Entry("unknown primitive", "count", "SearchRequest", semanticPrimitiveRejected),
 	)
 
-	ginkgo.DescribeTable("semanticPrimitiveName recognizes primitive carriers directly",
-		func(name string, want bool) {
-			Expect(semanticPrimitiveName(name)).To(Equal(want))
+	ginkgo.DescribeTable("direct primitive names expose stable scalar carriers",
+		func(name string, want semanticPrimitiveRecognitionState) {
+			Expect(classifySemanticPrimitive(name)).To(Equal(want))
 		},
-		ginkgo.Entry("depth", "Depth", true),
-		ginkgo.Entry("limit", "Limit", true),
-		ginkgo.Entry("offset", "offset", true),
-		ginkgo.Entry("ordinary count", "count", false),
+		ginkgo.Entry("depth", "Depth", semanticPrimitiveRecognized),
+		ginkgo.Entry("limit", "Limit", semanticPrimitiveRecognized),
+		ginkgo.Entry("offset", "offset", semanticPrimitiveRecognized),
+		ginkgo.Entry("ordinary count", "count", semanticPrimitiveRejected),
 	)
 
-	ginkgo.DescribeTable("semanticTypeForName returns precise names or a generic fallback",
+	ginkgo.DescribeTable("semantic names return precise domain types or a generic fallback",
 		func(name string, want string) {
 			Expect(semanticTypeForName(name)).To(Equal(want))
 		},
@@ -312,16 +507,16 @@ var _ = ginkgo.Describe("policy helpers", func() {
 		coded, codedStruct := named("PlainPayload", field("StatusCode"))
 		messageID, messageIDStruct := named("PlainPayload", field("MessageID"))
 
-		Expect(namedStructIsMessageBearing(nil, plainStruct)).To(BeFalse())
-		Expect(namedStructIsMessageBearing(plain, nil)).To(BeFalse())
-		Expect(namedStructIsMessageBearing(plain, plainStruct)).To(BeFalse())
-		Expect(namedStructIsMessageBearing(validation, validationStruct)).To(BeTrue())
-		Expect(namedStructIsMessageBearing(coded, codedStruct)).To(BeTrue())
+		Expect(classifyMessageBearingStruct(nil, plainStruct)).To(Equal(messageBearingStructAbsent))
+		Expect(classifyMessageBearingStruct(plain, nil)).To(Equal(messageBearingStructAbsent))
+		Expect(classifyMessageBearingStruct(plain, plainStruct)).To(Equal(messageBearingStructAbsent))
+		Expect(classifyMessageBearingStruct(validation, validationStruct)).To(Equal(messageBearingStructPresent))
+		Expect(classifyMessageBearingStruct(coded, codedStruct)).To(Equal(messageBearingStructPresent))
 
-		Expect(namedStructHasMessageID(nil, messageIDStruct)).To(BeFalse())
-		Expect(namedStructHasMessageID(messageID, nil)).To(BeFalse())
-		Expect(namedStructHasMessageID(plain, plainStruct)).To(BeFalse())
-		Expect(namedStructHasMessageID(messageID, messageIDStruct)).To(BeTrue())
+		Expect(classifyMessageIDField(nil, messageIDStruct)).To(Equal(messageIDFieldAbsent))
+		Expect(classifyMessageIDField(messageID, nil)).To(Equal(messageIDFieldAbsent))
+		Expect(classifyMessageIDField(plain, plainStruct)).To(Equal(messageIDFieldAbsent))
+		Expect(classifyMessageIDField(messageID, messageIDStruct)).To(Equal(messageIDFieldPresent))
 	})
 
 	ginkgo.It("recognizes literal, assignment, and value-spec stable contract contexts", func() {
@@ -331,11 +526,11 @@ var _ = ginkgo.Describe("policy helpers", func() {
 		malformed := &ast.BasicLit{Kind: token.STRING, Value: `"`}
 		intLiteral := &ast.BasicLit{Kind: token.INT, Value: `0`}
 
-		Expect(isEmptyOrRootString(empty)).To(BeTrue())
-		Expect(isEmptyOrRootString(root)).To(BeTrue())
-		Expect(isEmptyOrRootString(other)).To(BeFalse())
-		Expect(isEmptyOrRootString(malformed)).To(BeFalse())
-		Expect(isEmptyOrRootString(intLiteral)).To(BeFalse())
+		Expect(classifyEmptyOrRootString(empty)).To(Equal(stableStringLiteralEmptyOrRoot))
+		Expect(classifyEmptyOrRootString(root)).To(Equal(stableStringLiteralEmptyOrRoot))
+		Expect(classifyEmptyOrRootString(other)).To(Equal(stableStringLiteralRejected))
+		Expect(classifyEmptyOrRootString(malformed)).To(Equal(stableStringLiteralRejected))
+		Expect(classifyEmptyOrRootString(intLiteral)).To(Equal(stableStringLiteralRejected))
 
 		contractLiteral := &ast.BasicLit{Kind: token.STRING, Value: `"validation.error"`}
 		plainLiteral := &ast.BasicLit{Kind: token.STRING, Value: `"plain"`}
@@ -343,17 +538,17 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			Lhs: []ast.Expr{&ast.Ident{Name: "errorCode"}},
 			Rhs: []ast.Expr{contractLiteral},
 		}
-		Expect(assignStmtValueNameSuggestsStableContract(assign, contractLiteral)).To(BeTrue())
-		Expect(assignStmtValueNameSuggestsStableContract(assign, plainLiteral)).To(BeFalse())
-		Expect(assignStmtValueNameSuggestsStableContract(&ast.AssignStmt{Rhs: []ast.Expr{contractLiteral}}, contractLiteral)).To(BeFalse())
+		Expect(classifyAssignStableContractContext(assign, contractLiteral)).To(Equal(stableContractContextSuggested))
+		Expect(classifyAssignStableContractContext(assign, plainLiteral)).To(Equal(stableContractContextRejected))
+		Expect(classifyAssignStableContractContext(&ast.AssignStmt{Rhs: []ast.Expr{contractLiteral}}, contractLiteral)).To(Equal(stableContractContextRejected))
 
 		spec := &ast.ValueSpec{
 			Names:  []*ast.Ident{{Name: "messageID"}},
 			Values: []ast.Expr{contractLiteral},
 		}
-		Expect(valueSpecNameSuggestsStableContract(spec, contractLiteral)).To(BeTrue())
-		Expect(valueSpecNameSuggestsStableContract(spec, plainLiteral)).To(BeFalse())
-		Expect(valueSpecNameSuggestsStableContract(&ast.ValueSpec{Values: []ast.Expr{contractLiteral}}, contractLiteral)).To(BeFalse())
+		Expect(classifyValueSpecStableContractContext(spec, contractLiteral)).To(Equal(stableContractContextSuggested))
+		Expect(classifyValueSpecStableContractContext(spec, plainLiteral)).To(Equal(stableContractContextRejected))
+		Expect(classifyValueSpecStableContractContext(&ast.ValueSpec{Values: []ast.Expr{contractLiteral}}, contractLiteral)).To(Equal(stableContractContextRejected))
 	})
 
 	ginkgo.It("handles AST name, call containment, key name, and map helper edge cases", func() {
@@ -366,17 +561,17 @@ var _ = ginkgo.Describe("policy helpers", func() {
 		Expect(exprName(&ast.IndexListExpr{X: &ast.Ident{Name: "List"}})).To(Equal("List"))
 		Expect(exprName(&ast.BasicLit{Kind: token.STRING, Value: `"literal"`})).To(BeEmpty())
 		Expect(callName(call)).To(BeEmpty())
-		Expect(callContainsArg(call, target)).To(BeTrue())
-		Expect(callContainsFirstArg(call, target)).To(BeTrue())
-		Expect(callContainsFirstArg(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "other"}, target}}, target)).To(BeFalse())
+		Expect(classifyCallArgumentContainment(call, target)).To(Equal(callArgumentContained))
+		Expect(classifyFirstCallArgumentContainment(call, target)).To(Equal(callArgumentContained))
+		Expect(classifyFirstCallArgumentContainment(&ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "other"}, target}}, target)).To(Equal(callArgumentAbsent))
 
 		Expect(keyName(&ast.BasicLit{Kind: token.STRING, Value: `"message_id"`})).To(Equal("message_id"))
 		Expect(keyName(&ast.BasicLit{Kind: token.STRING, Value: `"`})).To(BeEmpty())
 		Expect(keyName(&ast.Ident{Name: "StatusCode"})).To(Equal("StatusCode"))
 
-		Expect(isStringKeyedMap(nil)).To(BeFalse())
-		Expect(isStringKeyedMap(types.NewMap(types.Typ[types.String], types.Typ[types.Int]))).To(BeTrue())
-		Expect(isStringKeyedMap(types.NewMap(types.Typ[types.Int], types.Typ[types.String]))).To(BeFalse())
-		Expect(isStringKeyedMap(types.Typ[types.String])).To(BeFalse())
+		Expect(classifyMapKeyType(nil)).To(Equal(mapKeyTypeOther))
+		Expect(classifyMapKeyType(types.NewMap(types.Typ[types.String], types.Typ[types.Int]))).To(Equal(mapKeyTypeString))
+		Expect(classifyMapKeyType(types.NewMap(types.Typ[types.Int], types.Typ[types.String]))).To(Equal(mapKeyTypeOther))
+		Expect(classifyMapKeyType(types.Typ[types.String])).To(Equal(mapKeyTypeOther))
 	})
 })

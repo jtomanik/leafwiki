@@ -16,6 +16,7 @@ func (analysisFixtureFailures) Errorf(format string, args ...any) {
 }
 
 var _ = ginkgo.DescribeTable("semantic hygiene analyzer fixtures",
+	ginkgo.Label("unit"),
 	func(pkg string) {
 		analysischeck.Run(analysisFixtureFailures{}, analysischeck.TestData(), semantichygiene.Analyzer, pkg)
 	},
@@ -25,7 +26,7 @@ var _ = ginkgo.DescribeTable("semantic hygiene analyzer fixtures",
 	ginkgo.Entry("tree", "github.com/perber/wiki/internal/core/tree"),
 	ginkgo.Entry("markdown", "github.com/perber/wiki/internal/core/markdown"),
 	ginkgo.Entry("fakeadapter", "github.com/perber/wiki/internal/fakeadapter"),
-	ginkgo.Entry("test_utils", "github.com/perber/wiki/internal/test_utils"),
+	ginkgo.Entry("test support package fixtures", "github.com/perber/wiki/internal/test_utils"),
 	ginkgo.Entry("wiki/mcp", "github.com/perber/wiki/internal/wiki/mcp"),
 	ginkgo.Entry("repotests", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/repotests"),
 	ginkgo.Entry("taxonomycases", "github.com/perber/wiki/internal/analysis/semantichygiene/testdata/taxonomycases"),
