@@ -16,6 +16,8 @@ import (
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 func setupUpdateUserUseCase() (*UpdateUserUseCase, *coreauth.UserService) {
@@ -206,7 +208,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			Role:             "superuser",
 			RequesterIsAdmin: true,
 		})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(HaveAuthFieldErrorCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid))
 	})
 
 	ginkgo.It("returns stable localized field codes for invalid user creation input", func() {
@@ -282,7 +284,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 
 		_, err := NewGetUsersUseCase(userSvc).Execute(context.Background())
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchAuthUseCaseSQLitePrimaryError(sqlite3.SQLITE_CANTOPEN))
 	})
 
 	ginkgo.It("ChangeOwnPasswordUseCase validates the old password and updates a matching user password", func() {
@@ -444,6 +446,17 @@ func HaveAuthFieldErrorCode(field testmatchers.ValidationField, code sharederror
 		}
 		return validation
 	}, testmatchers.ContainFieldError(field, code, messageID))
+}
+
+func matchAuthUseCaseSQLitePrimaryError(code int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(err error) int {
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) {
+			return -1
+		}
+		return sqliteErr.Code() & 0xFF
+	}, Equal(code))
 }
 
 func MatchAuthPublicUser(fields gstruct.Fields) types.GomegaMatcher {

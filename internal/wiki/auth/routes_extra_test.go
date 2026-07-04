@@ -116,7 +116,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		Expect(router).NotTo(BeNil())
 	})
 
-	ginkgo.It("requireAuthEnabled allows enabled auth and rejects disabled auth", func() {
+	ginkgo.It("rejects protected route access when authentication is disabled and allows it when enabled", func() {
 		rec := performAuthHandlerRequest(requireAuthEnabled(true), http.MethodGet, "/api/users/me/mcp-api-keys", nil, nil, nil, false)
 		Expect(rec).To(matchAuthRouteError(http.StatusForbidden, ErrCodeAuthDisabled), rec.Body.String())
 
@@ -124,7 +124,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 	})
 
-	ginkgo.It("writeAuthCookieError maps HTTPS and unexpected cookie failures", func() {
+	ginkgo.It("returns cookie failure responses for secure-cookie setup errors and internal responses for unexpected cookie failures", func() {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		writeAuthCookieError(c, mwutils.ErrHTTPSRequired, "https required", "internal", "log")
@@ -136,7 +136,7 @@ var _ = ginkgo.Describe("auth routes", func() {
 		Expect(rec).To(matchAuthRouteError(http.StatusInternalServerError, ErrCodeAuthInternalError), rec.Body.String())
 	})
 
-	ginkgo.It("respondWithAuthError maps localized, validation, core, API-key, and fallback errors", func() {
+	ginkgo.It("returns structured auth responses for localized validation core API key and fallback failures", func() {
 		localized := sharederrors.NewLocalizedErrorFromCode(ErrCodeAuthInvalidPayload, nil)
 		rec := respondWithAuthErrorRecorder(localized)
 		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidPayload), rec.Body.String())
