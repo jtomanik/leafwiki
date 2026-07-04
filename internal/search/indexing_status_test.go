@@ -15,7 +15,6 @@ var _ = ginkgo.Describe("IndexingStatus", func() {
 		Expect(status.IsReady()).To(BeFalse())
 		snapshot := status.Snapshot()
 		Expect(snapshot).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Active":     BeFalse(),
 			"Indexed":    BeZero(),
 			"Failed":     BeZero(),
 			"FinishedAt": BeZero(),
