@@ -14,7 +14,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-var _ = ginkgo.Describe("PropertiesStore error and recovery branches", ginkgo.Label("integration"), func() {
+var _ = ginkgo.Describe("property persistence error handling and recovery", ginkgo.Label("integration"), func() {
 	ginkgo.It("returns wrapped database open errors", func() {
 		previousOpen := openPropertiesDB
 		openErr := errors.New("open failed")
