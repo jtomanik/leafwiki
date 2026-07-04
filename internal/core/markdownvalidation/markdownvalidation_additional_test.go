@@ -8,6 +8,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -23,11 +24,34 @@ type workspaceResolverResult struct {
 	Code   IssueCode
 }
 
-func matchValidationResult(ok types.GomegaMatcher, issues types.GomegaMatcher) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"OK":     ok,
-		"Issues": issues,
-	})
+func matchValidationSuccess() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(result Result) (bool, error) {
+		return result.OK, nil
+	}).WithMessage("succeed validation")
+}
+
+func matchValidationSuccessWithIssues(issues types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(result Result) (bool, error) {
+		if !result.OK {
+			return false, nil
+		}
+		return issues.Match(result.Issues)
+	}).WithMessage("succeed validation with expected issues")
+}
+
+func matchValidationFailure() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(result Result) (bool, error) {
+		return !result.OK, nil
+	}).WithMessage("fail validation")
+}
+
+func matchValidationFailureWithIssues(issues types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(result Result) (bool, error) {
+		if result.OK {
+			return false, nil
+		}
+		return issues.Match(result.Issues)
+	}).WithMessage("fail validation with expected issues")
 }
 
 func matchValidationSummary(errorCount int, warningCount int) types.GomegaMatcher {
@@ -66,25 +90,29 @@ func resolveWorkspaceMarkdownLink(
 }
 
 func matchWorkspaceResolverResult(kind tree.NodeKind, code IssueCode) types.GomegaMatcher {
-	return gstruct.MatchAllFields(gstruct.Fields{
-		"PageID": BeEmpty(),
-		"Kind":   Equal(kind),
-		"OK":     BeFalse(),
-		"Code":   Equal(code),
-	})
+	want := struct {
+		Kind tree.NodeKind
+		Code IssueCode
+	}{Kind: kind, Code: code}
+	return gcustom.MakeMatcher(func(result workspaceResolverResult) (bool, error) {
+		return result.PageID == "" &&
+			result.Kind == kind &&
+			!result.OK &&
+			result.Code == code, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be an unresolved workspace markdown link\n{{format .Data 1}}", want)
 }
 
 var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 	ginkgo.It("ValidateMarkdownContent legacy wrapper returns OK for simple canonical content", func() {
 		result := ValidateMarkdownContent("docs/page", string(canonicalValidationMarkdown("page-1", "Page", "# Page\n")), "page-1")
 
-		Expect(result).To(matchValidationResult(BeTrue(), BeEmpty()))
+		Expect(result).To(matchValidationSuccessWithIssues(BeEmpty()))
 	})
 
 	ginkgo.It("ValidateMarkdownContent legacy wrapper reports invalid paths and metadata parse errors", func() {
 		result := ValidateMarkdownContent("../bad", "---\nleafwiki_id: [broken\n---\nBody", "page-1")
 
-		Expect(result).To(matchValidationResult(BeFalse(), ConsistOf(
+		Expect(result).To(matchValidationFailureWithIssues(ConsistOf(
 			WithTransform(func(issue Issue) IssueCode { return issue.Code }, Equal(IssueCodeInvalidPath)),
 			WithTransform(func(issue Issue) IssueCode { return issue.Code }, Equal(IssueCodeMetadataParseError)),
 		)))
@@ -97,7 +125,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 		allowedRoot := ValidateMarkdownContentWithOptions("", string(canonicalValidationMarkdown("root-page", "Root", "# Root\n")), ContentValidationOptions{
 			AllowRootRoute: true,
 		})
-		Expect(allowedRoot.OK).To(BeTrue())
+		Expect(allowedRoot).To(matchValidationSuccess())
 
 		conflict := ValidateMarkdownContentWithOptions("docs/page", string(canonicalValidationMarkdown("current-page", "Page", "# Page\n")), ContentValidationOptions{
 			ExistingPageID: "current-page",
@@ -155,14 +183,14 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 				return "", false
 			},
 		})
-		Expect(external.OK).To(BeTrue())
+		Expect(external).To(matchValidationSuccess())
 
 		noLegacyResolver := ValidateMarkdownContentWithOptions("docs/source", "[Wiki](target)\n", ContentValidationOptions{
 			AssetExists: func(string) bool {
 				return true
 			},
 		})
-		Expect(noLegacyResolver.OK).To(BeTrue())
+		Expect(noLegacyResolver).To(matchValidationSuccess())
 
 		rootReference := ValidateMarkdownContentWithOptions("", "[Root](/)\n", ContentValidationOptions{
 			AllowRootRoute: true,
@@ -170,7 +198,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 				return "", false
 			},
 		})
-		Expect(rootReference.OK).To(BeTrue())
+		Expect(rootReference).To(matchValidationSuccess())
 
 		var resolvedRoute tree.RoutePath
 		missing := ValidateMarkdownContentWithOptions("docs/source", "[Missing](missing)\n", ContentValidationOptions{
@@ -194,15 +222,14 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 
 		result := Combine(first, second)
 
-		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"OK":      BeFalse(),
-			"Summary": matchValidationSummary(1, 2),
-			"Issues": Equal([]Issue{
+		Expect(result).To(SatisfyAll(
+			matchValidationFailureWithIssues(Equal([]Issue{
 				{Severity: IssueSeverityWarning, Code: IssueCodeHiddenMarkdownPath, Message: "hidden"},
 				{Severity: IssueSeverityError, Code: IssueCodeBrokenLink, Message: "broken"},
 				{Severity: IssueSeverityWarning, Code: IssueCodeWorkspaceSyncValidation, Message: "sync"},
-			}),
-		}))
+			})),
+			HaveField("Summary", matchValidationSummary(1, 2)),
+		))
 	})
 
 	ginkgo.It("normalizes relative parent and absolute wiki references while ignoring empty anchors", func() {
@@ -271,7 +298,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 	})
 
 	ginkgo.It("ValidateWorkspaceMarkdownFiles handles empty roots, hidden markdown warnings, and workspace asset callbacks", func() {
-		Expect(ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: "  "}).OK).To(BeTrue())
+		Expect(ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: "  "})).To(matchValidationSuccess())
 
 		hiddenRoot := markdownValidationTempDir()
 		Expect(os.WriteFile(filepath.Join(hiddenRoot, ".hidden.md"), canonicalValidationMarkdown("hidden", "Hidden", "# Hidden\n"), 0o644)).To(Succeed())
@@ -279,7 +306,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 			RootDir:         hiddenRoot,
 			IncludeWarnings: true,
 		})
-		Expect(hiddenResult.OK).To(BeTrue())
+		Expect(hiddenResult).To(matchValidationSuccess())
 		Expect(hiddenResult.Summary.Warnings).To(Equal(1))
 		Expect(issueCodes(hiddenResult)).To(ContainElement(IssueCodeHiddenMarkdownPath))
 
@@ -295,7 +322,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 				return false
 			},
 		})
-		Expect(assetResult.OK).To(BeFalse())
+		Expect(assetResult).To(matchValidationFailure())
 		Expect(issueCodes(assetResult)).To(ContainElement(IssueCodeMissingAsset))
 		Expect(seenPageID).To(Equal(tree.PageID("source-page")))
 		Expect(seenDestination).To(Equal("assets/logo.png"))
@@ -308,7 +335,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeFalse())
+		Expect(result).To(matchValidationFailure())
 		Expect(issueCodes(result)).To(ContainElement(IssueCodeInvalidSlug))
 	})
 
@@ -326,7 +353,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchWorkspaceScanIssue(tree.MarkdownPath("broken.md")),
 			matchWorkspaceScanIssue(tree.MarkdownPath("workspace")),
 		)))
@@ -362,7 +389,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeFalse())
+		Expect(result).To(matchValidationFailure())
 		Expect(issueCodes(result)).To(ContainElement(IssueCodeWorkspaceScanError))
 		Expect(issueCodes(result)).NotTo(ContainElement(IssueCodeBrokenLink))
 	})

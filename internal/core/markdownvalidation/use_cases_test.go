@@ -27,7 +27,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	ginkgo.It("allows root index markdown to validate as the root route", func() {
@@ -36,7 +36,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	ginkgo.It("allows root README markdown to validate as the root fallback route", func() {
@@ -45,7 +45,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	ginkgo.It("allows root section links even when the root has no page content", func() {
@@ -56,7 +56,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	ginkgo.It("reports duplicate canonical page IDs with page metadata wording", func() {
@@ -66,7 +66,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchDuplicatePageIDIssue(),
 		)))
 	})
@@ -82,7 +82,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	ginkgo.It("resolves markdown links beneath a configured root prefix", func() {
@@ -97,7 +97,7 @@ var _ = ginkgo.Describe("use cases", func() {
 			MarkdownLinkRootPrefix: "/docs",
 		})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	ginkgo.It("resolves prefixed assets through the markdown link root prefix", func() {
@@ -111,7 +111,7 @@ var _ = ginkgo.Describe("use cases", func() {
 			},
 		})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 		Expect(seenDestination).To(Equal("/assets/logo.png"))
 	})
 
@@ -126,7 +126,7 @@ var _ = ginkgo.Describe("use cases", func() {
 			},
 		})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchValidationIssueCode(IssueCodeMissingAsset),
 		)))
 		Expect(seenDestination).To(Equal("/assets/manual.md"))
@@ -141,7 +141,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeTrue(), Not(ContainElement(
+		Expect(result).To(matchValidationSuccessWithIssues(Not(ContainElement(
 			matchValidationIssueAtPath(IssueCodeInvalidSlug, "plans/agent_hooks.PLAN.md"),
 		))))
 	})
@@ -155,7 +155,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchValidationIssueAtPath(IssueCodeNonCanonicalMarkdownPath, "source"),
 		)))
 	})
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), SatisfyAll(
+		Expect(result).To(matchValidationFailureWithIssues(SatisfyAll(
 			ContainElement(matchNormalizedRouteConflictIssue("plans/foo-bar.md", "plans/foo_bar.md")),
 			Not(ContainElement(matchValidationIssueAtPath(IssueCodeInvalidSlug, "plans/foo_bar.md"))),
 		)))
@@ -180,7 +180,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	ginkgo.It("requires workspace links to resolve to filesystem targets", func() {
@@ -189,7 +189,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchValidationIssueAtPath(IssueCodeBrokenLink, "source"),
 		)))
 	})
@@ -202,7 +202,7 @@ var _ = ginkgo.Describe("use cases", func() {
 			},
 		})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchDuplicatePageIDIssue(),
 		)))
 	})
@@ -217,7 +217,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchValidationIssueAtPath(IssueCodeInvalidLink, "source"),
 			matchValidationIssueAtPath(IssueCodeInvalidLink, "source"),
 		)))
@@ -231,7 +231,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchValidationIssueCode(IssueCodeBrokenLink),
 		)))
 	})
@@ -245,7 +245,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeTrue(), SatisfyAll(
+		Expect(result).To(matchValidationSuccessWithIssues(SatisfyAll(
 			Not(ContainElement(matchValidationIssueCode(IssueCodePathConflict))),
 			Not(ContainElement(matchValidationIssueCode(IssueCodeAmbiguousLegacyLink))),
 		)))
@@ -260,7 +260,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result.OK).To(BeTrue())
+		Expect(result).To(matchValidationSuccess())
 	})
 
 	// - Case mismatch is invalid
@@ -284,7 +284,7 @@ var _ = ginkgo.Describe("use cases", func() {
 
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchValidationIssueAtPath(IssueCodeNonCanonicalLink, "docs/a"),
 		)))
 	})
@@ -299,7 +299,7 @@ var _ = ginkgo.Describe("use cases", func() {
 			},
 		})
 
-		Expect(result).To(matchValidationResult(BeFalse(), HaveExactElements(
+		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
 			matchValidationIssueCode(IssueCodeNonCanonicalLink),
 		)))
 	})
