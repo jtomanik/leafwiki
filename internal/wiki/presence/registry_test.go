@@ -47,14 +47,15 @@ var _ = ginkgo.Describe("web presence registry", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		editorView := registry.List(&coreauth.User{Role: coreauth.RoleEditor})
-		Expect(editorView).To(HaveExactElements(matchPresenceSession(gstruct.Fields{
-			"User":  matchPresenceUserRef(gstruct.Fields{"Email": BeEmpty()}),
-			"State": Equal(SessionStateActive),
-			"Dirty": BeTrue(),
-			"Page":  gstruct.PointTo(matchPresencePageRef(gstruct.Fields{"Title": Equal("API")})),
-			"Type":  Equal(SessionTypeWeb),
-			"Mode":  Equal(SessionModeEdit),
-		})))
+		Expect(editorView).To(HaveExactElements(SatisfyAll(
+			matchPresenceSession(gstruct.Fields{
+				"User":  matchPresenceUserRef(gstruct.Fields{"Email": BeEmpty()}),
+				"State": Equal(SessionStateActive),
+				"Page":  gstruct.PointTo(matchPresencePageRef(gstruct.Fields{"Title": Equal("API")})),
+				"Type":  Equal(SessionTypeWeb),
+			}),
+			matchPresenceSessionEditWithUnsavedChanges(),
+		)))
 
 		raw, err := json.Marshal(editorView[0])
 		Expect(err).NotTo(HaveOccurred())
@@ -333,6 +334,27 @@ func matchPresenceHeartbeat(fields gstruct.Fields) types.GomegaMatcher {
 func matchPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchPresenceSessionEditWithUnsavedChanges() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(session Session) presenceSessionEditState {
+		return presenceSessionEditStateFor(session)
+	}, Equal(presenceSessionEditingUnsavedChanges))
+}
+
+type presenceSessionEditState uint8
+
+const (
+	presenceSessionOtherEditState presenceSessionEditState = iota
+	presenceSessionEditingUnsavedChanges
+)
+
+func presenceSessionEditStateFor(session Session) presenceSessionEditState {
+	if session.Mode == SessionModeEdit && session.Dirty {
+		return presenceSessionEditingUnsavedChanges
+	}
+	return presenceSessionOtherEditState
 }
 
 func matchPresenceUserRef(fields gstruct.Fields) types.GomegaMatcher {
