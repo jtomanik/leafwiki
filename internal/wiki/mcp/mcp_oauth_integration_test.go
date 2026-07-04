@@ -19,7 +19,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 	"github.com/ory/fosite"
 	"github.com/perber/wiki/internal/core/assets"
@@ -1344,10 +1343,7 @@ func mcpBearerAuthorizationAttempt(router http.Handler, path, token string) *htt
 
 func matchOAuthErrorField(want oauthErrorField) types.GomegaMatcher {
 	GinkgoHelper()
-	return gcustom.MakeMatcher(func(payload map[string]any) (bool, error) {
-		got, ok := payload["error"].(string)
-		return ok && oauthErrorField(got) == want, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} report OAuth error field")
+	return HaveKeyWithValue("error", string(want))
 }
 
 func stringFromMap(got map[string]any, field string) string {

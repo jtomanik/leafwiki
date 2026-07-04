@@ -8,7 +8,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
@@ -28,9 +27,9 @@ var _ = Describe("Validation tool helpers", Label("integration"), func() {
 			}
 		})
 
-		Expect(assetExists(newFixturePageID("page-1"), "logo.png")).To(BeTrue())
-		Expect(assetExists(newFixturePageID("page-1"), "other.png")).To(BeFalse())
-		Expect(assetExists(newFixturePageID("page-2"), "logo.png")).To(BeFalse())
+		Expect(cachedValidationAssetDestinationFor(assetExists, newFixturePageID("page-1"), "logo.png")).To(matchValidationAssetPresence(validationAssetPresent, Equal("logo.png")))
+		Expect(cachedValidationAssetDestinationFor(assetExists, newFixturePageID("page-1"), "other.png")).To(matchValidationAssetPresence(validationAssetAbsent, Equal("other.png")))
+		Expect(cachedValidationAssetDestinationFor(assetExists, newFixturePageID("page-2"), "logo.png")).To(matchValidationAssetPresence(validationAssetAbsent, Equal("logo.png")))
 		assetExists(newFixturePageID("page-1"), "second.png")
 
 		Expect(calls).To(HaveKeyWithValue(newFixturePageID("page-1"), 1))
@@ -214,7 +213,7 @@ func validationIssueCodeCount(result wikivalidation.Result, code wikivalidation.
 
 func matchMarkdownValidationIssue(code wikivalidation.IssueCode) types.GomegaMatcher {
 	GinkgoHelper()
-	return gcustom.MakeMatcher(func(issue wikivalidation.Issue) (bool, error) {
-		return issue.Code == code, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match markdown validation issue")
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Code": Equal(code),
+	})
 }

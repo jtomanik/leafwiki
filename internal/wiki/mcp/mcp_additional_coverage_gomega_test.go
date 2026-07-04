@@ -192,8 +192,8 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			))
 
 			huge := 99
-			Expect(shouldRefreshForContext(contextSyncModeForce, workspacesync.SyncStatus{})).To(BeTrue())
-			Expect(shouldRefreshForContext(contextSyncModeNone, workspacesync.SyncStatus{Enabled: true, PendingEventCount: 1})).To(BeFalse())
+			Expect(contextRefreshDecisionFor(contextSyncModeForce, workspacesync.SyncStatus{})).To(Equal(contextRefreshRequested))
+			Expect(contextRefreshDecisionFor(contextSyncModeNone, workspacesync.SyncStatus{Enabled: true, PendingEventCount: 1})).To(Equal(contextRefreshSkipped))
 			Expect(contextSnapshotPageSize(25)).To(Equal(25))
 			Expect(contextSnapshotPageSize(75)).To(Equal(50))
 			Expect(boundedContextTreeDepth(&huge)).To(Equal(treeDisplayDepth(maxContextTreeDepth)))
@@ -324,7 +324,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(routes.subtreeContentPreview(newFixturePageID("missing"))).To(BeEmpty())
 			Expect(func() { ensureSubtreeNodeChildrenArray(&subtreeNode{}) }).NotTo(Panic())
 			parent := &tree.PageNode{Children: []*tree.PageNode{{Children: []*tree.PageNode{{}}}}}
-			Expect(subtreeTruncated(parent, treeDisplayDepth(1))).To(BeTrue())
+			Expect(subtreeExtentFor(parent, treeDisplayDepth(1))).To(Equal(subtreeExtentTruncated))
 
 			emptyVersionPage := &tree.Page{PageNode: &tree.PageNode{ID: "empty", Title: "Empty", Slug: "empty", Kind: tree.NodeKindPage}}
 			Expect(partialEditVersionPreflight("", nil)).To(Succeed())
@@ -468,9 +468,9 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(validationPageIDResolutionFor(&Routes{}, newFixtureRoutePath("home"))).To(matchValidationPageID(validationUnresolved, BeEmpty()))
 			Expect(validationPageIDResolutionFor(routes, newFixtureRoutePath("missing"))).To(matchValidationPageID(validationUnresolved, BeEmpty()))
 			Expect(routes.validationSourceKind(newFixturePageID("missing"))).To(Equal(tree.NodeKindPage))
-			Expect(routes.validationPageIDExists(*sectionID)).To(BeTrue())
-			Expect((&Routes{}).validationPageIDExists(home.ID)).To(BeFalse())
-			Expect(routes.validationPageIDExists(home.ID)).To(BeTrue())
+			Expect(validationPagePresenceFor(routes, *sectionID)).To(matchValidationPagePresence(validationPagePresent, Equal(*sectionID)))
+			Expect(validationPagePresenceFor(&Routes{}, home.ID)).To(matchValidationPagePresence(validationPageAbsent, Equal(home.ID)))
+			Expect(validationPagePresenceFor(routes, home.ID)).To(matchValidationPagePresence(validationPagePresent, Equal(home.ID)))
 		})
 
 		It("normalizes validation asset destinations through the real list use case", func() {
@@ -484,15 +484,16 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 
 			exists := routes.validationAssetExists(context.Background(), home.ID)
 
-			Expect(exists("logo.png")).To(BeTrue())
-			Expect(exists("/assets/" + home.ID.MetadataValue() + "/logo.png")).To(BeTrue())
-			Expect(exists("<logo.png?size=1#preview>")).To(BeTrue())
-			Expect(exists("nested/logo.png")).To(BeFalse())
+			Expect(validationAssetDestinationFor(home.ID, "logo.png", exists)).To(matchValidationAssetPresence(validationAssetPresent, Equal("logo.png")))
+			Expect(validationAssetDestinationFor(home.ID, "/assets/"+home.ID.MetadataValue()+"/logo.png", exists)).To(matchValidationAssetPresence(validationAssetPresent, Equal("/assets/"+home.ID.MetadataValue()+"/logo.png")))
+			Expect(validationAssetDestinationFor(home.ID, "<logo.png?size=1#preview>", exists)).To(matchValidationAssetPresence(validationAssetPresent, Equal("<logo.png?size=1#preview>")))
+			Expect(validationAssetDestinationFor(home.ID, "nested/logo.png", exists)).To(matchValidationAssetPresence(validationAssetAbsent, Equal("nested/logo.png")))
 
 			predicate := validationAssetPredicate(home.ID, []string{"", "assets/" + home.ID.MetadataValue() + "/icon.png"})
-			Expect(predicate("icon.png")).To(BeTrue())
-			Expect(predicate("missing.png")).To(BeFalse())
-			Expect(validationAssetPredicate(home.ID, []string{"logo.png"})("/logo.png")).To(BeTrue())
+			Expect(validationAssetDestinationFor(home.ID, "icon.png", predicate)).To(matchValidationAssetPresence(validationAssetPresent, Equal("icon.png")))
+			Expect(validationAssetDestinationFor(home.ID, "missing.png", predicate)).To(matchValidationAssetPresence(validationAssetAbsent, Equal("missing.png")))
+			slashLogoPredicate := validationAssetPredicate(home.ID, []string{"logo.png"})
+			Expect(validationAssetDestinationFor(home.ID, "/logo.png", slashLogoPredicate)).To(matchValidationAssetPresence(validationAssetPresent, Equal("/logo.png")))
 		})
 
 		It("reports workspace refresh disabled, source, backend, and validation outcomes", func() {
@@ -620,6 +621,99 @@ func matchChangesSinceCommit(state changesSinceCommitState, changesMatcher types
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"State":   Equal(state),
 		"Changes": changesMatcher,
+	})
+}
+
+type contextRefreshDecision string
+
+const (
+	contextRefreshRequested contextRefreshDecision = "requested"
+	contextRefreshSkipped   contextRefreshDecision = "skipped"
+)
+
+func contextRefreshDecisionFor(syncMode string, status workspacesync.SyncStatus) contextRefreshDecision {
+	if shouldRefreshForContext(syncMode, status) {
+		return contextRefreshRequested
+	}
+	return contextRefreshSkipped
+}
+
+type subtreeExtent string
+
+const (
+	subtreeExtentComplete  subtreeExtent = "complete"
+	subtreeExtentTruncated subtreeExtent = "truncated"
+)
+
+func subtreeExtentFor(node *tree.PageNode, depth treeDisplayDepth) subtreeExtent {
+	if subtreeTruncated(node, depth) {
+		return subtreeExtentTruncated
+	}
+	return subtreeExtentComplete
+}
+
+type validationPagePresenceState string
+
+const (
+	validationPagePresent validationPagePresenceState = "present"
+	validationPageAbsent  validationPagePresenceState = "absent"
+)
+
+type validationPagePresence struct {
+	PageID tree.PageID
+	State  validationPagePresenceState
+}
+
+func validationPagePresenceFor(routes *Routes, pageID tree.PageID) validationPagePresence {
+	state := validationPageAbsent
+	if routes.validationPageIDExists(pageID) {
+		state = validationPagePresent
+	}
+	return validationPagePresence{PageID: pageID, State: state}
+}
+
+func matchValidationPagePresence(state validationPagePresenceState, pageIDMatcher types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":  Equal(state),
+		"PageID": pageIDMatcher,
+	})
+}
+
+type validationAssetPresenceState string
+
+const (
+	validationAssetPresent validationAssetPresenceState = "present"
+	validationAssetAbsent  validationAssetPresenceState = "absent"
+)
+
+type validationAssetPresence struct {
+	PageID      tree.PageID
+	Destination string
+	State       validationAssetPresenceState
+}
+
+func validationAssetDestinationFor(pageID tree.PageID, destination string, exists func(string) bool) validationAssetPresence {
+	state := validationAssetAbsent
+	if exists != nil && exists(destination) {
+		state = validationAssetPresent
+	}
+	return validationAssetPresence{PageID: pageID, Destination: destination, State: state}
+}
+
+func cachedValidationAssetDestinationFor(exists func(tree.PageID, string) bool, pageID tree.PageID, destination string) validationAssetPresence {
+	state := validationAssetAbsent
+	if exists != nil && exists(pageID, destination) {
+		state = validationAssetPresent
+	}
+	return validationAssetPresence{PageID: pageID, Destination: destination, State: state}
+}
+
+func matchValidationAssetPresence(state validationAssetPresenceState, destinationMatcher types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":       Equal(state),
+		"Destination": destinationMatcher,
 	})
 }
 

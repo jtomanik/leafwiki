@@ -57,9 +57,8 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 
 			onlyStore := newContextCheckpointStore(2)
 			onlyStore.sessions["only"] = []contextCheckpoint{{Token: "only", CreatedAt: base}}
-			evictedOnly := onlyStore.evictOldestSessionLocked("only")
 
-			Expect(evictedOnly).To(BeFalse())
+			Expect(checkpointEvictionDecisionFor(onlyStore.evictOldestSessionLocked("only"))).To(Equal(checkpointSessionRetained))
 			Expect(onlyStore.sessions).To(HaveKey("only"))
 		})
 
@@ -222,8 +221,8 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			Expect(contextSessionKey(nil, toolActor{ID: "actor-1"})).To(Equal("actor-1:sessionless"))
 			Expect(formatContextTime(time.Time{})).To(BeEmpty())
 			Expect(formatContextTime(time.Date(2026, 6, 20, 12, 30, 0, 0, time.FixedZone("CET", 3600)))).To(Equal("2026-06-20T11:30:00Z"))
-			Expect(containsToolID([]ToolID{ToolGetPage}, ToolGetPage)).To(BeTrue())
-			Expect(containsToolID([]ToolID{ToolGetPage}, ToolValidateWiki)).To(BeFalse())
+			Expect(toolIDMembershipFor([]ToolID{ToolGetPage}, ToolGetPage)).To(Equal(toolIDIncluded))
+			Expect(toolIDMembershipFor([]ToolID{ToolGetPage}, ToolValidateWiki)).To(Equal(toolIDExcluded))
 		})
 
 		It("falls back from snapshot listing to sync status changed paths", Label("integration"), func() {
@@ -315,7 +314,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 	Describe("validation helper guards", func() {
 		It("caches asset predicates and handles nil factories", Label("unit"), func() {
 			nilFactory := cachedValidationAssetExists(nil)
-			Expect(nilFactory(newFixturePageID("page-1"), "image.png")).To(BeFalse())
+			Expect(cachedValidationAssetDestinationFor(nilFactory, newFixturePageID("page-1"), "image.png")).To(matchValidationAssetPresence(validationAssetAbsent, Equal("image.png")))
 
 			calls := 0
 			exists := cachedValidationAssetExists(func(pageID tree.PageID) func(string) bool {
@@ -326,13 +325,13 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 				return func(destination string) bool { return destination == "hit.png" }
 			})
 
-			Expect(exists("", "hit.png")).To(BeFalse())
+			Expect(cachedValidationAssetDestinationFor(exists, "", "hit.png")).To(matchValidationAssetPresence(validationAssetAbsent, Equal("hit.png")))
 			Expect(calls).To(BeZero())
-			Expect(exists(newFixturePageID("page-1"), "hit.png")).To(BeTrue())
-			Expect(exists(newFixturePageID("page-1"), "miss.png")).To(BeFalse())
-			Expect(exists(newFixturePageID("page-1"), "hit.png")).To(BeTrue())
+			Expect(cachedValidationAssetDestinationFor(exists, newFixturePageID("page-1"), "hit.png")).To(matchValidationAssetPresence(validationAssetPresent, Equal("hit.png")))
+			Expect(cachedValidationAssetDestinationFor(exists, newFixturePageID("page-1"), "miss.png")).To(matchValidationAssetPresence(validationAssetAbsent, Equal("miss.png")))
+			Expect(cachedValidationAssetDestinationFor(exists, newFixturePageID("page-1"), "hit.png")).To(matchValidationAssetPresence(validationAssetPresent, Equal("hit.png")))
 			Expect(calls).To(Equal(1))
-			Expect(exists(newFixturePageID("page-2"), "hit.png")).To(BeFalse())
+			Expect(cachedValidationAssetDestinationFor(exists, newFixturePageID("page-2"), "hit.png")).To(matchValidationAssetPresence(validationAssetAbsent, Equal("hit.png")))
 			Expect(calls).To(Equal(2))
 		})
 
@@ -419,8 +418,8 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			Expect(routes.subtreeLinkCounts(ctx, nil)).To(BeNil())
 			Expect(routes.subtreeContentPreview(newFixturePageID("page-1"))).To(BeEmpty())
 			Expect(func() { ensureSubtreeNodeChildrenArray(nil) }).NotTo(Panic())
-			Expect(subtreeTruncated(nil, treeDisplayDepth(1))).To(BeFalse())
-			Expect(subtreeTruncated(&tree.PageNode{Children: []*tree.PageNode{{}}}, treeDisplayDepth(-1))).To(BeFalse())
+			Expect(subtreeExtentFor(nil, treeDisplayDepth(1))).To(Equal(subtreeExtentComplete))
+			Expect(subtreeExtentFor(&tree.PageNode{Children: []*tree.PageNode{{}}}, treeDisplayDepth(-1))).To(Equal(subtreeExtentComplete))
 
 			_, err := boundedSubtreeDepth(&negative)
 			Expect(err).To(MatchError(errSubtreeDepthInvalid))
@@ -455,8 +454,8 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			longContent := string(bytes.Repeat([]byte("word "), 70))
 			Expect(routes.treeService.UpdateNodeUncheckedVersion("system", page.ID, page.Title, page.Slug, &longContent, false)).To(Succeed())
 			Expect(routes.subtreeContentPreview(*childID)).To(HaveLen(240))
-			Expect(subtreeTruncated(parent.PageNode, treeDisplayDepth(0))).To(BeTrue())
-			Expect(subtreeTruncated(parent.PageNode, treeDisplayDepth(1))).To(BeFalse())
+			Expect(subtreeExtentFor(parent.PageNode, treeDisplayDepth(0))).To(Equal(subtreeExtentTruncated))
+			Expect(subtreeExtentFor(parent.PageNode, treeDisplayDepth(1))).To(Equal(subtreeExtentComplete))
 		})
 	})
 
@@ -485,3 +484,31 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 		})
 	})
 })
+
+type checkpointEvictionDecision string
+
+const (
+	checkpointSessionEvicted  checkpointEvictionDecision = "session evicted"
+	checkpointSessionRetained checkpointEvictionDecision = "session retained"
+)
+
+func checkpointEvictionDecisionFor(evicted bool) checkpointEvictionDecision {
+	if evicted {
+		return checkpointSessionEvicted
+	}
+	return checkpointSessionRetained
+}
+
+type toolIDMembershipState string
+
+const (
+	toolIDIncluded toolIDMembershipState = "included"
+	toolIDExcluded toolIDMembershipState = "excluded"
+)
+
+func toolIDMembershipFor(values []ToolID, needle ToolID) toolIDMembershipState {
+	if containsToolID(values, needle) {
+		return toolIDIncluded
+	}
+	return toolIDExcluded
+}

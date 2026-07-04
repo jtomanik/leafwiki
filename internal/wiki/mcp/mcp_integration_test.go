@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +23,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/agenthooks"
 	"github.com/perber/wiki/internal/core/assets"
@@ -321,18 +319,48 @@ func matchRecordedHTTPMCPParity() types.GomegaMatcher {
 	GinkgoHelper()
 
 	seenCases, expected := expectedHTTPMCPParityCases()
-	return gcustom.MakeMatcher(func(seen map[string]map[string]struct{}) (bool, error) {
-		for _, name := range expected {
-			tc, ok := seenCases[name]
-			if !ok {
-				return false, nil
-			}
-			if _, exercised := seen[name][tc.HTTPRoute]; !exercised {
-				return false, nil
-			}
+	return WithTransform(func(seen map[string]map[string]struct{}) parityCoverageObservation {
+		return parityCoverageObservationFor(seen, seenCases, expected)
+	}, matchParityCoverageComplete())
+}
+
+type parityCoverageState string
+
+const (
+	parityCoverageComplete parityCoverageState = "complete"
+	parityCoverageMissing  parityCoverageState = "missing"
+)
+
+type parityCoverageObservation struct {
+	State   parityCoverageState
+	Missing []string
+}
+
+func parityCoverageObservationFor(seen map[string]map[string]struct{}, seenCases map[string]httpMCPParityCase, expected []string) parityCoverageObservation {
+	missing := make([]string, 0)
+	for _, name := range expected {
+		tc, ok := seenCases[name]
+		if !ok {
+			missing = append(missing, name)
+			continue
 		}
-		return true, nil
-	}).WithMessage("record expected HTTP/MCP route parity evidence")
+		if _, exercised := seen[name][tc.HTTPRoute]; !exercised {
+			missing = append(missing, name+" "+tc.HTTPRoute)
+		}
+	}
+	state := parityCoverageComplete
+	if len(missing) > 0 {
+		state = parityCoverageMissing
+	}
+	return parityCoverageObservation{State: state, Missing: missing}
+}
+
+func matchParityCoverageComplete() types.GomegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		HaveField("State", Equal(parityCoverageComplete)),
+		HaveField("Missing", BeEmpty()),
+	)
 }
 
 func expectedHTTPMCPParityCases() (map[string]httpMCPParityCase, []string) {
@@ -4043,23 +4071,44 @@ func listAllTools(session *sdkmcp.ClientSession) []*sdkmcp.Tool {
 func matchInputSchemas(expected, expectedRequired map[string][]string) types.GomegaMatcher {
 	GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(tools []*sdkmcp.Tool) (bool, error) {
-		if err := inputSchemasMatch(tools, expected, expectedRequired); err != nil {
-			return false, err
-		}
-		return true, nil
-	}).WithMessage("match MCP input schema contracts")
+	return WithTransform(func(tools []*sdkmcp.Tool) schemaContractObservation {
+		return schemaContractObservationFor(inputSchemasMatch(tools, expected, expectedRequired))
+	}, matchSchemaContractSatisfied())
 }
 
 func matchOutputSchemas(expected map[string][]string) types.GomegaMatcher {
 	GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(tools []*sdkmcp.Tool) (bool, error) {
-		if err := outputSchemasMatch(tools, expected); err != nil {
-			return false, err
-		}
-		return true, nil
-	}).WithMessage("match MCP output schema contracts")
+	return WithTransform(func(tools []*sdkmcp.Tool) schemaContractObservation {
+		return schemaContractObservationFor(outputSchemasMatch(tools, expected))
+	}, matchSchemaContractSatisfied())
+}
+
+type schemaContractState string
+
+const (
+	schemaContractSatisfied schemaContractState = "satisfied"
+	schemaContractViolated  schemaContractState = "violated"
+)
+
+type schemaContractObservation struct {
+	State schemaContractState
+	Err   error
+}
+
+func schemaContractObservationFor(err error) schemaContractObservation {
+	if err != nil {
+		return schemaContractObservation{State: schemaContractViolated, Err: err}
+	}
+	return schemaContractObservation{State: schemaContractSatisfied}
+}
+
+func matchSchemaContractSatisfied() types.GomegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		HaveField("State", Equal(schemaContractSatisfied)),
+		HaveField("Err", Succeed()),
+	)
 }
 
 func inputSchemasMatch(tools []*sdkmcp.Tool, expected, expectedRequired map[string][]string) error {
@@ -4767,39 +4816,37 @@ func getHTTPRevision(router http.Handler, pageID, revisionID string) map[string]
 func matchSearchResults(httpSearch map[string]any) types.GomegaMatcher {
 	GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(mcpSearch map[string]any) (bool, error) {
-		for _, field := range []string{"count", "offset", "limit"} {
-			if !jsonValuesEqual(mcpSearch[field], httpSearch[field]) {
-				return false, nil
-			}
-		}
-		if !jsonValuesEqual(arrayFieldFromMap(mcpSearch, "items"), arrayFieldFromMap(httpSearch, "items")) {
-			return false, nil
-		}
-		if !jsonValuesEqual(mcpSearch["tagFacets"], httpSearch["tag_facets"]) {
-			return false, nil
-		}
-		count, countOK := httpSearch["count"].(float64)
-		offset, offsetOK := httpSearch["offset"].(float64)
-		if !countOK || !offsetOK {
-			return false, fmt.Errorf("HTTP search response should expose numeric count and offset")
-		}
-		wantHasMore := int(offset)+len(arrayFieldFromMap(httpSearch, "items")) < int(count)
-		return mcpSearch["hasMore"] == wantHasMore, nil
-	}).WithMessage("match HTTP search result semantics")
+	return SatisfyAll(
+		HaveKeyWithValue("count", matchJSONEqual(httpSearch["count"])),
+		HaveKeyWithValue("offset", matchJSONEqual(httpSearch["offset"])),
+		HaveKeyWithValue("limit", matchJSONEqual(httpSearch["limit"])),
+		HaveKeyWithValue("items", matchJSONEqual(arrayFieldFromMap(httpSearch, "items"))),
+		HaveKeyWithValue("tagFacets", matchJSONEqual(httpSearch["tag_facets"])),
+		HaveKeyWithValue("hasMore", Equal(searchResultsHasMoreFromHTTP(httpSearch))),
+	)
 }
 
 func matchMapFields(want map[string]any, fields []string) types.GomegaMatcher {
 	GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(got map[string]any) (bool, error) {
-		for _, field := range fields {
-			if !jsonValuesEqual(got[field], want[field]) {
-				return false, nil
-			}
-		}
-		return true, nil
-	}).WithMessage("match selected map fields").WithTemplateData(fields)
+	matchers := make([]types.GomegaMatcher, 0, len(fields))
+	for _, field := range fields {
+		matchers = append(matchers, HaveKeyWithValue(field, matchJSONEqual(want[field])))
+	}
+	return SatisfyAll(matchers...)
+}
+
+func searchResultsHasMoreFromHTTP(httpSearch map[string]any) bool {
+	count := numericMapField(httpSearch, "count")
+	offset := numericMapField(httpSearch, "offset")
+	items := arrayFieldFromMap(httpSearch, "items")
+	return int(offset)+len(items) < int(count)
+}
+
+func numericMapField(value map[string]any, key string) float64 {
+	GinkgoHelper()
+	Expect(value).To(HaveKeyWithValue(key, BeAssignableToTypeOf(float64(0))))
+	return value[key].(float64)
 }
 
 func matchRestoredMetadata() types.GomegaMatcher {
@@ -4852,16 +4899,10 @@ func matchHTTPPageVersionConflict() types.GomegaMatcher {
 func matchRestoreVolatileFields() types.GomegaMatcher {
 	GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(page map[string]any) (bool, error) {
-		if stringField(page, "version") == "" {
-			return false, nil
-		}
-		updatedAt := stringField(nestedMap(page, "metadata"), "updatedAt")
-		if _, err := time.Parse(time.RFC3339, updatedAt); err != nil {
-			return false, err
-		}
-		return true, nil
-	}).WithMessage("expose restore volatile fields")
+	return SatisfyAll(
+		HaveKeyWithValue("version", SatisfyAll(BeAssignableToTypeOf(""), Not(BeEmpty()))),
+		HaveKeyWithValue("metadata", HaveKeyWithValue("updatedAt", matchRFC3339Timestamp())),
+	)
 }
 
 func matchPageState(id, title, slug, pathValue, kind, parentID string) types.GomegaMatcher {
@@ -4888,22 +4929,33 @@ func matchChildOrder(childIDs ...string) types.GomegaMatcher {
 func matchChildrenExcludingIDs(childIDs ...string) types.GomegaMatcher {
 	GinkgoHelper()
 
-	disallowed := map[string]struct{}{}
-	for _, id := range childIDs {
-		disallowed[id] = struct{}{}
+	matchers := make([]types.GomegaMatcher, 0, len(childIDs))
+	for _, childID := range childIDs {
+		matchers = append(matchers, Not(ContainElement(childID)))
 	}
-	return gcustom.MakeMatcher(func(page map[string]any) (bool, error) {
-		for _, raw := range arrayFieldFromMap(page, "children") {
-			child, ok := raw.(map[string]any)
-			if !ok {
-				return false, fmt.Errorf("child should be an object")
-			}
-			if _, denied := disallowed[stringValue(child["id"])]; denied {
-				return false, nil
-			}
-		}
-		return true, nil
-	}).WithMessage("exclude moved child pages").WithTemplateData(childIDs)
+	return WithTransform(childIDsFromPage, SatisfyAll(matchers...))
+}
+
+func matchRFC3339Timestamp() types.GomegaMatcher {
+	GinkgoHelper()
+	return SatisfyAll(
+		BeAssignableToTypeOf(""),
+		WithTransform(func(value string) (time.Time, error) {
+			return time.Parse(time.RFC3339, value)
+		}, Not(BeZero())),
+	)
+}
+
+func childIDsFromPage(page map[string]any) []string {
+	GinkgoHelper()
+	rawChildren := arrayFieldFromMap(page, "children")
+	ids := make([]string, 0, len(rawChildren))
+	for _, raw := range rawChildren {
+		Expect(raw).To(BeAssignableToTypeOf(map[string]any{}))
+		child := raw.(map[string]any)
+		ids = append(ids, stringValue(child["id"]))
+	}
+	return ids
 }
 
 func childIDMatchers(childIDs []string) []any {
@@ -4937,53 +4989,82 @@ func matchAssetURLResult(field, pageID string) types.GomegaMatcher {
 func matchScopedSuccessPayload(httpPayload map[string]any, mcpMessageID, httpMessageID string) types.GomegaMatcher {
 	GinkgoHelper()
 
-	httpComparable := mapWithoutField(httpPayload, "messageId")
-	return gcustom.MakeMatcher(func(mcpPayload map[string]any) (bool, error) {
-		if !jsonValuesEqual(mcpPayload["messageId"], mcpMessageID) {
-			return false, nil
+	expected := scopedSuccessPayloadProjection{
+		MCPMessageID:  mcpMessageID,
+		HTTPMessageID: httpMessageID,
+		Body:          successPayloadFromWire("HTTP success payload", httpPayload).Body,
+	}
+	return WithTransform(func(mcpPayload map[string]any) scopedSuccessPayloadProjection {
+		httpSuccess := successPayloadFromWire("HTTP success payload", httpPayload)
+		mcpSuccess := successPayloadFromWire("MCP success payload", mcpPayload)
+		return scopedSuccessPayloadProjection{
+			MCPMessageID:  mcpSuccess.MessageID,
+			HTTPMessageID: httpSuccess.MessageID,
+			Body:          mcpSuccess.Body,
 		}
-		if !jsonValuesEqual(httpPayload["messageId"], httpMessageID) {
-			return false, nil
-		}
-		return jsonValuesEqual(mapWithoutField(mcpPayload, "messageId"), httpComparable), nil
-	}).WithMessage("match scoped MCP and HTTP success payloads")
+	}, Equal(expected),
+	)
+}
+
+type successPayloadWire struct {
+	MessageID string `json:"messageId"`
+	Body      any
+}
+
+type scopedSuccessPayloadProjection struct {
+	MCPMessageID  string
+	HTTPMessageID string
+	Body          any
+}
+
+func successPayloadFromWire(label string, payload map[string]any) successPayloadWire {
+	GinkgoHelper()
+	raw, err := json.Marshal(payload)
+	Expect(err).NotTo(HaveOccurred(), "%s should marshal", label)
+	var decoded struct {
+		MessageID string `json:"messageId"`
+	}
+	Expect(json.Unmarshal(raw, &decoded)).To(Succeed(), "%s should decode", label)
+	return successPayloadWire{
+		MessageID: decoded.MessageID,
+		Body:      normalizeJSON(mapWithoutField(payload, "messageId")),
+	}
 }
 
 func matchLookupFinalID(wantID string, wantKind string) types.GomegaMatcher {
 	GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(lookup map[string]any) (bool, error) {
-		segments := arrayFieldFromMap(lookup, "segments")
-		if len(segments) == 0 {
-			return false, nil
-		}
-		final, ok := segments[len(segments)-1].(map[string]any)
-		if !ok {
-			return false, fmt.Errorf("final lookup segment should be an object")
-		}
-		return stringValue(final["id"]) == wantID && stringValue(final["kind"]) == wantKind, nil
-	}).WithMessage("end at the requested lookup segment")
+	return WithTransform(finalLookupSegment, SatisfyAll(
+		HaveKeyWithValue("id", wantID),
+		HaveKeyWithValue("kind", wantKind),
+	))
 }
 
 func matchValidationIssueCodes(wantCodes []wikivalidation.IssueCode) types.GomegaMatcher {
 	GinkgoHelper()
 
-	return gcustom.MakeMatcher(func(output map[string]any) (bool, error) {
-		codes, err := validationIssueCodes(output)
-		if err != nil {
-			return false, err
-		}
-		for _, want := range wantCodes {
-			if !containsIssueCode(codes, want) {
-				return false, nil
-			}
-		}
-		return true, nil
-	}).WithMessage("contain validation issue codes").WithTemplateData(wantCodes)
+	return WithTransform(validationIssueCodes, ContainElements(issueCodeElements(wantCodes)...))
 }
 
-func jsonValuesEqual(got, want any) bool {
-	return reflect.DeepEqual(normalizeJSON(got), normalizeJSON(want))
+func finalLookupSegment(lookup map[string]any) (map[string]any, error) {
+	GinkgoHelper()
+	segments := arrayFieldFromMap(lookup, "segments")
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("lookup should include at least one segment")
+	}
+	final, ok := segments[len(segments)-1].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("final lookup segment should be an object")
+	}
+	return final, nil
+}
+
+func issueCodeElements(codes []wikivalidation.IssueCode) []any {
+	out := make([]any, 0, len(codes))
+	for _, code := range codes {
+		out = append(out, code)
+	}
+	return out
 }
 
 type httpPageErrorPayloadWire struct {
@@ -5230,22 +5311,11 @@ func assertNoValidationIssuePath(output map[string]any, unwantedPath string) {
 func matchValidationIssueCodesAbsent(absentCodes []wikivalidation.IssueCode) types.GomegaMatcher {
 	GinkgoHelper()
 
-	absent := make(map[wikivalidation.IssueCode]struct{}, len(absentCodes))
+	matchers := make([]types.GomegaMatcher, 0, len(absentCodes))
 	for _, code := range absentCodes {
-		absent[code] = struct{}{}
+		matchers = append(matchers, Not(ContainElement(code)))
 	}
-	return gcustom.MakeMatcher(func(output map[string]any) (bool, error) {
-		codes, err := validationIssueCodes(output)
-		if err != nil {
-			return false, err
-		}
-		for _, code := range codes {
-			if _, forbidden := absent[code]; forbidden {
-				return false, nil
-			}
-		}
-		return true, nil
-	}).WithMessage("exclude validation issue codes").WithTemplateData(absentCodes)
+	return WithTransform(validationIssueCodes, SatisfyAll(matchers...))
 }
 
 func validationIssueCodes(output map[string]any) ([]wikivalidation.IssueCode, error) {
