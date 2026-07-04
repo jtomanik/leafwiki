@@ -33,16 +33,23 @@ const (
 	ExecutionStatusCanceled  ExecutionStatus = "canceled"
 )
 
+type ExecutionErrorCode string
+
+const (
+	ExecutionErrorCodeImportPlanStale ExecutionErrorCode = "import_plan_stale"
+)
+
 type StoredPlan struct {
-	Plan            *PlanResult
-	PlanOptions     PlanOptions
-	WorkspaceRoot   string
-	CreatedAt       time.Time
-	ExecutionStatus ExecutionStatus
-	ExecutionUserID string
-	CancelRequested bool
-	ExecutionResult *ExecutionResult
-	ExecutionError  *string
+	Plan               *PlanResult
+	PlanOptions        PlanOptions
+	WorkspaceRoot      string
+	CreatedAt          time.Time
+	ExecutionStatus    ExecutionStatus
+	ExecutionUserID    string
+	CancelRequested    bool
+	ExecutionResult    *ExecutionResult
+	ExecutionError     *string
+	ExecutionErrorCode *ExecutionErrorCode
 	ExecutionProgress
 }
 
@@ -129,6 +136,7 @@ func (ps *PlanStore) TryStartExecution(userID string) (*StoredPlan, bool, error)
 	ps.plan.CancelRequested = false
 	ps.plan.ExecutionResult = nil
 	ps.plan.ExecutionError = nil
+	ps.plan.ExecutionErrorCode = nil
 	now := time.Now()
 	ps.plan.ExecutionProgress = ExecutionProgress{
 		ProcessedItems: 0,
@@ -165,6 +173,7 @@ func (ps *PlanStore) FinishExecution(planID string, result *ExecutionResult, exe
 		if errors.Is(execErr, ErrImportCanceled) {
 			ps.plan.ExecutionStatus = ExecutionStatusCanceled
 			ps.plan.ExecutionError = nil
+			ps.plan.ExecutionErrorCode = nil
 			if err := ps.persistLocked(); err != nil {
 				ps.stateErr = fmt.Errorf("%w: %v", ErrImportStateUnavailable, err)
 				return ps.stateErr
@@ -174,6 +183,7 @@ func (ps *PlanStore) FinishExecution(planID string, result *ExecutionResult, exe
 		errMsg := execErr.Error()
 		ps.plan.ExecutionStatus = ExecutionStatusFailed
 		ps.plan.ExecutionError = &errMsg
+		ps.plan.ExecutionErrorCode = executionErrorCode(execErr)
 		if err := ps.persistLocked(); err != nil {
 			ps.stateErr = fmt.Errorf("%w: %v", ErrImportStateUnavailable, err)
 			return ps.stateErr
@@ -183,6 +193,7 @@ func (ps *PlanStore) FinishExecution(planID string, result *ExecutionResult, exe
 
 	ps.plan.ExecutionStatus = ExecutionStatusCompleted
 	ps.plan.ExecutionError = nil
+	ps.plan.ExecutionErrorCode = nil
 	finishedAt := time.Now()
 	ps.plan.FinishedAt = &finishedAt
 	ps.plan.ProcessedItems = ps.plan.TotalItems
@@ -247,6 +258,19 @@ func (ps *PlanStore) RequestCancel() (*StoredPlan, bool, error) {
 		return nil, false, ps.stateErr
 	}
 	return cloneStoredPlan(ps.plan), true, nil
+}
+
+func executionErrorCode(err error) *ExecutionErrorCode {
+	switch {
+	case errors.Is(err, ErrImportPlanStale):
+		return executionErrorCodePtr(ExecutionErrorCodeImportPlanStale)
+	default:
+		return nil
+	}
+}
+
+func executionErrorCodePtr(code ExecutionErrorCode) *ExecutionErrorCode {
+	return &code
 }
 
 func (ps *PlanStore) IsCancelRequested(planID string) bool {

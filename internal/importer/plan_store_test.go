@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("empty plan store reads", func() {
 		s := NewPlanStore()
 
 		_, err := s.Get()
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(ErrNoPlan))
 
 	})
 })
@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("plan store clearing", func() {
 		Expect(err).To(Succeed())
 
 		_, err = s.Get()
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(ErrNoPlan))
 
 	})
 })

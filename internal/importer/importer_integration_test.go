@@ -317,7 +317,7 @@ var _ = ginkgo.Describe("import execution for link asset fixture packages", func
 		_, err = probe.FindByPath("guides")
 		Expect(err).To(Succeed())
 		_, err = probe.FindByPath("readme")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 	})
 })

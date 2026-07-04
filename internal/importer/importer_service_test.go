@@ -378,7 +378,14 @@ var _ = ginkgo.Describe("resumed import with changed tree hash", func() {
 
 		resumed := NewImporterService(planner, NewPlanStore(stateFile), filepath.Join(stateRoot, "workspaces"), 0)
 		failedState := waitForExecutionStatus(resumed, ExecutionStatusFailed)
-		Expect(failedState.ExecutionError).To(gstruct.PointTo(ContainSubstring(ErrImportPlanStale.Error())))
+		Expect(failedState).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"ExecutionResult":    BeNil(),
+			"ExecutionErrorCode": gstruct.PointTo(Equal(ExecutionErrorCodeImportPlanStale)),
+			"ExecutionProgress": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ProcessedItems": Equal(1),
+				"TotalItems":     Equal(2),
+			}),
+		})))
 
 	})
 })

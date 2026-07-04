@@ -648,7 +648,18 @@ var _ = ginkgo.Describe("Executor execution edges", func() {
 		result, err := executor.Execute("user-1")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.TreeHashBefore).To(Equal("partial"))
-		Expect(progresses).NotTo(BeEmpty())
+		Expect(progresses).To(HaveExactElements(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ProcessedItems": Equal(1),
+				"TotalItems":     Equal(1),
+				"StartedAt":      Not(BeNil()),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ProcessedItems": Equal(1),
+				"TotalItems":     Equal(1),
+				"FinishedAt":     Not(BeNil()),
+			}),
+		))
 	})
 })
 

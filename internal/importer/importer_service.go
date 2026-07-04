@@ -43,15 +43,16 @@ var (
 )
 
 type CurrentPlanState struct {
-	ID              string           `json:"id"`
-	TreeHash        string           `json:"tree_hash"`
-	Items           []PlanItem       `json:"items"`
-	Errors          []string         `json:"errors"`
-	ErrorDetails    []PlanError      `json:"error_details,omitempty"`
-	ExecutionStatus ExecutionStatus  `json:"execution_status"`
-	CancelRequested bool             `json:"cancel_requested"`
-	ExecutionResult *ExecutionResult `json:"execution_result,omitempty"`
-	ExecutionError  *string          `json:"execution_error,omitempty"`
+	ID                 string              `json:"id"`
+	TreeHash           string              `json:"tree_hash"`
+	Items              []PlanItem          `json:"items"`
+	Errors             []string            `json:"errors"`
+	ErrorDetails       []PlanError         `json:"error_details,omitempty"`
+	ExecutionStatus    ExecutionStatus     `json:"execution_status"`
+	CancelRequested    bool                `json:"cancel_requested"`
+	ExecutionResult    *ExecutionResult    `json:"execution_result,omitempty"`
+	ExecutionError     *string             `json:"execution_error,omitempty"`
+	ExecutionErrorCode *ExecutionErrorCode `json:"execution_error_code,omitempty"`
 	ExecutionProgress
 }
 
@@ -356,15 +357,16 @@ func currentPlanStateFromStored(sp *StoredPlan) *CurrentPlanState {
 	}
 
 	return &CurrentPlanState{
-		ID:              sp.Plan.ID,
-		TreeHash:        sp.Plan.TreeHash,
-		Items:           sp.Plan.Items,
-		Errors:          sp.Plan.Errors,
-		ErrorDetails:    sp.Plan.ErrorDetails,
-		ExecutionStatus: sp.ExecutionStatus,
-		CancelRequested: sp.CancelRequested,
-		ExecutionResult: sp.ExecutionResult,
-		ExecutionError:  sp.ExecutionError,
+		ID:                 sp.Plan.ID,
+		TreeHash:           sp.Plan.TreeHash,
+		Items:              sp.Plan.Items,
+		Errors:             sp.Plan.Errors,
+		ErrorDetails:       sp.Plan.ErrorDetails,
+		ExecutionStatus:    sp.ExecutionStatus,
+		CancelRequested:    sp.CancelRequested,
+		ExecutionResult:    sp.ExecutionResult,
+		ExecutionError:     sp.ExecutionError,
+		ExecutionErrorCode: sp.ExecutionErrorCode,
 		ExecutionProgress: ExecutionProgress{
 			ProcessedItems:        sp.ProcessedItems,
 			TotalItems:            sp.TotalItems,
