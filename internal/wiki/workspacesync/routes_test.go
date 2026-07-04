@@ -209,7 +209,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 			PendingEventCount int  `json:"pendingEventCount"`
 		}
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		Expect(body).To(haveWorkspaceSyncStatusResponse(true, 3))
+		Expect(body).To(haveWorkspaceSyncEnabledStatus(3))
 	})
 
 	ginkgo.It("serves status from the public route when public access is enabled", func() {
@@ -415,10 +415,10 @@ func haveWorkspaceSyncSnapshotPageResponse(snapshot workspacesync.Snapshot, next
 	})
 }
 
-func haveWorkspaceSyncStatusResponse(enabled bool, pendingEventCount int) types.GomegaMatcher {
+func haveWorkspaceSyncEnabledStatus(pendingEventCount int) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Enabled":           Equal(enabled),
+		"Enabled":           BeTrue(),
 		"PendingEventCount": Equal(pendingEventCount),
 	})
 }
