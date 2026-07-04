@@ -22,6 +22,7 @@ linters:
     - exptostd
     - gochecksumtype
     - grouper
+    - revive
   settings:
     custom:
       leafwiki:
@@ -33,6 +34,14 @@ linters:
       forbid-focus-container: true
       suppress-len-assertion: true
       validate-async-intervals: true
+    revive:
+      severity: error
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skip-comments: true
+              skip-blank-lines: true
   exclusions:
     paths:
       - ^ui/leafwiki-ui/node_modules/
