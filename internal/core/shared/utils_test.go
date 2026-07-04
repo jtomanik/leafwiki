@@ -14,7 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("atomic file utilities", func() {
+var _ = Describe("atomic file utilities", Label("unit"), func() {
 	It("writes byte slices to the target path atomically", func() {
 		tmp := sharedTempDir()
 		target := filepath.Join(tmp, "page.md")
@@ -43,7 +43,7 @@ type atomicWriteDirCase struct {
 	want string
 }
 
-var _ = DescribeTable("atomic write directory resolution",
+var _ = DescribeTable("atomic write directory resolution", Label("unit"),
 	func(tc atomicWriteDirCase) {
 		got := strings.ReplaceAll(atomicWriteDir(tc.path), `\`, `/`)
 
@@ -59,7 +59,7 @@ var _ = DescribeTable("atomic write directory resolution",
 	}),
 )
 
-var _ = Describe("shared utility contracts", func() {
+var _ = Describe("shared utility contracts", Label("unit"), func() {
 	It("CopyWithLimit succeeds exactly at the byte cap", func() {
 		var dst bytes.Buffer
 
