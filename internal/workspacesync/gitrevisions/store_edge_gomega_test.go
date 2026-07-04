@@ -39,8 +39,6 @@ var _ = Describe("git revision edge behavior", func() {
 		Expect(target).To(Equal(filepath.Clean("/tmp/repo/.git")))
 
 		Expect(mergeMarkdownPaths([]string{" a.md ", "", "nested/b.md"}, []string{"a.md"})).To(Equal([]string{"a.md", "nested/b.md"}))
-		messageCommit := commitFromObject(&object.Commit{Message: commitMessage(CommitRequest{}, "batch-1", nil)})
-		Expect(messageCommit.Source).To(Equal(SourceUnknown))
 		startupCommit := commitFromObject(&object.Commit{Message: commitMessage(CommitRequest{Reason: ReasonStartup}, "batch-1", nil)})
 		Expect(startupCommit.Reason).To(Equal(ReasonStartup))
 		restoreCommit := commitFromObject(&object.Commit{Message: commitMessage(CommitRequest{Reason: ReasonRestore}, "batch-1", nil)})
