@@ -23,7 +23,7 @@ type healthEvaluation struct {
 	Checks  healthChecks
 }
 
-var _ = ginkgo.Describe("health routes", func() {
+var _ = ginkgo.Describe("health routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("reports degraded health when a required runtime role has crashed", func() {
 		routes := NewRoutes(RoutesConfig{
 			StorageDir: healthTempDir(),
@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("health routes", func() {
 })
 
 var _ = ginkgo.Describe("health evaluation", func() {
-	ginkgo.It("marks missing or non-directory storage as failed", func() {
+	ginkgo.It("marks missing or non-directory storage as failed", ginkgo.Label("unit"), func() {
 		missing := filepath.Join(healthTempDir(), "missing")
 		Expect(evaluateHealth(NewHealthUseCase(nil, nil, missing))).To(reportUnhealthyHealthChecks(
 			HaveKeyWithValue(healthCheckDataDir, healthStatusFailed),
@@ -86,7 +86,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		))
 	})
 
-	ginkgo.It("marks failed indexing status as unhealthy", func() {
+	ginkgo.It("marks failed indexing status as unhealthy", ginkgo.Label("unit"), func() {
 		status := search.NewIndexingStatus()
 		status.Start()
 		status.Fail()
@@ -97,7 +97,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		))
 	})
 
-	ginkgo.It("updates required role checks through SetRoleHealth", func() {
+	ginkgo.It("updates required role checks from runtime role health", ginkgo.Label("unit"), func() {
 		uc := NewHealthUseCase(nil, nil, healthTempDir())
 		Expect(evaluateHealth(uc)).To(reportHealthyHealthChecks(
 			Not(HaveKey(healthCheckRoleWikid)),
@@ -112,7 +112,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		))
 	})
 
-	ginkgo.It("reports ready and active indexing states", func() {
+	ginkgo.It("reports ready and active indexing states", ginkgo.Label("unit"), func() {
 		status := search.NewIndexingStatus()
 		status.Start()
 		status.Success()
@@ -128,7 +128,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		))
 	})
 
-	ginkgo.It("reports sqlite health for configured indexes and legacy constructor", func() {
+	ginkgo.It("reports sqlite health for configured indexes and legacy constructor", ginkgo.Label("integration"), func() {
 		index, err := search.NewSQLiteIndex(healthTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
@@ -143,7 +143,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		))
 	})
 
-	ginkgo.It("reports sqlite failure when a configured index cannot reopen its database", func() {
+	ginkgo.It("reports sqlite failure when a configured index cannot reopen its database", ginkgo.Label("integration"), func() {
 		indexStorage := healthTempDir()
 		index, err := search.NewSQLiteIndex(indexStorage)
 		Expect(err).NotTo(HaveOccurred())
@@ -155,7 +155,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 		))
 	})
 
-	ginkgo.It("routes SetRoleHealth updates the health endpoint checks", func() {
+	ginkgo.It("publishes updated role health checks through the health endpoint", ginkgo.Label("integration"), func() {
 		routes := NewRoutes(RoutesConfig{StorageDir: healthTempDir()})
 		routes.SetRoleHealth([]projectdaemon.RoleName{projectdaemon.RoleWikid}, func() []projectdaemon.RoleHealth {
 			return []projectdaemon.RoleHealth{{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateCrashed}}
@@ -170,7 +170,7 @@ var _ = ginkgo.Describe("health evaluation", func() {
 	})
 })
 
-var _ = ginkgo.Describe("required role checks", func() {
+var _ = ginkgo.Describe("required role checks", ginkgo.Label("unit"), func() {
 	ginkgo.It("reports ready, missing, unknown, and non-ready role states", func() {
 		Expect(evaluateRequiredRoles(
 			[]projectdaemon.RoleName{
