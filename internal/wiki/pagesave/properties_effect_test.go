@@ -55,8 +55,8 @@ var _ = ginkgo.Describe("property indexing side effect", func() {
 			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
 			newRaw := "---\nstatus: published\n---\n\nUpdated."
-			Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), "Update Props", newFixtureSlug("update-props"), &newRaw, true)).To(Succeed())
-			updated, err := treeSvc.GetPage(newFixturePageID(page.ID))
+			Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), tree.PageIDFromString(page.ID), "Update Props", newFixtureSlug("update-props"), &newRaw, true)).To(Succeed())
+			updated, err := treeSvc.GetPage(tree.PageIDFromString(page.ID))
 			Expect(err).NotTo(HaveOccurred())
 			effect.Apply(PageSaveEvent{Operation: PageOperationUpdate, After: updated})
 

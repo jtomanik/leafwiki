@@ -31,9 +31,9 @@ func createPageWithFrontmatter(treeSvc *tree.TreeService, title, slug, raw strin
 	ginkgo.GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	id, err := treeSvc.CreateNode(newFixtureUserID("system"), nil, title, newFixtureSlug(slug), &kind)
+	id, err := treeSvc.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, newFixtureSlug(slug), &raw, true)).To(Succeed())
+	Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &raw, true)).To(Succeed())
 	page, err := treeSvc.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
 	return page
@@ -69,8 +69,8 @@ var _ = ginkgo.Describe("tag indexing side effect", func() {
 			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
 			newRaw := "---\ntags:\n  - newtag\n---\n\nUpdated."
-			Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), "Update Tags", newFixtureSlug("update-tags"), &newRaw, true)).To(Succeed())
-			updated, err := treeSvc.GetPage(newFixturePageID(page.ID))
+			Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), tree.PageIDFromString(page.ID), "Update Tags", newFixtureSlug("update-tags"), &newRaw, true)).To(Succeed())
+			updated, err := treeSvc.GetPage(tree.PageIDFromString(page.ID))
 			Expect(err).NotTo(HaveOccurred())
 
 			effect.Apply(PageSaveEvent{Operation: PageOperationUpdate, After: updated})

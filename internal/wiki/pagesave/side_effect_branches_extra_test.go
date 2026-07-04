@@ -279,11 +279,11 @@ func setupTreeService() (string, *tree.TreeService) {
 func createMarkdownPage(treeService *tree.TreeService, title, slug, content string) *tree.Page {
 	ginkgo.GinkgoHelper()
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, newFixtureSlug(slug), &kind)
+	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
 	page, err := treeService.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(treeService.UpdateNode(newFixtureUserID("system"), *id, title, newFixtureSlug(slug), &content, newFixturePageVersion(page.Version()), false)).To(Succeed())
+	Expect(treeService.UpdateNode(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &content, tree.PageVersionFromString(page.Version()), false)).To(Succeed())
 	page, err = treeService.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
 	return page
@@ -292,9 +292,9 @@ func createMarkdownPage(treeService *tree.TreeService, title, slug, content stri
 func createRawPage(treeService *tree.TreeService, title, slug, raw string) *tree.Page {
 	ginkgo.GinkgoHelper()
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, newFixtureSlug(slug), &kind)
+	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, newFixtureSlug(slug), &raw, true)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &raw, true)).To(Succeed())
 	page, err := treeService.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
 	return page

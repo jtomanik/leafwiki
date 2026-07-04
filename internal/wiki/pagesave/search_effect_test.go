@@ -35,11 +35,11 @@ func createChildPageWithContent(treeSvc *tree.TreeService, parentID *tree.PageID
 	ginkgo.GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	id, err := treeSvc.CreateNode(newFixtureUserID("system"), parentID, title, newFixtureSlug(slug), &kind)
+	id, err := treeSvc.CreateNode(newFixtureUserID("system"), parentID, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
 	page, err := treeSvc.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(treeSvc.UpdateNode(newFixtureUserID("system"), *id, title, newFixtureSlug(slug), &content, newFixturePageVersion(page.Version()), false)).To(Succeed())
+	Expect(treeSvc.UpdateNode(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &content, tree.PageVersionFromString(page.Version()), false)).To(Succeed())
 	page, err = treeSvc.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
 	return page
@@ -128,8 +128,8 @@ var _ = ginkgo.Describe("search indexing side effect", func() {
 			Expect(searchForTerm(index, "uniqueword_before")).To(haveSearchHitForPage(page.ID))
 
 			newContent := "updated uniqueword_after content"
-			Expect(treeSvc.UpdateNode(newFixtureUserID("system"), newFixturePageID(page.ID), page.Title, newFixtureSlug(page.Slug), &newContent, newFixturePageVersion(page.Version()), false)).To(Succeed())
-			updated, err := treeSvc.GetPage(newFixturePageID(page.ID))
+			Expect(treeSvc.UpdateNode(newFixtureUserID("system"), tree.PageIDFromString(page.ID), page.Title, tree.SlugFromString(page.Slug), &newContent, tree.PageVersionFromString(page.Version()), false)).To(Succeed())
+			updated, err := treeSvc.GetPage(tree.PageIDFromString(page.ID))
 			Expect(err).NotTo(HaveOccurred())
 
 			effect.Apply(PageSaveEvent{
@@ -161,7 +161,7 @@ var _ = ginkgo.Describe("search indexing side effect", func() {
 			treeSvc, index, effect := setupSearchTest()
 			parent := createPageWithContent(treeSvc, "Parent Section", "parent", "parent uniqueterm_parent content")
 
-			parentID := newFixturePageID(parent.ID)
+			parentID := tree.PageIDFromString(parent.ID)
 			child1 := createChildPageWithContent(treeSvc, &parentID, "Child One", "child-one", "child one uniqueterm_child1 content")
 			child2 := createChildPageWithContent(treeSvc, &parentID, "Child Two", "child-two", "child two uniqueterm_child2 content")
 			Expect(effect.IndexAllPages()).To(Succeed())
@@ -190,8 +190,8 @@ var _ = ginkgo.Describe("search indexing side effect", func() {
 			page := createPageWithContent(treeSvc, "Movable Page", "movable", "movable uniqueterm_move content")
 			Expect(effect.IndexAllPages()).To(Succeed())
 
-			Expect(treeSvc.MoveNode(newFixtureUserID("system"), newFixturePageID(page.ID), *parentID, newFixturePageVersion(page.Version()))).To(Succeed())
-			moved, err := treeSvc.GetPage(newFixturePageID(page.ID))
+			Expect(treeSvc.MoveNode(newFixtureUserID("system"), tree.PageIDFromString(page.ID), *parentID, tree.PageVersionFromString(page.Version()))).To(Succeed())
+			moved, err := treeSvc.GetPage(tree.PageIDFromString(page.ID))
 			Expect(err).NotTo(HaveOccurred())
 
 			effect.Apply(PageSaveEvent{
