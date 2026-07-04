@@ -8,7 +8,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("revision validation", func() {
+var _ = ginkgo.Describe("revision validation", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns typed revision lookup and asset values from normalized inputs", func() {
 		pageID, revisionID, err := ValidateRevisionLookupInput(" page-1 ", " rev-1 ")
 		Expect(err).NotTo(HaveOccurred())

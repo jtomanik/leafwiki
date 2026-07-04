@@ -14,19 +14,19 @@ import (
 )
 
 var _ = ginkgo.Describe("revision errors", func() {
-	ginkgo.It("maps invalid list limits to bad request", func() {
+	ginkgo.It("maps invalid list limits to bad request", ginkgo.Label("unit"), func() {
 		Expect(revisionErrorStatus(ErrCodeRevisionInvalidLimit)).To(Equal(http.StatusBadRequest))
 	})
 
-	ginkgo.It("maps missing revisions to not found", func() {
+	ginkgo.It("maps missing revisions to not found", ginkgo.Label("unit"), func() {
 		Expect(revisionErrorStatus(ErrCodeRevisionNotFound)).To(Equal(http.StatusNotFound))
 	})
 
-	ginkgo.It("uses internal server status for service failure errors", func() {
+	ginkgo.It("uses internal server status for service failure errors", ginkgo.Label("unit"), func() {
 		Expect(revisionErrorStatus(ErrCodeRevisionInternalError)).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("revision error helpers create localized not-found and blob-unavailable errors", func() {
+	ginkgo.It("revision error helpers create localized not-found and blob-unavailable errors", ginkgo.Label("unit"), func() {
 		notFound := NewRevisionNotFoundError("missing", "missing %s", "rev-1")
 		Expect(notFound).To(MatchRevisionErrorCode(ErrCodeRevisionNotFound))
 		Expect(notFound.Args).To(Equal([]string{"rev-1"}))
@@ -38,7 +38,7 @@ var _ = ginkgo.Describe("revision errors", func() {
 		Expect(blob).To(MatchError(cause))
 	})
 
-	ginkgo.It("converts missing revision storage reads into not-found errors and preserves other causes", func() {
+	ginkgo.It("converts missing revision storage reads into not-found errors and preserves other causes", ginkgo.Label("unit"), func() {
 		Expect(mapRevisionNotFoundError(nil, "missing", "missing")).To(Succeed())
 
 		mapped := mapRevisionNotFoundError(os.ErrNotExist, "missing", "missing %s", "rev-1")
@@ -48,7 +48,7 @@ var _ = ginkgo.Describe("revision errors", func() {
 		Expect(mapRevisionNotFoundError(other, "missing", "missing")).To(MatchError(other))
 	})
 
-	ginkgo.It("sends localized missing and internal revision failures with their HTTP status", func() {
+	ginkgo.It("sends localized missing and internal revision failures with their HTTP status", ginkgo.Label("integration"), func() {
 		gin.SetMode(gin.TestMode)
 
 		localizedRec := httptest.NewRecorder()

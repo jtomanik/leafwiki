@@ -10,7 +10,7 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = ginkgo.Describe("routes contracts", func() {
+var _ = ginkgo.Describe("routes contracts", ginkgo.Label("unit"), func() {
 	ginkgo.It("requires semantic revision IDs in route callbacks", func() {
 		_ = RoutesConfig{
 			GetWorkspaceRevision: func(context.Context, *tree.Page, revision.RevisionID) (*revision.RevisionSnapshot, error) {

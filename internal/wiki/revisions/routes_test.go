@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -25,7 +24,7 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = ginkgo.Describe("revision routes", func() {
+var _ = ginkgo.Describe("revision routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("RegisterRoutes wires revision API routes through the shared router", func() {
 		router := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
@@ -487,11 +486,11 @@ var _ = ginkgo.Describe("revision routes", func() {
 })
 
 var _ = ginkgo.Describe("revision response mappers", func() {
-	ginkgo.It("ToRevisionResponse returns nil for nil revisions", func() {
+	ginkgo.It("ToRevisionResponse returns nil for nil revisions", ginkgo.Label("unit"), func() {
 		Expect(ToRevisionResponse(nil, nil)).To(BeNil())
 	})
 
-	ginkgo.It("ToRevisionResponse includes resolved author labels when a resolver is available", func() {
+	ginkgo.It("ToRevisionResponse includes resolved author labels when a resolver is available", ginkgo.Label("integration"), func() {
 		store, err := coreauth.NewUserStore(newRevisionTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(func() {
@@ -510,7 +509,7 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 		Expect(out.Author).To(Equal(&coreauth.UserLabel{ID: user.ID, Username: "alice"}))
 	})
 
-	ginkgo.It("ToSnapshotResponse returns nil for nil snapshots and maps revision content and assets", func() {
+	ginkgo.It("ToSnapshotResponse returns nil for nil snapshots and maps revision content and assets", ginkgo.Label("unit"), func() {
 		Expect(ToSnapshotResponse(nil, nil)).To(BeNil())
 
 		createdAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -563,7 +562,7 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 		})))
 	})
 
-	ginkgo.It("ToComparisonResponse returns nil for nil comparisons and maps asset deltas", func() {
+	ginkgo.It("ToComparisonResponse returns nil for nil comparisons and maps asset deltas", ginkgo.Label("unit"), func() {
 		Expect(ToComparisonResponse(nil, nil)).To(BeNil())
 
 		cmp := &revision.RevisionComparison{
@@ -586,7 +585,7 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 		)))
 	})
 
-	ginkgo.It("NormalizeRevisionListLimit handles default, valid, and invalid limits", func() {
+	ginkgo.It("NormalizeRevisionListLimit handles default, valid, and invalid limits", ginkgo.Label("unit"), func() {
 		pageID := newFixturePageID("page-1")
 		limit, err := NormalizeRevisionListLimit(nil, pageID)
 		Expect(err).NotTo(HaveOccurred())
@@ -660,28 +659,44 @@ func HaveRevisionRouteError(status int, code sharederrors.ErrorCode) types.Gomeg
 	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
 }
 
+type revisionComparisonContentState string
+
+const revisionComparisonContentChanged revisionComparisonContentState = "changed"
+
+type revisionComparisonObservation struct {
+	ContentState  revisionComparisonContentState
+	BaseContent   string
+	TargetContent string
+	AssetChanges  []RevisionAssetDeltaResponse
+}
+
+func observeRevisionComparison(response RevisionComparisonResponse) revisionComparisonObservation {
+	observation := revisionComparisonObservation{
+		AssetChanges: response.AssetChanges,
+	}
+	if response.ContentChanged {
+		observation.ContentState = revisionComparisonContentChanged
+	}
+	if response.Base != nil {
+		observation.BaseContent = response.Base.Content
+	}
+	if response.Target != nil {
+		observation.TargetContent = response.Target.Content
+	}
+	return observation
+}
+
 func matchContentChangedRevisionComparison(baseContent string, targetContent string, assetChanges types.GomegaMatcher) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-
-	want := struct {
-		BaseContent   string
-		TargetContent string
-	}{
-		BaseContent:   baseContent,
-		TargetContent: targetContent,
+	fields := gstruct.Fields{
+		"ContentState":  Equal(revisionComparisonContentChanged),
+		"BaseContent":   Equal(baseContent),
+		"TargetContent": Equal(targetContent),
 	}
-	return gcustom.MakeMatcher(func(response RevisionComparisonResponse) (bool, error) {
-		if !response.ContentChanged || response.Base == nil || response.Target == nil {
-			return false, nil
-		}
-		if response.Base.Content != baseContent || response.Target.Content != targetContent {
-			return false, nil
-		}
-		if assetChanges == nil {
-			return true, nil
-		}
-		return assetChanges.Match(response.AssetChanges)
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} describe a content-changing revision comparison\n{{format .Data 1}}", want)
+	if assetChanges != nil {
+		fields["AssetChanges"] = assetChanges
+	}
+	return WithTransform(observeRevisionComparison, gstruct.MatchFields(gstruct.IgnoreExtras, fields))
 }
 
 func MatchRevisionErrorCode(code sharederrors.ErrorCode) types.GomegaMatcher {

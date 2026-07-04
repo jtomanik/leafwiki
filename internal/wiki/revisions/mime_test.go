@@ -6,6 +6,7 @@ import (
 )
 
 var _ = ginkgo.DescribeTable("detects revision asset MIME types from manifest and filename fallbacks",
+	ginkgo.Label("unit"),
 	func(name string, manifestMIME string, want string) {
 		Expect(DetectRevisionAssetMIMEType(name, manifestMIME)).To(Equal(want))
 	},
