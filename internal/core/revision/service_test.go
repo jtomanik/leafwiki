@@ -832,9 +832,7 @@ var _ = ginkgo.Describe("service", func() {
 		comparison, err := service.CompareRevisionSnapshots(tree.PageIDFromString(pageID), RevisionIDFromString(baseRev.ID), RevisionIDFromString(targetRev.ID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(comparison).To(SatisfyAll(
-			HaveField("Base", Not(BeNil())),
-			HaveField("Target", Not(BeNil())),
-			HaveField("ContentChanged", BeTrue()),
+			matchRevisionContentDelta(Equal("one"), Equal("two")),
 			HaveField("AssetChanges", HaveExactElements(SatisfyAll(
 				HaveField("Name", "b.txt"),
 				HaveField("Status", "added"),

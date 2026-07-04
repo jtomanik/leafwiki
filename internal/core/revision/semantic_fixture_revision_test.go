@@ -79,6 +79,18 @@ func matchRevisionIntegrityIssue(code sharederrors.ErrorCode) types.GomegaMatche
 	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match revision integrity issue\n{{format .Data 1}}", code)
 }
 
+func matchRevisionContentDelta(baseContent, targetContent types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(comparison *RevisionComparison) (bool, error) {
+		if comparison == nil || comparison.Base == nil || comparison.Target == nil || !comparison.ContentChanged {
+			return false, nil
+		}
+		if matches, err := baseContent.Match(comparison.Base.Content); err != nil || !matches {
+			return matches, err
+		}
+		return targetContent.Match(comparison.Target.Content)
+	}).WithMessage("match revision comparison content delta")
+}
+
 var (
 	errRevisionNotCreated          = errors.New("revision was not created")
 	errRevisionUnexpectedlyCreated = errors.New("revision was unexpectedly created")
