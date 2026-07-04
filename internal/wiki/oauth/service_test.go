@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"errors"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gcustom"
@@ -41,8 +42,8 @@ var _ = ginkgo.Describe("OAuth service construction", func() {
 		req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+values.Encode(), nil)
 
 		_, err = service.newAuthorizeRequest(req, redirectURI, values.Get("state"))
-		// Plantrace evidence: Fosite preserves the RFC error field unsupported_response_type.
-		Expect(fosite.ErrorToRFC6749Error(err).ErrorField).To(Equal(fosite.ErrUnsupportedResponseType.ErrorField))
+		// Plantrace evidence: Fosite preserves the RFC6749 unsupported_response_type class.
+		Expect(err).To(matchFositeRFC6749Error(fosite.ErrUnsupportedResponseType))
 
 		values.Set("response_type", responseTypeCode)
 		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+values.Encode(), nil)
@@ -75,4 +76,13 @@ func haveInstalledFositeServiceComponents() types.GomegaMatcher {
 		}
 		return service.fositeConfig != nil && service.fositeProvider != nil && service.store != nil, nil
 	}).WithMessage("have installed Fosite configuration, provider, and store")
+}
+
+func matchFositeRFC6749Error(want *fosite.RFC6749Error) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		if err == nil {
+			return false, nil
+		}
+		return errors.Is(fosite.ErrorToRFC6749Error(err), want), nil
+	}).WithMessage("match Fosite RFC6749 error class")
 }
