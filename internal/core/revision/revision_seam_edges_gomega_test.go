@@ -60,6 +60,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		restore = setRevisionSeam(&revisionWriteFileAtomic, func(string, []byte, os.FileMode) error {
 			return manifestWriteFailedErr
 		})
+		defer restore()
 		_, err = store.SaveAssetManifest([]AssetRef{{Name: "other.txt", SHA256: strings.Repeat("b", 64), SizeBytes: 5}})
 		Expect(err).To(MatchError(manifestWriteFailedErr))
 	})
@@ -145,6 +146,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		restoreRename = setRevisionSeam(&revisionRename, func(string, string) error {
 			return renameFailedErr
 		})
+		defer restoreRename()
 		_, _, err = NewFSStore(filepath.Join(tmp, "rename-fail")).SaveAssetBlobFromPath(srcPath)
 		Expect(err).To(MatchError(renameFailedErr))
 	})

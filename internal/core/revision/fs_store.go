@@ -237,7 +237,8 @@ func (s *FSStore) GetLatestRevision(pageID tree.PageID) (*Revision, error) {
 		return nil, err
 	}
 	if len(names) == 0 {
-		return nil, nil
+		var latest *Revision
+		return latest, nil
 	}
 	var rev Revision
 	if err := readJSON(filepath.Join(s.revisionsPageDir(pageID), names[0]), &rev); err != nil {
@@ -470,7 +471,7 @@ func (s *FSStore) CopyAssetBlobToPath(hash string, expectedSize int64, dstPath s
 
 func (s *FSStore) DeletePageRevisions(pageID tree.PageID) error {
 	if err := validateStorageID(pageIDStorageKey(pageID)); err != nil {
-		return nil
+		return fmt.Errorf("invalid page ID: %w", err)
 	}
 
 	if err := revisionRemoveAll(s.revisionsPageDir(pageID)); err != nil {

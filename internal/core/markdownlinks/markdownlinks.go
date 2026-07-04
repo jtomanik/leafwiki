@@ -210,7 +210,10 @@ func NewIndexFromRootWithOptions(rootDir string, opts Options) (*Index, error) {
 			return nil
 		}
 		route, err := mapWorkspaceMarkdownRoute(rootDir, relPath, false)
-		if err != nil || route.Skip {
+		if err != nil {
+			return err
+		}
+		if route.Skip {
 			return nil
 		}
 		if route.Kind == tree.NodeKindSection {

@@ -25,21 +25,6 @@ type workspaceContentPathLookup struct {
 	Err    error
 }
 
-type contentMatchResult struct {
-	Matches bool
-	Err     error
-}
-
-type legacyContentMissingResult struct {
-	Missing bool
-	Err     error
-}
-
-type directoryEntriesResult struct {
-	HasEntries bool
-	Err        error
-}
-
 type pageLookupResult struct {
 	Page *Page
 	Err  error
@@ -213,7 +198,6 @@ var errExpectedContentMatch = errors.New("expected content match")
 var errExpectedContentDifference = errors.New("expected content difference")
 var errExpectedLegacyContentMissing = errors.New("expected legacy content missing")
 var errExpectedLegacyContentPresent = errors.New("expected legacy content present")
-var errExpectedDirectoryEntries = errors.New("expected directory entries")
 var errExpectedDirectoryEmpty = errors.New("expected directory to be empty")
 var errExpectedCleanPathMatch = errors.New("expected clean paths to match")
 var errExpectedCleanPathDifference = errors.New("expected clean paths to differ")
@@ -266,18 +250,6 @@ func directoryFileContentsDiffer(sourceDir string, targetDir string) error {
 	return nil
 }
 
-func filesHaveMatchingContent(sourceFile string, targetFile string) error {
-	ginkgo.GinkgoHelper()
-	matches, err := filesHaveSameContent(sourceFile, targetFile)
-	if err != nil {
-		return err
-	}
-	if !matches {
-		return errExpectedContentMatch
-	}
-	return nil
-}
-
 func filesHaveDifferentContent(sourceFile string, targetFile string) error {
 	ginkgo.GinkgoHelper()
 	matches, err := filesHaveSameContent(sourceFile, targetFile)
@@ -286,18 +258,6 @@ func filesHaveDifferentContent(sourceFile string, targetFile string) error {
 	}
 	if matches {
 		return errExpectedContentDifference
-	}
-	return nil
-}
-
-func directoryHasEntriesResult(path string) error {
-	ginkgo.GinkgoHelper()
-	hasEntries, err := directoryHasEntries(path)
-	if err != nil {
-		return err
-	}
-	if !hasEntries {
-		return errExpectedDirectoryEntries
 	}
 	return nil
 }
@@ -701,27 +661,6 @@ func matchMissingWorkspaceContentPath(path types.GomegaMatcher, err types.Gomega
 		HaveField("State", Equal(treeLookupMissing)),
 		HaveField("Err", err),
 	))
-}
-
-func matchContentComparison(matches types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Matches", matches),
-		HaveField("Err", err),
-	)
-}
-
-func matchLegacyContentMissing(missing types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Missing", missing),
-		HaveField("Err", err),
-	)
-}
-
-func matchDirectoryEntries(hasEntries types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("HasEntries", hasEntries),
-		HaveField("Err", err),
-	)
 }
 
 func matchTreeNode(kind NodeKind, id PageID, title string) types.GomegaMatcher {

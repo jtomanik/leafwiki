@@ -18,6 +18,7 @@ import (
 var _ = Describe("tree service migration and store seam failure behavior", Label("unit"), func() {
 	It("LoadTree reports migration and reconstruction seam failures", func() {
 		svc := NewTreeService(tempTreeDir())
+		var nilRoot *PageNode
 		schemaErr := errors.New("schema failed")
 		swapTreeSeam(&treeLoadSchema, func(string) (SchemaInfo, error) {
 			return SchemaInfo{}, schemaErr
@@ -34,7 +35,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		Expect(svc.LoadTree()).To(MatchError(reconstructErr))
 
 		swapTreeSeam(&treeStoreReconstructTreeFromFS, func(*NodeStore) (*PageNode, error) {
-			return nil, nil
+			return nilRoot, nil
 		})
 		Expect(svc.LoadTree()).To(MatchError(ErrTreeReconstructionNil))
 
@@ -69,7 +70,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 			if calls == 1 {
 				return root, nil
 			}
-			return nil, nil
+			return nilRoot, nil
 		})
 		Expect(svc.LoadTree()).To(MatchError(ErrTreeReconstructionNil))
 	})
@@ -78,6 +79,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		dataDir := tempTreeDir()
 		legacyPath := filepath.Join(dataDir, legacyTreeFilename)
 		root := edgeSectionNode(RootPageID, "root", "Root", nil)
+		var nilRoot *PageNode
 
 		swapTreeSeam(&treeLoadSchema, func(string) (SchemaInfo, error) {
 			return SchemaInfo{Version: 0}, nil
@@ -98,7 +100,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		Expect(NewTreeService(dataDir).LoadTree()).To(MatchError(fallbackReconstructErr))
 
 		swapTreeSeam(&treeStoreReconstructTreeFromFS, func(*NodeStore) (*PageNode, error) {
-			return nil, nil
+			return nilRoot, nil
 		})
 		Expect(NewTreeService(dataDir).LoadTree()).To(MatchError(ErrTreeReconstructionNil))
 
@@ -127,6 +129,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 	It("reconstruction seams roll back state and compare legacy roots", func() {
 		svc := newInMemoryService()
 		oldTree := svc.tree
+		var nilRoot *PageNode
 
 		reconstructErr := errors.New("reconstruct failed")
 		swapTreeSeam(&treeStoreReconstructTreeFromFS, func(*NodeStore) (*PageNode, error) {
@@ -135,7 +138,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		Expect(svc.ReconstructTreeFromFS()).To(MatchError(reconstructErr))
 
 		swapTreeSeam(&treeStoreReconstructTreeFromFS, func(*NodeStore) (*PageNode, error) {
-			return nil, nil
+			return nilRoot, nil
 		})
 		Expect(svc.ReconstructTreeFromFS()).To(MatchError(ErrTreeReconstructionNil))
 

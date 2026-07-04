@@ -212,7 +212,7 @@ var _ = Describe("revision edge behavior", func() {
 		_, err = store.OpenAssetBlob(" ")
 		Expect(err).To(MatchError(ErrAssetHashRequired))
 		Expect(assetManifestObservationFor(store, "")).To(matchAssetManifestPresence(assetManifestMissing, Equal("")))
-		Expect(store.DeletePageRevisions(newFixturePageID("../bad"))).To(Succeed())
+		Expect(store.DeletePageRevisions(newFixturePageID("../bad"))).To(matchRevisionError(ErrRevisionValidation))
 
 		Expect(cloneAndSortAssetRefs([]AssetRef{
 			{Name: "b.txt", SHA256: "2"},

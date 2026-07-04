@@ -247,6 +247,17 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 		}
 		_, err = NewIndexFromRootWithOptions(rootDir, Options{})
 		Expect(err).ToNot(HaveOccurred())
+
+		fileRouteErr := errors.New("file route failed")
+		mapWorkspaceMarkdownRoute = func(rootDir string, relPath string, isDir bool) (tree.WorkspaceMarkdownRoute, error) {
+			if !isDir {
+				return tree.WorkspaceMarkdownRoute{}, fileRouteErr
+			}
+			return originalMapWorkspaceMarkdownRoute(rootDir, relPath, isDir)
+		}
+		_, err = NewIndexFromRootWithOptions(rootDir, Options{})
+		Expect(err).To(MatchError(fileRouteErr))
+
 		mapWorkspaceMarkdownRoute = originalMapWorkspaceMarkdownRoute
 	})
 

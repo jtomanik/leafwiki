@@ -39,7 +39,8 @@ func NewUserResolver(userService *UserService) (*UserResolver, error) {
 
 func (r *UserResolver) ResolveUserLabel(userID UserID) (*UserLabel, error) {
 	if userID == "" {
-		return nil, nil
+		var label *UserLabel
+		return label, nil
 	}
 
 	// fast path

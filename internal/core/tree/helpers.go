@@ -2,6 +2,7 @@ package tree
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -99,7 +100,13 @@ func FoldPageFolderIfEmpty(storageDir string, pagePath string) error {
 
 	// Only run if it's actually a folder
 	info, err := treeOSStat(dirPath)
-	if err != nil || !info.IsDir() {
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("%w: %w", ErrReadDirectory, err)
+	}
+	if !info.IsDir() {
 		return nil // nothing to do
 	}
 
