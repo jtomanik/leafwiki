@@ -82,11 +82,11 @@ func sectionKind() *tree.NodeKind {
 }
 
 func semanticUserID(id string) tree.UserID {
-	return newFixtureUserID(id)
+	return tree.UserIDFromString(id)
 }
 
 func pageID[T ~string](id T) tree.PageID {
-	return newFixturePageID(id)
+	return tree.PageIDFromString(id)
 }
 
 func pageIDPtr[T ~string](id T) *tree.PageID {
@@ -375,7 +375,7 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 		}
 
 		// Verify it is gone
-		if _, err := deps.tree.GetPage(newFixturePageID(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
+		if _, err := deps.tree.GetPage(pageID(created.Page.ID)); !errors.Is(err, tree.ErrPageNotFound) {
 			Expect(err).To(MatchError(tree.ErrPageNotFound))
 		}
 	})
@@ -433,7 +433,7 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 			Expect(err).To(Succeed())
 		}
 
-		moved, err := deps.tree.GetPage(newFixturePageID(child.Page.ID))
+		moved, err := deps.tree.GetPage(pageID(child.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(moved.Parent).To(gstruct.PointTo(HaveField("ID", Equal(parent.Page.ID))))
 	})
@@ -842,7 +842,7 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 			Expect(err).To(Succeed())
 		}
 
-		sortedParent, err := deps.tree.GetPage(newFixturePageID(parent.Page.ID))
+		sortedParent, err := deps.tree.GetPage(pageID(parent.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(sortedParent.Children).To(HaveExactElements(
 			HaveField("ID", Equal(child2.Page.ID)),
@@ -1197,7 +1197,7 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 			Expect(err).To(Succeed())
 		}
 
-		refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		refPage, err := deps.tree.GetPage(pageID(ref.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(refPage.Content).To(Equal(content))
 	})
@@ -1354,7 +1354,7 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 		Expect(err).To(Succeed())
 		Expect(updated.CalculatePath()).To(Equal("/target-renamed"))
 
-		refPage, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		refPage, err := deps.tree.GetPage(pageID(ref.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(refPage.Content).To(Equal("[Target](/target-renamed.md)"))
 
@@ -1508,7 +1508,7 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 		})
 		Expect(err).To(MatchError(tree.ErrVersionConflict))
 
-		refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		refAfter, err := deps.tree.GetPage(pageID(ref.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(refAfter.Content).To(Equal(refContent))
 	})
@@ -1551,10 +1551,10 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 		})
 		Expect(err).To(MatchError(tree.ErrPageAlreadyExists))
 
-		refAfter, err := deps.tree.GetPage(newFixturePageID(ref.Page.ID))
+		refAfter, err := deps.tree.GetPage(pageID(ref.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(refAfter.Content).To(Equal(refContent))
-		targetAfter, err := deps.tree.GetPage(newFixturePageID(target.Page.ID))
+		targetAfter, err := deps.tree.GetPage(pageID(target.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(targetAfter.CalculatePath()).To(Equal("/target"))
 	})
@@ -1660,7 +1660,7 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 		Expect(err).To(Succeed())
 		Expect(updated.CalculatePath()).To(Equal("/archive/page-a"))
 
-		movedPage, err := deps.tree.GetPage(newFixturePageID(pageA.Page.ID))
+		movedPage, err := deps.tree.GetPage(pageID(pageA.Page.ID))
 		Expect(err).To(Succeed())
 		Expect(movedPage.Content).To(Equal("[To B](../docs/page-b.md)"))
 
