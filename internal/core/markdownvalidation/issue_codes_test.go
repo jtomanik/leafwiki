@@ -16,7 +16,20 @@ var _ = ginkgo.Describe("issue codes", func() {
 	})
 
 	ginkgo.It("maps typed issue codes and severities to stable contracts", func() {
-		Expect(IssueCodeDuplicateLeafwikiID.MessageID()).To(Equal(MessageIDDuplicateLeafwikiID))
-		Expect(IssueSeverityWarning.Normalize(IssueSeverityError)).To(Equal(IssueSeverityWarning))
+		result := ValidateWorkspaceStatus([]WorkspaceStatusIssue{
+			{Path: "duplicate.md", Code: IssueCodeDuplicateLeafwikiID, Message: "duplicate"},
+			{Path: "warning.md", Severity: IssueSeverityWarning, Message: "warning"},
+		}, true)
+
+		Expect(result.Issues).To(ContainElements(
+			SatisfyAll(
+				matchValidationIssueCode(IssueCodeDuplicateLeafwikiID),
+				HaveField("Severity", IssueSeverityError),
+			),
+			SatisfyAll(
+				matchValidationIssueCode(IssueCodeWorkspaceSyncValidation),
+				HaveField("Severity", IssueSeverityWarning),
+			),
+		))
 	})
 })

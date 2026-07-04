@@ -368,9 +368,27 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 	})
 
 	ginkgo.It("IssueCode and IssueSeverity normalize empty and unknown values predictably", func() {
-		Expect(IssueSeverity("  ").Normalize(IssueSeverityWarning)).To(Equal(IssueSeverityWarning))
-		Expect(IssueSeverity(" notice ").Normalize(IssueSeverityError)).To(Equal(IssueSeverity("notice")))
-		Expect(IssueCode("unknown_code").MessageID()).To(Equal(MessageIDWorkspaceSyncValidation))
+		result := ValidateWorkspaceStatus([]WorkspaceStatusIssue{
+			{Path: "default-severity.md", Severity: IssueSeverity("  "), Code: IssueCodeBrokenLink, Message: "default severity"},
+			{Path: "custom-severity.md", Severity: IssueSeverity(" notice "), Code: IssueCodeBrokenLink, Message: "custom severity"},
+			{Path: "unknown-code.md", Code: IssueCode("unknown_code"), Message: "unknown code"},
+		}, true)
+
+		Expect(result.Issues).To(ConsistOf(
+			SatisfyAll(
+				matchIssue(tree.MarkdownPath("default-severity.md"), IssueCodeBrokenLink, MessageIDBrokenLink),
+				HaveField("Severity", IssueSeverityError),
+			),
+			SatisfyAll(
+				matchIssue(tree.MarkdownPath("custom-severity.md"), IssueCodeBrokenLink, MessageIDBrokenLink),
+				HaveField("Severity", IssueSeverity("notice")),
+			),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"SourcePath": Equal(tree.MarkdownPath("unknown-code.md")),
+				"MessageID":  Equal(MessageIDWorkspaceSyncValidation),
+				"Severity":   Equal(IssueSeverityError),
+			}),
+		))
 	})
 
 	ginkgo.It("helper fallbacks return stable values for invalid relative and URL inputs", func() {
