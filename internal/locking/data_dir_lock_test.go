@@ -45,7 +45,36 @@ func createTempLockFile(pattern string) *os.File {
 	return file
 }
 
-var _ = Describe("directory locking", func() {
+type lockContentionClassification int
+
+const (
+	dataDirLockContention lockContentionClassification = iota + 1
+	rootDirLockContention
+	genericLockContention
+	noLockContention
+	inconsistentLockContract
+)
+
+func lockContentionClassificationFor(err error) lockContentionClassification {
+	dataHeld := IsDataDirLockHeld(err)
+	rootHeld := IsRootDirLockHeld(err)
+	lockHeld := IsLockHeld(err)
+
+	switch {
+	case dataHeld && lockHeld && !rootHeld:
+		return dataDirLockContention
+	case rootHeld && lockHeld && !dataHeld:
+		return rootDirLockContention
+	case lockHeld && !dataHeld && !rootHeld:
+		return genericLockContention
+	case !lockHeld && !dataHeld && !rootHeld:
+		return noLockContention
+	default:
+		return inconsistentLockContract
+	}
+}
+
+var _ = Describe("directory locking", Label("unit"), func() {
 	It("creates the data lock parent and releases ownership for a later acquisition", func() {
 		dataDir := filepath.Join(tempLockingDir(), "data")
 
@@ -100,9 +129,7 @@ var _ = Describe("directory locking", func() {
 		_, dataErr := AcquireDataDirLock(dataDir)
 		Expect(dataErr).To(MatchError(errDataDirLockHeld))
 		wrappedDataErr := fmt.Errorf("acquire data directory lock: %w", dataErr)
-		Expect(IsDataDirLockHeld(wrappedDataErr)).To(BeTrue())
-		Expect(IsLockHeld(wrappedDataErr)).To(BeTrue())
-		Expect(IsRootDirLockHeld(wrappedDataErr)).To(BeFalse())
+		Expect(lockContentionClassificationFor(wrappedDataErr)).To(Equal(dataDirLockContention))
 
 		rootDir := filepath.Join(tempLockingDir(), "content")
 		rootLock, err := AcquireRootDirLock(rootDir)
@@ -111,18 +138,14 @@ var _ = Describe("directory locking", func() {
 		_, rootErr := AcquireRootDirLock(rootDir)
 		Expect(rootErr).To(MatchError(errRootDirLockHeld))
 		wrappedRootErr := fmt.Errorf("acquire root directory lock: %w", rootErr)
-		Expect(IsRootDirLockHeld(wrappedRootErr)).To(BeTrue())
-		Expect(IsLockHeld(wrappedRootErr)).To(BeTrue())
-		Expect(IsDataDirLockHeld(wrappedRootErr)).To(BeFalse())
+		Expect(lockContentionClassificationFor(wrappedRootErr)).To(Equal(rootDirLockContention))
 
 		otherErr := errors.New("open lock file: permission denied")
-		Expect(IsLockHeld(otherErr)).To(BeFalse())
-		Expect(IsDataDirLockHeld(otherErr)).To(BeFalse())
-		Expect(IsRootDirLockHeld(otherErr)).To(BeFalse())
+		Expect(lockContentionClassificationFor(otherErr)).To(Equal(noLockContention))
 	})
 })
 
-var _ = Describe("directory lock edge behavior", func() {
+var _ = Describe("directory lock edge behavior", Label("unit"), func() {
 	It("returns an empty path for a nil lock receiver", func() {
 		var lock *DataDirLock
 
