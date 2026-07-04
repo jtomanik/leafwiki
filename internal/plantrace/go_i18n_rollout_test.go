@@ -14,7 +14,10 @@ var _ = ginkgo.Describe("go-i18n rollout plan traceability", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		planPath := filepath.Join(repoRoot, "docs", "plans", "go-i18n-rollout.PLAN.md")
 		titles := goI18nScenarioTitles(planPath)
-		Expect(titles).NotTo(BeEmpty(), "go-i18n rollout scenarios should exist")
+		Expect(titles).To(SatisfyAll(
+			ContainElement("Renderer resolves an English catalog message by message ID"),
+			ContainElement("Plantrace maps every Gherkin scenario to evidence"),
+		), "go-i18n rollout scenarios should exist")
 		for _, title := range titles {
 			evidence, err := goI18nRolloutEvidenceResult(title)
 			Expect(err).NotTo(HaveOccurred())

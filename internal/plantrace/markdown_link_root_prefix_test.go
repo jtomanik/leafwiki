@@ -39,7 +39,7 @@ var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenari
 
 var markdownLinkRootPrefixPlanExtraEvidence = map[string][]markdownLinkRootPrefixEvidence{
 	"Importer and refactor generated absolute links include the configured prefix": {
-		mlrpEvidence("internal/links/link_refactor_test.go", "TestMarkdownRefactorEngine_UsesMarkdownLinkRootPrefixForPrefixedAbsoluteInput"),
+		mlrpEvidence("internal/links/link_refactor_test.go", "recognizes absolute input that already includes the markdown root prefix"),
 	},
 	"CLI env YAML and run wrapper expose the same prefix setting": {
 		mlrpEvidence("scripts/test-run.sh", "native prefix dry-run"),
@@ -86,10 +86,10 @@ var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", func()
 		Expect(err).NotTo(HaveOccurred(), "read markdown link root prefix plan")
 
 		focusedCommands := markdownLinkRootPrefixFocusedCommandLines(string(raw))
-		for _, line := range focusedCommands {
-			Expect(line).To(ContainSubstring("E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs"), "focused E2E command should set markdown link root prefix")
-		}
-		Expect(focusedCommands).NotTo(BeEmpty(), "focused markdown link root prefix E2E commands should exist")
+		Expect(focusedCommands).To(SatisfyAll(
+			ContainElement(ContainSubstring("E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs")),
+			HaveEach(ContainSubstring("E2E_MARKDOWN_LINK_ROOT_PREFIX=/docs")),
+		), "focused markdown link root prefix E2E commands should set markdown link root prefix")
 
 	})
 
