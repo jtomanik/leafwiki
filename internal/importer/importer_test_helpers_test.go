@@ -12,7 +12,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 )
@@ -269,12 +268,33 @@ func HaveStoredPlanState(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
 }
 
+type storedPlanCancellationState uint8
+
+const (
+	storedPlanCancellationAbsent storedPlanCancellationState = iota
+	storedPlanCancellationClear
+	storedPlanCancellationRequested
+)
+
+func observeStoredPlanCancellation(plan *StoredPlan) storedPlanCancellationState {
+	if plan == nil {
+		return storedPlanCancellationAbsent
+	}
+	if plan.CancelRequested {
+		return storedPlanCancellationRequested
+	}
+	return storedPlanCancellationClear
+}
+
+func HaveStoredPlanCancellation(state storedPlanCancellationState) types.GomegaMatcher {
+	return WithTransform(observeStoredPlanCancellation, Equal(state))
+}
+
 func HaveFreshRunningStoredPlan(userID tree.UserID, totalItems int) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(plan *StoredPlan) (bool, error) {
-		if plan == nil || plan.CancelRequested {
-			return false, nil
-		}
-		return HaveStoredPlanState(gstruct.Fields{
+	return SatisfyAll(
+		Not(BeNil()),
+		HaveStoredPlanCancellation(storedPlanCancellationClear),
+		HaveStoredPlanState(gstruct.Fields{
 			"ExecutionStatus": Equal(ExecutionStatusRunning),
 			"ExecutionUserID": WithTransform(func(raw string) tree.UserID {
 				return tree.UserIDFromString(raw)
@@ -286,16 +306,15 @@ func HaveFreshRunningStoredPlan(userID tree.UserID, totalItems int) types.Gomega
 				"TotalItems":     Equal(totalItems),
 				"StartedAt":      Not(BeNil()),
 			}),
-		}).Match(plan)
-	}).WithMessage("start a fresh importer execution")
+		}),
+	)
 }
 
 func HaveCanceledStoredPlan(result *ExecutionResult) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(plan *StoredPlan) (bool, error) {
-		if plan == nil || plan.CancelRequested {
-			return false, nil
-		}
-		return HaveStoredPlanState(gstruct.Fields{
+	return SatisfyAll(
+		Not(BeNil()),
+		HaveStoredPlanCancellation(storedPlanCancellationClear),
+		HaveStoredPlanState(gstruct.Fields{
 			"ExecutionStatus": Equal(ExecutionStatusCanceled),
 			"ExecutionResult": Equal(result),
 			"ExecutionError":  BeNil(),
@@ -303,18 +322,40 @@ func HaveCanceledStoredPlan(result *ExecutionResult) types.GomegaMatcher {
 				"FinishedAt":            Not(BeNil()),
 				"CurrentItemSourcePath": BeNil(),
 			}),
-		}).Match(plan)
-	}).WithMessage("finish importer execution as canceled")
+		}),
+	)
+}
+
+type existingPagePlanItemState uint8
+
+const (
+	existingPagePlanItemOther existingPagePlanItemState = iota
+	existingPagePlanItemSkipped
+)
+
+type existingPagePlanItemObservation struct {
+	State      existingPagePlanItemState
+	ExistingID tree.PageID
+	Slug       tree.Slug
+}
+
+func observeExistingPagePlanItem(item PlanItem) existingPagePlanItemObservation {
+	if item.Action != PlanActionSkip || !item.Exists || item.ExistingID == nil {
+		return existingPagePlanItemObservation{State: existingPagePlanItemOther}
+	}
+	return existingPagePlanItemObservation{
+		State:      existingPagePlanItemSkipped,
+		ExistingID: *item.ExistingID,
+		Slug:       item.DesiredSlug,
+	}
 }
 
 func HaveSkippedExistingPage(existingID tree.PageID, slug tree.Slug) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(item PlanItem) (bool, error) {
-		return item.Action == PlanActionSkip &&
-			item.Exists &&
-			item.ExistingID != nil &&
-			*item.ExistingID == existingID &&
-			item.DesiredSlug == slug, nil
-	}).WithMessage("skip an existing wiki page")
+	return WithTransform(observeExistingPagePlanItem, Equal(existingPagePlanItemObservation{
+		State:      existingPagePlanItemSkipped,
+		ExistingID: existingID,
+		Slug:       slug,
+	}))
 }
 
 type fakeExecWikiState struct {

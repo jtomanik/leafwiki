@@ -35,6 +35,48 @@ type importerServiceDefaults struct {
 	workspaceBaseDirPresent bool
 }
 
+type importedHrefPathShape uint8
+
+const (
+	importedHrefPathOther importedHrefPathShape = iota
+	importedHrefPathWindowsDrive
+)
+
+func classifyImportedHrefPathShape(raw string) importedHrefPathShape {
+	if looksLikeWindowsDrivePath(raw) {
+		return importedHrefPathWindowsDrive
+	}
+	return importedHrefPathOther
+}
+
+type markdownBracketEscapeState uint8
+
+const (
+	markdownBracketLiteral markdownBracketEscapeState = iota
+	markdownBracketEscaped
+)
+
+func classifyMarkdownBracketEscape(content string, index int) markdownBracketEscapeState {
+	if isEscapedMarkdownBracket(content, index) {
+		return markdownBracketEscaped
+	}
+	return markdownBracketLiteral
+}
+
+type sourceSuffixCaseMatchState uint8
+
+const (
+	sourceSuffixCaseMatchAbsent sourceSuffixCaseMatchState = iota
+	sourceSuffixCaseVariantPresent
+)
+
+func classifyCaseVariantSourceSuffixMatch(transformer *contentTransformer, source string) sourceSuffixCaseMatchState {
+	if transformer.hasCaseVariantSourceSuffixMatch(source) {
+		return sourceSuffixCaseVariantPresent
+	}
+	return sourceSuffixCaseMatchAbsent
+}
+
 func importerBadStateFile() string {
 	ginkgo.GinkgoHelper()
 	base := importerTempDir()
@@ -174,9 +216,9 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		Expect(normalizeImportedHref(` C:\Users\me\guide.md `)).To(Equal(` C:\Users\me\guide.md `))
 		Expect(normalizeImportedHref("   ")).To(Equal("   "))
 		Expect(decodeImportTarget("%zz")).To(Equal("%zz"))
-		Expect(looksLikeWindowsDrivePath(`C:/Users/me/guide.md`)).To(BeTrue())
-		Expect(looksLikeWindowsDrivePath(`\\server\share\guide.md`)).To(BeFalse())
-		Expect(looksLikeWindowsDrivePath("C:")).To(BeFalse())
+		Expect(classifyImportedHrefPathShape(`C:/Users/me/guide.md`)).To(Equal(importedHrefPathWindowsDrive))
+		Expect(classifyImportedHrefPathShape(`\\server\share\guide.md`)).To(Equal(importedHrefPathOther))
+		Expect(classifyImportedHrefPathShape("C:")).To(Equal(importedHrefPathOther))
 	})
 
 	ginkgo.It("derives default wiki labels and handles escaped markdown brackets", func() {
@@ -189,8 +231,8 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		Expect(findMarkdownClosingBracket(content, 0)).To(Equal(len(content) - 1))
 		Expect(findMarkdownClosingBracket(content, 1)).To(Equal(-1))
 		Expect(findMarkdownClosingBracket("[unterminated", 0)).To(Equal(-1))
-		Expect(isEscapedMarkdownBracket(`\\]`, 2)).To(BeFalse())
-		Expect(isEscapedMarkdownBracket(`\]`, 1)).To(BeTrue())
+		Expect(classifyMarkdownBracketEscape(`\\]`, 2)).To(Equal(markdownBracketLiteral))
+		Expect(classifyMarkdownBracketEscape(`\]`, 1)).To(Equal(markdownBracketEscaped))
 	})
 
 	ginkgo.It("deduplicates helper slices without keeping empty targets", func() {
@@ -447,9 +489,9 @@ var _ = ginkgo.Describe("content transformer fallback wiki hrefs", ginkgo.Label(
 		_, err = fallbackWikiHrefResult(transformer, "current.md", "guide")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		Expect(transformer.hasCaseVariantSourceSuffixMatch("docs/exact.md")).To(BeTrue())
-		Expect(transformer.hasCaseVariantSourceSuffixMatch("Docs/Exact.md")).To(BeFalse())
-		Expect(transformer.hasCaseVariantSourceSuffixMatch("../Exact.md")).To(BeFalse())
+		Expect(classifyCaseVariantSourceSuffixMatch(transformer, "docs/exact.md")).To(Equal(sourceSuffixCaseVariantPresent))
+		Expect(classifyCaseVariantSourceSuffixMatch(transformer, "Docs/Exact.md")).To(Equal(sourceSuffixCaseMatchAbsent))
+		Expect(classifyCaseVariantSourceSuffixMatch(transformer, "../Exact.md")).To(Equal(sourceSuffixCaseMatchAbsent))
 	})
 
 	ginkgo.It("generates route fallbacks for safe relative sources", func() {
@@ -663,7 +705,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 	})
 })
 
-var _ = ginkgo.Describe("PlanStore cancellation", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("stored import plan cancellation requests", ginkgo.Label("unit"), func() {
 	ginkgo.It("records a running plan cancel request and is idempotent", func() {
 		store := NewPlanStore()
 		Expect(store.Set(&StoredPlan{
@@ -673,12 +715,14 @@ var _ = ginkgo.Describe("PlanStore cancellation", ginkgo.Label("unit"), func() {
 
 		plan, err := requestCancelResult(store)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(plan.CancelRequested).To(BeTrue())
-		Expect(store.IsCancelRequested("plan-1")).To(BeTrue())
+		Expect(plan).To(HaveStoredPlanCancellation(storedPlanCancellationRequested))
+		stored, err := store.Get()
+		Expect(err).To(Succeed())
+		Expect(stored).To(HaveStoredPlanCancellation(storedPlanCancellationRequested))
 
 		plan, err = requestCancelResult(store)
 		Expect(err).To(MatchError(errImporterCancellationNotRequested))
-		Expect(plan.CancelRequested).To(BeTrue())
+		Expect(plan).To(HaveStoredPlanCancellation(storedPlanCancellationRequested))
 	})
 
 	ginkgo.It("does not request cancellation for a non-running plan", func() {
@@ -690,11 +734,11 @@ var _ = ginkgo.Describe("PlanStore cancellation", ginkgo.Label("unit"), func() {
 
 		plan, err := requestCancelResult(store)
 		Expect(err).To(MatchError(errImporterCancellationNotRequested))
-		Expect(plan.CancelRequested).To(BeFalse())
+		Expect(plan).To(HaveStoredPlanCancellation(storedPlanCancellationClear))
 	})
 })
 
-var _ = ginkgo.Describe("PlanStore execution state edges", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("stored import plan execution lifecycle", ginkgo.Label("unit"), func() {
 	ginkgo.It("starts planned execution by resetting stale execution state", func() {
 		store := NewPlanStore()
 
@@ -839,7 +883,7 @@ var _ = ginkgo.Describe("PlanStore execution state edges", ginkgo.Label("unit"),
 	})
 })
 
-var _ = ginkgo.Describe("PlanStore persistence edge cases", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("stored import plan persistence failures", ginkgo.Label("unit"), func() {
 	ginkgo.It("turns set persistence failures into sticky state errors", func() {
 		store := NewPlanStore()
 		store.stateFile = importerBadStateFile()
@@ -1016,7 +1060,7 @@ var _ = ginkgo.Describe("PlanStore persistence edge cases", ginkgo.Label("unit")
 	})
 })
 
-var _ = ginkgo.Describe("ImporterService execution state edges", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("import plan execution service state handling", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns stored terminal states that do not need a new executor", func() {
 		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		result := &ExecutionResult{ImportedCount: 2}
@@ -1072,7 +1116,7 @@ var _ = ginkgo.Describe("ImporterService execution state edges", ginkgo.Label("u
 	})
 })
 
-var _ = ginkgo.Describe("ImporterService zip planning", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("zip upload import planning", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates an import plan from an uploaded zip and stores the extracted workspace", func() {
 		var zipBytes bytes.Buffer
 		zipWriter := zip.NewWriter(&zipBytes)
@@ -1151,7 +1195,7 @@ var _ = ginkgo.Describe("Planner error edges", ginkgo.Label("unit"), func() {
 	})
 })
 
-var _ = ginkgo.Describe("ImporterService error edges", ginkgo.Label("unit"), func() {
+var _ = ginkgo.Describe("import planning service error handling", ginkgo.Label("unit"), func() {
 	ginkgo.It("surfaces folder planning cleanup, discovery, planning, and persistence errors", func() {
 		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 
