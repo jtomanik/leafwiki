@@ -50,8 +50,55 @@ func matchAssetDownload(filename tree.AssetName, mimeType string, content []byte
 	}))
 }
 
+type assetLogEvent struct {
+	Level slog.Level
+	Attrs map[string]any
+}
+
+type assetLogRecords struct {
+	Events []assetLogEvent
+}
+
+type uploadedAssetCloseCause struct{}
+
+func (uploadedAssetCloseCause) Error() string {
+	return "uploaded asset close cause"
+}
+
+func (r *assetLogRecords) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (r *assetLogRecords) Handle(_ context.Context, record slog.Record) error {
+	event := assetLogEvent{
+		Level: record.Level,
+		Attrs: map[string]any{},
+	}
+	record.Attrs(func(attr slog.Attr) bool {
+		event.Attrs[attr.Key] = attr.Value.Any()
+		return true
+	})
+	r.Events = append(r.Events, event)
+	return nil
+}
+
+func (r *assetLogRecords) WithAttrs([]slog.Attr) slog.Handler {
+	return r
+}
+
+func (r *assetLogRecords) WithGroup(string) slog.Handler {
+	return r
+}
+
+func matchUploadedAssetCloseErrorLog(closeErr error) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Level": Equal(slog.LevelError),
+		"Attrs": HaveKeyWithValue("error", BeIdenticalTo(closeErr)),
+	})
+}
+
 var _ = ginkgo.Describe("asset helpers", func() {
-	ginkgo.It("assigns HTTP status classes to validation missing duplicate and unknown asset failures", func() {
+	ginkgo.It("assigns HTTP status classes to validation missing duplicate and unknown asset failures", ginkgo.Label("unit"), func() {
 		Expect(assetErrorStatus(ErrCodeAssetFileTooLarge)).To(Equal(http.StatusRequestEntityTooLarge))
 		Expect(assetErrorStatus(ErrCodeAssetMissingFile)).To(Equal(http.StatusBadRequest))
 		Expect(assetErrorStatus(ErrCodeAssetInvalidName)).To(Equal(http.StatusBadRequest))
@@ -60,7 +107,7 @@ var _ = ginkgo.Describe("asset helpers", func() {
 		Expect(assetErrorStatus("unknown")).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("asset localized error constructors preserve code and cause", func() {
+	ginkgo.It("asset localized error constructors preserve code and cause", ginkgo.Label("unit"), func() {
 		tooLarge := NewAssetFileTooLargeError()
 		Expect(tooLarge).To(testmatchers.MatchLocalizedError(ErrCodeAssetFileTooLarge, sharederrors.MessageIDForCode(ErrCodeAssetFileTooLarge)))
 
@@ -70,17 +117,17 @@ var _ = ginkgo.Describe("asset helpers", func() {
 		Expect(invalid).To(MatchError(cause))
 	})
 
-	ginkgo.It("logs uploaded file close errors", func() {
-		var logOutput bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&logOutput, nil))
+	ginkgo.It("logs uploaded file close errors", ginkgo.Label("unit"), func() {
+		records := &assetLogRecords{}
+		logger := slog.New(records)
+		closeErr := &uploadedAssetCloseCause{}
 
-		logUploadedAssetFileClose(logger, closeErrorFile{err: errors.New("close failed")})
+		logUploadedAssetFileClose(logger, closeErrorFile{err: closeErr})
 
-		Expect(logOutput.String()).To(ContainSubstring("could not close uploaded file"))
-		Expect(logOutput.String()).To(ContainSubstring("close failed"))
+		Expect(records.Events).To(ConsistOf(matchUploadedAssetCloseErrorLog(closeErr)))
 	})
 
-	ginkgo.It("returns structured asset errors for localized failures and internal responses for generic failures", func() {
+	ginkgo.It("returns structured asset errors for localized failures and internal responses for generic failures", ginkgo.Label("integration"), func() {
 		gin.SetMode(gin.TestMode)
 
 		localizedRec := httptest.NewRecorder()
@@ -94,13 +141,13 @@ var _ = ginkgo.Describe("asset helpers", func() {
 		Expect(genericRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, ErrCodeAssetInternalError, sharederrors.MessageIDForCode(ErrCodeAssetInternalError)))
 	})
 
-	ginkgo.It("DetectAssetMIMEType prefers extension and falls back to content sniffing", func() {
+	ginkgo.It("prefers extension MIME types and falls back to content sniffing", ginkgo.Label("unit"), func() {
 		Expect(DetectAssetMIMEType("style.css", []byte("not css"))).To(Equal("text/css; charset=utf-8"))
 		Expect(DetectAssetMIMEType("asset.unknownext", []byte("%PDF-1.7\n"))).To(Equal("application/pdf"))
 	})
 })
 
-var _ = ginkgo.Describe("asset use cases", func() {
+var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 	ginkgo.It("upload, list, get, rename, and delete round-trip a page asset", func() {
 		treeService, pageID := setupAssetUseCaseTree()
 		assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
@@ -300,7 +347,7 @@ var _ = ginkgo.Describe("asset use cases", func() {
 	})
 })
 
-var _ = ginkgo.Describe("asset route handlers", func() {
+var _ = ginkgo.Describe("asset route handlers", ginkgo.Label("integration"), func() {
 	ginkgo.It("lists, renames, and deletes assets through handlers", func() {
 		fixture := newAssetRouteFixture()
 		fixture.uploadAsset("asset.png", []byte("content"))
@@ -320,10 +367,12 @@ var _ = ginkgo.Describe("asset route handlers", func() {
 			strings.NewReader(`{"old_filename":"asset.png","new_filename":"renamed.png"}`),
 			"application/json",
 		)
-		Expect(rename).To(SatisfyAll(
-			HaveHTTPStatus(http.StatusOK),
-			HaveHTTPBody(ContainSubstring(pageAssetURL(fixture.pageID, tree.AssetNameFromString("renamed.png")))),
-		), rename.Body.String())
+		Expect(rename).To(HaveHTTPStatus(http.StatusOK), rename.Body.String())
+		var renameBody struct {
+			URL string `json:"url"`
+		}
+		Expect(json.Unmarshal(rename.Body.Bytes(), &renameBody)).To(Succeed())
+		Expect(renameBody.URL).To(Equal(pageAssetURL(fixture.pageID, tree.AssetNameFromString("renamed.png"))))
 
 		deleted := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodDelete, assetFilePath(fixture.pageID, tree.AssetNameFromString("renamed.png")), nil, "")
 		Expect(deleted).To(HaveHTTPStatus(http.StatusOK), deleted.Body.String())
@@ -340,10 +389,12 @@ var _ = ginkgo.Describe("asset route handlers", func() {
 
 		uploaded := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodPost, assetsPagePath(fixture.pageID), uploadBody, uploadContentType)
 
-		Expect(uploaded).To(SatisfyAll(
-			HaveHTTPStatus(http.StatusCreated),
-			HaveHTTPBody(ContainSubstring(pageAssetURL(fixture.pageID, tree.AssetNameFromString("asset.png")))),
-		), uploaded.Body.String())
+		Expect(uploaded).To(HaveHTTPStatus(http.StatusCreated), uploaded.Body.String())
+		var uploadedBody struct {
+			File string `json:"file"`
+		}
+		Expect(json.Unmarshal(uploaded.Body.Bytes(), &uploadedBody)).To(Succeed())
+		Expect(uploadedBody.File).To(Equal(pageAssetURL(fixture.pageID, tree.AssetNameFromString("asset.png"))))
 
 		invalidNameBody, invalidNameContentType := assetMultipartBody(".", []byte("content"))
 		invalidName := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodPost, assetsPagePath(fixture.pageID), invalidNameBody, invalidNameContentType)

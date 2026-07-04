@@ -6,7 +6,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("asset semantic types", func() {
+var _ = ginkgo.Describe("asset semantic types", ginkgo.Label("unit"), func() {
 	ginkgo.It("keeps use-case boundaries typed with semantic asset identifiers", func() {
 		upload := UploadAssetInput{UserID: newFixtureUserID("user-1"), PageID: newFixturePageID("page-1"), Filename: tree.AssetName("diagram.png")}
 		var _ tree.UserID = upload.UserID

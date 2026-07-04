@@ -12,7 +12,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 )
 
-var _ = ginkgo.Describe("asset routes", func() {
+var _ = ginkgo.Describe("asset routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("serves static asset files when public access is enabled", func() {
 		assetsDir := assetTempDir()
 		pageDir := filepath.Join(assetsDir, "page-1")
