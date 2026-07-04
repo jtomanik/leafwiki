@@ -32,7 +32,7 @@ func validFrontdActor(workspaceID workspaceid.WorkspaceID) projectdaemon.ActorCo
 }
 
 var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
-	ginkgo.It("validates proxy constructors and small path helpers", func() {
+	ginkgo.It("validates proxy constructors and small path helpers", ginkgo.Label("unit"), func() {
 		_, err := NewControlPlaneProxy("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewControlPlaneProxy("http://127.0.0.1:1", " ")
@@ -63,7 +63,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		))
 	})
 
-	ginkgo.It("maps workspace proxy actor and encoding failures", func() {
+	ginkgo.It("maps workspace proxy actor and encoding failures", ginkgo.Label("integration"), func() {
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
@@ -101,7 +101,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		encodeActorContext = originalEncodeActorContext
 	})
 
-	ginkgo.It("maps workspace router defaults and proxy construction failures", func() {
+	ginkgo.It("maps workspace router defaults and proxy construction failures", ginkgo.Label("integration"), func() {
 		request := httptest.NewRequest(http.MethodGet, PublicWorkspacesPrefix+"/home/tree", nil)
 
 		handler := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		))
 	})
 
-	ginkgo.It("routes workspace MCP requests and preserves session binding contracts", func() {
+	ginkgo.It("routes workspace MCP requests and preserves session binding contracts", ginkgo.Label("integration"), func() {
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/not-mcp", nil))
@@ -235,7 +235,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session"), workspaceid.WorkspaceID("other")))
 	})
 
-	ginkgo.It("maps wikid single-workspace resolver responses into routing errors", func() {
+	ginkgo.It("maps wikid single-workspace resolver responses into routing errors", ginkgo.Label("integration"), func() {
 		_, err := NewWikidSingleWorkspaceResolver("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewWikidSingleWorkspaceResolver("http://127.0.0.1:1", " ")
@@ -290,7 +290,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(err).To(matchFrontdUpstreamRequestError(http.MethodGet))
 	})
 
-	ginkgo.It("maps wikid workspace resolver responses into workspace routes and errors", func() {
+	ginkgo.It("maps wikid workspace resolver responses into workspace routes and errors", ginkgo.Label("integration"), func() {
 		_, err := NewWikidWorkspaceResolver("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))
 		_, err = NewWikidWorkspaceResolver("http://127.0.0.1:1", " ")
@@ -374,7 +374,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(err).To(matchFrontdUpstreamRequestError(http.MethodPost))
 	})
 
-	ginkgo.It("preserves original request headers while ignoring nil and blank inputs", func() {
+	ginkgo.It("preserves original request headers while ignoring nil and blank inputs", ginkgo.Label("unit"), func() {
 		preserveOriginalRequestHeaders(nil, httptest.NewRequest(http.MethodGet, "/x", nil))
 		target := httptest.NewRequest(http.MethodPost, "/target", nil)
 		preserveOriginalRequestHeaders(target, nil)

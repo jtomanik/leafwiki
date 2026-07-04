@@ -20,7 +20,7 @@ type rootMCPWorkspaceResolutionCase struct {
 }
 
 var _ = Describe("workspace MCP session routing", func() {
-	It("rejects rebinding a session to a different workspace", func() {
+	It("rejects rebinding a session to a different workspace", Label("unit"), func() {
 		bindings := NewMCPSessionBindings()
 
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
@@ -28,14 +28,14 @@ var _ = Describe("workspace MCP session routing", func() {
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("beta"))).To(MatchError(ErrMCPSessionWorkspaceMismatch))
 	})
 
-	It("rejects invalid workspace identifiers before binding", func() {
+	It("rejects invalid workspace identifiers before binding", Label("unit"), func() {
 		bindings := NewMCPSessionBindings()
 
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID(" alpha "))).To(matchFrontdWorkspaceIDError(workspaceid.ErrCodeWorkspaceIDWhitespace))
 		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("session-1")))
 	})
 
-	It("routes explicit workspace MCP requests and binds the client session", func() {
+	It("routes explicit workspace MCP requests and binds the client session", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
 		var seenPath string
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
@@ -72,7 +72,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		))
 	})
 
-	It("binds a server-issued session only after a successful proxy response", func() {
+	It("binds a server-issued session only after a successful proxy response", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
@@ -96,7 +96,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session-1"), workspaceid.WorkspaceID("alpha")))
 	})
 
-	It("routes root MCP through an existing session binding", func() {
+	It("routes root MCP through an existing session binding", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
 		var seenID workspaceid.WorkspaceID
@@ -125,7 +125,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		Expect(seenID).To(Equal(workspaceid.WorkspaceID("alpha")))
 	})
 
-	It("clears a session binding after a successful DELETE", func() {
+	It("clears a session binding after a successful DELETE", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
@@ -159,7 +159,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusConflict))
 	})
 
-	It("authorizes explicit workspace requests before binding the session", func() {
+	It("authorizes explicit workspace requests before binding the session", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
@@ -182,7 +182,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("forbidden-session")))
 	})
 
-	DescribeTable("root MCP workspace resolution",
+	DescribeTable("root MCP workspace resolution", Label("integration"),
 		func(tc rootMCPWorkspaceResolutionCase) {
 			var seenID workspaceid.WorkspaceID
 			handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
@@ -242,7 +242,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		}),
 	)
 
-	It("reports structured dependency errors when root MCP cannot proxy", func() {
+	It("reports structured dependency errors when root MCP cannot proxy", Label("integration"), func() {
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			ResolveRoot: func(*http.Request) (workspaceid.WorkspaceID, error) { return "home", nil },
 		})

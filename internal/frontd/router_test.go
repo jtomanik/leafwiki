@@ -21,7 +21,7 @@ type publicRuntimeRouteCase struct {
 	wantStatus int
 }
 
-var _ = Describe("public runtime router", func() {
+var _ = Describe("public runtime router", Label("integration"), func() {
 	DescribeTable("serves public runtime routes",
 		func(tc publicRuntimeRouteCase) {
 			w := newTestWiki()

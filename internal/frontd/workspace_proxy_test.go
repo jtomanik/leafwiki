@@ -37,7 +37,7 @@ type workspaceRouterProxyDependencyErrorCase struct {
 	wantMessageID sharederrors.MessageID
 }
 
-var _ = Describe("workspace router proxy", func() {
+var _ = Describe("workspace router proxy", Label("integration"), func() {
 	It("resolves a workspace route and rewrites the public API path", func() {
 		now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 		var seen observedWorkspaceRouterRequest

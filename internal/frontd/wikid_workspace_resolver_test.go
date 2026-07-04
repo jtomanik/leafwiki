@@ -31,7 +31,7 @@ type workspaceResolverAccessErrorCase struct {
 	want error
 }
 
-var _ = Describe("wikid workspace resolver", func() {
+var _ = Describe("wikid workspace resolver", Label("integration"), func() {
 	It("ensures the requested workspace and returns its workspaced route", func() {
 		var seen observedWikidResolverRequest
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -139,7 +139,7 @@ var _ = Describe("wikid workspace resolver", func() {
 	)
 })
 
-var _ = Describe("wikid workspace resolver constructors", func() {
+var _ = Describe("wikid workspace resolver constructors", Label("unit"), func() {
 	It("reject invalid upstreams and missing daemon tokens", func() {
 		_, err := NewWikidWorkspaceResolver("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))
@@ -153,7 +153,7 @@ var _ = Describe("wikid workspace resolver constructors", func() {
 	})
 })
 
-var _ = Describe("wikid workspace resolver request construction", func() {
+var _ = Describe("wikid workspace resolver request construction", Label("unit"), func() {
 	It("returns request construction errors before contacting wikid", func() {
 		originalNewRequest := newFrontdRequestWithContext
 		requestErr := errors.New("frontd request failed")

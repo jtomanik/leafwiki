@@ -22,7 +22,7 @@ type observedMCPProxyRequest struct {
 }
 
 var _ = Describe("frontd MCP proxy behavior", func() {
-	DescribeTable("constructor validation",
+	DescribeTable("constructor validation", Label("unit"),
 		func(upstream string, token string, wantErr error) {
 			proxy, err := NewMCPProxy(upstream, token)
 
@@ -33,7 +33,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		Entry("rejects a missing daemon token", "http://127.0.0.1:1", "   ", errDaemonTokenRequired),
 	)
 
-	It("injects the daemon token and strips public actor context", func() {
+	It("injects the daemon token and strips public actor context", Label("integration"), func() {
 		var seen observedMCPProxyRequest
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			seen.Path = req.URL.Path
@@ -64,7 +64,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		))
 	})
 
-	It("records implicit OK status and unwraps the session recorder", func() {
+	It("records implicit OK status and unwraps the session recorder", Label("unit"), func() {
 		rec := httptest.NewRecorder()
 		writer := &mcpSessionResponseWriter{ResponseWriter: rec}
 
@@ -75,7 +75,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		Expect(writer.Unwrap()).To(Equal(rec))
 	})
 
-	DescribeTable("workspace MCP path parsing",
+	DescribeTable("workspace MCP path parsing", Label("unit"),
 		func(path string) {
 			Expect(workspaceMCPPathResult(path)).To(RejectWorkspaceMCPPath())
 		},
@@ -85,7 +85,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		Entry("rejects an invalid workspace ID", "/mcp/workspaces/%20bad"),
 	)
 
-	It("preserves an existing binding when DELETE has no session header", func() {
+	It("preserves an existing binding when DELETE has no session header", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), "alpha")).To(Succeed())
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
@@ -107,7 +107,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha")))
 	})
 
-	DescribeTable("ingress base-path routing",
+	DescribeTable("ingress base-path routing", Label("integration"),
 		func(path string, basePath string, wantBody string) {
 			public := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				_, _ = w.Write([]byte("public:" + req.URL.Path))
@@ -130,7 +130,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		Entry("keeps root well-known paths on the control plane", "/.well-known/oauth-authorization-server", "/wiki", "control:/.well-known/oauth-authorization-server"),
 	)
 
-	It("rejects malformed workspace paths before resolving", func() {
+	It("rejects malformed workspace paths before resolving", Label("integration"), func() {
 		proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
 				return WorkspaceRoute{}, errors.New("resolver should not be called")

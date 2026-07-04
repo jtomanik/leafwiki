@@ -18,7 +18,7 @@ type observedWorkspacesAPIOriginalHeaders struct {
 	Remote string
 }
 
-var _ = Describe("workspaces API proxy", func() {
+var _ = Describe("workspaces API proxy", Label("integration"), func() {
 	It("forwards list, status, and ensure requests to wikid", func() {
 		var seen []string
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

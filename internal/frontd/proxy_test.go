@@ -44,7 +44,7 @@ type observedControlPlaneProxyRequest struct {
 	ActorContext  string
 }
 
-var _ = Describe("frontd proxy routing", func() {
+var _ = Describe("frontd proxy routing", Label("integration"), func() {
 	It("strips public credentials and injects private actor context for workspace requests", func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		var seen observedWorkspaceProxyRequest

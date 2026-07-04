@@ -10,7 +10,7 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = Describe("workspace router semantic IDs", func() {
+var _ = Describe("workspace router semantic IDs", Label("unit"), func() {
 	It("parses workspace routes into typed workspace identifiers", func() {
 		Expect(workspaceAPIPathResult("/api/workspaces/home/tree")).To(ResolveWorkspaceAPIPath(
 			workspaceid.WorkspaceID("home"),
