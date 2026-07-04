@@ -114,7 +114,7 @@ var _ = ginkgo.Describe("Fosite in-memory store", ginkgo.Label("integration"), f
 	ginkgo.DescribeTable("isolated worker access",
 		func(worker int) {
 			store := newFositeStore()
-			Expect(exerciseFositeStoreWorker(store, worker)).To(Succeed())
+			Expect(runFositeStoreWorkerRoundTrip(store, worker)).To(Succeed())
 		},
 		ginkgo.Entry("handles worker 0", 0),
 		ginkgo.Entry("handles worker 1", 1),
@@ -138,7 +138,7 @@ var _ = ginkgo.Describe("Fosite in-memory store", ginkgo.Label("integration"), f
 			go func() {
 				defer wg.Done()
 				<-start
-				errs <- exerciseFositeStoreWorker(store, i)
+				errs <- runFositeStoreWorkerRoundTrip(store, i)
 			}()
 		}
 		close(start)
@@ -151,7 +151,7 @@ var _ = ginkgo.Describe("Fosite in-memory store", ginkgo.Label("integration"), f
 	})
 })
 
-func exerciseFositeStoreWorker(store *fositeStore, worker int) error {
+func runFositeStoreWorkerRoundTrip(store *fositeStore, worker int) error {
 	ctx := context.Background()
 	requester := newStoreTestRequester(fmt.Sprintf("request-%d", worker))
 	accessSignature := fmt.Sprintf("access-%d", worker)
