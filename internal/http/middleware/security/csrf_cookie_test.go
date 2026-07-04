@@ -14,6 +14,44 @@ import (
 	"github.com/perber/wiki/internal/http/middleware/utils"
 )
 
+type csrfCookieAccessPolicy string
+
+const (
+	csrfCookieReadableByClient csrfCookieAccessPolicy = "client-readable"
+	csrfCookieServerOnly       csrfCookieAccessPolicy = "server-only"
+)
+
+type csrfCookieTransportPolicy string
+
+const (
+	csrfCookieSecureTransport   csrfCookieTransportPolicy = "secure-transport"
+	csrfCookieInsecureTransport csrfCookieTransportPolicy = "insecure-transport"
+)
+
+type csrfCookieValueState string
+
+const (
+	csrfCookieTokenPresent csrfCookieValueState = "token-present"
+	csrfCookieValueCleared csrfCookieValueState = "value-cleared"
+)
+
+type issuedCSRFCookieContract struct {
+	Name            string
+	ValueState      csrfCookieValueState
+	AccessPolicy    csrfCookieAccessPolicy
+	TransportPolicy csrfCookieTransportPolicy
+	Path            string
+	SameSite        http.SameSite
+	MaxAge          int
+}
+
+type clearedCSRFCookieContract struct {
+	Name            string
+	ValueState      csrfCookieValueState
+	TransportPolicy csrfCookieTransportPolicy
+	MaxAge          int
+}
+
 func singleResponseCookie(rec *httptest.ResponseRecorder) *http.Cookie {
 	GinkgoHelper()
 
@@ -22,25 +60,78 @@ func singleResponseCookie(rec *httptest.ResponseRecorder) *http.Cookie {
 	return cookies[0]
 }
 
-func matchIssuedCSRFCookie(name string, secure bool, maxAge int) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Name", name),
-		HaveField("Value", Not(BeEmpty())),
-		HaveField("HttpOnly", BeFalse()),
-		HaveField("Secure", secure),
-		HaveField("Path", "/"),
-		HaveField("SameSite", http.SameSiteLaxMode),
-		HaveField("MaxAge", maxAge),
-	)
+func matchIssuedCSRFCookie(name string, transportPolicy csrfCookieTransportPolicy, maxAge int) types.GomegaMatcher {
+	expected := issuedCSRFCookieContract{
+		Name:            name,
+		ValueState:      csrfCookieTokenPresent,
+		AccessPolicy:    csrfCookieReadableByClient,
+		TransportPolicy: transportPolicy,
+		Path:            "/",
+		SameSite:        http.SameSiteLaxMode,
+		MaxAge:          maxAge,
+	}
+
+	return WithTransform(issuedCSRFCookieContractFromCookie, Equal(expected))
 }
 
-func matchClearedCSRFCookie(name string, secure bool) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Name", name),
-		HaveField("Value", BeEmpty()),
-		HaveField("Secure", secure),
-		HaveField("MaxAge", -1),
-	)
+func matchClearedCSRFCookie(name string, transportPolicy csrfCookieTransportPolicy) types.GomegaMatcher {
+	expected := clearedCSRFCookieContract{
+		Name:            name,
+		ValueState:      csrfCookieValueCleared,
+		TransportPolicy: transportPolicy,
+		MaxAge:          -1,
+	}
+
+	return WithTransform(clearedCSRFCookieContractFromCookie, Equal(expected))
+}
+
+func csrfCookieNameForTransport(csrf *CSRFCookie, transportPolicy csrfCookieTransportPolicy) string {
+	if transportPolicy == csrfCookieSecureTransport {
+		return csrf.cookieName(true)
+	}
+	return csrf.cookieName(false)
+}
+
+func issuedCSRFCookieContractFromCookie(cookie *http.Cookie) issuedCSRFCookieContract {
+	return issuedCSRFCookieContract{
+		Name:            cookie.Name,
+		ValueState:      csrfCookieValueStateFor(cookie),
+		AccessPolicy:    csrfCookieAccessPolicyFor(cookie),
+		TransportPolicy: csrfCookieTransportPolicyFor(cookie.Secure),
+		Path:            cookie.Path,
+		SameSite:        cookie.SameSite,
+		MaxAge:          cookie.MaxAge,
+	}
+}
+
+func clearedCSRFCookieContractFromCookie(cookie *http.Cookie) clearedCSRFCookieContract {
+	return clearedCSRFCookieContract{
+		Name:            cookie.Name,
+		ValueState:      csrfCookieValueStateFor(cookie),
+		TransportPolicy: csrfCookieTransportPolicyFor(cookie.Secure),
+		MaxAge:          cookie.MaxAge,
+	}
+}
+
+func csrfCookieAccessPolicyFor(cookie *http.Cookie) csrfCookieAccessPolicy {
+	if cookie.HttpOnly {
+		return csrfCookieServerOnly
+	}
+	return csrfCookieReadableByClient
+}
+
+func csrfCookieValueStateFor(cookie *http.Cookie) csrfCookieValueState {
+	if cookie.Value == "" {
+		return csrfCookieValueCleared
+	}
+	return csrfCookieTokenPresent
+}
+
+func csrfCookieTransportPolicyFor(secure bool) csrfCookieTransportPolicy {
+	if secure {
+		return csrfCookieSecureTransport
+	}
+	return csrfCookieInsecureTransport
 }
 
 var _ = Describe("CSRF cookie", func() {
@@ -48,7 +139,7 @@ var _ = Describe("CSRF cookie", func() {
 		gin.SetMode(gin.TestMode)
 	})
 
-	Describe("cookie naming", func() {
+	Describe("cookie naming", Label("unit"), func() {
 		It("uses the host-prefixed cookie name for secure requests", func() {
 			csrf := NewCSRFCookie(false, time.Hour)
 
@@ -62,7 +153,7 @@ var _ = Describe("CSRF cookie", func() {
 		})
 	})
 
-	Describe("issuing tokens", func() {
+	Describe("issuing tokens", Label("integration"), func() {
 		It("sets a readable secure cookie and mirrors the token in the response header", func() {
 			csrf := NewCSRFCookie(false, time.Hour)
 			router := gin.New()
@@ -78,7 +169,7 @@ var _ = Describe("CSRF cookie", func() {
 
 			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 			csrfCookie := singleResponseCookie(rec)
-			Expect(csrfCookie).To(matchIssuedCSRFCookie(csrf.cookieName(true), true, int(time.Hour.Seconds())))
+			Expect(csrfCookie).To(matchIssuedCSRFCookie(csrfCookieNameForTransport(csrf, csrfCookieSecureTransport), csrfCookieSecureTransport, int(time.Hour.Seconds())))
 			Expect(rec).To(HaveHTTPHeaderWithValue("X-CSRF-Token", csrfCookie.Value))
 		})
 
@@ -96,7 +187,7 @@ var _ = Describe("CSRF cookie", func() {
 
 			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 			csrfCookie := singleResponseCookie(rec)
-			Expect(csrfCookie).To(matchIssuedCSRFCookie(csrf.cookieName(false), false, int(time.Hour.Seconds())))
+			Expect(csrfCookie).To(matchIssuedCSRFCookie(csrfCookieNameForTransport(csrf, csrfCookieInsecureTransport), csrfCookieInsecureTransport, int(time.Hour.Seconds())))
 		})
 
 		It("requires HTTPS before issuing secure cookies", func() {
@@ -162,7 +253,7 @@ var _ = Describe("CSRF cookie", func() {
 		})
 	})
 
-	Describe("reading tokens", func() {
+	Describe("reading tokens", Label("integration"), func() {
 		It("reads the secure cookie token from HTTPS requests", func() {
 			csrf := NewCSRFCookie(false, time.Hour)
 			router := gin.New()
@@ -234,7 +325,7 @@ var _ = Describe("CSRF cookie", func() {
 		})
 	})
 
-	Describe("clearing tokens", func() {
+	Describe("clearing tokens", Label("integration"), func() {
 		It("expires the secure CSRF cookie", func() {
 			csrf := NewCSRFCookie(false, time.Hour)
 			router := gin.New()
@@ -248,7 +339,7 @@ var _ = Describe("CSRF cookie", func() {
 			rec := performSecurityRequest(router, req)
 
 			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-			Expect(singleResponseCookie(rec)).To(matchClearedCSRFCookie(csrf.cookieName(true), true))
+			Expect(singleResponseCookie(rec)).To(matchClearedCSRFCookie(csrfCookieNameForTransport(csrf, csrfCookieSecureTransport), csrfCookieSecureTransport))
 		})
 
 		It("expires the insecure CSRF cookie when insecure requests are allowed", func() {
@@ -263,7 +354,7 @@ var _ = Describe("CSRF cookie", func() {
 			rec := performSecurityRequest(router, req)
 
 			Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-			Expect(singleResponseCookie(rec)).To(matchClearedCSRFCookie(csrf.cookieName(false), false))
+			Expect(singleResponseCookie(rec)).To(matchClearedCSRFCookie(csrfCookieNameForTransport(csrf, csrfCookieInsecureTransport), csrfCookieInsecureTransport))
 		})
 	})
 })

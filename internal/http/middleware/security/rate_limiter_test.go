@@ -29,7 +29,7 @@ func rateLimitedRequest(router *gin.Engine, remoteAddr string) *httptest.Respons
 	return performSecurityRequest(router, req)
 }
 
-var _ = Describe("rate limiter", func() {
+var _ = Describe("rate limiter", Label("integration"), func() {
 	BeforeEach(func() {
 		gin.SetMode(gin.TestMode)
 	})

@@ -27,7 +27,7 @@ func performSecurityRequest(router *gin.Engine, req *http.Request) *httptest.Res
 	return rec
 }
 
-var _ = Describe("CSRF middleware", func() {
+var _ = Describe("CSRF middleware", Label("integration"), func() {
 	BeforeEach(func() {
 		gin.SetMode(gin.TestMode)
 	})
