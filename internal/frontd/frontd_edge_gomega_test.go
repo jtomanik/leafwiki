@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -285,7 +287,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(err).ToNot(HaveOccurred())
 		server.Close()
 		_, err = resolver(nil)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchFrontdUpstreamRequestError(http.MethodGet))
 	})
 
 	ginkgo.It("maps wikid workspace resolver responses into workspace routes and errors", func() {
@@ -369,7 +371,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(err).ToNot(HaveOccurred())
 		server.Close()
 		_, err = resolver(nil, "home")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchFrontdUpstreamRequestError(http.MethodPost))
 	})
 
 	ginkgo.It("preserves original request headers while ignoring nil and blank inputs", func() {
@@ -403,4 +405,12 @@ func matchFrontdJSONDecodeError() types.GomegaMatcher {
 func matchFrontdWorkspaceIDError(code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(code))
+}
+
+func matchFrontdUpstreamRequestError(method string) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var urlErr *url.Error
+		return errors.As(err, &urlErr) && strings.EqualFold(urlErr.Op, method)
+	})
 }

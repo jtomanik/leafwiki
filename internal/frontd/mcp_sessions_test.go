@@ -25,13 +25,13 @@ var _ = Describe("workspace MCP session routing", func() {
 
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("beta"))).To(HaveOccurred())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("beta"))).To(MatchError(ErrMCPSessionWorkspaceMismatch))
 	})
 
 	It("rejects invalid workspace identifiers before binding", func() {
 		bindings := NewMCPSessionBindings()
 
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID(" alpha "))).To(HaveOccurred())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID(" alpha "))).To(matchFrontdWorkspaceIDError(workspaceid.ErrCodeWorkspaceIDWhitespace))
 		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("session-1")))
 	})
 

@@ -10,6 +10,8 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
+var ErrMCPSessionWorkspaceMismatch = errors.New("mcp session workspace mismatch")
+
 type MCPSessionBindings struct {
 	mu       sync.Mutex
 	sessions map[MCPSessionID]workspaceid.WorkspaceID
@@ -49,7 +51,7 @@ func (b *MCPSessionBindings) Bind(sessionID MCPSessionID, workspaceID workspacei
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if existing := b.sessions[sessionID]; existing != "" && existing != workspaceID {
-		return fmt.Errorf("mcp session %q is bound to workspace %q", sessionID.String(), existing.String())
+		return fmt.Errorf("%w: session %q is bound to workspace %q", ErrMCPSessionWorkspaceMismatch, sessionID.String(), existing.String())
 	}
 	b.sessions[sessionID] = workspaceID
 	return nil
