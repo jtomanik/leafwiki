@@ -63,6 +63,16 @@ func matchRevisionErrorCause(want error) types.GomegaMatcher {
 	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} wrap revision error\n{{format .Data 1}}", want)
 }
 
+func matchRevisionError(want error) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		return errors.Is(err, want), nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match revision error\n{{format .Data 1}}", want)
+}
+
+func rejectRevisionValidation() types.GomegaMatcher {
+	return matchRevisionError(ErrRevisionValidation)
+}
+
 func matchRevisionIntegrityIssue(code sharederrors.ErrorCode) types.GomegaMatcher {
 	return gcustom.MakeMatcher(func(issue RevisionIntegrityIssue) (bool, error) {
 		return issue.Code == code && issue.MessageID == sharederrors.MessageIDForCode(code), nil

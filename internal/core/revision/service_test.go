@@ -5,6 +5,7 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -147,7 +148,7 @@ var _ = ginkgo.Describe("service", func() {
 		errs := service.RecordContentUpdates([]*tree.Page{page1, nil, page2}, "tester", "batch")
 		Expect(errs).To(HaveExactElements(
 			Succeed(),
-			HaveOccurred(),
+			rejectRevisionValidation(),
 			Succeed(),
 		))
 
@@ -204,7 +205,7 @@ var _ = ginkgo.Describe("service", func() {
 
 		revisions, err := service.ListRevisions(newFixturePageID(pageID))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(revisions).NotTo(BeEmpty())
+		Expect(revisions).To(HaveExactElements(HaveField("Type", RevisionTypeContentUpdate)))
 		paged, _, err := service.ListRevisionsPage(newFixturePageID(pageID), "", 1)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(paged).To(HaveLen(1))
@@ -246,8 +247,9 @@ var _ = ginkgo.Describe("service", func() {
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 
 		typedPageID := revisionTestPageID(pageID)
-		Expect(service.restoreAssets(typedPageID, []AssetRef{{Name: "dup.txt", SHA256: "abc", SizeBytes: 1}, {Name: "dup.txt", SHA256: "def", SizeBytes: 1}})).To(HaveOccurred())
-		Expect(service.restoreAssets(typedPageID, []AssetRef{{Name: "missing.txt", SHA256: "abc", SizeBytes: 3}})).To(HaveOccurred())
+		blobHash, blobSize := writeStoredAssetBlob(service.store, []byte("asset"))
+		Expect(service.restoreAssets(typedPageID, []AssetRef{{Name: "dup.txt", SHA256: blobHash, SizeBytes: blobSize}, {Name: "dup.txt", SHA256: blobHash, SizeBytes: blobSize}})).To(MatchError(ErrDuplicateAssetName))
+		Expect(service.restoreAssets(typedPageID, []AssetRef{{Name: "missing.txt", SHA256: "abc", SizeBytes: 3}})).To(matchRevisionError(os.ErrNotExist))
 
 		assetPath := filepath.Join(storageDir, "standalone.txt")
 		Expect(os.WriteFile(assetPath, []byte("css"), 0o644)).To(Succeed())
@@ -255,7 +257,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ref.MIMEType).NotTo(Equal("application/octet-stream"))
 		_, err = buildAssetRef(filepath.Join(storageDir, "missing.txt"), "missing.txt")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(os.ErrNotExist))
 	})
 
 	ginkgo.It("records restore revisions with and without live assets", func() {
@@ -288,18 +290,18 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(refs).To(HaveExactElements(HaveField("Name", "a.txt")))
 
-		Expect(service.persistLiveAssets(typedPageID, []AssetRef{{Name: "a.txt", SHA256: "wrong", SizeBytes: int64(len("asset"))}})).To(HaveOccurred())
+		Expect(service.persistLiveAssets(typedPageID, []AssetRef{{Name: "a.txt", SHA256: "wrong", SizeBytes: int64(len("asset"))}})).To(matchRevisionError(ErrAssetBlobHashMismatch))
 		goodRef, err := buildAssetRef(revisionAssetPath(storageDir, pageID, "a.txt"), "a.txt")
 		Expect(err).NotTo(HaveOccurred())
 		goodRef.SizeBytes++
-		Expect(service.persistLiveAssets(typedPageID, []AssetRef{goodRef})).To(HaveOccurred())
+		Expect(service.persistLiveAssets(typedPageID, []AssetRef{goodRef})).To(matchRevisionError(ErrAssetBlobSizeMismatch))
 
 		badPageID := "bad-assets"
 		badDir := filepath.Join(storageDir, "assets", badPageID)
 		Expect(os.MkdirAll(filepath.Dir(badDir), 0o755)).To(Succeed())
 		Expect(os.WriteFile(badDir, []byte("not a dir"), 0o644)).To(Succeed())
 		_, err = service.scanLiveAssets(revisionTestPageID(badPageID))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 	})
 
 	ginkgo.It("reports restored asset hash and size mismatches", func() {
@@ -309,14 +311,14 @@ var _ = ginkgo.Describe("service", func() {
 		assetBlob := service.store.AssetBlobPath(hash)
 		Expect(os.MkdirAll(filepath.Dir(assetBlob), 0o755)).To(Succeed())
 		Expect(os.WriteFile(assetBlob, []byte("tampered"), 0o644)).To(Succeed())
-		Expect(service.restoreAssets("page-1", []AssetRef{{Name: "a.txt", SHA256: hash, SizeBytes: int64(len("asset"))}})).To(HaveOccurred())
+		Expect(service.restoreAssets("page-1", []AssetRef{{Name: "a.txt", SHA256: hash, SizeBytes: int64(len("asset"))}})).To(matchRevisionError(ErrAssetBlobHashMismatch))
 
 		hash2, err := service.store.SaveContentBlob([]byte("size-ok"))
 		Expect(err).NotTo(HaveOccurred())
 		assetBlob2 := service.store.AssetBlobPath(hash2)
 		Expect(os.MkdirAll(filepath.Dir(assetBlob2), 0o755)).To(Succeed())
 		Expect(os.WriteFile(assetBlob2, []byte("size-ok"), 0o644)).To(Succeed())
-		Expect(service.restoreAssets("page-2", []AssetRef{{Name: "a.txt", SHA256: hash2, SizeBytes: 999}})).To(HaveOccurred())
+		Expect(service.restoreAssets("page-2", []AssetRef{{Name: "a.txt", SHA256: hash2, SizeBytes: 999}})).To(matchRevisionError(ErrAssetBlobSizeMismatch))
 	})
 
 	ginkgo.It("records structure revisions even when no live assets exist", func() {

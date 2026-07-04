@@ -53,6 +53,7 @@ var (
 	ErrAssetBlobSizeMismatch     = errors.New("asset blob size mismatch")
 	ErrInvalidAssetName          = errors.New("invalid asset name")
 	ErrDuplicateAssetName        = errors.New("duplicate asset name")
+	ErrRevisionValidation        = errors.New("revision validation failed")
 	ErrRevisionStateRequired     = errors.New("revision state is required")
 )
 
@@ -143,7 +144,7 @@ func (s *Service) RecordContentUpdates(pages []*tree.Page, authorID tree.UserID,
 	}
 
 	for _, i := range nilItems {
-		errs[i] = fmt.Errorf("page is required")
+		errs[i] = fmt.Errorf("%w: page is required", ErrRevisionValidation)
 	}
 
 	parallelism := revisionGOMAXPROCS(0)
@@ -850,10 +851,10 @@ func (s *Service) persistLiveAssets(pageID tree.PageID, refs []AssetRef) error {
 			return err
 		}
 		if hash != ref.SHA256 {
-			return fmt.Errorf("asset hash mismatch for %s: computed=%s saved=%s", ref.Name, ref.SHA256, hash)
+			return fmt.Errorf("%w: asset %s computed=%s saved=%s", ErrAssetBlobHashMismatch, ref.Name, ref.SHA256, hash)
 		}
 		if size != ref.SizeBytes {
-			return fmt.Errorf("asset size mismatch for %s: computed=%d saved=%d", ref.Name, ref.SizeBytes, size)
+			return fmt.Errorf("%w: asset %s computed=%d saved=%d", ErrAssetBlobSizeMismatch, ref.Name, ref.SizeBytes, size)
 		}
 	}
 	return nil

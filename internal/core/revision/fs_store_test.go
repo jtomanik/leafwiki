@@ -4,6 +4,7 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -178,8 +179,8 @@ var _ = ginkgo.Describe("fs store", func() {
 		_, err = store.LoadAssetManifest("")
 		Expect(err).NotTo(HaveOccurred())
 		_, err = store.ReadAssetBlob("")
-		Expect(err).To(HaveOccurred())
-		Expect(store.SaveRevision(nil)).To(HaveOccurred())
+		Expect(err).To(MatchError(ErrAssetHashRequired))
+		Expect(store.SaveRevision(nil)).To(rejectRevisionValidation())
 	})
 
 	ginkgo.It("reads legacy revision files without compatibility metadata fields", func() {
@@ -271,7 +272,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(m2).To(Equal(m1))
 
-		Expect(store.SaveRevision(&Revision{})).To(HaveOccurred())
+		Expect(store.SaveRevision(&Revision{})).To(rejectRevisionValidation())
 	})
 
 	ginkgo.It("filters non-revision files and returns empty pages for stale cursors", func() {
@@ -300,7 +301,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(os.MkdirAll(brokenDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(brokenDir, "20260326T120000.000000000Z_a.json"), []byte("{"), 0o644)).To(Succeed())
 		_, err = store.GetLatestRevision("broken-page")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchJSONSyntaxError())
 	})
 
 	ginkgo.It("rejects unsafe revision identifiers", func() {
@@ -315,7 +316,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		}
 
 		err := store.SaveRevision(rev)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(rejectRevisionValidation())
 	})
 
 	ginkgo.It("rejects invalid page identifiers before revision identifiers", func() {
@@ -330,7 +331,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		}
 
 		err := store.SaveRevision(rev)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(rejectRevisionValidation())
 	})
 
 	ginkgo.It("round-trips JSON helpers and keeps nil localized errors inert", func() {
@@ -343,7 +344,7 @@ var _ = ginkgo.Describe("fs store", func() {
 
 		badPath := filepath.Join(revisionTempDir(), "bad.json")
 		Expect(os.WriteFile(badPath, []byte("{"), 0o644)).To(Succeed())
-		Expect(readJSON(badPath, &got)).To(HaveOccurred())
+		Expect(readJSON(badPath, &got)).To(MatchJSONSyntaxError())
 
 		var localized *sharederrors.LocalizedError
 		Expect(localized.Error()).To(BeEmpty())
@@ -367,7 +368,7 @@ var _ = ginkgo.Describe("fs store", func() {
 			`foo\bar`,
 		}
 		for _, id := range bad {
-			Expect(validateStorageID(id)).To(HaveOccurred())
+			Expect(validateStorageID(id)).To(rejectRevisionValidation())
 		}
 	})
 
@@ -378,12 +379,12 @@ var _ = ginkgo.Describe("fs store", func() {
 				store := NewFSStore(revisionTempDir())
 				pageID := newFixturePageID(tc.id)
 				_, _, err := store.ListRevisionsPage(pageID, "", 50)
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(rejectRevisionValidation())
 				_, err = store.GetLatestRevision(pageID)
-				Expect(err).To(HaveOccurred())
+				Expect(err).To(rejectRevisionValidation())
 				_, err = store.GetRevision(pageID, "rev1")
-				Expect(err).To(HaveOccurred())
-				Expect(store.PruneRevisions(pageID, 5)).To(HaveOccurred())
+				Expect(err).To(rejectRevisionValidation())
+				Expect(store.PruneRevisions(pageID, 5)).To(rejectRevisionValidation())
 			})
 		}
 	})
@@ -391,7 +392,7 @@ var _ = ginkgo.Describe("fs store", func() {
 	ginkgo.It("returns an error when a live asset blob source is missing", func() {
 		store := NewFSStore(revisionTempDir())
 		_, _, err := store.SaveAssetBlobFromPath(filepath.Join(revisionTempDir(), "missing.txt"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(os.ErrNotExist))
 	})
 
 	ginkgo.It("surfaces filesystem errors when the store root is not a directory", func() {
@@ -401,19 +402,19 @@ var _ = ginkgo.Describe("fs store", func() {
 		store := NewFSStore(invalidBase)
 
 		_, err := store.SaveContentBlob([]byte("hello"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 
 		src := filepath.Join(root, "asset.txt")
 		Expect(os.WriteFile(src, []byte("asset"), 0o644)).To(Succeed())
 		_, _, err = store.SaveAssetBlobFromPath(src)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 		_, err = store.SaveAssetManifest([]AssetRef{{Name: "asset.txt", SHA256: "abc", SizeBytes: 5}})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 
 		rev := &Revision{ID: "rev1", PageID: "page-1", CreatedAt: time.Now().UTC(), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
-		Expect(store.SaveRevision(rev)).To(HaveOccurred())
+		Expect(store.SaveRevision(rev)).To(matchRevisionError(syscall.ENOTDIR))
 		_, err = store.ListRevisions("page-1")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 	})
 
 	ginkgo.It("uses and backfills revision indexes for direct lookups", func() {

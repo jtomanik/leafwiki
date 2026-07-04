@@ -138,19 +138,19 @@ func (s *FSStore) SaveAssetManifest(items []AssetRef) (string, error) {
 
 func (s *FSStore) SaveRevision(rev *Revision) error {
 	if rev == nil {
-		return fmt.Errorf("revision is required")
+		return fmt.Errorf("%w: revision is required", ErrRevisionValidation)
 	}
 	if strings.TrimSpace(revisionIDStorageKey(rev.ID)) == "" {
-		return fmt.Errorf("revision id is required")
+		return fmt.Errorf("%w: revision id is required", ErrRevisionValidation)
 	}
 	if err := validateStorageID(pageIDStorageKey(rev.PageID)); err != nil {
-		return fmt.Errorf("page id is required")
+		return fmt.Errorf("page id is required: %w", err)
 	}
 	if rev.CreatedAt.IsZero() {
 		return ErrRevisionCreatedAtRequired
 	}
 	if err := validateStorageID(revisionIDStorageKey(rev.ID)); err != nil {
-		return fmt.Errorf("invalid revision id: %s", rev.ID)
+		return fmt.Errorf("invalid revision id %s: %w", rev.ID, err)
 	}
 
 	dst := s.revisionFilePath(rev.PageID, rev.ID, rev.CreatedAt)
@@ -520,13 +520,13 @@ func (s *FSStore) assetManifestPath(hash string) string {
 // Rejects empty strings, path separators, and dot-only segments like "." or "..".
 func validateStorageID(id string) error {
 	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("id must not be empty")
+		return fmt.Errorf("%w: id must not be empty", ErrRevisionValidation)
 	}
 	if strings.ContainsAny(id, "/\\") {
-		return fmt.Errorf("id must not contain path separators")
+		return fmt.Errorf("%w: id must not contain path separators", ErrRevisionValidation)
 	}
 	if id == "." || id == ".." {
-		return fmt.Errorf("id must not be a dot component")
+		return fmt.Errorf("%w: id must not be a dot component", ErrRevisionValidation)
 	}
 	return nil
 }

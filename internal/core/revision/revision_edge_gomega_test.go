@@ -154,12 +154,12 @@ var _ = Describe("revision edge behavior", func() {
 			Version: 1,
 			Fields:  map[string]interface{}{"bad": []string{"unsupported"}},
 		}, nil, "body")
-		Expect(failedRestoredRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContentError(HaveOccurred()))
+		Expect(failedRestoredRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContentError(matchRevisionError(markdown.ErrMetadataParse)))
 
 		raw, replaceMetadata, err = buildRestoredRawContent(newFixturePageID("../bad"), "Page", nil, map[string]interface{}{
 			"legacy": "value",
 		}, "body")
-		Expect(failedRestoredRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContentError(HaveOccurred()))
+		Expect(failedRestoredRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContentError(matchRevisionError(markdown.ErrMetadataParse)))
 	})
 
 	It("reports each revision asset delta type in stable order", func() {
@@ -211,7 +211,7 @@ var _ = Describe("revision edge behavior", func() {
 			{Name: "b.txt", SHA256: "2"},
 		}))
 
-		Expect(writeJSONAtomic(filepath.Join(revisionTempDir(), "bad.json"), map[string]interface{}{"bad": func() {}})).To(HaveOccurred())
+		Expect(writeJSONAtomic(filepath.Join(revisionTempDir(), "bad.json"), map[string]interface{}{"bad": func() {}})).To(MatchJSONUnsupportedTypeError())
 
 		Expect(store.saveRevisionIndex(newFixturePageID("indexed"), nil)).To(Succeed())
 		index, err := store.loadRevisionIndex(newFixturePageID("indexed"))
@@ -345,18 +345,18 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(errs).To(ConsistOf(MatchError(tree.ErrPageNotFound)))
 
 		Expect(failedRevisionRecord(service.RecordAssetChange(newFixturePageID("../bad"), newFixtureUserID("tester"), "bad"))).
-			To(haveRevisionRecordError(HaveOccurred()))
+			To(haveRevisionRecordError(rejectRevisionValidation()))
 		Expect(failedRevisionRecord(service.RecordAssetChange(newFixturePageID("missing-asset-page"), newFixtureUserID("tester"), "missing"))).
-			To(haveRevisionRecordError(HaveOccurred()))
+			To(haveRevisionRecordError(MatchError(tree.ErrPageNotFound)))
 		Expect(failedRevisionRecord(service.RecordStructureChange(newFixturePageID("../bad"), newFixtureUserID("tester"), "bad"))).
-			To(haveRevisionRecordError(HaveOccurred()))
+			To(haveRevisionRecordError(rejectRevisionValidation()))
 		Expect(failedRevisionRecord(service.RecordStructureChange(newFixturePageID("missing-structure-page"), newFixtureUserID("tester"), "missing"))).
-			To(haveRevisionRecordError(HaveOccurred()))
-		Expect(service.recordRestoreRevision(newFixturePageID("missing-restore-page"), newFixtureUserID("tester"))).To(HaveOccurred())
+			To(haveRevisionRecordError(MatchError(tree.ErrPageNotFound)))
+		Expect(service.recordRestoreRevision(newFixturePageID("missing-restore-page"), newFixtureUserID("tester"))).To(MatchError(tree.ErrPageNotFound))
 		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("page"), nil)).To(MatchError(ErrRevisionStateRequired))
-		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("missing-enrich-page"), &RevisionState{})).To(HaveOccurred())
+		Expect(service.enrichStateWithExtraFrontmatter(newFixturePageID("missing-enrich-page"), &RevisionState{})).To(MatchError(tree.ErrPageNotFound))
 		_, err := service.resolveAssetManifestHash(newFixturePageID("missing-manifest-page"), nil)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
@@ -379,7 +379,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(ref.MIMEType).To(Equal("application/octet-stream"))
 
 		_, err = buildAssetRef(filepath.Dir(assetPath), "dir")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(syscall.EISDIR))
 
 		pageID := newFixturePageID("restore-validation")
 		hash, size := writeStoredAssetBlob(service.store, []byte("asset"))
@@ -423,9 +423,9 @@ var _ = Describe("revision edge behavior", func() {
 		validRev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-valid"), createdAt, contentHash, manifestHash)
 
 		_, err = service.CompareRevisionSnapshots(pageID, validRev.ID, newFixtureRevisionID("missing-target"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(os.ErrNotExist))
 		_, err = service.GetRevisionAsset(pageID, newFixtureRevisionID("missing-asset-revision"), tree.AssetName("image.png"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(os.ErrNotExist))
 
 		Expect(os.WriteFile(service.store.revisionIndexPath(pageID), []byte("{"), 0o644)).To(Succeed())
 		Expect(service.RestoreRevision(pageID, validRev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
@@ -444,22 +444,22 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(os.MkdirAll(filepath.Dir(assetPath), 0o755)).To(Succeed())
 		Expect(os.WriteFile(assetPath, []byte("not a directory"), 0o644)).To(Succeed())
 		Expect(failedRevisionRecord(service.RecordContentUpdate(brokenAssetPageID, newFixtureUserID("tester"), "broken assets"))).
-			To(haveRevisionRecordError(HaveOccurred()))
+			To(haveRevisionRecordError(matchRevisionError(syscall.ENOTDIR)))
 		Expect(failedRevisionRecord(service.RecordStructureChange(brokenAssetPageID, newFixtureUserID("tester"), "broken assets"))).
-			To(haveRevisionRecordError(HaveOccurred()))
+			To(haveRevisionRecordError(matchRevisionError(syscall.ENOTDIR)))
 		Expect(os.Remove(assetPath)).To(Succeed())
 
-		Expect(service.persistLiveAssets(pageID, []AssetRef{{Name: "missing.txt", SHA256: strings.Repeat("e", 64), SizeBytes: 7}})).To(HaveOccurred())
+		Expect(service.persistLiveAssets(pageID, []AssetRef{{Name: "missing.txt", SHA256: strings.Repeat("e", 64), SizeBytes: 7}})).To(matchRevisionError(os.ErrNotExist))
 
 		brokenSymlinkDir := revisionAssetPath(storageDir, newFixturePageID("broken-symlink-page"))
 		Expect(os.MkdirAll(brokenSymlinkDir, 0o755)).To(Succeed())
 		Expect(os.Symlink(filepath.Join(brokenSymlinkDir, "missing-target"), filepath.Join(brokenSymlinkDir, "broken.txt"))).To(Succeed())
 		_, err = service.scanLiveAssets(newFixturePageID("broken-symlink-page"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(os.ErrNotExist))
 
 		badPage := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("../bad")}}
 		Expect(failedRevisionRecord(service.recordContentUpdateForPage(badPage, newFixtureUserID("tester"), "bad"))).
-			To(haveRevisionRecordError(HaveOccurred()))
+			To(haveRevisionRecordError(rejectRevisionValidation()))
 	})
 
 	It("reports deterministic FSStore edge paths", func() {
@@ -541,16 +541,16 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(service.RestoreRevision(pageID, missingManifestRev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreAssetsMissing))
 
 		_, err = service.GetRevisionSnapshot(pageID, newFixtureRevisionID("missing-snapshot"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(os.ErrNotExist))
 		_, err = service.GetRevisionSnapshot(pageID, missingContentRev.ID)
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewContentUnavailable))
 		_, err = service.GetRevisionSnapshot(pageID, missingManifestRev.ID)
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetsUnavailable))
 
 		_, err = service.CompareRevisionSnapshots(pageID, newFixtureRevisionID("missing-base"), missingManifestRev.ID)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchRevisionError(os.ErrNotExist))
 		_, err = service.CompareRevisionSnapshots(pageID, missingContentRev.ID, newFixtureRevisionID("missing-target"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewContentUnavailable))
 
 		_, err = service.GetRevisionAsset(pageID, missingManifestRev.ID, tree.AssetName(" "))
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetInvalidName))
