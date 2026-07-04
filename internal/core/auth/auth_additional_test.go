@@ -9,7 +9,7 @@ import (
 )
 
 var _ = ginkgo.Describe("auth session and resolver behavior", func() {
-	ginkgo.It("SessionStore.CleanupExpiredSessions removes expired sessions and keeps active sessions", func() {
+	ginkgo.It("removes expired refresh sessions while leaving active sessions usable", func() {
 		store, err := NewSessionStore(authTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(closeWithErrorCheck, store.Close)
@@ -67,7 +67,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		Expect(reloadedLabel.Username).To(Equal("alice-renamed"))
 	})
 
-	ginkgo.It("UserService.DoesIDAndPasswordMatch handles success, invalid password, and missing user", func() {
+	ginkgo.It("accepts matching passwords and rejects wrong or missing-user credentials", func() {
 		service := setupTestUserService()
 		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
@@ -81,7 +81,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		Expect(rejectedAuthPassword(service.DoesIDAndPasswordMatch(newFixtureUserID("missing-user"), "correct-password"))).To(Equal(ErrUserNotFound))
 	})
 
-	ginkgo.It("UserService.GetUserByUsername and GetUserByIdentifier resolve username, email fallback, and not found", func() {
+	ginkgo.It("finds users by username or email and reports missing identifiers", func() {
 		service := setupTestUserService()
 		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
@@ -106,7 +106,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		Expect(err).To(Equal(ErrUserNotFound))
 	})
 
-	ginkgo.It("UserService.ChangeOwnPassword rejects the wrong old password and replaces the stored password", func() {
+	ginkgo.It("requires the current password before replacing stored credentials", func() {
 		service := setupTestUserService()
 		ginkgo.DeferCleanup(closeWithErrorCheck, service.Close)
 
