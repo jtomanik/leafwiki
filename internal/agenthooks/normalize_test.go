@@ -47,13 +47,13 @@ var _ = Describe("agent hook normalization", func() {
 		event, err := normalizeEvent(ProviderCodex, raw, seenAt)
 
 		Expect(err).To(Succeed())
+		Expect(event).To(beNormalizedAgentHookEvent())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Provider":      Equal(ProviderCodex),
 			"SessionIDHash": Equal(testSessionHash(ProviderCodex, "raw-codex-session")),
 			"EventName":     Equal(AgentEventPreToolUse),
 			"Model":         Equal("gpt-5.4"),
 			"ToolName":      Equal(AgentToolName("mcp__leafwiki__wiki_get_page")),
-			"IsMCPTool":     BeTrue(),
 			"SeenAt":        BeTemporally("==", seenAt),
 		}))
 	})
@@ -90,11 +90,12 @@ var _ = Describe("agent hook normalization", func() {
 		}`), time.Now())
 
 		Expect(err).To(Succeed())
+		Expect(event).To(beNormalizedAgentHookEvent())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"EventName": Equal(AgentEventPreToolUse),
 			"Model":     BeEmpty(),
 			"Source":    BeEmpty(),
 			"ToolName":  BeEmpty(),
-			"IsMCPTool": BeFalse(),
 		}))
 	})
 
