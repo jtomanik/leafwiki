@@ -21,6 +21,19 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
+type parsedControlErrorBody struct {
+	Code      sharederrors.ErrorCode
+	MessageID sharederrors.MessageID
+}
+
+func parsedControlErrorBodyForSpec(raw []byte) parsedControlErrorBody {
+	code, messageID, _ := parseControlErrorBody(raw)
+	return parsedControlErrorBody{
+		Code:      code,
+		MessageID: messageID,
+	}
+}
+
 type fakeDescriptorTempFile struct {
 	name      string
 	chmodErr  error
@@ -141,7 +154,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 			ExpiresAt:   now.Add(time.Minute),
 		}
 		_, err = actorContextFromWire(wire)
-		Expect(workspaceid.WorkspaceIDErrorCode(err)).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
+		Expect(err).To(matchWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
 
 		valid.Version = 2
 		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextVersion))
@@ -237,15 +250,14 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 
 	ginkgo.It("handles control client and control error parsing edge cases", func() {
 		Expect(&ControlHTTPError{StatusCode: http.StatusTeapot}).To(haveControlStatus(http.StatusTeapot))
-		code, messageID, message := parseControlErrorBody([]byte(`{"error":{"code":"daemon_control_unauthorized","messageId":"errors.daemon.control_unauthorized","message":" unauthorized "}}`))
-		Expect(code).To(Equal(errCodeDaemonControlUnauthorized))
-		Expect(messageID).To(Equal(sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized)))
-		Expect(message).To(Equal("unauthorized"))
-		plainControlBody := " plain text "
-		code, messageID, message = parseControlErrorBody([]byte(plainControlBody))
-		Expect(code).To(BeEmpty())
-		Expect(messageID).To(BeEmpty())
-		Expect(message).To(Equal(strings.TrimSpace(plainControlBody)))
+		Expect(parsedControlErrorBodyForSpec([]byte(`{"error":{"code":"daemon_control_unauthorized","messageId":"errors.daemon.control_unauthorized","message":" unauthorized "}}`))).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code":      Equal(errCodeDaemonControlUnauthorized),
+			"MessageID": Equal(sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized)),
+		}))
+		Expect(parsedControlErrorBodyForSpec([]byte(" plain text "))).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Code":      BeEmpty(),
+			"MessageID": BeEmpty(),
+		}))
 
 		var seenControlToken string
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -299,7 +311,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		raw, err := json.Marshal(wire)
 		Expect(err).ToNot(HaveOccurred())
 		_, err = DecodeActorContext(base64.RawURLEncoding.EncodeToString(raw), ActorContextValidation{})
-		Expect(workspaceid.WorkspaceIDErrorCode(err)).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
+		Expect(err).To(matchWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
 
 		Expect(validateActorContext(ActorContext{
 			Version:     1,

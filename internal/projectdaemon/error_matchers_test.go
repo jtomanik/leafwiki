@@ -9,6 +9,9 @@ import (
 	"os"
 
 	"github.com/onsi/gomega/types"
+
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type projectdaemonErrorMatcher struct {
@@ -62,6 +65,18 @@ func matchProjectdaemonURLParseError() types.GomegaMatcher {
 		match: func(err error) bool {
 			var urlErr *url.Error
 			return errors.As(err, &urlErr)
+		},
+	}
+}
+
+func matchWorkspaceIDValidationError(code sharederrors.ErrorCode) types.GomegaMatcher {
+	return projectdaemonErrorMatcher{
+		label: fmt.Sprintf("workspace ID validation error %s", code),
+		match: func(err error) bool {
+			var validationErr *workspaceid.ValidationError
+			return errors.As(err, &validationErr) &&
+				validationErr.Code == code &&
+				validationErr.MessageID == sharederrors.MessageIDForCode(code)
 		},
 	}
 }
