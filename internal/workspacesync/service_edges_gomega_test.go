@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
@@ -67,9 +69,9 @@ var _ = Describe("workspace sync service edges", func() {
 	})
 
 	It("aggregates sync errors without adding blank fragments", func() {
-		Expect(appendSyncError("", syncSecondaryError)).To(Equal(syncSecondaryError))
-		Expect(appendSyncError(syncPrimaryError, "")).To(Equal(syncPrimaryError))
-		Expect(appendSyncError(syncPrimaryError, syncSecondaryError)).To(Equal(syncPrimaryError + "; " + syncSecondaryError))
+		Expect(appendSyncError("", syncSecondaryError)).To(matchSyncErrorFragments(syncSecondaryError))
+		Expect(appendSyncError(syncPrimaryError, "")).To(matchSyncErrorFragments(syncPrimaryError))
+		Expect(appendSyncError(syncPrimaryError, syncSecondaryError)).To(matchSyncErrorFragments(syncPrimaryError, syncSecondaryError))
 	})
 
 	DescribeTable("accepts managed markdown watcher paths",
@@ -184,6 +186,15 @@ var _ = Describe("workspace sync service edges", func() {
 		})).To(BeTrue())
 	})
 })
+
+func matchSyncErrorFragments(fragments ...string) types.GomegaMatcher {
+	return WithTransform(func(status string) []string {
+		if strings.TrimSpace(status) == "" {
+			return nil
+		}
+		return strings.Split(status, "; ")
+	}, Equal(fragments))
+}
 
 func managedMarkdownEventPathResult(rootDir string, eventPath string) (string, error) {
 	GinkgoHelper()

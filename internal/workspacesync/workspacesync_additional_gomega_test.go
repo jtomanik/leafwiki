@@ -147,7 +147,10 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(service).To(BeNil())
 			pathErr, err := pathErrorResult(err)
 			Expect(err).To(Succeed())
-			Expect(pathErr.Path).To(Equal(blocker))
+			Expect(pathErr).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Op":   Equal("mkdir"),
+				"Path": Equal(blocker),
+			})))
 		})
 
 		It("updates watcher batch status for dropped events and sync errors", func() {
