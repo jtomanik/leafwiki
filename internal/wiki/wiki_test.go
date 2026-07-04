@@ -224,7 +224,7 @@ func createPageForTest(w *Wiki, userID string, parentID *tree.PageID, title, slu
 
 	out, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.CreatePageInput{UserID: newFixtureUserID(userID), ParentID: parentID, Title: title, Slug: newFixtureSlug(slug), Kind: kind},
+		wikipages.CreatePageInput{UserID: tree.UserIDFromString(userID), ParentID: parentID, Title: title, Slug: tree.SlugFromString(slug), Kind: kind},
 	)
 	Expect(err).To(Succeed())
 	return out.Page
@@ -238,7 +238,7 @@ func updatePageForTest(w *Wiki, userID string, id tree.PageID, title, slug strin
 
 	out, err := wikipages.NewUpdatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.UpdatePageInput{UserID: newFixtureUserID(userID), ID: id, Version: newFixturePageVersion(current.Version()), Title: title, Slug: newFixtureSlug(slug), Content: content, Kind: kind},
+		wikipages.UpdatePageInput{UserID: tree.UserIDFromString(userID), ID: id, Version: tree.PageVersionFromString(current.Version()), Title: title, Slug: tree.SlugFromString(slug), Content: content, Kind: kind},
 	)
 	Expect(err).To(Succeed())
 	return out.Page
@@ -252,7 +252,7 @@ func deletePageForTest(w *Wiki, userID string, id tree.PageID, recursive bool) {
 
 	err = wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.DeletePageInput{UserID: newFixtureUserID(userID), ID: id, Version: newFixturePageVersion(current.Version()), Recursive: recursive},
+		wikipages.DeletePageInput{UserID: tree.UserIDFromString(userID), ID: id, Version: tree.PageVersionFromString(current.Version()), Recursive: recursive},
 	)
 	Expect(err).To(Succeed())
 }
@@ -867,7 +867,7 @@ workspace-sync-updated-token`
 
 		err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 			context.Background(),
-			wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: newFixturePageVersion(parent.Version()), Recursive: false},
+			wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: tree.PageVersionFromString(parent.Version()), Recursive: false},
 		)
 		Expect(err).To(MatchError(tree.ErrPageHasChildren))
 	})
