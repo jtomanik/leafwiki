@@ -46,7 +46,9 @@ var _ = Describe("git revision store", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(commit.Hash).NotTo(BeEmpty())
+		head, err := store.repo.Head()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(commit.Hash).To(Equal(CommitHashFromPlumbingHash(head.Hash())))
 		Expect(os.Stat(filepath.Join(dataDir, ".leafwiki", "git"))).Error().NotTo(HaveOccurred())
 		Expect(os.Stat(filepath.Join(rootDir, ".git"))).Error().To(Satisfy(os.IsNotExist))
 
