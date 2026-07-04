@@ -1518,6 +1518,14 @@ func BeFalse() any { return nil }
 func Equal(actual any) any { return nil }
 func HaveField(name string, matcher any) any { return nil }
 type Commit struct{ Created bool }
+type SessionID string
+type SessionRegistry struct{}
+func (SessionRegistry) Heartbeat(SessionID) bool { return true }
+func (SessionRegistry) SeenSession() bool { return true }
+type OAuthClient struct{}
+func (OAuthClient) IsPublic() bool { return true }
+func clientRedirectURIAllowed(OAuthClient, string) bool { return true }
+func GetEnforcePKCE() bool { return true }
 
 func normalize() (string, bool) { return "", true }
 func foundState(found bool) string {
@@ -1600,6 +1608,13 @@ func TestAgentPresence() {
 	_ = body
 	_ = err
 	Expect(has).To(BeTrue())
+	registry := SessionRegistry{}
+	Expect(registry.Heartbeat(SessionID("session-1"))).To(BeTrue())
+	Expect(registry.SeenSession()).To(BeFalse())
+	client := OAuthClient{}
+	Expect(client.IsPublic()).To(BeTrue())
+	Expect(clientRedirectURIAllowed(client, "http://127.0.0.1:49152/callback")).To(BeFalse())
+	Expect(GetEnforcePKCE()).To(BeTrue())
 }
 `,
 			})
@@ -1626,11 +1641,64 @@ func TestAgentPresence() {
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
 				"semh:gomega.proxy-boolean: do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly",
+			))
+		})
+
+		ginkgo.It("reports matcher factories that return predicate-only domain booleans", func() {
+			h := newRuleHarness("/repo/internal/wiki/oauth/service_test.go", "github.com/perber/wiki/internal/wiki/oauth", `package oauth
+
+import "errors"
+
+type GomegaMatcher interface{}
+type matcherBuilder struct{}
+type gcustomPackage struct{}
+type Service struct {
+	fositeConfig   any
+	fositeProvider any
+	store          any
+}
+
+var gcustom gcustomPackage
+var target = errors.New("target")
+
+func (gcustomPackage) MakeMatcher(fn any) matcherBuilder { return matcherBuilder{} }
+func (matcherBuilder) WithMessage(message string) GomegaMatcher { return nil }
+func ErrorToClass(err error) error { return err }
+
+func haveInstalledFositeServiceComponents() GomegaMatcher {
+	return gcustom.MakeMatcher(func(service *Service) (bool, error) {
+		if service == nil {
+			return false, nil
+		}
+		return service.fositeConfig != nil && service.fositeProvider != nil && service.store != nil, nil
+	}).WithMessage("have installed Fosite configuration, provider, and store")
+}
+
+func matchFositeRFC6749Error() GomegaMatcher {
+	return gcustom.MakeMatcher(func(err error) (bool, error) {
+		if err == nil {
+			return false, nil
+		}
+		return errors.Is(ErrorToClass(err), target), nil
+	}).WithMessage("match Fosite RFC6749 error class")
+}
+`)
+			checkGomegaMatcherFactorySignature(h.ctx, h.findFunc("haveInstalledFositeServiceComponents"))
+			checkGomegaMatcherFactorySignature(h.ctx, h.findFunc("matchFositeRFC6749Error"))
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: matcher factory returns a predicate-only boolean oracle; assert a semantic value or compose structured Gomega matchers instead",
+				"semh:gomega.proxy-boolean: matcher factory returns a predicate-only boolean oracle; assert a semantic value or compose structured Gomega matchers instead",
 			))
 		})
 
@@ -1698,6 +1766,7 @@ func matchIssuedCSRFCookie(secure bool) GomegaMatcher {
 				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers",
 				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers",
 				"semh:gomega.proxy-boolean: matcher factory captures boolean state while matching domain semantics; assert the semantic result directly or split into explicit domain matchers",
+				"semh:gomega.proxy-boolean: matcher factory returns a predicate-only boolean oracle; assert a semantic value or compose structured Gomega matchers instead",
 			))
 		})
 
@@ -1751,6 +1820,7 @@ func matchCommittedStatus() GomegaMatcher {
 				"semh:gomega.proxy-boolean: matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher",
 				"semh:gomega.proxy-boolean: matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher",
 				"semh:gomega.proxy-boolean: matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher",
+				"semh:gomega.proxy-boolean: matcher factory returns a predicate-only boolean oracle; assert a semantic value or compose structured Gomega matchers instead",
 			))
 		})
 

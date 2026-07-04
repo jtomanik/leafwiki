@@ -382,6 +382,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 	checkGomegaMatcherFactoryProxyBooleanPredicate(ctx, fn)
 	checkGomegaMatcherFactoryLastErrorRenderedText(ctx, fn)
 	checkGomegaMatcherFactoryStructuredProtocolStatus(ctx, fn)
+	checkGomegaMatcherFactoryPredicateOnlyBoolean(ctx, fn)
 	isMatcherFactory := gomegaMatcherFactoryName(fn.Name.Name)
 	isRenderedOutputMatcherFactory := gomegaRenderedOutputMatcherFactoryName(fn.Name.Name)
 	if fn.Type.Params == nil || !isMatcherFactory && !isRenderedOutputMatcherFactory {
@@ -469,6 +470,30 @@ func checkGomegaMatcherFactoryStructuredProtocolStatus(ctx *analysisContext, fn 
 		case *ast.CallExpr:
 			if predicate := gomegaStructuredProtocolStatusPredicateMatcher(ctx, current); predicate != nil {
 				ctx.report(ruleGomegaStructuredProtocolStatus, predicate, gomegaStructuredProtocolStatusMatcherDiagnostic())
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func checkGomegaMatcherFactoryPredicateOnlyBoolean(ctx *analysisContext, fn *ast.FuncDecl) {
+	boolParams := matcherFactoryBoolParams(ctx, fn)
+	proxyBoolParams := matcherFactoryProxyBoolParams(ctx, fn)
+	if len(boolParams) > 0 &&
+		(matcherFactoryCombinesBoolParamWithErrorPredicate(ctx, fn.Body, boolParams) ||
+			matcherFactoryUsesProxyBoolParam(ctx, fn.Body, proxyBoolParams)) {
+		return
+	}
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch current := node.(type) {
+		case nil:
+			return false
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			if predicate := gomegaPredicateOnlyBooleanMatcher(ctx, current); predicate != nil {
+				ctx.report(ruleGomegaProxyBoolean, predicate, gomegaMatcherFactoryPredicateOnlyBooleanDiagnostic())
 				return false
 			}
 		}
@@ -772,6 +797,67 @@ func gomegaProxyBooleanPredicateMatcher(ctx *analysisContext, call *ast.CallExpr
 		return nil
 	}
 	return proxyBooleanPredicateReturn(ctx, fn.Body)
+}
+
+func gomegaPredicateOnlyBooleanMatcher(ctx *analysisContext, call *ast.CallExpr) ast.Expr {
+	if callName(call) != "MakeMatcher" || len(call.Args) == 0 {
+		return nil
+	}
+	fn, ok := call.Args[0].(*ast.FuncLit)
+	if !ok {
+		return nil
+	}
+	if gomegaGenericErrorPredicateMatcher(ctx, call) != nil ||
+		gomegaProxyBooleanPredicateMatcher(ctx, call) != nil ||
+		gomegaLastErrorRenderedPredicateMatcher(ctx, call) != nil ||
+		gomegaStructuredProtocolStatusPredicateMatcher(ctx, call) != nil {
+		return nil
+	}
+	return predicateOnlyBooleanReturn(ctx, fn.Body)
+}
+
+func predicateOnlyBooleanReturn(ctx *analysisContext, body *ast.BlockStmt) ast.Expr {
+	var predicate ast.Expr
+	ast.Inspect(body, func(node ast.Node) bool {
+		if predicate != nil || node == nil {
+			return false
+		}
+		switch current := node.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ReturnStmt:
+			if len(current.Results) > 0 && exprIsPredicateOnlyBoolean(ctx, current.Results[0]) {
+				predicate = current.Results[0]
+			}
+			return false
+		}
+		return true
+	})
+	return predicate
+}
+
+func exprIsPredicateOnlyBoolean(ctx *analysisContext, expr ast.Expr) bool {
+	expr = unparenExpr(expr)
+	if ident, ok := expr.(*ast.Ident); ok && (ident.Name == "true" || ident.Name == "false") {
+		return false
+	}
+	if !isBoolType(ctx.pass.TypesInfo.TypeOf(expr)) {
+		return false
+	}
+	switch current := expr.(type) {
+	case *ast.BinaryExpr:
+		return current.Op == token.LAND ||
+			current.Op == token.LOR ||
+			isBooleanProducingBinaryOp(current.Op)
+	case *ast.CallExpr:
+		return true
+	case *ast.SelectorExpr:
+		return true
+	case *ast.UnaryExpr:
+		return current.Op == token.NOT && exprIsPredicateOnlyBoolean(ctx, current.X)
+	default:
+		return false
+	}
 }
 
 func proxyBooleanPredicateReturn(ctx *analysisContext, body *ast.BlockStmt) ast.Expr {
@@ -1713,6 +1799,9 @@ func assertionUsesCommaOKBoolean(ctx *analysisContext, assertion gomegaAssertion
 }
 
 func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) bool {
+	if assertionUsesDedicatedBooleanPredicate(ctx, assertion) {
+		return false
+	}
 	ident, ok := unparenExpr(assertion.actual).(*ast.Ident)
 	if ok && isBooleanMatcher(assertion.matcher) && (isProxyBooleanName(ident.Name) || identIsSemanticBooleanResult(ctx, ident)) {
 		if identIsCommaOKResult(ctx, ident) {
@@ -1724,6 +1813,10 @@ func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) 
 	if ok && isBooleanMatcher(assertion.matcher) && selectorIsProxyBoolean(ctx, selector) {
 		return true
 	}
+	call, ok := unparenExpr(assertion.actual).(*ast.CallExpr)
+	if ok && isBooleanMatcher(assertion.matcher) && callReturnsProxyBoolean(ctx, call) {
+		return true
+	}
 	return compositeActualContainsIdent(assertion.actual, func(ident *ast.Ident) bool {
 		return (isProxyBooleanName(ident.Name) || identIsSemanticBooleanResult(ctx, ident)) &&
 			isBoolType(ctx.pass.TypesInfo.TypeOf(ident)) &&
@@ -1731,9 +1824,56 @@ func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) 
 	})
 }
 
+func assertionUsesDedicatedBooleanPredicate(ctx *analysisContext, assertion gomegaAssertion) bool {
+	return assertionUsesStringsContains(ctx, assertion) ||
+		assertionUsesStringsPredicate(ctx, assertion, "HasPrefix") ||
+		assertionUsesStringsPredicate(ctx, assertion, "HasSuffix") ||
+		assertionUsesRegexpMatchString(ctx, assertion) ||
+		assertionUsesErrorsIs(ctx, assertion) ||
+		assertionUsesErrorsAs(ctx, assertion) ||
+		assertionUsesControlStatus(assertion) ||
+		assertionUsesOSIsNotExist(ctx, assertion)
+}
+
 func selectorIsProxyBoolean(ctx *analysisContext, selector *ast.SelectorExpr) bool {
 	return isProxyBooleanName(selector.Sel.Name) &&
 		isBoolType(ctx.pass.TypesInfo.TypeOf(selector))
+}
+
+func callReturnsProxyBoolean(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isBoolType(ctx.pass.TypesInfo.TypeOf(call)) {
+		return false
+	}
+	name := callName(call)
+	if semanticBooleanCallName(name) {
+		return true
+	}
+	if fn := calledFunctionObject(ctx, call); fn != nil {
+		return semanticBooleanCallName(fn.Name())
+	}
+	return false
+}
+
+func semanticBooleanCallName(name string) bool {
+	if isProxyBooleanName(name) {
+		return true
+	}
+	canonical := canonicalName(name)
+	for _, prefix := range []string{
+		"is", "has", "can", "should", "supports", "allows", "contains", "get", "seen",
+	} {
+		if strings.HasPrefix(canonical, prefix) {
+			return true
+		}
+	}
+	for _, marker := range []string{
+		"allowed", "heartbeat", "enabled", "disabled", "public", "running", "ready",
+	} {
+		if strings.Contains(canonical, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isProxyBooleanName(name string) bool {

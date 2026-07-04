@@ -197,6 +197,10 @@ func gomegaMatcherFactoryProxyBooleanPredicateDiagnostic() string {
 	return "matcher factory returns proxy boolean fields as the matcher oracle; assert a semantic value or include the domain outcome in the matcher"
 }
 
+func gomegaMatcherFactoryPredicateOnlyBooleanDiagnostic() string {
+	return "matcher factory returns a predicate-only boolean oracle; assert a semantic value or compose structured Gomega matchers instead"
+}
+
 func gomegaControlStatusMatcherDiagnostic() string {
 	return "assert project daemon control errors with MatchError or a domain matcher instead of IsControlStatus with boolean matchers"
 }
