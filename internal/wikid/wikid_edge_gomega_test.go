@@ -16,6 +16,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -33,6 +34,39 @@ const (
 	wikidWorkspaceInsertBlockedFixture = "workspace insert blocked"
 	wikidWorkspaceUpdateBlockedFixture = "workspace update blocked"
 )
+
+type wikidErrorMatcher struct {
+	label string
+	match func(error) bool
+}
+
+func matchWikidWorkspaceIDValidationError(code sharederrors.ErrorCode) types.GomegaMatcher {
+	return wikidErrorMatcher{
+		label: "workspace ID validation error",
+		match: func(err error) bool {
+			var validationErr *workspaceid.ValidationError
+			return errors.As(err, &validationErr) &&
+				validationErr.Code == code &&
+				validationErr.MessageID == sharederrors.MessageIDForCode(code)
+		},
+	}
+}
+
+func (matcher wikidErrorMatcher) Match(actual interface{}) (bool, error) {
+	err, ok := actual.(error)
+	if !ok {
+		return false, nil
+	}
+	return matcher.match(err), nil
+}
+
+func (matcher wikidErrorMatcher) FailureMessage(actual interface{}) string {
+	return "Expected\n\t" + format.Object(actual, 1) + "\nto satisfy " + matcher.label
+}
+
+func (matcher wikidErrorMatcher) NegatedFailureMessage(actual interface{}) string {
+	return "Expected\n\t" + format.Object(actual, 1) + "\nnot to satisfy " + matcher.label
+}
 
 var _ = ginkgo.Describe("wikid persistence and private route edge behavior", func() {
 	ginkgo.Describe("auth storage", func() {
@@ -122,7 +156,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 		ginkgo.It("reports grant document validation failures", func() {
 			Expect((GrantDocument{}).Validate()).To(MatchError(ErrGrantSchemaVersion))
 			Expect(validateGrant(Grant{WorkspaceID: HomeWorkspaceID, Role: GrantRoleViewer})).To(MatchError(ErrGrantSubjectRequired))
-			Expect(workspaceid.WorkspaceIDErrorCode(validateGrant(Grant{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer}))).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
+			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer})).To(matchWikidWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
 			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: HomeWorkspaceID, Role: GrantRole("owner")})).To(MatchError(ErrUnknownGrantRole))
 			Expect(CapabilitiesForRole(GrantRole("owner"))).Error().To(MatchError(ErrUnknownGrantRole))
 		})
@@ -357,7 +391,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			_, err = store.RegisterWorkspaceWithResultAndGrants(workspace, time.Now, func(RegisterWorkspaceResult) ([]Grant, error) {
 				return []Grant{{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer}}, nil
 			})
-			Expect(workspaceid.WorkspaceIDErrorCode(err)).To(Equal(workspaceid.ErrCodeWorkspaceIDInvalid))
+			Expect(err).To(matchWikidWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
 		})
 
 		ginkgo.It("normalizes replace helpers and workspace slugs", func() {
