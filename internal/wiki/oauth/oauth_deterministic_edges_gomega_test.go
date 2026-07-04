@@ -13,7 +13,7 @@ import (
 	coreauth "github.com/perber/wiki/internal/core/auth"
 )
 
-var _ = Describe("OAuth deterministic service behavior", func() {
+var _ = Describe("OAuth deterministic service behavior", Label("integration"), func() {
 	It("applies fixed-client redirect overrides and rejects replayed client assertions", func() {
 		ctx := context.Background()
 		store := newFositeStore()

@@ -16,7 +16,7 @@ import (
 )
 
 var _ = ginkgo.Describe("OAuth helper contracts", func() {
-	ginkgo.It("derives base-path-aware metadata paths and URLs", func() {
+	ginkgo.It("derives base-path-aware metadata paths and URLs", ginkgo.Label("unit"), func() {
 		Expect(AuthorizationServerMetadataPath("/wiki")).To(Equal("/.well-known/oauth-authorization-server/wiki"))
 		Expect(AuthorizationServerMetadataPaths("/wiki")).To(Equal([]string{"/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/wiki"}))
 		Expect(ProtectedResourceMetadataPaths("/wiki")).To(Equal([]string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource/wiki/mcp"}))
@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("OAuth helper contracts", func() {
 		Expect(ProtectedResourceMetadataURL(req, "/wiki")).To(Equal("http://leafwiki.test/.well-known/oauth-protected-resource/wiki/mcp"))
 	})
 
-	ginkgo.It("applies LeafWiki defaults and rejects unsupported dynamic registration values", func() {
+	ginkgo.It("applies LeafWiki defaults and rejects unsupported dynamic registration values", ginkgo.Label("unit"), func() {
 		redirects, err := normalizeRedirectURIs([]string{" http://127.0.0.1:49152/callback "})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(redirects).To(Equal([]string{"http://127.0.0.1:49152/callback"}))
@@ -49,7 +49,7 @@ var _ = ginkgo.Describe("OAuth helper contracts", func() {
 		Expect(scope).To(Equal(ScopeMCP))
 	})
 
-	ginkgo.It("revokes access and refresh sessions by request ID", func() {
+	ginkgo.It("revokes access and refresh sessions by request ID", ginkgo.Label("integration"), func() {
 		ctx := context.Background()
 		store := newFositeStore()
 		requester := newStoreTestRequester("revoke-request")

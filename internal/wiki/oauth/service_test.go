@@ -2,10 +2,9 @@ package oauth
 
 import (
 	"context"
-	"errors"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +14,7 @@ import (
 	"github.com/ory/fosite"
 )
 
-var _ = ginkgo.Describe("OAuth service construction", func() {
+var _ = ginkgo.Describe("OAuth service construction", ginkgo.Label("integration"), func() {
 	ginkgo.It("installs Fosite configuration, provider, store, and fixed client", func() {
 		service, err := NewService(ServiceConfig{
 			AccessTokenTimeout:  15 * time.Minute,
@@ -69,20 +68,36 @@ func validAuthorizeRequestValues(redirectURI string) url.Values {
 	}
 }
 
-func haveInstalledFositeServiceComponents() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(service *Service) (bool, error) {
-		if service == nil {
-			return false, nil
-		}
-		return service.fositeConfig != nil && service.fositeProvider != nil && service.store != nil, nil
-	}).WithMessage("have installed Fosite configuration, provider, and store")
+type installedFositeServiceComponents struct {
+	Config   interface{}
+	Provider interface{}
+	Store    interface{}
 }
 
-func matchFositeRFC6749Error(want *fosite.RFC6749Error) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		if err == nil {
-			return false, nil
+func haveInstalledFositeServiceComponents() types.GomegaMatcher {
+	return WithTransform(func(service *Service) installedFositeServiceComponents {
+		if service == nil {
+			return installedFositeServiceComponents{}
 		}
-		return errors.Is(fosite.ErrorToRFC6749Error(err), want), nil
-	}).WithMessage("match Fosite RFC6749 error class")
+		return installedFositeServiceComponents{
+			Config:   service.fositeConfig,
+			Provider: service.fositeProvider,
+			Store:    service.store,
+		}
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Config":   Not(BeNil()),
+		"Provider": Not(BeNil()),
+		"Store":    Not(BeNil()),
+	}))
+}
+
+type fositeRFC6749ErrorClass string
+
+func matchFositeRFC6749Error(want *fosite.RFC6749Error) types.GomegaMatcher {
+	return WithTransform(func(err error) fositeRFC6749ErrorClass {
+		if err == nil {
+			return ""
+		}
+		return fositeRFC6749ErrorClass(fosite.ErrorToRFC6749Error(err).ErrorField)
+	}, Equal(fositeRFC6749ErrorClass(want.ErrorField)))
 }

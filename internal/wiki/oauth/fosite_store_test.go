@@ -10,7 +10,7 @@ import (
 	"github.com/ory/fosite"
 )
 
-var _ = ginkgo.Describe("Fosite in-memory store", func() {
+var _ = ginkgo.Describe("Fosite in-memory store", ginkgo.Label("integration"), func() {
 	ginkgo.It("creates and retrieves public OAuth clients", func() {
 		ctx := context.Background()
 		store := newFositeStore()
@@ -21,8 +21,7 @@ var _ = ginkgo.Describe("Fosite in-memory store", func() {
 		Expect(store.setClient(fixedOAuthClient())).To(Succeed())
 		client, err := store.GetClient(ctx, ClientID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(client.GetID()).To(Equal(ClientID))
-		Expect(client.IsPublic()).To(BeTrue())
+		Expect(client).To(matchPublicOAuthClient(ClientID))
 	})
 
 	ginkgo.It("keeps invalidated authorization code requesters available for Fosite error handling", func() {

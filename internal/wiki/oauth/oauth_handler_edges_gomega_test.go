@@ -20,7 +20,7 @@ import (
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 )
 
-var _ = Describe("OAuth authorization handler behavior", func() {
+var _ = Describe("OAuth authorization handler behavior", Label("integration"), func() {
 	const redirectURI = "http://127.0.0.1:49152/callback"
 
 	var (
@@ -263,7 +263,7 @@ var _ = Describe("OAuth authorization handler behavior", func() {
 	})
 })
 
-var _ = Describe("OAuth token and bearer behavior", func() {
+var _ = Describe("OAuth token and bearer behavior", Label("integration"), func() {
 	It("handles token subject failures, access response failures, and successful token responses", func() {
 		userService, user := newOAuthUserServiceForSpec("token-user")
 		service := newOAuthServiceForSpec(ServiceConfig{UserService: userService})
@@ -355,7 +355,7 @@ var _ = Describe("OAuth token and bearer behavior", func() {
 	})
 })
 
-var _ = Describe("OAuth deterministic service seams", func() {
+var _ = Describe("OAuth deterministic service seams", Label("integration"), func() {
 	It("surfaces random source failures from service, client ID, and approval token generation", func() {
 		entropyExhaustedErr := errors.New("entropy exhausted")
 		withOAuthRandomRead(func([]byte) (int, error) {

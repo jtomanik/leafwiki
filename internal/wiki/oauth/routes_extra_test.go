@@ -23,7 +23,7 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 )
 
-var _ = ginkgo.Describe("OAuth routes and responses", func() {
+var _ = ginkgo.Describe("OAuth routes and responses", ginkgo.Label("integration"), func() {
 	ginkgo.It("RegisterRoutes exposes metadata endpoints only when local MCP OAuth is enabled", func() {
 		gin.SetMode(gin.TestMode)
 
@@ -246,17 +246,57 @@ var _ = ginkgo.Describe("OAuth routes and responses", func() {
 		Expect(validateLoopbackRedirectURI("http://127.0.0.1:49152/callback#fragment")).To(MatchError(ErrOAuthRedirectURIHasFragment))
 		Expect(validateLoopbackRedirectURI("http://example.com:49152/callback")).To(MatchError(ErrOAuthRedirectURINotLoopback))
 
-		client := registeredClient{RedirectURIs: []string{"http://127.0.0.1:49152/callback"}, Scope: ScopeMCP}
-		Expect(clientRedirectURIAllowed(registeredClient{}, "http://anything.test/callback")).To(BeTrue())
-		Expect(clientRedirectURIAllowed(client, "http://127.0.0.1:49152/callback")).To(BeTrue())
-		Expect(clientRedirectURIAllowed(client, "http://127.0.0.1:49153/callback")).To(BeFalse())
-		Expect(clientScopeAllowed(client, "")).To(BeTrue())
-		Expect(clientScopeAllowed(registeredClient{}, ScopeMCP)).To(BeTrue())
-		Expect(clientScopeAllowed(client, ScopeMCP)).To(BeTrue())
-		Expect(clientScopeAllowed(client, "other")).To(BeFalse())
-		Expect(clientScopeAllowed(registeredClient{Scope: "other"}, ScopeMCP)).To(BeFalse())
-		Expect(stringSliceContains([]string{"a", "b"}, "b")).To(BeTrue())
-		Expect(stringSliceContains([]string{"a", "b"}, "c")).To(BeFalse())
+		service.clients["open-client"] = registeredClient{}
+		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=open-client&redirect_uri=http://127.0.0.1:49154/callback", nil)
+		redirectURI, _, err := routes.validateAuthorizeRedirectTarget(req)
+		Expect(err).To(Succeed())
+		Expect(redirectURI).To(Equal("http://127.0.0.1:49154/callback"))
+
+		restrictedClient := registeredClient{
+			RedirectURIs:  []string{"http://127.0.0.1:49152/callback"},
+			ResponseTypes: []string{responseTypeCode},
+			Scope:         ScopeMCP,
+		}
+		service.clients["restricted-client"] = restrictedClient
+		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=restricted-client&redirect_uri=http://127.0.0.1:49152/callback", nil)
+		redirectURI, _, err = routes.validateAuthorizeRedirectTarget(req)
+		Expect(err).To(Succeed())
+		Expect(redirectURI).To(Equal("http://127.0.0.1:49152/callback"))
+
+		req = httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=restricted-client&redirect_uri=http://127.0.0.1:49153/callback", nil)
+		_, _, err = routes.validateAuthorizeRedirectTarget(req)
+		Expect(err).To(MatchError(ErrOAuthRedirectURIUnregistered))
+
+		authorizeRequest := func(clientID string, scopes ...string) fosite.AuthorizeRequester {
+			parsedRedirectURI, parseErr := url.Parse("http://127.0.0.1:49152/callback")
+			Expect(parseErr).NotTo(HaveOccurred())
+
+			ar := fosite.NewAuthorizeRequest()
+			ar.Client = &fosite.DefaultClient{
+				ID:            clientID,
+				GrantTypes:    []string{string(fosite.GrantTypeAuthorizationCode)},
+				ResponseTypes: []string{responseTypeCode},
+				Scopes:        []string{ScopeMCP},
+				Public:        true,
+			}
+			ar.ResponseTypes = fosite.Arguments{responseTypeCode}
+			ar.RedirectURI = parsedRedirectURI
+			ar.RequestedScope = fosite.Arguments(scopes)
+			return ar
+		}
+		validAuthorizeReq := httptest.NewRequest(http.MethodGet, "http://leafwiki.test/oauth/authorize?code_challenge=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUV&code_challenge_method=S256&resource=http://leafwiki.test/mcp", nil)
+		Expect(routes.validateAuthorizeRequest(validAuthorizeReq, authorizeRequest("restricted-client"), "")).To(Succeed())
+		Expect(routes.validateAuthorizeRequest(validAuthorizeReq, authorizeRequest("restricted-client", ScopeMCP), "")).To(Succeed())
+		Expect(routes.validateAuthorizeRequest(validAuthorizeReq, authorizeRequest("restricted-client", "other"), "")).To(MatchError(fosite.ErrInvalidScope))
+
+		service.clients["open-scope-client"] = registeredClient{ResponseTypes: []string{responseTypeCode}}
+		Expect(routes.validateAuthorizeRequest(validAuthorizeReq, authorizeRequest("open-scope-client", ScopeMCP), "")).To(Succeed())
+
+		service.clients["other-scope-client"] = registeredClient{
+			ResponseTypes: []string{responseTypeCode},
+			Scope:         "other",
+		}
+		Expect(routes.validateAuthorizeRequest(validAuthorizeReq, authorizeRequest("other-scope-client", ScopeMCP), "")).To(MatchError(fosite.ErrInvalidScope))
 
 		_, err = ((*Service)(nil)).VerifyBearerToken(context.Background(), "token", httptest.NewRequest(http.MethodGet, "/mcp", nil))
 		Expect(err).To(matchOAuthInvalidTokenError())
