@@ -4,9 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -80,23 +82,28 @@ func matchRootSection(canonicalHref string) types.GomegaMatcher {
 }
 
 func matchRewriteUpdatesContent(content string, issues ...Issue) types.GomegaMatcher {
-	return matchRewriteResult(content, BeTrue(), issues...)
+	expectedIssues := append([]Issue(nil), issues...)
+	return gcustom.MakeMatcher(func(result RewriteResult) (bool, error) {
+		return result.Content == content &&
+			result.Changed &&
+			rewriteIssuesMatch(result.Issues, expectedIssues), nil
+	}).WithMessage("rewrite updates content")
 }
 
 func matchRewriteLeavesContentUnchanged(content string, issues ...Issue) types.GomegaMatcher {
-	return matchRewriteResult(content, BeFalse(), issues...)
+	expectedIssues := append([]Issue(nil), issues...)
+	return gcustom.MakeMatcher(func(result RewriteResult) (bool, error) {
+		return result.Content == content &&
+			!result.Changed &&
+			rewriteIssuesMatch(result.Issues, expectedIssues), nil
+	}).WithMessage("rewrite leaves content unchanged")
 }
 
-func matchRewriteResult(content string, changed types.GomegaMatcher, issues ...Issue) types.GomegaMatcher {
-	issueMatcher := Equal(issues)
-	if len(issues) == 0 {
-		issueMatcher = BeEmpty()
+func rewriteIssuesMatch(actual []Issue, expected []Issue) bool {
+	if len(expected) == 0 {
+		return len(actual) == 0
 	}
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Content": Equal(content),
-		"Changed": changed,
-		"Issues":  issueMatcher,
-	})
+	return reflect.DeepEqual(actual, expected)
 }
 
 func matchLinkOccurrenceHref(href string) types.GomegaMatcher {
