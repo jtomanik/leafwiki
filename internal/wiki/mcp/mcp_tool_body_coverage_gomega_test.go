@@ -9,8 +9,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	coreauth "github.com/perber/wiki/internal/core/auth"
+	"github.com/perber/wiki/internal/core/markdown"
 	corerevision "github.com/perber/wiki/internal/core/revision"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
@@ -18,37 +21,43 @@ import (
 	coreprop "github.com/perber/wiki/internal/properties"
 	coresearch "github.com/perber/wiki/internal/search"
 	coretags "github.com/perber/wiki/internal/tags"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	wikilinks "github.com/perber/wiki/internal/wiki/links"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikiproperties "github.com/perber/wiki/internal/wiki/properties"
+	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
 	wikisearch "github.com/perber/wiki/internal/wiki/search"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
 var _ = Describe("MCP extracted tool bodies", func() {
-	It("covers actor, context, page, partial-edit, and validation tool body branches", func() {
+	It("reports actor, page, partial-edit, and validation tool outcomes through semantic contracts", func() {
 		backendErr := errors.New("tool failed")
 		_, err := callActorTool[emptyInput, currentUserOutput](&Routes{}, context.Background(), nil, emptyInput{}, func(context.Context, toolActor, emptyInput) (currentUserOutput, error) {
 			return currentUserOutput{}, nil
 		})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPTokenInfoMissing))
 		actorOut, err := callActorTool[emptyInput, currentUserOutput](&Routes{authDisabled: true}, context.Background(), nil, emptyInput{}, func(_ context.Context, actor toolActor, _ emptyInput) (currentUserOutput, error) {
 			return currentUserOutput{User: actor.User.ToPublicUser()}, nil
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actorOut.User.ID).NotTo(BeEmpty())
+		Expect(actorOut.User).To(SatisfyAll(
+			HaveField("ID", Equal(publicEditorID)),
+			HaveField("Username", Equal(publicEditorID)),
+			HaveField("Role", Equal(coreauth.RoleEditor)),
+		))
 
 		_, err = (&Routes{}).getContextTool(context.Background(), nil, httpinternal.RouterOptions{}, getContextInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPTokenInfoMissing))
 
-		unloadedTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})
+		unloadedTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})
 		Expect((&Routes{treeService: unloadedTree}).getTreeTool(getTreeInput{}).Tree).To(BeNil())
 		Expect(os.WriteFile(filepath.Join(unloadedTree.RootDir(), "README.md"), []byte("# Root\n"), 0o644)).To(Succeed())
 		_, err = (&Routes{treeService: unloadedTree}).findToolPageByInputPath(context.Background(), "README.md", mcpInputNodeKindSection)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 
-		routes := newContextToolTestRoutes(GinkgoT())
+		routes := newContextToolTestRoutes()
 		page, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		routes.lookupPath = fakeMCPLookupPathUseCase{err: backendErr}
@@ -68,10 +77,10 @@ var _ = Describe("MCP extracted tool bodies", func() {
 
 		routes.updatePage = fakeMCPUpdatePageUseCase{err: backendErr}
 		_, err = routes.updatePageTool(context.Background(), toolActor{ID: "user-1"}, updatePageInput{ID: page.ID.String(), TagsPresent: true, Tags: []string{""}})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(havePageValidationFieldError("tags[0]", wikipages.FieldCodePageTagRequired, wikipages.MessageIDPageTagRequired))
 		content := "updated"
 		_, err = routes.updatePageTool(context.Background(), toolActor{ID: "user-1"}, updatePageInput{ID: "missing", Content: &content})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 		relPath, err := routes.treeService.ContentPathForNode(page.PageNode)
 		Expect(err).NotTo(HaveOccurred())
@@ -81,14 +90,14 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		routes.findByPath = fakeMCPFindByPathUseCase{out: &wikipages.FindByPathOutput{Page: page}}
 		Expect(os.Remove(absPath)).To(Succeed())
 		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{Path: "home", Version: page.Version().String()})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchTreeDriftError())
 		Expect(os.WriteFile(absPath, originalRaw, 0o644)).To(Succeed())
 		Expect(os.WriteFile(absPath, []byte("<!-- leafwiki\n: bad\n-->\nBody"), 0o644)).To(Succeed())
 		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{Path: "home", Version: page.Version().String()})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(markdown.ErrMetadataParse))
 		Expect(os.WriteFile(absPath, originalRaw, 0o644)).To(Succeed())
 		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{Path: "home", Version: page.Version().String(), AddTags: []string{""}})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(backendErr))
 		originalBuildMarkdownWithPublicMetadataPatch := buildMarkdownWithPublicMetadataPatch
 		buildMarkdownWithPublicMetadataPatch = func(string, tree.PageID, string, wikipages.PublicMetadataPatch, string) (string, error) {
 			return "", backendErr
@@ -105,14 +114,14 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		routes.findByPath = fakeMCPFindByPathUseCase{out: &wikipages.FindByPathOutput{Page: page}}
 		Expect(os.WriteFile(absPath, []byte("<!-- leafwiki extra\nversion: 1\npage:\n  id: page-123\n-->\nBody"), 0o644)).To(Succeed())
 		_, err = routes.updatePageTool(context.Background(), toolActor{ID: "user-1"}, updatePageInput{ID: page.ID.String(), TagsPresent: true, Tags: []string{"tag"}})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(markdown.ErrMetadataParse))
 		Expect(os.WriteFile(absPath, originalRaw, 0o644)).To(Succeed())
 
 		routes.updatePage = fakeMCPUpdatePageUseCase{out: &wikipages.UpdatePageOutput{Page: page}}
 		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageTargetRequired))
 		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{PageID: page.ID.String(), Version: "stale"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionConflict))
 		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{PageID: page.ID.String(), Version: page.Version().String(), AddTags: []string{"tag"}})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -120,9 +129,9 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{PageID: page.ID.String(), Version: page.Version().String(), AddTags: []string{"tag"}})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: "user-1"}, replacePageSectionInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageTargetRequired))
 		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: "user-1"}, replacePageSectionInput{PageID: page.ID.String(), Version: page.Version().String(), HeadingPath: []string{"Missing"}, Content: "replacement"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(wikipages.ErrSectionHeadingNotFound))
 		sectionContent := "# Heading\nold"
 		Expect(routes.treeService.UpdateNodeUncheckedVersion("system", page.ID, page.Title, page.Slug, &sectionContent, false)).To(Succeed())
 		page, err = routes.treeService.GetPage(page.ID)
@@ -135,12 +144,12 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(err).To(MatchError(backendErr))
 
 		_, err = routes.validatePageTool(context.Background(), validatePageInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageTargetRequired))
 		Expect(os.Remove(absPath)).To(Succeed())
 		_ = routes.validateLoadedTree(context.Background())
 		routes.findByPath = fakeMCPFindByPathUseCase{out: &wikipages.FindByPathOutput{Page: page}}
 		_, err = routes.validatePageTool(context.Background(), validatePageInput{Path: "home"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchTreeDriftError())
 		Expect(os.WriteFile(absPath, originalRaw, 0o644)).To(Succeed())
 		out, err := routes.validatePageTool(context.Background(), validatePageInput{PageID: page.ID.String()})
 		Expect(err).NotTo(HaveOccurred())
@@ -155,7 +164,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(wikiOut.OK).To(BeFalse())
 	})
 
-	It("covers tag and property tool body success and error branches", func() {
+	It("reports tag and property tool backend failures and result counts", func() {
 		backendErr := errors.New("backend failed")
 		routes := &Routes{
 			getTags:      fakeMCPGetTagsUseCase{err: backendErr},
@@ -167,7 +176,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		_, err := routes.listTagsTool(context.Background(), listTagsInput{Query: "tag"})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.pagesByTagsTool(context.Background(), pagesByTagsInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikitags.ErrCodeTagsMissingParam))
 		_, err = routes.pagesByTagsTool(context.Background(), pagesByTagsInput{Tags: []string{"tag"}})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.listPropertyKeysTool(context.Background(), listPropertyKeysInput{Query: "status"})
@@ -194,12 +203,12 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(pages.Pages).To(HaveLen(1))
 	})
 
-	It("covers search tool body validation, backend, and pagination branches", func() {
+	It("reports search validation, backend failures, and pagination metadata", func() {
 		backendErr := errors.New("search failed")
 		routes := &Routes{search: fakeMCPSearchUseCase{err: backendErr}}
 
 		_, err := routes.searchPagesTool(context.Background(), searchPagesInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikisearch.ErrCodeSearchMissingQuery))
 		_, err = routes.searchPagesTool(context.Background(), searchPagesInput{Query: "needle"})
 		Expect(err).To(MatchError(backendErr))
 
@@ -217,7 +226,7 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		}))
 	})
 
-	It("covers refactor tool body validation, backend, and success branches", func() {
+	It("reports refactor validation, backend failures, and applied page results", func() {
 		backendErr := errors.New("refactor failed")
 		routes := &Routes{
 			previewRef: fakeMCPPreviewRefactorUseCase{err: backendErr},
@@ -225,15 +234,15 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		}
 
 		_, err := routes.previewRefactorTool(context.Background(), previewRefactorInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.previewRefactorTool(context.Background(), previewRefactorInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.applyRefactorTool(context.Background(), toolActor{ID: "user-1"}, applyRefactorInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.applyRefactorTool(context.Background(), toolActor{ID: "user-1"}, applyRefactorInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
 
-		routes = newContextToolTestRoutes(GinkgoT())
+		routes = newContextToolTestRoutes()
 		page, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		routes.previewRef = fakeMCPPreviewRefactorUseCase{out: &wikipages.RefactorPreview{}}
@@ -246,20 +255,20 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(applied.Page.ID).To(Equal(mcpOutputPageID(page.ID)))
 	})
 
-	It("covers revision tool body validation, backend, and success branches", func() {
+	It("reports revision validation, backend failures, and revision payloads", func() {
 		backendErr := errors.New("revision failed")
 		actor := toolActor{ID: "user-1", User: &coreauth.User{ID: "user-1", Username: "user", Email: "user@example.com"}}
 		routes := &Routes{}
 		_, err := routes.listRevisionsTool(context.Background(), listRevisionsInput{PageID: "page-1"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.latestRevisionTool(context.Background(), pageIDInput{PageID: "page-1"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.getRevisionTool(context.Background(), revisionIDInput{PageID: "page-1", RevisionID: "rev-1"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.compareRevisionsTool(context.Background(), compareRevisionsInput{PageID: "page-1", BaseRevisionID: "base", TargetRevisionID: "target"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.restoreRevisionTool(context.Background(), actor, revisionIDInput{PageID: "page-1", RevisionID: "rev-1"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 
 		routes.listWorkspaceRevisions = func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
 			return workspacesync.PageRevisionList{}, backendErr
@@ -273,35 +282,35 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		routes.getPage = fakeMCPGetPageUseCase{err: backendErr}
 
 		_, err = routes.listRevisionsTool(context.Background(), listRevisionsInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.listRevisionsTool(context.Background(), listRevisionsInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.latestRevisionTool(context.Background(), pageIDInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.latestRevisionTool(context.Background(), pageIDInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.getRevisionTool(context.Background(), revisionIDInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.getRevisionTool(context.Background(), revisionIDInput{PageID: "page-1", RevisionID: ""})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionInvalidRevisionID))
 		_, err = routes.getRevisionTool(context.Background(), revisionIDInput{PageID: "page-1", RevisionID: "rev-1"})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.compareRevisionsTool(context.Background(), compareRevisionsInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.compareRevisionsTool(context.Background(), compareRevisionsInput{PageID: "page-1", BaseRevisionID: "", TargetRevisionID: "target"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionCompareInvalidRequest))
 		_, err = routes.compareRevisionsTool(context.Background(), compareRevisionsInput{PageID: "page-1", BaseRevisionID: "base", TargetRevisionID: "target"})
 		Expect(err).To(MatchError(backendErr))
 		_, err = revisionAssetTool(revisionAssetInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = revisionAssetTool(revisionAssetInput{PageID: "page-1", RevisionID: "", AssetName: "logo.png"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionInvalidRevisionID))
 		_, err = revisionAssetTool(revisionAssetInput{PageID: "page-1", RevisionID: "rev-1", AssetName: "logo.png"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.restoreRevisionTool(context.Background(), actor, revisionIDInput{})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.restoreRevisionTool(context.Background(), actor, revisionIDInput{PageID: "page-1", RevisionID: ""})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionInvalidRevisionID))
 		_, err = routes.restoreRevisionTool(context.Background(), actor, revisionIDInput{PageID: "page-1", RevisionID: "rev-1"})
 		Expect(err).To(MatchError(backendErr))
 
@@ -310,15 +319,15 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		_, err = routes.listRevisionsTool(context.Background(), listRevisionsInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
 		_, err = routes.latestRevisionTool(context.Background(), pageIDInput{PageID: "page-1"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.getRevisionTool(context.Background(), revisionIDInput{PageID: "page-1", RevisionID: "rev-1"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.compareRevisionsTool(context.Background(), compareRevisionsInput{PageID: "page-1", BaseRevisionID: "base", TargetRevisionID: "target"})
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
 		_, err = routes.restoreRevisionTool(context.Background(), actor, revisionIDInput{PageID: "page-1", RevisionID: "rev-1"})
 		Expect(err).To(MatchError(backendErr))
 
-		routes = newContextToolTestRoutes(GinkgoT())
+		routes = newContextToolTestRoutes()
 		page, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		rev := mcpTestRevision(page.ID, "rev-1")
@@ -361,9 +370,9 @@ var _ = Describe("MCP extracted tool bodies", func() {
 		Expect(restored.Page.ID).To(Equal(mcpOutputPageID(page.ID)))
 	})
 
-	It("covers link-status dependent helper branches", func() {
+	It("reports link-status failures and enriches partial-edit output with link status", func() {
 		backendErr := errors.New("links failed")
-		routes := newContextToolTestRoutes(GinkgoT())
+		routes := newContextToolTestRoutes()
 		page, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		routes.linkStatus = fakeMCPLinkStatusUseCase{err: backendErr}
@@ -406,6 +415,30 @@ func mcpTestRevision(pageID tree.PageID, id string) *corerevision.Revision {
 
 func mcpOutputPageID(pageID tree.PageID) string {
 	return pageID.MetadataValue()
+}
+
+func matchMCPToolLocalizedError(code sharederrors.ErrorCode) types.GomegaMatcher {
+	GinkgoHelper()
+	return matchLocalizedErrorCode(code, sharederrors.MessageIDForCode(code))
+}
+
+func havePageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	GinkgoHelper()
+	return WithTransform(func(err error) *sharederrors.ValidationErrors {
+		var validation *sharederrors.ValidationErrors
+		if !errors.As(err, &validation) {
+			return nil
+		}
+		return validation
+	}, testmatchers.ContainFieldError(field, code, messageID))
+}
+
+func matchTreeDriftError() types.GomegaMatcher {
+	GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var drift *tree.DriftError
+		return errors.As(err, &drift)
+	})
 }
 
 type fakeMCPGetTagsUseCase struct {

@@ -7,6 +7,9 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	corerevision "github.com/perber/wiki/internal/core/revision"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
@@ -20,10 +23,9 @@ import (
 var _ = Describe("Revision tools", func() {
 	It("passes the workspace cursor and returns the next cursor", func() {
 		const revisionCursorFixture = "rev-3"
-		t := GinkgoT()
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-			DataDir: t.TempDir(),
-			RootDir: t.TempDir(),
+			DataDir: mcpTestTempDir(),
+			RootDir: mcpTestTempDir(),
 		})
 		Expect(treeService.LoadTree()).To(Succeed())
 		kind := tree.NodeKindPage
@@ -75,17 +77,13 @@ var _ = Describe("Revision tools", func() {
 			Arguments: map[string]any{"pageId": *pageID, "cursor": "rev-5", "limit": float64(1)},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.IsError).To(BeFalse(), "CallTool wiki_list_revisions returned tool error: %#v", result.Content)
-		body, ok := result.StructuredContent.(map[string]any)
-		Expect(ok).To(BeTrue(), "structured content type = %T", result.StructuredContent)
 		Expect(seenCursor).To(Equal("rev-5"))
-		Expect(body).To(HaveKeyWithValue("nextCursor", revisionCursorFixture))
-		revisions, ok := body["revisions"].([]any)
-		Expect(ok).To(BeTrue(), "revisions = %#v", body["revisions"])
-		Expect(revisions).To(HaveLen(1))
-		first, ok := revisions[0].(map[string]any)
-		Expect(ok).To(BeTrue(), "first revision = %#v", revisions[0])
-		Expect(first).To(HaveKeyWithValue("id", revisionCursorFixture))
+		Expect(result).To(matchSuccessfulToolStructuredContent(
+			gstruct.MatchKeys(gstruct.IgnoreExtras, gstruct.Keys{
+				"nextCursor": Equal(revisionCursorFixture),
+				"revisions":  HaveExactElements(HaveKeyWithValue("id", revisionCursorFixture)),
+			}),
+		), "CallTool wiki_list_revisions returned tool error: %#v", result.Content)
 	})
 
 	It("returns a stable unavailable-backend revision error", func() {
@@ -93,3 +91,14 @@ var _ = Describe("Revision tools", func() {
 		Expect(err).To(testmatchers.MatchLocalizedError(wikirevisions.ErrCodeRevisionNotFound, sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionNotFound)))
 	})
 })
+
+func matchSuccessfulToolStructuredContent(content types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+
+	return gcustom.MakeMatcher(func(result *sdkmcp.CallToolResult) (bool, error) {
+		if result == nil || result.IsError {
+			return false, nil
+		}
+		return content.Match(result.StructuredContent)
+	}).WithMessage("be a successful MCP tool result with matching structured content")
+}

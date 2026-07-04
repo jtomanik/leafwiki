@@ -9,7 +9,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/perber/wiki/internal/core/auth"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -28,9 +27,8 @@ var _ = Describe("Workspace sync tool helpers", func() {
 	})
 
 	It("returns validation status without modeling it as a tool error", func() {
-		t := GinkgoT()
-		rootDir := filepath.Join(t.TempDir(), "content")
-		dataDir := filepath.Join(t.TempDir(), "data")
+		rootDir := filepath.Join(mcpTestTempDir(), "content")
+		dataDir := filepath.Join(mcpTestTempDir(), "data")
 		routes := &Routes{
 			workspaceRootDir: rootDir,
 			workspaceDataDir: dataDir,
@@ -49,7 +47,7 @@ var _ = Describe("Workspace sync tool helpers", func() {
 		actor := toolActor{ID: "editor", User: &auth.User{ID: "editor", Username: "editor", Role: auth.RoleEditor}}
 
 		out, err := routes.refreshWorkspaceSync(context.Background(), actor, refreshInput{})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		validation := out.Validation
 		Expect(validation).NotTo(BeNil())
 		Expect(*validation).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -62,16 +60,13 @@ var _ = Describe("Workspace sync tool helpers", func() {
 			})),
 		}))
 
-		status, ok := out.SyncStatus.(map[string]any)
-		Expect(ok).To(BeTrue(), "syncStatus has type %T: %#v", out.SyncStatus, out.SyncStatus)
-		lastErrorDetail, ok := status["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
-		Expect(ok && lastErrorDetail != nil).To(BeFalse(), "syncStatus = %#v, did not want validation status modeled as tool error", status)
-		validationErrors, ok := status["validationErrorDetails"].([]workspacesync.ValidationError)
-		Expect(ok).To(BeTrue(), "syncStatus validationErrorDetails = %#v", status["validationErrorDetails"])
-		Expect(validationErrors).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Path":    Equal("<root-dir>/a.md"),
-			"Message": ContainSubstring("<data-dir>/.leafwiki/scan"),
-		})))
+		Expect(out.SyncStatus).To(SatisfyAll(
+			HaveKeyWithValue("lastErrorDetail", BeNil()),
+			HaveKeyWithValue("validationErrorDetails", HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Path":    Equal("<root-dir>/a.md"),
+				"Message": ContainSubstring("<data-dir>/.leafwiki/scan"),
+			}))),
+		))
 	})
 
 	It("propagates hard errors even when validation status is present", func() {

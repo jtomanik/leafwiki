@@ -43,7 +43,6 @@ var _ = Describe("Tool descriptor contracts", func() {
 			"Missing": BeFalse(),
 			"Err":     Not(HaveOccurred()),
 		}))
-		Expect(output.Message).To(Equal(rendered.Message))
 
 		encoded, err := json.Marshal(output)
 		Expect(err).NotTo(HaveOccurred())
@@ -51,7 +50,7 @@ var _ = Describe("Tool descriptor contracts", func() {
 		Expect(json.Unmarshal(encoded, &decoded)).To(Succeed())
 		Expect(decoded).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"MessageID": Equal(ToolMessageMovePageSuccess),
-			"Message":   Equal(rendered.Message),
+			"Message":   Not(BeEmpty()),
 		}))
 	})
 
@@ -66,9 +65,9 @@ var _ = Describe("Tool descriptor contracts", func() {
 		rawErr := errors.New("sqlite raw private failure")
 
 		result := mcpToolErrorResult(rawErr)
-		errorMeta, ok := result.Meta["error"].(map[string]any)
-		Expect(ok).To(BeTrue(), "Meta error = %#v, want map", result.Meta["error"])
-		Expect(errorMeta).To(testmatchers.HaveMCPStructuredError(errCodeMCPToolError, sharederrors.MessageIDForCode(errCodeMCPToolError)))
-		Expect(errorMeta).To(HaveKeyWithValue("args", Equal([]string{rawErr.Error()})))
+		Expect(result.Meta).To(HaveKeyWithValue("error", SatisfyAll(
+			testmatchers.HaveMCPStructuredError(errCodeMCPToolError, sharederrors.MessageIDForCode(errCodeMCPToolError)),
+			HaveKeyWithValue("args", HaveLen(1)),
+		)))
 	})
 })

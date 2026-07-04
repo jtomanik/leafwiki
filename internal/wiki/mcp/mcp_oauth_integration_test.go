@@ -10,20 +10,24 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/types"
 	"github.com/ory/fosite"
 	"github.com/perber/wiki/internal/core/assets"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	xoauth2 "golang.org/x/oauth2"
@@ -33,6 +37,10 @@ const (
 	oauthClientID = "leafwiki-local-mcp"
 	oauthScope    = "leafwiki:mcp"
 )
+
+type oauthErrorField string
+
+const oauthErrorInvalidClientMetadata oauthErrorField = "invalid_client_metadata"
 
 type oauthMetadataCase struct {
 	basePath          string
@@ -44,8 +52,7 @@ type oauthMetadataCase struct {
 
 var _ = DescribeTable("LocalMCPOAuthMetadata",
 	func(tc oauthMetadataCase) {
-		t := GinkgoTB()
-		w := newLocalMCPAuthTestWiki(t)
+		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 			AllowInsecure:           true,
 			BasePath:                tc.basePath,
@@ -56,38 +63,30 @@ var _ = DescribeTable("LocalMCPOAuthMetadata",
 		})
 
 		for _, path := range tc.authMetadataPaths {
-			authMeta := getJSONMap(t, router, "http://leafwiki.local"+path)
-			assertStringField(t, authMeta, "issuer", tc.issuer)
-			assertStringField(t, authMeta, "authorization_endpoint", tc.issuer+"/oauth/authorize")
-			assertStringField(t, authMeta, "token_endpoint", tc.issuer+"/oauth/token")
-			assertStringField(t, authMeta, "registration_endpoint", tc.issuer+"/oauth/register")
-			assertStringSliceField(t, authMeta, "response_types_supported", []string{"code"})
-			assertStringSliceField(t, authMeta, "grant_types_supported", []string{"authorization_code", "refresh_token"})
-			assertStringSliceField(t, authMeta, "code_challenge_methods_supported", []string{"S256"})
-			assertStringSliceField(t, authMeta, "scopes_supported", []string{oauthScope})
-			assertStringSliceField(t, authMeta, "token_endpoint_auth_methods_supported", []string{"none"})
-			if _, exists := authMeta["revocation_endpoint"]; exists {
-				t.Fatalf("authorization metadata advertised revocation_endpoint: %#v", authMeta)
-			}
-			if _, exists := authMeta["introspection_endpoint"]; exists {
-				t.Fatalf("authorization metadata advertised introspection_endpoint: %#v", authMeta)
-			}
+			authMeta := getJSONMap(router, "http://leafwiki.local"+path)
+			Expect(authMeta).To(HaveKeyWithValue("issuer", tc.issuer))
+			Expect(authMeta).To(HaveKeyWithValue("authorization_endpoint", tc.issuer+"/oauth/authorize"))
+			Expect(authMeta).To(HaveKeyWithValue("token_endpoint", tc.issuer+"/oauth/token"))
+			Expect(authMeta).To(HaveKeyWithValue("registration_endpoint", tc.issuer+"/oauth/register"))
+			Expect(authMeta).To(HaveKeyWithValue("response_types_supported", HaveExactElements("code")))
+			Expect(authMeta).To(HaveKeyWithValue("grant_types_supported", HaveExactElements("authorization_code", "refresh_token")))
+			Expect(authMeta).To(HaveKeyWithValue("code_challenge_methods_supported", HaveExactElements("S256")))
+			Expect(authMeta).To(HaveKeyWithValue("scopes_supported", HaveExactElements(oauthScope)))
+			Expect(authMeta).To(HaveKeyWithValue("token_endpoint_auth_methods_supported", HaveExactElements("none")))
+			Expect(authMeta).NotTo(HaveKey("revocation_endpoint"))
+			Expect(authMeta).NotTo(HaveKey("introspection_endpoint"))
 		}
 
 		for _, path := range tc.prMetadataPaths {
-			rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local"+path, nil, nil)
-			if contentType := rec.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
-				t.Fatalf("GET %s content-type = %q, want JSON; body=%s", path, contentType, rec.Body.String())
-			}
-			prMeta := decodeJSONResponse(t, rec, http.StatusOK)
-			assertStringField(t, prMeta, "resource", tc.resource)
-			assertStringSliceField(t, prMeta, "authorization_servers", []string{tc.issuer})
-			assertStringSliceField(t, prMeta, "scopes_supported", []string{oauthScope})
+			rec := performRequest(router, http.MethodGet, "http://leafwiki.local"+path, nil, nil)
+			Expect(rec.Header().Get("Content-Type")).To(HavePrefix("application/json"), "protected resource metadata should be JSON for %s", path)
+			prMeta := decodeJSONResponse(rec, http.StatusOK)
+			Expect(prMeta).To(HaveKeyWithValue("resource", tc.resource))
+			Expect(prMeta).To(HaveKeyWithValue("authorization_servers", HaveExactElements(tc.issuer)))
+			Expect(prMeta).To(HaveKeyWithValue("scopes_supported", HaveExactElements(oauthScope)))
 
-			optionsRec := performRequest(t, router, http.MethodOptions, "http://leafwiki.local"+path, nil, nil)
-			if optionsRec.Code != http.StatusNoContent {
-				t.Fatalf("OPTIONS protected resource metadata = %d, want 204: %s", optionsRec.Code, optionsRec.Body.String())
-			}
+			optionsRec := performRequest(router, http.MethodOptions, "http://leafwiki.local"+path, nil, nil)
+			Expect(optionsRec).To(HaveHTTPStatus(http.StatusNoContent), optionsRec.Body.String())
 		}
 	},
 	Entry(
@@ -114,13 +113,12 @@ var _ = DescribeTable("LocalMCPOAuthMetadata",
 
 var _ = DescribeTable("LocalMCPOAuthDynamicClientRegistration invalid registrations",
 	func(body string) {
-		t := GinkgoTB()
-		w := newLocalMCPAuthTestWiki(t)
+		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 
-		rec := performJSON(t, router, "http://leafwiki.local/oauth/register", body)
-		payload := decodeJSONResponse(t, rec, http.StatusBadRequest)
-		assertStringField(t, payload, "error", "invalid_client_metadata")
+		rec := performJSON(router, "http://leafwiki.local/oauth/register", body)
+		payload := decodeJSONResponse(rec, http.StatusBadRequest)
+		Expect(payload).To(matchOAuthErrorField(oauthErrorInvalidClientMetadata))
 	},
 	Entry("missing redirect uris", `{"token_endpoint_auth_method":"none"}`),
 	Entry("non loopback redirect uri", `{"redirect_uris":["http://example.com/callback"],"token_endpoint_auth_method":"none"}`),
@@ -131,12 +129,12 @@ var _ = DescribeTable("LocalMCPOAuthDynamicClientRegistration invalid registrati
 	Entry("unsupported scope", `{"redirect_uris":["http://127.0.0.1:49152/callback"],"scope":"leafwiki:mcp other","token_endpoint_auth_method":"none"}`),
 )
 
-var _ = It("LocalMCPOAuthDynamicClientRegistration", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+var _ = Describe("OAuth dynamic client registration", func() {
+	It("registers loopback public clients and exchanges authorization codes", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 
-	registration := registerOAuthClient(t, router, "", `{
+		registration := registerOAuthClient(router, "", `{
 		"client_name":"codex",
 		"redirect_uris":["http://127.0.0.1:49152/callback"],
 		"grant_types":["authorization_code","refresh_token"],
@@ -144,170 +142,143 @@ var _ = It("LocalMCPOAuthDynamicClientRegistration", func() {
 		"token_endpoint_auth_method":"none",
 		"scope":"leafwiki:mcp"
 	}`)
-	clientID := stringFromMap(t, registration, "client_id")
-	if clientID == "" || clientID == oauthClientID {
-		t.Fatalf("dynamic client_id = %q, want generated non-default id; payload=%#v", clientID, registration)
-	}
-	assertStringSliceField(t, registration, "redirect_uris", []string{"http://127.0.0.1:49152/callback"})
-	assertStringField(t, registration, "token_endpoint_auth_method", "none")
-	assertStringSliceField(t, registration, "grant_types", []string{"authorization_code", "refresh_token"})
-	assertStringSliceField(t, registration, "response_types", []string{"code"})
-	assertStringField(t, registration, "scope", oauthScope)
+		clientID := stringFromMap(registration, "client_id")
+		Expect(clientID).To(SatisfyAll(Not(BeEmpty()), Not(Equal(oauthClientID))))
+		Expect(registration).To(HaveKeyWithValue("redirect_uris", HaveExactElements("http://127.0.0.1:49152/callback")))
+		Expect(registration).To(HaveKeyWithValue("token_endpoint_auth_method", "none"))
+		Expect(registration).To(HaveKeyWithValue("grant_types", HaveExactElements("authorization_code", "refresh_token")))
+		Expect(registration).To(HaveKeyWithValue("response_types", HaveExactElements("code")))
+		Expect(registration).To(HaveKeyWithValue("scope", oauthScope))
 
-	cookies := loginCookies(t, router, "admin", "admin")
-	redirectURI := "http://127.0.0.1:49152/callback"
-	verifier := "oauth-dynamic-client-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		cookies := loginCookies(router, "admin", "admin")
+		redirectURI := "http://127.0.0.1:49152/callback"
+		verifier := "oauth-dynamic-client-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
 
-	mismatchQ := validAuthorizeQueryForClient(clientID, "http://127.0.0.1:49153/callback", "dynamic-client-mismatch-state", pkceS256(verifier), "http://leafwiki.local/mcp")
-	mismatch := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+mismatchQ.Encode(), cookies, nil)
-	if mismatch.Code != http.StatusBadRequest {
-		t.Fatalf("dynamic client authorize with unregistered redirect = %d, want 400: %s", mismatch.Code, mismatch.Body.String())
-	}
+		mismatchQ := validAuthorizeQueryForClient(clientID, "http://127.0.0.1:49153/callback", "dynamic-client-mismatch-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		mismatch := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+mismatchQ.Encode(), cookies, nil)
+		Expect(mismatch).To(HaveHTTPStatus(http.StatusBadRequest), mismatch.Body.String())
 
-	q := validAuthorizeQueryForClient(clientID, redirectURI, "dynamic-client-state", pkceS256(verifier), "http://leafwiki.local/mcp")
-	rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
-	form := approvalFormFromAuthorizeRedirect(t, rec, "")
-	approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
-	if approved.Code != http.StatusFound {
-		t.Fatalf("dynamic client approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-	}
-	redirected, err := url.Parse(approved.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse dynamic client authorize redirect: %v", err)
-	}
-	if got := redirected.Query().Get("state"); got != "dynamic-client-state" {
-		t.Fatalf("dynamic client authorize state = %q, want dynamic-client-state", got)
-	}
-	code := redirected.Query().Get("code")
-	if code == "" {
-		t.Fatalf("dynamic client authorize redirect missing code: %s", redirected.String())
-	}
+		q := validAuthorizeQueryForClient(clientID, redirectURI, "dynamic-client-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		rec := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
+		form := approvalFormFromAuthorizeRedirect(rec, "")
+		approved := performFormWithCookiesAndHeaders(router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
+		Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
+		redirected, err := url.Parse(approved.Header().Get("Location"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(redirected.Query().Get("state")).To(Equal("dynamic-client-state"))
+		code := redirected.Query().Get("code")
+		Expect(code).NotTo(BeEmpty(), "dynamic client authorize redirect should include code: %s", redirected.String())
 
-	token := exchangeCodeForClient(t, router, "", clientID, code, redirectURI, verifier)
-	assertStringField(t, token, "token_type", "Bearer")
-	assertStringField(t, token, "scope", oauthScope)
-	if stringFromMap(t, token, "access_token") == "" || stringFromMap(t, token, "refresh_token") == "" {
-		t.Fatalf("dynamic client token response missing tokens: %#v", token)
-	}
+		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		Expect(token).To(HaveKeyWithValue("token_type", "Bearer"))
+		Expect(token).To(HaveKeyWithValue("scope", oauthScope))
+		Expect(token).To(SatisfyAll(
+			HaveKeyWithValue("access_token", Not(BeEmpty())),
+			HaveKeyWithValue("refresh_token", Not(BeEmpty())),
+		))
+	})
 })
 
-var _ = It("LocalMCPOAuthDynamicClientRegistrationDefaultsRefreshAndBindsRefreshClient", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
-	redirectURI := "http://127.0.0.1:49152/callback"
+var _ = Describe("OAuth dynamic client registration defaults", func() {
+	It("adds refresh grants and binds refresh tokens to the registered client", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		redirectURI := "http://127.0.0.1:49152/callback"
 
-	registration := registerOAuthClient(t, router, "", `{
+		registration := registerOAuthClient(router, "", `{
 		"client_name":"Codex CLI",
 		"redirect_uris":["http://127.0.0.1:49152/callback"],
 		"response_types":["code"],
 		"token_endpoint_auth_method":"none",
 		"scope":"leafwiki:mcp"
 	}`)
-	clientID := stringFromMap(t, registration, "client_id")
-	assertStringSliceField(t, registration, "grant_types", []string{"authorization_code", "refresh_token"})
+		clientID := stringFromMap(registration, "client_id")
+		Expect(registration).To(HaveKeyWithValue("grant_types", HaveExactElements("authorization_code", "refresh_token")))
 
-	cookies := loginCookies(t, router, "admin", "admin")
-	verifier := "oauth-dcr-default-refresh-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	q := validAuthorizeQueryForClient(clientID, redirectURI, "dcr-default-refresh-state", pkceS256(verifier), "http://leafwiki.local/mcp")
-	rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
-	form := approvalFormFromAuthorizeRedirect(t, rec, "")
-	details := approvalDetails(t, router, "", form.Get("approval_token"), cookies, nil)
-	assertStringField(t, details, "clientLabel", "Codex CLI")
-	assertStringField(t, details, "clientId", clientID)
-	assertStringField(t, details, "redirectUri", redirectURI)
-	assertStringField(t, details, "scope", oauthScope)
-	assertStringField(t, details, "resource", "http://leafwiki.local/mcp")
+		cookies := loginCookies(router, "admin", "admin")
+		verifier := "oauth-dcr-default-refresh-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		q := validAuthorizeQueryForClient(clientID, redirectURI, "dcr-default-refresh-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		rec := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
+		form := approvalFormFromAuthorizeRedirect(rec, "")
+		details := approvalDetails(router, "", form.Get("approval_token"), cookies, nil)
+		Expect(details).To(HaveKeyWithValue("clientLabel", "Codex CLI"))
+		Expect(details).To(HaveKeyWithValue("clientId", clientID))
+		Expect(details).To(HaveKeyWithValue("redirectUri", redirectURI))
+		Expect(details).To(HaveKeyWithValue("scope", oauthScope))
+		Expect(details).To(HaveKeyWithValue("resource", "http://leafwiki.local/mcp"))
 
-	approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
-	if approved.Code != http.StatusFound {
-		t.Fatalf("dynamic default client approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-	}
-	redirected, err := url.Parse(approved.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse dynamic default client authorize redirect: %v", err)
-	}
-	code := redirected.Query().Get("code")
-	if code == "" {
-		t.Fatalf("dynamic default client authorize redirect missing code: %s", redirected.String())
-	}
-	token := exchangeCodeForClient(t, router, "", clientID, code, redirectURI, verifier)
-	refreshToken := stringFromMap(t, token, "refresh_token")
-	if refreshToken == "" {
-		t.Fatalf("dynamic default client token response missing refresh token: %#v", token)
-	}
+		approved := performFormWithCookiesAndHeaders(router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
+		Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
+		redirected, err := url.Parse(approved.Header().Get("Location"))
+		Expect(err).NotTo(HaveOccurred())
+		code := redirected.Query().Get("code")
+		Expect(code).NotTo(BeEmpty(), "dynamic default client authorize redirect should include code: %s", redirected.String())
+		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		refreshToken := stringFromMap(token, "refresh_token")
+		Expect(refreshToken).NotTo(BeEmpty())
 
-	wrongClientRefresh := performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
-		"grant_type":    {"refresh_token"},
-		"client_id":     {oauthClientID},
-		"refresh_token": {refreshToken},
+		wrongClientRefresh := performForm(router, "http://leafwiki.local/oauth/token", url.Values{
+			"grant_type":    {"refresh_token"},
+			"client_id":     {oauthClientID},
+			"refresh_token": {refreshToken},
+		})
+		wrongClientError := decodeJSONResponse(wrongClientRefresh, http.StatusUnauthorized)
+		Expect(wrongClientError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
+
+		refreshed := decodeJSONResponse(performForm(router, "http://leafwiki.local/oauth/token", url.Values{
+			"grant_type":    {"refresh_token"},
+			"client_id":     {clientID},
+			"refresh_token": {refreshToken},
+		}), http.StatusOK)
+		Expect(refreshed).To(HaveKeyWithValue("access_token", Not(BeEmpty())))
 	})
-	wrongClientError := decodeJSONResponse(t, wrongClientRefresh, http.StatusUnauthorized)
-	assertStringField(t, wrongClientError, "error", "invalid_grant")
-
-	refreshed := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
-		"grant_type":    {"refresh_token"},
-		"client_id":     {clientID},
-		"refresh_token": {refreshToken},
-	}), http.StatusOK)
-	if stringFromMap(t, refreshed, "access_token") == "" {
-		t.Fatalf("dynamic default client refresh response missing access token: %#v", refreshed)
-	}
 })
 
-var _ = It("LocalMCPOAuthDynamicClientRegistrationOmittedScopeCanRequestAdvertisedScope", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
-	redirectURI := "http://127.0.0.1:49152/callback"
+var _ = Describe("OAuth dynamic client registration scopes", func() {
+	It("allows clients without a stored scope to request the advertised scope", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		redirectURI := "http://127.0.0.1:49152/callback"
 
-	registration := registerOAuthClient(t, router, "", `{
+		registration := registerOAuthClient(router, "", `{
 		"client_name":"SDK style client",
 		"redirect_uris":["http://127.0.0.1:49152/callback"],
 		"grant_types":["authorization_code","refresh_token"],
 		"response_types":["code"],
 		"token_endpoint_auth_method":"none"
 	}`)
-	clientID := stringFromMap(t, registration, "client_id")
-	if _, ok := registration["scope"]; ok {
-		t.Fatalf("DCR response included omitted scope: %#v", registration)
-	}
+		clientID := stringFromMap(registration, "client_id")
+		Expect(registration).NotTo(HaveKey("scope"))
 
-	cookies := loginCookies(t, router, "admin", "admin")
-	verifier := "oauth-dcr-omitted-scope-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	q := validAuthorizeQueryForClient(clientID, redirectURI, "dcr-omitted-scope-state", pkceS256(verifier), "http://leafwiki.local/mcp")
-	rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
-	form := approvalFormFromAuthorizeRedirect(t, rec, "")
-	approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
-	if approved.Code != http.StatusFound {
-		t.Fatalf("omitted-scope DCR approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-	}
-	redirected, err := url.Parse(approved.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse omitted-scope DCR authorize redirect: %v", err)
-	}
-	if got := redirected.Query().Get("state"); got != "dcr-omitted-scope-state" {
-		t.Fatalf("omitted-scope DCR authorize state = %q, want dcr-omitted-scope-state", got)
-	}
-	code := redirected.Query().Get("code")
-	if code == "" {
-		t.Fatalf("omitted-scope DCR authorize redirect missing code: %s", redirected.String())
-	}
+		cookies := loginCookies(router, "admin", "admin")
+		verifier := "oauth-dcr-omitted-scope-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		q := validAuthorizeQueryForClient(clientID, redirectURI, "dcr-omitted-scope-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		rec := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
+		form := approvalFormFromAuthorizeRedirect(rec, "")
+		approved := performFormWithCookiesAndHeaders(router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
+		Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
+		redirected, err := url.Parse(approved.Header().Get("Location"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(redirected.Query().Get("state")).To(Equal("dcr-omitted-scope-state"))
+		code := redirected.Query().Get("code")
+		Expect(code).NotTo(BeEmpty(), "omitted-scope DCR authorize redirect should include code: %s", redirected.String())
 
-	token := exchangeCodeForClient(t, router, "", clientID, code, redirectURI, verifier)
-	assertStringField(t, token, "scope", oauthScope)
-	if stringFromMap(t, token, "access_token") == "" || stringFromMap(t, token, "refresh_token") == "" {
-		t.Fatalf("omitted-scope DCR token response missing tokens: %#v", token)
-	}
+		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		Expect(token).To(HaveKeyWithValue("scope", oauthScope))
+		Expect(token).To(SatisfyAll(
+			HaveKeyWithValue("access_token", Not(BeEmpty())),
+			HaveKeyWithValue("refresh_token", Not(BeEmpty())),
+		))
+	})
 })
 
-var _ = It("LocalMCPOAuthDynamicClientRegistrationHonorsAuthorizationCodeOnlyGrant", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
-	redirectURI := "http://127.0.0.1:49152/callback"
+var _ = Describe("OAuth dynamic client registration grant restrictions", func() {
+	It("omits refresh tokens for authorization-code-only clients", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		redirectURI := "http://127.0.0.1:49152/callback"
 
-	registration := registerOAuthClient(t, router, "", `{
+		registration := registerOAuthClient(router, "", `{
 		"client_name":"Auth Code Only Client",
 		"redirect_uris":["http://127.0.0.1:49152/callback"],
 		"grant_types":["authorization_code"],
@@ -315,49 +286,37 @@ var _ = It("LocalMCPOAuthDynamicClientRegistrationHonorsAuthorizationCodeOnlyGra
 		"token_endpoint_auth_method":"none",
 		"scope":"leafwiki:mcp"
 	}`)
-	clientID := stringFromMap(t, registration, "client_id")
-	assertStringSliceField(t, registration, "grant_types", []string{"authorization_code"})
+		clientID := stringFromMap(registration, "client_id")
+		Expect(registration).To(HaveKeyWithValue("grant_types", HaveExactElements("authorization_code")))
 
-	cookies := loginCookies(t, router, "admin", "admin")
-	verifier := "oauth-dcr-auth-code-only-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	q := validAuthorizeQueryForClient(clientID, redirectURI, "dcr-auth-code-only-state", pkceS256(verifier), "http://leafwiki.local/mcp")
-	rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
-	form := approvalFormFromAuthorizeRedirect(t, rec, "")
-	approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
-	if approved.Code != http.StatusFound {
-		t.Fatalf("auth-code-only approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-	}
-	redirected, err := url.Parse(approved.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse auth-code-only authorize redirect: %v", err)
-	}
-	code := redirected.Query().Get("code")
-	if code == "" {
-		t.Fatalf("auth-code-only authorize redirect missing code: %s", redirected.String())
-	}
-	token := exchangeCodeForClient(t, router, "", clientID, code, redirectURI, verifier)
-	if stringFromMap(t, token, "access_token") == "" {
-		t.Fatalf("auth-code-only client token response missing access token: %#v", token)
-	}
-	if refreshToken, ok := token["refresh_token"]; ok {
-		t.Fatalf("auth-code-only client token response included refresh_token %#v; payload=%#v", refreshToken, token)
-	}
+		cookies := loginCookies(router, "admin", "admin")
+		verifier := "oauth-dcr-auth-code-only-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		q := validAuthorizeQueryForClient(clientID, redirectURI, "dcr-auth-code-only-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		rec := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
+		form := approvalFormFromAuthorizeRedirect(rec, "")
+		approved := performFormWithCookiesAndHeaders(router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
+		Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
+		redirected, err := url.Parse(approved.Header().Get("Location"))
+		Expect(err).NotTo(HaveOccurred())
+		code := redirected.Query().Get("code")
+		Expect(code).NotTo(BeEmpty(), "auth-code-only authorize redirect should include code: %s", redirected.String())
+		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		Expect(token).To(HaveKeyWithValue("access_token", Not(BeEmpty())))
+		Expect(token).NotTo(HaveKey("refresh_token"))
+	})
 })
 
 var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect bad requests",
 	func(override func(url.Values)) {
-		t := GinkgoTB()
-		w := newLocalMCPAuthTestWiki(t)
+		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 		verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
 		q := validAuthorizeQuery("http://localhost:49152/callback", "state-1", pkceS256(verifier), "http://leafwiki.local/mcp")
 		override(q)
 
-		rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
+		rec := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("authorize = %d, want 400: %s", rec.Code, rec.Body.String())
-		}
+		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), rec.Body.String())
 	},
 	Entry("unknown client", func(q url.Values) { q.Set("client_id", "unknown-client") }),
 	Entry("non loopback redirect", func(q url.Values) { q.Set("redirect_uri", "http://example.com/callback") }),
@@ -367,35 +326,22 @@ var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect bad requ
 
 var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect errors",
 	func(override func(url.Values), wantError *fosite.RFC6749Error, wantState string) {
-		t := GinkgoTB()
-		w := newLocalMCPAuthTestWiki(t)
+		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 		verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
 		validRedirect := "http://localhost:49152/callback"
 		q := validAuthorizeQuery(validRedirect, "redirect-error-state", pkceS256(verifier), "http://leafwiki.local/mcp")
 		override(q)
 
-		rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
+		rec := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil)
 
-		if rec.Code != http.StatusFound {
-			t.Fatalf("authorize = %d, want 302: %s", rec.Code, rec.Body.String())
-		}
+		Expect(rec).To(HaveHTTPStatus(http.StatusFound), rec.Body.String())
 		redirected, err := url.Parse(rec.Header().Get("Location"))
-		if err != nil {
-			t.Fatalf("parse authorize error redirect: %v", err)
-		}
-		if got := redirected.Scheme + "://" + redirected.Host + redirected.Path; got != validRedirect {
-			t.Fatalf("authorize error redirect target = %q, want %q", got, validRedirect)
-		}
-		if got := redirected.Query().Get("state"); got != wantState {
-			t.Fatalf("authorize error redirect state = %q, want %q", got, wantState)
-		}
-		if got := redirected.Query().Get("error"); got != wantError.ErrorField {
-			t.Fatalf("authorize error = %q, want %q in %s", got, wantError.ErrorField, redirected.String())
-		}
-		if code := redirected.Query().Get("code"); code != "" {
-			t.Fatalf("authorize error redirect included code %q", code)
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(redirected.Scheme + "://" + redirected.Host + redirected.Path).To(Equal(validRedirect))
+		Expect(redirected.Query().Get("state")).To(Equal(wantState))
+		Expect(redirected.Query().Get("error")).To(Equal(wantError.ErrorField))
+		Expect(redirected.Query().Get("code")).To(BeEmpty())
 	},
 	Entry("missing state redirects to client", func(q url.Values) { q.Del("state") }, fosite.ErrInvalidState, ""),
 	Entry("short state redirects to client", func(q url.Values) { q.Set("state", "short") }, fosite.ErrInvalidState, "short"),
@@ -408,794 +354,671 @@ var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect
 
 var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect authenticated approval",
 	func(redirectURI string) {
-		t := GinkgoTB()
-		w := newLocalMCPAuthTestWiki(t)
+		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
 		verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
 		challenge := pkceS256(verifier)
-		cookies := loginCookies(t, router, "admin", "admin")
+		cookies := loginCookies(router, "admin", "admin")
 		q := validAuthorizeQuery(redirectURI, "roundtrip-state", challenge, "")
 
-		rec := performRequest(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
-		form := approvalFormFromAuthorizeRedirect(t, rec, "")
-		approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
+		rec := performRequest(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), cookies, nil)
+		form := approvalFormFromAuthorizeRedirect(rec, "")
+		approved := performFormWithCookiesAndHeaders(router, "http://leafwiki.local/oauth/authorize", form, cookies, nil)
 
-		if approved.Code != http.StatusFound {
-			t.Fatalf("approved authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-		}
+		Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
 		redirected, err := url.Parse(approved.Header().Get("Location"))
-		if err != nil {
-			t.Fatalf("parse approved authorize redirect: %v", err)
-		}
-		if got := redirected.Query().Get("state"); got != "roundtrip-state" {
-			t.Fatalf("redirect state = %q, want roundtrip-state", got)
-		}
-		if redirected.Query().Get("code") == "" {
-			t.Fatalf("authorize redirect did not include code: %s", redirected.String())
-		}
+		Expect(err).NotTo(HaveOccurred())
+		Expect(redirected.Query().Get("state")).To(Equal("roundtrip-state"))
+		Expect(redirected.Query().Get("code")).NotTo(BeEmpty(), "authorize redirect should include code: %s", redirected.String())
 	},
 	Entry("authenticated approval http://localhost:49152/callback", "http://localhost:49152/callback"),
 	Entry("authenticated approval http://127.0.0.1:49152/callback", "http://127.0.0.1:49152/callback"),
 	Entry("authenticated approval http://[::1]:49152/callback", "http://[::1]:49152/callback"),
 )
 
-var _ = It("LocalMCPOAuthAuthorizeValidationAndLoginRedirect", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
-	verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	challenge := pkceS256(verifier)
-	validRedirect := "http://localhost:49152/callback"
+var _ = Describe("OAuth authorization redirects", func() {
+	It("sends unauthenticated clients through login before approval", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		verifier := "oauth-test-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		challenge := pkceS256(verifier)
+		validRedirect := "http://localhost:49152/callback"
 
-	q := validAuthorizeQuery(validRedirect, "login-state", challenge, "http://leafwiki.local/mcp")
-	authorizeURL := "http://leafwiki.local/oauth/authorize?" + q.Encode()
-	rec := performRequest(t, router, http.MethodGet, authorizeURL, nil, nil)
-	if rec.Code != http.StatusFound {
-		t.Fatalf("unauthenticated authorize = %d, want 302: %s", rec.Code, rec.Body.String())
-	}
-	location := rec.Header().Get("Location")
-	if !strings.HasPrefix(location, "/login?") {
-		t.Fatalf("unauthenticated authorize location = %q, want /login", location)
-	}
-	loginURL, err := url.Parse(location)
-	if err != nil {
-		t.Fatalf("parse login redirect %q: %v", location, err)
-	}
-	if got := loginURL.Query().Get("returnTo"); got != authorizeURL {
-		t.Fatalf("login returnTo = %q, want %q", got, authorizeURL)
-	}
-})
-
-var _ = It("LocalMCPOAuthRemoteUserAuthorizeRequiresApproval", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
-	if err != nil {
-		t.Fatalf("ParseTrustedProxies: %v", err)
-	}
-	opts := oauthRouterOptions("")
-	opts.HTTPRemoteUser = httpinternal.HTTPRemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "X-Remote-User",
-		TrustedProxies: trustedProxies,
-		UserService:    w.UserService(),
-	}
-	router := newLocalMCPTestRouter(w, opts)
-	verifier := "oauth-remote-user-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	q := validAuthorizeQuery("http://localhost:49152/callback", "remote-user-state", pkceS256(verifier), "http://leafwiki.local/mcp")
-	headers := map[string]string{"X-Remote-User": "admin"}
-
-	rec := performRequestWithHeaders(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil, headers)
-	if strings.HasPrefix(rec.Header().Get("Location"), "/login") {
-		t.Fatalf("remote-user authorize redirected to login: %q", rec.Header().Get("Location"))
-	}
-
-	form := approvalFormFromAuthorizeRedirect(t, rec, "")
-	approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, nil, headers)
-	if approved.Code != http.StatusFound {
-		t.Fatalf("approved remote-user authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-	}
-	redirected, err := url.Parse(approved.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse remote-user authorize redirect: %v", err)
-	}
-	if got := redirected.Query().Get("state"); got != "remote-user-state" {
-		t.Fatalf("remote-user authorize state = %q, want remote-user-state", got)
-	}
-	if redirected.Query().Get("code") == "" {
-		t.Fatalf("remote-user authorize redirect missing code: %s", redirected.String())
-	}
-})
-
-var _ = It("LocalMCPOAuthTokenExchangeAndRefresh", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
-	cookies := loginCookies(t, router, "admin", "admin")
-	redirectURI := "http://localhost:49152/callback"
-	verifier := "oauth-token-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	resource := "http://leafwiki.local/mcp"
-
-	badCode := authorizeCode(t, router, cookies, redirectURI, "bad-verifier", verifier, resource)
-	badForm := url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {oauthClientID},
-		"redirect_uri":  {redirectURI},
-		"code":          {badCode},
-		"code_verifier": {"wrong-verifier"},
-	}
-	badRec := performForm(t, router, "http://leafwiki.local/oauth/token", badForm)
-	if badRec.Code == http.StatusOK {
-		t.Fatalf("token exchange with wrong verifier succeeded: %s", badRec.Body.String())
-	}
-	if got := badRec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
-		t.Fatalf("token exchange error content-type = %q, want JSON", got)
-	}
-	badTokenError := decodeJSONResponse(t, badRec, http.StatusUnauthorized)
-	assertStringField(t, badTokenError, "error", "invalid_grant")
-
-	code := authorizeCode(t, router, cookies, redirectURI, "token-state", verifier, resource)
-	token := exchangeCode(t, router, code, redirectURI, verifier)
-	accessToken := stringFromMap(t, token, "access_token")
-	refreshToken := stringFromMap(t, token, "refresh_token")
-	assertStringField(t, token, "token_type", "Bearer")
-	assertStringField(t, token, "scope", oauthScope)
-	if accessToken == "" || refreshToken == "" {
-		t.Fatalf("token response missing access or refresh token: %#v", token)
-	}
-	assertMCPBearerUnauthorized(t, router, "/mcp", refreshToken)
-
-	refreshForm := url.Values{
-		"grant_type":    {"refresh_token"},
-		"client_id":     {oauthClientID},
-		"refresh_token": {refreshToken},
-	}
-	refreshed := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", refreshForm), http.StatusOK)
-	refreshedAccessToken := stringFromMap(t, refreshed, "access_token")
-	refreshedRefreshToken := stringFromMap(t, refreshed, "refresh_token")
-	if refreshedAccessToken == "" {
-		t.Fatalf("refresh token response missing access token: %#v", refreshed)
-	}
-	if refreshedRefreshToken == "" {
-		t.Fatalf("refresh token response missing replacement refresh token: %#v", refreshed)
-	}
-	if refreshedRefreshToken == refreshToken {
-		t.Fatalf("refresh token response reused refresh token %q", refreshToken)
-	}
-	assertMCPBearerUnauthorized(t, router, "/mcp", accessToken)
-	refreshedSession := connectLocalMCPWithToken(t, router, "/mcp", refreshedAccessToken)
-	current := callToolStructured(t, refreshedSession, "wiki_get_current_user", nil)
-	user := nestedMap(t, current, "user")
-	assertStringField(t, user, "username", "admin")
-
-	secondRefresh := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
-		"grant_type":    {"refresh_token"},
-		"client_id":     {oauthClientID},
-		"refresh_token": {refreshedRefreshToken},
-	}), http.StatusOK)
-	if stringFromMap(t, secondRefresh, "access_token") == "" {
-		t.Fatalf("replacement refresh token response missing access token: %#v", secondRefresh)
-	}
-
-	reusedRefreshError := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", refreshForm), http.StatusUnauthorized)
-	assertStringField(t, reusedRefreshError, "error", "invalid_grant")
-
-	reuseVerifier := "oauth-code-reuse-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	reuseCode := authorizeCode(t, router, cookies, redirectURI, "code-reuse-state", reuseVerifier, resource)
-	reuseToken := exchangeCode(t, router, reuseCode, redirectURI, reuseVerifier)
-	reuseAccessToken := stringFromMap(t, reuseToken, "access_token")
-	reuseRefreshToken := stringFromMap(t, reuseToken, "refresh_token")
-	reuseCodeError := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {oauthClientID},
-		"redirect_uri":  {redirectURI},
-		"code":          {reuseCode},
-		"code_verifier": {reuseVerifier},
-	}), http.StatusUnauthorized)
-	assertStringField(t, reuseCodeError, "error", "invalid_grant")
-	assertMCPBearerUnauthorized(t, router, "/mcp", reuseAccessToken)
-	reuseRefreshError := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", url.Values{
-		"grant_type":    {"refresh_token"},
-		"client_id":     {oauthClientID},
-		"refresh_token": {reuseRefreshToken},
-	}), http.StatusUnauthorized)
-	assertStringField(t, reuseRefreshError, "error", "invalid_grant")
-
-	deleted, err := w.UserService().CreateUser("refresh-deleted", "refresh-deleted@example.com", "deletedpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create refresh-deleted user: %v", err)
-	}
-	deletedCookies := loginCookies(t, router, "refresh-deleted", "deletedpass")
-	deletedCode := authorizeCode(t, router, deletedCookies, redirectURI, "refresh-deleted-state", verifier+"2", resource)
-	deletedToken := exchangeCode(t, router, deletedCode, redirectURI, verifier+"2")
-	deletedRefresh := stringFromMap(t, deletedToken, "refresh_token")
-	if err := w.UserService().DeleteUser(newFixtureUserID(deleted.ID)); err != nil {
-		t.Fatalf("delete refresh-deleted user: %v", err)
-	}
-	deletedRefreshForm := url.Values{
-		"grant_type":    {"refresh_token"},
-		"client_id":     {oauthClientID},
-		"refresh_token": {deletedRefresh},
-	}
-	deletedRefreshError := decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local/oauth/token", deletedRefreshForm), http.StatusUnauthorized)
-	assertStringField(t, deletedRefreshError, "error", "invalid_grant")
-
-	rec := performRequest(t, router, http.MethodPost, "http://leafwiki.local/oauth/revoke", nil, strings.NewReader(""))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("POST /oauth/revoke = %d, want 404", rec.Code)
-	}
-	rec = performRequest(t, router, http.MethodPost, "http://leafwiki.local/oauth/introspect", nil, strings.NewReader(""))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("POST /oauth/introspect = %d, want 404", rec.Code)
-	}
-})
-
-var _ = It("LocalMCPOAuthTokenLifetimesComeFromWikiOptions", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{
-		AccessTokenTimeout:  15 * time.Minute,
-		RefreshTokenTimeout: 7 * 24 * time.Hour,
+		q := validAuthorizeQuery(validRedirect, "login-state", challenge, "http://leafwiki.local/mcp")
+		authorizeURL := "http://leafwiki.local/oauth/authorize?" + q.Encode()
+		rec := performRequest(router, http.MethodGet, authorizeURL, nil, nil)
+		Expect(rec).To(HaveHTTPStatus(http.StatusFound), rec.Body.String())
+		location := rec.Header().Get("Location")
+		Expect(location).To(HavePrefix("/login?"))
+		loginURL, err := url.Parse(location)
+		Expect(err).NotTo(HaveOccurred(), "login redirect should parse: %s", location)
+		Expect(loginURL.Query().Get("returnTo")).To(Equal(authorizeURL))
 	})
-	opts := oauthRouterOptions("")
-	opts.AccessTokenTimeout = time.Minute
-	opts.RefreshTokenTimeout = 2 * time.Minute
-	router := newLocalMCPTestRouter(w, opts)
-
-	cookies := loginCookies(t, router, "admin", "admin")
-	verifier := "oauth-lifetime-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	code := authorizeCode(t, router, cookies, "http://localhost:49152/callback", "lifetime-state", verifier, "http://leafwiki.local/mcp")
-	token := exchangeCode(t, router, code, "http://localhost:49152/callback", verifier)
-
-	expiresIn, ok := token["expires_in"].(float64)
-	if !ok {
-		t.Fatalf("expires_in has type %T, want number; payload=%#v", token["expires_in"], token)
-	}
-	if expiresIn < float64((14 * time.Minute).Seconds()) {
-		t.Fatalf("expires_in = %v seconds, want wiki-configured lifetime near 15m", expiresIn)
-	}
 })
 
-var _ = It("LocalMCPOAuthExpiredBearerTokenRejected", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{AccessTokenTimeout: -time.Minute})
-	trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
-	if err != nil {
-		t.Fatalf("ParseTrustedProxies: %v", err)
-	}
-	opts := oauthRouterOptions("")
-	opts.HTTPRemoteUser = httpinternal.HTTPRemoteUserConfig{
-		Enabled:        true,
-		HeaderName:     "X-Remote-User",
-		TrustedProxies: trustedProxies,
-		UserService:    w.UserService(),
-	}
-	router := newLocalMCPTestRouter(w, opts)
-	headers := map[string]string{"X-Remote-User": "admin"}
-	verifier := "oauth-expired-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
-	q := validAuthorizeQuery("http://localhost:49152/callback", "expired-state", pkceS256(verifier), "http://leafwiki.local/mcp")
-	rec := performRequestWithHeaders(t, router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil, headers)
-	form := approvalFormFromAuthorizeRedirect(t, rec, "")
-	approved := performFormWithCookiesAndHeaders(t, router, "http://leafwiki.local/oauth/authorize", form, nil, headers)
-	if approved.Code != http.StatusFound {
-		t.Fatalf("approved expired-token authorize = %d, want 302: %s", approved.Code, approved.Body.String())
-	}
-	redirected, err := url.Parse(approved.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse expired-token authorize redirect: %v", err)
-	}
-	code := redirected.Query().Get("code")
-	if code == "" {
-		t.Fatalf("expired-token authorize redirect missing code: %s", redirected.String())
-	}
-	token := stringFromMap(t, exchangeCode(t, router, code, "http://localhost:49152/callback", verifier), "access_token")
+var _ = Describe("OAuth authorization with trusted remote users", func() {
+	It("still requires explicit approval before issuing an authorization code", func() {
+		w := newLocalMCPAuthTestWiki()
+		trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
+		Expect(err).NotTo(HaveOccurred())
+		opts := oauthRouterOptions("")
+		opts.HTTPRemoteUser = httpinternal.HTTPRemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "X-Remote-User",
+			TrustedProxies: trustedProxies,
+			UserService:    w.UserService(),
+		}
+		router := newLocalMCPTestRouter(w, opts)
+		verifier := "oauth-remote-user-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		q := validAuthorizeQuery("http://localhost:49152/callback", "remote-user-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		headers := map[string]string{"X-Remote-User": "admin"}
 
-	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST /mcp with expired bearer = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
+		rec := performRequestWithHeaders(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil, headers)
+		Expect(rec.Header().Get("Location")).NotTo(HavePrefix("/login"))
+
+		form := approvalFormFromAuthorizeRedirect(rec, "")
+		approved := performFormWithCookiesAndHeaders(router, "http://leafwiki.local/oauth/authorize", form, nil, headers)
+		Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
+		redirected, err := url.Parse(approved.Header().Get("Location"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(redirected.Query().Get("state")).To(Equal("remote-user-state"))
+		Expect(redirected.Query().Get("code")).NotTo(BeEmpty(), "remote-user authorize redirect should include code: %s", redirected.String())
+	})
 })
 
-var _ = It("LocalMCPRegistration_AuthEnabledWritesCSRFAndAuthorParity", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
-	admin, err := w.UserService().GetUserByUsername("admin")
-	if err != nil {
-		t.Fatalf("get admin user: %v", err)
-	}
-	adminCookies := loginCookies(t, router, "admin", "admin")
-	adminToken := oauthAccessTokenWithCookies(t, router, adminCookies, "admin-parity-state")
-	adminSession := connectLocalMCPWithToken(t, router, "/mcp", adminToken)
+var _ = Describe("OAuth token exchange", func() {
+	It("rejects invalid grants and refreshes valid sessions", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		cookies := loginCookies(router, "admin", "admin")
+		redirectURI := "http://localhost:49152/callback"
+		verifier := "oauth-token-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		resource := "http://leafwiki.local/mcp"
 
-	noCSRFBody := strings.NewReader(`{"title":"HTTP Missing CSRF","slug":"http-missing-csrf","kind":"page"}`)
-	noCSRF := performRequest(t, router, http.MethodPost, "http://leafwiki.local/api/pages", adminCookies, noCSRFBody)
-	if noCSRF.Code != http.StatusForbidden {
-		t.Fatalf("POST /api/pages without CSRF = %d, want 403: %s", noCSRF.Code, noCSRF.Body.String())
-	}
+		badCode := authorizeCode(router, cookies, redirectURI, "bad-verifier", verifier, resource)
+		badForm := url.Values{
+			"grant_type":    {"authorization_code"},
+			"client_id":     {oauthClientID},
+			"redirect_uri":  {redirectURI},
+			"code":          {badCode},
+			"code_verifier": {"wrong-verifier"},
+		}
+		badRec := performForm(router, "http://leafwiki.local/oauth/token", badForm)
+		Expect(badRec).To(HaveHTTPStatus(http.StatusUnauthorized), badRec.Body.String())
+		Expect(badRec.Header().Get("Content-Type")).To(HavePrefix("application/json"))
+		badTokenError := decodeJSONResponse(badRec, http.StatusUnauthorized)
+		Expect(badTokenError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
 
-	page := exerciseOAuthWriterCRUD(t, router, adminSession, adminCookies, "admin", admin.ID)
-	metadata := nestedMap(t, page, "metadata")
-	creator := nestedMap(t, metadata, "creator")
-	lastAuthor := nestedMap(t, metadata, "lastAuthor")
-	assertStringField(t, metadata, "creatorId", admin.ID)
-	assertStringField(t, metadata, "lastAuthorId", admin.ID)
-	assertStringField(t, creator, "username", "admin")
-	assertStringField(t, lastAuthor, "username", "admin")
+		code := authorizeCode(router, cookies, redirectURI, "token-state", verifier, resource)
+		token := exchangeCode(router, code, redirectURI, verifier)
+		accessToken := stringFromMap(token, "access_token")
+		refreshToken := stringFromMap(token, "refresh_token")
+		Expect(token).To(HaveKeyWithValue("token_type", "Bearer"))
+		Expect(token).To(HaveKeyWithValue("scope", oauthScope))
+		Expect(token).To(SatisfyAll(
+			HaveKeyWithValue("access_token", accessToken),
+			HaveKeyWithValue("refresh_token", refreshToken),
+		))
+		Expect(mcpBearerAuthorizationAttempt(router, "/mcp", refreshToken)).To(HaveHTTPStatus(http.StatusUnauthorized))
 
-	editor, err := w.UserService().CreateUser("oauth-editor", "oauth-editor@example.com", "editorpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create oauth-editor user: %v", err)
-	}
-	editorCookies := loginCookies(t, router, "oauth-editor", "editorpass")
-	editorToken := oauthAccessTokenWithCookies(t, router, editorCookies, "editor-crud-state")
-	editorSession := connectLocalMCPWithToken(t, router, "/mcp", editorToken)
-	_ = exerciseOAuthWriterCRUD(t, router, editorSession, editorCookies, "editor", editor.ID)
+		refreshForm := url.Values{
+			"grant_type":    {"refresh_token"},
+			"client_id":     {oauthClientID},
+			"refresh_token": {refreshToken},
+		}
+		refreshed := decodeJSONResponse(performForm(router, "http://leafwiki.local/oauth/token", refreshForm), http.StatusOK)
+		refreshedAccessToken := stringFromMap(refreshed, "access_token")
+		refreshedRefreshToken := stringFromMap(refreshed, "refresh_token")
+		Expect(refreshed).To(SatisfyAll(
+			HaveKeyWithValue("access_token", refreshedAccessToken),
+			HaveKeyWithValue("refresh_token", refreshedRefreshToken),
+		))
+		Expect(refreshedRefreshToken).NotTo(Equal(refreshToken))
+		Expect(mcpBearerAuthorizationAttempt(router, "/mcp", accessToken)).To(HaveHTTPStatus(http.StatusUnauthorized))
+		refreshedSession := connectLocalMCPWithToken(router, "/mcp", refreshedAccessToken)
+		current := callToolStructured(refreshedSession, "wiki_get_current_user", nil)
+		user := nestedMap(current, "user")
+		Expect(user).To(HaveKeyWithValue("username", "admin"))
+
+		secondRefresh := decodeJSONResponse(performForm(router, "http://leafwiki.local/oauth/token", url.Values{
+			"grant_type":    {"refresh_token"},
+			"client_id":     {oauthClientID},
+			"refresh_token": {refreshedRefreshToken},
+		}), http.StatusOK)
+		Expect(secondRefresh).To(HaveKeyWithValue("access_token", Not(BeEmpty())))
+
+		reusedRefreshError := decodeJSONResponse(performForm(router, "http://leafwiki.local/oauth/token", refreshForm), http.StatusUnauthorized)
+		Expect(reusedRefreshError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
+
+		reuseVerifier := "oauth-code-reuse-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		reuseCode := authorizeCode(router, cookies, redirectURI, "code-reuse-state", reuseVerifier, resource)
+		reuseToken := exchangeCode(router, reuseCode, redirectURI, reuseVerifier)
+		reuseAccessToken := stringFromMap(reuseToken, "access_token")
+		reuseRefreshToken := stringFromMap(reuseToken, "refresh_token")
+		reuseCodeError := decodeJSONResponse(performForm(router, "http://leafwiki.local/oauth/token", url.Values{
+			"grant_type":    {"authorization_code"},
+			"client_id":     {oauthClientID},
+			"redirect_uri":  {redirectURI},
+			"code":          {reuseCode},
+			"code_verifier": {reuseVerifier},
+		}), http.StatusUnauthorized)
+		Expect(reuseCodeError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
+		Expect(mcpBearerAuthorizationAttempt(router, "/mcp", reuseAccessToken)).To(HaveHTTPStatus(http.StatusUnauthorized))
+		reuseRefreshError := decodeJSONResponse(performForm(router, "http://leafwiki.local/oauth/token", url.Values{
+			"grant_type":    {"refresh_token"},
+			"client_id":     {oauthClientID},
+			"refresh_token": {reuseRefreshToken},
+		}), http.StatusUnauthorized)
+		Expect(reuseRefreshError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
+
+		deleted, err := w.UserService().CreateUser("refresh-deleted", "refresh-deleted@example.com", "deletedpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		deletedCookies := loginCookies(router, "refresh-deleted", "deletedpass")
+		deletedCode := authorizeCode(router, deletedCookies, redirectURI, "refresh-deleted-state", verifier+"2", resource)
+		deletedToken := exchangeCode(router, deletedCode, redirectURI, verifier+"2")
+		deletedRefresh := stringFromMap(deletedToken, "refresh_token")
+		Expect(w.UserService().DeleteUser(coreauth.UserIDFromString(deleted.ID))).To(Succeed())
+		deletedRefreshForm := url.Values{
+			"grant_type":    {"refresh_token"},
+			"client_id":     {oauthClientID},
+			"refresh_token": {deletedRefresh},
+		}
+		deletedRefreshError := decodeJSONResponse(performForm(router, "http://leafwiki.local/oauth/token", deletedRefreshForm), http.StatusUnauthorized)
+		Expect(deletedRefreshError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
+
+		rec := performRequest(router, http.MethodPost, "http://leafwiki.local/oauth/revoke", nil, strings.NewReader(""))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+		rec = performRequest(router, http.MethodPost, "http://leafwiki.local/oauth/introspect", nil, strings.NewReader(""))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+	})
 })
 
-func exerciseOAuthWriterCRUD(t testing.TB, router http.Handler, session *sdkmcp.ClientSession, cookies []*http.Cookie, label, userID string) map[string]any {
-	t.Helper()
+var _ = Describe("OAuth token lifetimes", func() {
+	It("uses wiki options for access token expiry", func() {
+		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{
+			AccessTokenTimeout:  15 * time.Minute,
+			RefreshTokenTimeout: 7 * 24 * time.Hour,
+		})
+		opts := oauthRouterOptions("")
+		opts.AccessTokenTimeout = time.Minute
+		opts.RefreshTokenTimeout = 2 * time.Minute
+		router := newLocalMCPTestRouter(w, opts)
+
+		cookies := loginCookies(router, "admin", "admin")
+		verifier := "oauth-lifetime-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		code := authorizeCode(router, cookies, "http://localhost:49152/callback", "lifetime-state", verifier, "http://leafwiki.local/mcp")
+		token := exchangeCode(router, code, "http://localhost:49152/callback", verifier)
+
+		Expect(token).To(HaveKeyWithValue("expires_in", BeNumerically(">=", (14*time.Minute).Seconds())))
+	})
+
+	It("rejects bearer tokens after configured expiry", func() {
+		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{AccessTokenTimeout: -time.Minute})
+		trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
+		Expect(err).NotTo(HaveOccurred())
+		opts := oauthRouterOptions("")
+		opts.HTTPRemoteUser = httpinternal.HTTPRemoteUserConfig{
+			Enabled:        true,
+			HeaderName:     "X-Remote-User",
+			TrustedProxies: trustedProxies,
+			UserService:    w.UserService(),
+		}
+		router := newLocalMCPTestRouter(w, opts)
+		headers := map[string]string{"X-Remote-User": "admin"}
+		verifier := "oauth-expired-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
+		q := validAuthorizeQuery("http://localhost:49152/callback", "expired-state", pkceS256(verifier), "http://leafwiki.local/mcp")
+		rec := performRequestWithHeaders(router, http.MethodGet, "http://leafwiki.local/oauth/authorize?"+q.Encode(), nil, nil, headers)
+		form := approvalFormFromAuthorizeRedirect(rec, "")
+		approved := performFormWithCookiesAndHeaders(router, "http://leafwiki.local/oauth/authorize", form, nil, headers)
+		Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
+		redirected, err := url.Parse(approved.Header().Get("Location"))
+		Expect(err).NotTo(HaveOccurred())
+		code := redirected.Query().Get("code")
+		Expect(code).NotTo(BeEmpty(), "expired-token authorize redirect should include code: %s", redirected.String())
+		token := stringFromMap(exchangeCode(router, code, "http://localhost:49152/callback", verifier), "access_token")
+
+		req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
+	})
+})
+
+var _ = Describe("OAuth-authenticated writes", func() {
+	It("preserves CSRF protection and author metadata across HTTP and MCP mutations", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
+		admin, err := w.UserService().GetUserByUsername("admin")
+		Expect(err).NotTo(HaveOccurred())
+		adminCookies := loginCookies(router, "admin", "admin")
+		adminToken := oauthAccessTokenWithCookies(router, adminCookies, "admin-parity-state")
+		adminSession := connectLocalMCPWithToken(router, "/mcp", adminToken)
+
+		noCSRFBody := strings.NewReader(`{"title":"HTTP Missing CSRF","slug":"http-missing-csrf","kind":"page"}`)
+		noCSRF := performRequest(router, http.MethodPost, "http://leafwiki.local/api/pages", adminCookies, noCSRFBody)
+		Expect(noCSRF).To(HaveHTTPStatus(http.StatusForbidden), noCSRF.Body.String())
+
+		page := exerciseOAuthWriterCRUD(router, adminSession, adminCookies, "admin", admin.ID)
+		metadata := nestedMap(page, "metadata")
+		creator := nestedMap(metadata, "creator")
+		lastAuthor := nestedMap(metadata, "lastAuthor")
+		Expect(metadata).To(HaveKeyWithValue("creatorId", admin.ID))
+		Expect(metadata).To(HaveKeyWithValue("lastAuthorId", admin.ID))
+		Expect(creator).To(HaveKeyWithValue("username", "admin"))
+		Expect(lastAuthor).To(HaveKeyWithValue("username", "admin"))
+
+		editor, err := w.UserService().CreateUser("oauth-editor", "oauth-editor@example.com", "editorpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		editorCookies := loginCookies(router, "oauth-editor", "editorpass")
+		editorToken := oauthAccessTokenWithCookies(router, editorCookies, "editor-crud-state")
+		editorSession := connectLocalMCPWithToken(router, "/mcp", editorToken)
+		_ = exerciseOAuthWriterCRUD(router, editorSession, editorCookies, "editor", editor.ID)
+	})
+})
+
+func exerciseOAuthWriterCRUD(router http.Handler, session *sdkmcp.ClientSession, cookies []*http.Cookie, label, userID string) map[string]any {
+	GinkgoHelper()
 
 	titlePrefix := strings.ToUpper(label[:1]) + label[1:]
-	created := callToolStructured(t, session, "wiki_create_page", map[string]any{
+	created := callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": titlePrefix + " OAuth Page",
 		"slug":  label + "-oauth-page",
 		"kind":  "page",
 	})
-	createdPage := nestedMap(t, created, "page")
-	pageID := stringField(t, createdPage, "id")
-	createdVersion := stringField(t, createdPage, "version")
-	createdMetadata := nestedMap(t, createdPage, "metadata")
-	assertStringField(t, createdMetadata, "creatorId", userID)
-	assertStringField(t, createdMetadata, "lastAuthorId", userID)
+	createdPage := nestedMap(created, "page")
+	pageID := stringField(createdPage, "id")
+	createdVersion := stringField(createdPage, "version")
+	createdMetadata := nestedMap(createdPage, "metadata")
+	Expect(createdMetadata).To(HaveKeyWithValue("creatorId", userID))
+	Expect(createdMetadata).To(HaveKeyWithValue("lastAuthorId", userID))
 
-	httpPage := decodeJSONResponse(t, performRequest(t, router, http.MethodGet, "http://leafwiki.local/api/pages/"+pageID, cookies, nil), http.StatusOK)
-	httpMetadata := nestedMap(t, httpPage, "metadata")
-	assertStringField(t, httpMetadata, "creatorId", userID)
-	assertStringField(t, httpMetadata, "lastAuthorId", userID)
-	assertStringField(t, httpPage, "id", pageID)
+	httpPage := decodeJSONResponse(performRequest(router, http.MethodGet, "http://leafwiki.local/api/pages/"+pageID, cookies, nil), http.StatusOK)
+	httpMetadata := nestedMap(httpPage, "metadata")
+	Expect(httpMetadata).To(HaveKeyWithValue("creatorId", userID))
+	Expect(httpMetadata).To(HaveKeyWithValue("lastAuthorId", userID))
+	Expect(httpPage).To(HaveKeyWithValue("id", pageID))
 
-	updated := callToolStructured(t, session, "wiki_update_page", map[string]any{
+	updated := callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": createdVersion,
 		"title":   titlePrefix + " OAuth Page Updated",
 		"slug":    label + "-oauth-page",
 		"content": "Updated over authenticated MCP\n",
 	})
-	updatedPage := nestedMap(t, updated, "page")
-	updatedMetadata := nestedMap(t, updatedPage, "metadata")
-	assertStringField(t, updatedMetadata, "lastAuthorId", userID)
-	updatedVersion := stringField(t, updatedPage, "version")
+	updatedPage := nestedMap(updated, "page")
+	updatedMetadata := nestedMap(updatedPage, "metadata")
+	Expect(updatedMetadata).To(HaveKeyWithValue("lastAuthorId", userID))
+	updatedVersion := stringField(updatedPage, "version")
 
-	deleted := callToolStructured(t, session, "wiki_delete_page", map[string]any{
+	deleted := callToolStructured(session, "wiki_delete_page", map[string]any{
 		"id":        pageID,
 		"version":   updatedVersion,
 		"recursive": false,
 	})
-	assertStringField(t, deleted, "message", "Page deleted")
+	Expect(deleted).To(HaveKey("message"))
 
-	notFound := performRequest(t, router, http.MethodGet, "http://leafwiki.local/api/pages/"+pageID, cookies, nil)
-	if notFound.Code != http.StatusNotFound {
-		t.Fatalf("GET deleted %s page = %d, want 404: %s", label, notFound.Code, notFound.Body.String())
-	}
+	notFound := performRequest(router, http.MethodGet, "http://leafwiki.local/api/pages/"+pageID, cookies, nil)
+	Expect(notFound).To(HaveHTTPStatus(http.StatusNotFound), "deleted %s page should be absent through HTTP", label)
 	return updatedPage
 }
 
-var _ = It("LocalMCPRegistration_AuthEnabledOAuthBearerProtection", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
-	opts := oauthRouterOptions("")
-	opts.EnableLinkRefactor = true
-	opts.EnableWorkspaceSync = true
-	router := newLocalMCPTestRouter(w, opts)
-
-	rec := performRequest(t, router, http.MethodPost, "http://leafwiki.local/mcp", nil, strings.NewReader("{}"))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST /mcp without bearer = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
-	wwwAuth := rec.Header().Get("WWW-Authenticate")
-	if !strings.Contains(wwwAuth, `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/mcp"`) ||
-		!strings.Contains(wwwAuth, `scope="leafwiki:mcp"`) {
-		t.Fatalf("WWW-Authenticate = %q, want resource metadata and scope", wwwAuth)
-	}
-
-	rec = performRequest(t, router, http.MethodPost, "http://leafwiki.local/mcp", nil, strings.NewReader("{}"))
-	rec.Result().Body.Close()
-	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader("{}"))
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("Authorization", "Bearer invalid-token")
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST /mcp with invalid bearer = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
-
-	adminToken := oauthAccessTokenForUser(t, router, "admin", "admin", "admin-state")
-	adminSession := connectLocalMCPWithToken(t, router, "/mcp", adminToken)
-	current := callToolStructured(t, adminSession, "wiki_get_current_user", nil)
-	user := nestedMap(t, current, "user")
-	assertStringField(t, user, "username", "admin")
-	expectedTools := append(append([]string{}, baseToolNames...), wikimcp.WorkspaceSyncToolNames()...)
-	expectedTools = append(expectedTools, wikimcp.RevisionToolNames()...)
-	expectedTools = append(expectedTools, wikimcp.LinkRefactorToolNames()...)
-	assertToolNames(t, listAllToolNames(t, adminSession), expectedTools)
-
-	editor, err := w.UserService().CreateUser("editor", "editor@example.com", "editorpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create editor user: %v", err)
-	}
-	editorToken := oauthAccessTokenForUser(t, router, "editor", "editorpass", "editor-state")
-	if _, err := w.UserService().UpdateUser(newFixtureUserID(editor.ID), editor.Username, editor.Email, "", coreauth.RoleViewer); err != nil {
-		t.Fatalf("downgrade editor user: %v", err)
-	}
-	downgradedSession := connectLocalMCPWithToken(t, router, "/mcp", editorToken)
-	downgradedErr := callToolError(t, downgradedSession, "wiki_create_page", map[string]any{
-		"title": "Downgraded Write",
-		"slug":  "downgraded-write",
-	})
-	if !strings.Contains(strings.ToLower(downgradedErr), "editor") && !strings.Contains(strings.ToLower(downgradedErr), "admin") {
-		t.Fatalf("downgraded create_page error = %q, want editor/admin permission detail", downgradedErr)
-	}
-
-	deleted, err := w.UserService().CreateUser("deleted", "deleted@example.com", "deletedpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create deleted user: %v", err)
-	}
-	deletedToken := oauthAccessTokenForUser(t, router, "deleted", "deletedpass", "deleted-state")
-	if err := w.UserService().DeleteUser(newFixtureUserID(deleted.ID)); err != nil {
-		t.Fatalf("delete user before MCP request: %v", err)
-	}
-	req = httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("Authorization", "Bearer "+deletedToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST /mcp with deleted user token = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
-})
-
-var _ = DescribeTable("LocalMCPRegistration_AuthEnabledOAuthBearerProtection viewer denied",
-	func(toolName wikimcp.ToolID, buildArgs func(pageID, currentVersion, latestRevisionID string) map[string]any) {
-		t := GinkgoTB()
-		w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
+var _ = Describe("local MCP OAuth bearer protection", func() {
+	It("challenges unauthenticated requests and rejects stale bearer identities", func() {
+		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{})
 		opts := oauthRouterOptions("")
 		opts.EnableLinkRefactor = true
 		opts.EnableWorkspaceSync = true
 		router := newLocalMCPTestRouter(w, opts)
 
-		adminToken := oauthAccessTokenForUser(t, router, "admin", "admin", "admin-state")
-		adminSession := connectLocalMCPWithToken(t, router, "/mcp", adminToken)
+		rec := performRequest(router, http.MethodPost, "http://leafwiki.local/mcp", nil, strings.NewReader("{}"))
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
+		Expect(rec.Header().Get("WWW-Authenticate")).To(SatisfyAll(
+			ContainSubstring(`resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/mcp"`),
+			ContainSubstring(`scope="leafwiki:mcp"`),
+		))
 
-		if _, err := w.UserService().CreateUser("viewer", "viewer@example.com", "viewerpass", coreauth.RoleViewer); err != nil {
-			t.Fatalf("create viewer user: %v", err)
-		}
-		viewerToken := oauthAccessTokenForUser(t, router, "viewer", "viewerpass", "viewer-state")
-		viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerToken)
-		_ = callToolStructured(t, viewerSession, "wiki_get_tree", nil)
+		rec = performRequest(router, http.MethodPost, "http://leafwiki.local/mcp", nil, strings.NewReader("{}"))
+		rec.Result().Body.Close()
+		req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader("{}"))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Authorization", "Bearer invalid-token")
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
 
-		page := nestedMap(t, callToolStructured(t, adminSession, "wiki_create_page", map[string]any{
+		adminToken := oauthAccessTokenForUser(router, "admin", "admin", "admin-state")
+		adminSession := connectLocalMCPWithToken(router, "/mcp", adminToken)
+		current := callToolStructured(adminSession, "wiki_get_current_user", nil)
+		user := nestedMap(current, "user")
+		Expect(user).To(HaveKeyWithValue("username", "admin"))
+		expectedTools := append(append([]string{}, baseToolNames...), wikimcp.WorkspaceSyncToolNames()...)
+		expectedTools = append(expectedTools, wikimcp.RevisionToolNames()...)
+		expectedTools = append(expectedTools, wikimcp.LinkRefactorToolNames()...)
+		Expect(listAllToolNames(adminSession)).To(matchToolNames(expectedTools))
+
+		editor, err := w.UserService().CreateUser("editor", "editor@example.com", "editorpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		editorToken := oauthAccessTokenForUser(router, "editor", "editorpass", "editor-state")
+		_, err = w.UserService().UpdateUser(coreauth.UserIDFromString(editor.ID), editor.Username, editor.Email, "", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+
+		downgradedSession := connectLocalMCPWithToken(router, "/mcp", editorToken)
+		downgradedErr := callTypedToolStructuredError(downgradedSession, wikimcp.ToolCreatePage, map[string]any{
+			"title": "Downgraded Write",
+			"slug":  "downgraded-write",
+		})
+		Expect(downgradedErr).To(testmatchers.HaveMCPStructuredError(wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired)))
+
+		deleted, err := w.UserService().CreateUser("deleted", "deleted@example.com", "deletedpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		deletedToken := oauthAccessTokenForUser(router, "deleted", "deletedpass", "deleted-state")
+		Expect(w.UserService().DeleteUser(coreauth.UserIDFromString(deleted.ID))).To(Succeed())
+
+		req = httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Authorization", "Bearer "+deletedToken)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
+	})
+})
+
+var _ = DescribeTable("OAuth-authenticated viewers are denied editor MCP tools",
+	func(toolName wikimcp.ToolID, buildArgs func(pageID, currentVersion, latestRevisionID string) map[string]any) {
+		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{})
+		opts := oauthRouterOptions("")
+		opts.EnableLinkRefactor = true
+		opts.EnableWorkspaceSync = true
+		router := newLocalMCPTestRouter(w, opts)
+
+		adminToken := oauthAccessTokenForUser(router, "admin", "admin", "admin-state")
+		adminSession := connectLocalMCPWithToken(router, "/mcp", adminToken)
+
+		_, err := w.UserService().CreateUser("viewer", "viewer@example.com", "viewerpass", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+		viewerToken := oauthAccessTokenForUser(router, "viewer", "viewerpass", "viewer-state")
+		viewerSession := connectLocalMCPWithToken(router, "/mcp", viewerToken)
+		_ = callToolStructured(viewerSession, "wiki_get_tree", nil)
+
+		page := nestedMap(callToolStructured(adminSession, "wiki_create_page", map[string]any{
 			"title": "Viewer Gate Fixture",
 			"slug":  "viewer-gate-fixture",
 			"kind":  "page",
 		}), "page")
-		pageID := stringField(t, page, "id")
-		pageVersion := stringField(t, page, "version")
+		pageID := stringField(page, "id")
+		pageVersion := stringField(page, "version")
 		updatedContent := "viewer gate fixture revision"
-		updated := nestedMap(t, callToolStructured(t, adminSession, "wiki_update_page", map[string]any{
+		updated := nestedMap(callToolStructured(adminSession, "wiki_update_page", map[string]any{
 			"id":      pageID,
 			"version": pageVersion,
 			"title":   "Viewer Gate Fixture",
 			"slug":    "viewer-gate-fixture",
 			"content": updatedContent,
 		}), "page")
-		currentVersion := stringField(t, updated, "version")
-		_ = callToolStructured(t, adminSession, "wiki_upload_asset", map[string]any{
+		currentVersion := stringField(updated, "version")
+		_ = callToolStructured(adminSession, "wiki_upload_asset", map[string]any{
 			"pageId":        pageID,
 			"filename":      "viewer-gate.txt",
 			"contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer gate asset")),
 		})
-		latestRevision := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_latest_revision", map[string]any{"pageId": pageID}), "revision")
-		latestRevisionID := stringField(t, latestRevision, "id")
+		latestRevision := nestedMap(callToolStructured(adminSession, "wiki_get_latest_revision", map[string]any{"pageId": pageID}), "revision")
+		latestRevisionID := stringField(latestRevision, "id")
 
-		errResult := callTypedToolStructuredError(t, viewerSession, toolName, buildArgs(pageID, currentVersion, latestRevisionID))
-		assertMCPStructuredError(t, fmt.Sprintf("viewer_%s_denied", toolName), errResult, wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired))
+		errResult := callTypedToolStructuredError(viewerSession, toolName, buildArgs(pageID, currentVersion, latestRevisionID))
+		Expect(errResult).To(testmatchers.HaveMCPStructuredError(wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired)))
 
-		afterViewerDenied := nestedMap(t, callToolStructured(t, adminSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
-		if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != updatedContent {
-			t.Fatalf("page after viewer-denied %s = %#v, want version %q and content %q", toolName, afterViewerDenied, currentVersion, updatedContent)
-		}
+		afterViewerDenied := nestedMap(callToolStructured(adminSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
+		Expect(afterViewerDenied).To(SatisfyAll(
+			HaveKeyWithValue("version", currentVersion),
+			HaveKeyWithValue("content", updatedContent),
+		))
 	},
-	Entry("wiki_suggest_slug", wikimcp.ToolSuggestSlug, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("suggesting a slug", wikimcp.ToolSuggestSlug, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"title": "Viewer Slug"}
 	}),
-	Entry("wiki_refresh", wikimcp.ToolRefresh, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("refreshing the workspace", wikimcp.ToolRefresh, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"source": "filesystem"}
 	}),
-	Entry("wiki_create_page", wikimcp.ToolCreatePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("creating a page", wikimcp.ToolCreatePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"title": "Viewer Write", "slug": "viewer-write"}
 	}),
-	Entry("wiki_update_page", wikimcp.ToolUpdatePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("updating page content", wikimcp.ToolUpdatePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion, "title": "Viewer Gate Fixture", "slug": "viewer-gate-fixture", "content": "viewer update"}
 	}),
-	Entry("wiki_update_page_metadata", wikimcp.ToolUpdatePageMetadata, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("updating page metadata", wikimcp.ToolUpdatePageMetadata, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}
 	}),
-	Entry("wiki_replace_page_section", wikimcp.ToolReplacePageSection, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("replacing a page section", wikimcp.ToolReplacePageSection, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}
 	}),
-	Entry("wiki_delete_page", wikimcp.ToolDeletePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("deleting a page", wikimcp.ToolDeletePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion, "recursive": false}
 	}),
-	Entry("wiki_move_page", wikimcp.ToolMovePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("moving a page", wikimcp.ToolMovePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion}
 	}),
-	Entry("wiki_sort_pages", wikimcp.ToolSortPages, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("sorting pages", wikimcp.ToolSortPages, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"parentId": "", "orderedIds": []any{pageID}}
 	}),
-	Entry("wiki_ensure_page", wikimcp.ToolEnsurePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("ensuring a page", wikimcp.ToolEnsurePage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"path": "viewer/ensured", "title": "Viewer Ensured"}
 	}),
-	Entry("wiki_convert_page", wikimcp.ToolConvertPage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("converting a page kind", wikimcp.ToolConvertPage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "version": currentVersion, "targetKind": "section"}
 	}),
-	Entry("wiki_copy_page", wikimcp.ToolCopyPage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("copying a page", wikimcp.ToolCopyPage, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"id": pageID, "title": "Viewer Copy", "slug": "viewer-copy"}
 	}),
-	Entry("wiki_upload_asset", wikimcp.ToolUploadAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("uploading an asset", wikimcp.ToolUploadAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "filename": "viewer.txt", "contentBase64": base64.StdEncoding.EncodeToString([]byte("viewer"))}
 	}),
-	Entry("wiki_rename_asset", wikimcp.ToolRenameAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("renaming an asset", wikimcp.ToolRenameAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "oldFilename": "viewer-gate.txt", "newFilename": "viewer-renamed.txt"}
 	}),
-	Entry("wiki_delete_asset", wikimcp.ToolDeleteAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("deleting an asset", wikimcp.ToolDeleteAsset, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "filename": "viewer-gate.txt"}
 	}),
-	Entry("wiki_restore_revision", wikimcp.ToolRestoreRevision, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("restoring a revision", wikimcp.ToolRestoreRevision, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "revisionId": latestRevisionID}
 	}),
-	Entry("wiki_preview_page_refactor", wikimcp.ToolPreviewRefactor, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("previewing a page refactor", wikimcp.ToolPreviewRefactor, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "kind": "page", "title": "Viewer Preview", "slug": "viewer-preview"}
 	}),
-	Entry("wiki_apply_page_refactor", wikimcp.ToolApplyRefactor, func(pageID, currentVersion, latestRevisionID string) map[string]any {
+	Entry("applying a page refactor", wikimcp.ToolApplyRefactor, func(pageID, currentVersion, latestRevisionID string) map[string]any {
 		return map[string]any{"pageId": pageID, "version": currentVersion, "kind": "page", "title": "Viewer Apply", "slug": "viewer-apply"}
 	}),
 )
 
-var _ = It("LocalMCPRegistration_AuthEnabledAPIKeyBearerProtection", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
-	opts := oauthRouterOptions("")
-	opts.EnableWorkspaceSync = true
-	router := newLocalMCPTestRouter(w, opts)
+var _ = Describe("local MCP API-key bearer protection", func() {
+	It("allows editor keys and rejects viewer downgraded revoked and deleted credentials", func() {
+		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{})
+		opts := oauthRouterOptions("")
+		opts.EnableWorkspaceSync = true
+		router := newLocalMCPTestRouter(w, opts)
 
-	editor, err := w.UserService().CreateUser("api-editor", "api-editor@example.com", "editorpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create api editor user: %v", err)
-	}
-	editorID := newFixtureUserID(editor.ID)
-	editorKey, err := w.APIKeyService().CreateAPIKey(editorID, "Editor MCP", editorID)
-	if err != nil {
-		t.Fatalf("create editor api key: %v", err)
-	}
-	editorSession := connectLocalMCPWithToken(t, router, "/mcp", editorKey.Secret)
-	current := callToolStructured(t, editorSession, "wiki_get_current_user", nil)
-	user := nestedMap(t, current, "user")
-	assertStringField(t, user, "username", "api-editor")
-	created := nestedMap(t, callToolStructured(t, editorSession, "wiki_create_page", map[string]any{
-		"title": "API Key Editor Page",
-		"slug":  "api-key-editor-page",
-	}), "page")
-	pageID := stringField(t, created, "id")
-	pageVersion := stringField(t, created, "version")
-	updated := nestedMap(t, callToolStructured(t, editorSession, "wiki_update_page", map[string]any{
-		"id":      pageID,
-		"version": pageVersion,
-		"title":   "API Key Editor Page",
-		"slug":    "api-key-editor-page",
-		"content": "updated through api key",
-	}), "page")
-	currentVersion := stringField(t, updated, "version")
+		editor, err := w.UserService().CreateUser("api-editor", "api-editor@example.com", "editorpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		editorID := coreauth.UserIDFromString(editor.ID)
+		editorKey, err := w.APIKeyService().CreateAPIKey(editorID, "Editor MCP", editorID)
+		Expect(err).NotTo(HaveOccurred())
 
-	viewer, err := w.UserService().CreateUser("api-viewer", "api-viewer@example.com", "viewerpass", coreauth.RoleViewer)
-	if err != nil {
-		t.Fatalf("create api viewer user: %v", err)
-	}
-	viewerID := newFixtureUserID(viewer.ID)
-	viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer MCP", viewerID)
-	if err != nil {
-		t.Fatalf("create viewer api key: %v", err)
-	}
-	viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerKey.Secret)
-	_ = callToolStructured(t, viewerSession, "wiki_get_tree", nil)
-	for _, tt := range []struct {
-		name wikimcp.ToolID
-		args map[string]any
-	}{
-		{name: wikimcp.ToolRefresh, args: map[string]any{"source": "filesystem"}},
-		{name: wikimcp.ToolCreatePage, args: map[string]any{"title": "Viewer API Key Write", "slug": "viewer-api-key-write"}},
-		{name: wikimcp.ToolUpdatePageMetadata, args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
-		{name: wikimcp.ToolReplacePageSection, args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
-	} {
-		viewerErr := callTypedToolStructuredError(t, viewerSession, tt.name, tt.args)
-		assertMCPStructuredError(t, fmt.Sprintf("viewer_api_key_%s_denied", tt.name), viewerErr, wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired))
-	}
-	afterViewerDenied := nestedMap(t, callToolStructured(t, editorSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
-	if afterViewerDenied["version"] != currentVersion || afterViewerDenied["content"] != "updated through api key" {
-		t.Fatalf("page after viewer api key denied tools = %#v, want version %q and unchanged content", afterViewerDenied, currentVersion)
-	}
+		editorSession := connectLocalMCPWithToken(router, "/mcp", editorKey.Secret)
+		current := callToolStructured(editorSession, "wiki_get_current_user", nil)
+		user := nestedMap(current, "user")
+		Expect(user).To(HaveKeyWithValue("username", "api-editor"))
+		created := nestedMap(callToolStructured(editorSession, "wiki_create_page", map[string]any{
+			"title": "API Key Editor Page",
+			"slug":  "api-key-editor-page",
+		}), "page")
+		pageID := stringField(created, "id")
+		pageVersion := stringField(created, "version")
+		updated := nestedMap(callToolStructured(editorSession, "wiki_update_page", map[string]any{
+			"id":      pageID,
+			"version": pageVersion,
+			"title":   "API Key Editor Page",
+			"slug":    "api-key-editor-page",
+			"content": "updated through api key",
+		}), "page")
+		currentVersion := stringField(updated, "version")
 
-	if err := w.APIKeyService().RevokeAPIKey(editorID, editorKey.Key.ID); err != nil {
-		t.Fatalf("revoke editor api key: %v", err)
-	}
-	assertMCPBearerUnauthorized(t, router, "/mcp", editorKey.Secret)
+		viewer, err := w.UserService().CreateUser("api-viewer", "api-viewer@example.com", "viewerpass", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+		viewerID := coreauth.UserIDFromString(viewer.ID)
+		viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer MCP", viewerID)
+		Expect(err).NotTo(HaveOccurred())
 
-	roleUser, err := w.UserService().CreateUser("api-role-change", "api-role-change@example.com", "editorpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create role-change user: %v", err)
-	}
-	roleUserID := newFixtureUserID(roleUser.ID)
-	roleKey, err := w.APIKeyService().CreateAPIKey(roleUserID, "Role MCP", roleUserID)
-	if err != nil {
-		t.Fatalf("create role-change api key: %v", err)
-	}
-	if _, err := w.UserService().UpdateUser(roleUserID, roleUser.Username, roleUser.Email, "", coreauth.RoleViewer); err != nil {
-		t.Fatalf("downgrade api key user: %v", err)
-	}
-	downgradedSession := connectLocalMCPWithToken(t, router, "/mcp", roleKey.Secret)
-	downgradedErr := callToolError(t, downgradedSession, "wiki_create_page", map[string]any{
-		"title": "Downgraded API Key Write",
-		"slug":  "downgraded-api-key-write",
-	})
-	if !strings.Contains(strings.ToLower(downgradedErr), "editor") && !strings.Contains(strings.ToLower(downgradedErr), "admin") {
-		t.Fatalf("downgraded api key create_page error = %q, want editor/admin permission detail", downgradedErr)
-	}
-
-	deleted, err := w.UserService().CreateUser("api-deleted", "api-deleted@example.com", "editorpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create deleted api key user: %v", err)
-	}
-	deletedID := newFixtureUserID(deleted.ID)
-	deletedKey, err := w.APIKeyService().CreateAPIKey(deletedID, "Deleted MCP", deletedID)
-	if err != nil {
-		t.Fatalf("create deleted-user api key: %v", err)
-	}
-	if err := w.UserService().DeleteUser(deletedID); err != nil {
-		t.Fatalf("delete api key user: %v", err)
-	}
-	assertMCPBearerUnauthorized(t, router, "/mcp", deletedKey.Secret)
-	assertMCPBearerUnauthorized(t, router, "/mcp", "lwk_"+deletedKey.Key.ID.String()+"_wrongsecret")
-})
-
-var _ = It("LocalMCPGetContext_ViewerCannotForceWorkspaceRefresh", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace: wiki.Workspace{RootDir: rootDir},
-	})
-	opts := oauthRouterOptions("")
-	opts.EnableWorkspaceSync = true
-	router := newLocalMCPTestRouter(w, opts)
-
-	viewer, err := w.UserService().CreateUser("context-viewer", "context-viewer@example.com", "viewerpass", coreauth.RoleViewer)
-	if err != nil {
-		t.Fatalf("create context viewer: %v", err)
-	}
-	viewerID := newFixtureUserID(viewer.ID)
-	viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer Context MCP", viewerID)
-	if err != nil {
-		t.Fatalf("create viewer context api key: %v", err)
-	}
-	viewerSession := connectLocalMCPWithToken(t, router, "/mcp", viewerKey.Secret)
-
-	out := callToolStructured(t, viewerSession, "wiki_get_context", map[string]any{
-		"syncMode": "force",
-	})
-	warnings, ok := out["warnings"].([]any)
-	if !ok || len(warnings) == 0 {
-		t.Fatalf("viewer context warnings = %#v, want skipped refresh warning", out["warnings"])
-	}
-	if !strings.Contains(fmt.Sprint(warnings), "not an editor or admin") {
-		t.Fatalf("viewer context warnings = %#v, want editor/admin skip detail", warnings)
-	}
-	if _, ok := out["syncStatus"]; !ok {
-		t.Fatalf("viewer context = %#v, want syncStatus despite skipped refresh", out)
-	}
-	recommended := arrayField(t, out, "recommendedTools")
-	for _, forbidden := range []string{"wiki_refresh", "wiki_update_page", "wiki_create_page", "wiki_update_page_metadata", "wiki_replace_page_section"} {
-		if arrayContainsString(recommended, forbidden) {
-			t.Fatalf("viewer recommendedTools = %#v, did not expect %s", recommended, forbidden)
+		viewerSession := connectLocalMCPWithToken(router, "/mcp", viewerKey.Secret)
+		_ = callToolStructured(viewerSession, "wiki_get_tree", nil)
+		for _, tt := range []struct {
+			name wikimcp.ToolID
+			args map[string]any
+		}{
+			{name: wikimcp.ToolRefresh, args: map[string]any{"source": "filesystem"}},
+			{name: wikimcp.ToolCreatePage, args: map[string]any{"title": "Viewer API Key Write", "slug": "viewer-api-key-write"}},
+			{name: wikimcp.ToolUpdatePageMetadata, args: map[string]any{"pageId": pageID, "version": currentVersion, "addTags": []any{"viewer"}}},
+			{name: wikimcp.ToolReplacePageSection, args: map[string]any{"pageId": pageID, "version": currentVersion, "headingPath": []any{"Missing"}, "content": "viewer section"}},
+		} {
+			viewerErr := callTypedToolStructuredError(viewerSession, tt.name, tt.args)
+			Expect(viewerErr).To(testmatchers.HaveMCPStructuredError(wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired)))
 		}
-	}
-})
+		afterViewerDenied := nestedMap(callToolStructured(editorSession, "wiki_get_page", map[string]any{"pageId": pageID}), "page")
+		Expect(afterViewerDenied).To(SatisfyAll(
+			HaveKeyWithValue("version", currentVersion),
+			HaveKeyWithValue("content", "updated through api key"),
+		))
 
-var _ = It("PrivateMCPAuthEnabledStdioAPIKeyRevocationBlocksReadOnlyTools", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
+		Expect(w.APIKeyService().RevokeAPIKey(editorID, editorKey.Key.ID)).To(Succeed())
+		Expect(mcpBearerAuthorizationAttempt(router, "/mcp", editorKey.Secret)).To(HaveHTTPStatus(http.StatusUnauthorized))
 
-	editor, err := w.UserService().CreateUser("private-stdio-editor", "private-stdio-editor@example.com", "editorpass", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("create private stdio editor user: %v", err)
-	}
-	editorID := newFixtureUserID(editor.ID)
-	apiKey, err := w.APIKeyService().CreateAPIKey(editorID, "Private STDIO MCP", editorID)
-	if err != nil {
-		t.Fatalf("create private stdio api key: %v", err)
-	}
+		roleUser, err := w.UserService().CreateUser("api-role-change", "api-role-change@example.com", "editorpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		roleUserID := coreauth.UserIDFromString(roleUser.ID)
+		roleKey, err := w.APIKeyService().CreateAPIKey(roleUserID, "Role MCP", roleUserID)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = w.UserService().UpdateUser(roleUserID, roleUser.Username, roleUser.Email, "", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+		downgradedSession := connectLocalMCPWithToken(router, "/mcp", roleKey.Secret)
+		downgradedErr := callTypedToolStructuredError(downgradedSession, wikimcp.ToolCreatePage, map[string]any{
+			"title": "Downgraded API Key Write",
+			"slug":  "downgraded-api-key-write",
+		})
+		Expect(downgradedErr).To(testmatchers.HaveMCPStructuredError(wikimcp.ErrCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPEditorRoleRequired)))
 
-	session := connectLocalMCPWithToken(t, w.PrivateMCPHTTPHandler(oauthRouterOptions("")), "/mcp", apiKey.Secret)
-	_ = callToolStructured(t, session, "wiki_get_tree", nil)
-
-	if err := w.APIKeyService().RevokeAPIKey(editorID, apiKey.Key.ID); err != nil {
-		t.Fatalf("revoke private stdio api key: %v", err)
-	}
-	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name: "wiki_get_tree",
+		deleted, err := w.UserService().CreateUser("api-deleted", "api-deleted@example.com", "editorpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		deletedID := coreauth.UserIDFromString(deleted.ID)
+		deletedKey, err := w.APIKeyService().CreateAPIKey(deletedID, "Deleted MCP", deletedID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(w.UserService().DeleteUser(deletedID)).To(Succeed())
+		Expect(mcpBearerAuthorizationAttempt(router, "/mcp", deletedKey.Secret)).To(HaveHTTPStatus(http.StatusUnauthorized))
+		Expect(mcpBearerAuthorizationAttempt(router, "/mcp", deletedKey.Secret+"_wrongsecret")).To(HaveHTTPStatus(http.StatusUnauthorized))
 	})
-	if err == nil && !result.IsError {
-		t.Fatalf("revoked private STDIO API key %s succeeded: %#v", strings.Join([]string{"get", "tree"}, "_"), result.StructuredContent)
-	}
 })
 
-var _ = It("LocalMCPRegistration_AuthEnabledBasePathAPIKeySession", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
+var _ = Describe("local MCP context for viewers", func() {
+	It("skips forced workspace refresh while still returning context state", func() {
+		rootDir := filepath.Join(oauthTestTempDir(), "content")
+		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{
+			Workspace: wiki.Workspace{RootDir: rootDir},
+		})
+		opts := oauthRouterOptions("")
+		opts.EnableWorkspaceSync = true
+		router := newLocalMCPTestRouter(w, opts)
 
-	admin, err := w.UserService().GetUserByUsername("admin")
-	if err != nil {
-		t.Fatalf("get admin user: %v", err)
-	}
-	adminID := newFixtureUserID(admin.ID)
-	apiKey, err := w.APIKeyService().CreateAPIKey(adminID, "Base Path MCP", adminID)
-	if err != nil {
-		t.Fatalf("create base-path api key: %v", err)
-	}
-	session := connectLocalMCPWithToken(t, router, "/wiki/mcp", apiKey.Secret)
-	current := callToolStructured(t, session, "wiki_get_current_user", nil)
-	user := nestedMap(t, current, "user")
-	assertStringField(t, user, "username", "admin")
+		viewer, err := w.UserService().CreateUser("context-viewer", "context-viewer@example.com", "viewerpass", coreauth.RoleViewer)
+		Expect(err).NotTo(HaveOccurred())
+		viewerID := coreauth.UserIDFromString(viewer.ID)
+		viewerKey, err := w.APIKeyService().CreateAPIKey(viewerID, "Viewer Context MCP", viewerID)
+		Expect(err).NotTo(HaveOccurred())
+		viewerSession := connectLocalMCPWithToken(router, "/mcp", viewerKey.Secret)
 
-	config := callToolStructured(t, session, "wiki_get_config", nil)
-	assertStringField(t, config, "basePath", "/wiki")
+		out := callToolStructured(viewerSession, "wiki_get_context", map[string]any{
+			"syncMode": "force",
+		})
+
+		Expect(out).To(SatisfyAll(
+			HaveKeyWithValue("warnings", ContainElement(ContainSubstring("not an editor or admin"))),
+			HaveKey("syncStatus"),
+			HaveKeyWithValue("recommendedTools", Not(ContainElements(
+				"wiki_refresh",
+				"wiki_update_page",
+				"wiki_create_page",
+				"wiki_update_page_metadata",
+				"wiki_replace_page_section",
+			))),
+		))
+	})
 })
 
-var _ = It("LocalMCPRegistration_AuthEnabledBasePathMetadataChallenge", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
+var _ = Describe("private MCP API-key sessions", func() {
+	It("blocks read-only tools after the backing API key is revoked", func() {
+		w := newLocalMCPAuthTestWiki()
 
-	rec := performRequest(t, router, http.MethodPost, "http://leafwiki.local/wiki/mcp", nil, strings.NewReader("{}"))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST /wiki/mcp without bearer = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("WWW-Authenticate"); !strings.Contains(got, `resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/wiki/mcp"`) {
-		t.Fatalf("base-path WWW-Authenticate = %q, want base-path resource metadata", got)
-	}
+		editor, err := w.UserService().CreateUser("private-stdio-editor", "private-stdio-editor@example.com", "editorpass", coreauth.RoleEditor)
+		Expect(err).NotTo(HaveOccurred())
+		editorID := coreauth.UserIDFromString(editor.ID)
+		apiKey, err := w.APIKeyService().CreateAPIKey(editorID, "Private STDIO MCP", editorID)
+		Expect(err).NotTo(HaveOccurred())
+
+		handler := w.PrivateMCPHTTPHandler(oauthRouterOptions(""))
+		session := connectLocalMCPWithToken(handler, "/mcp", apiKey.Secret)
+		_ = callToolStructured(session, "wiki_get_tree", nil)
+
+		Expect(w.APIKeyService().RevokeAPIKey(editorID, apiKey.Key.ID)).To(Succeed())
+		Expect(mcpBearerAuthorizationAttempt(handler, "/mcp", apiKey.Secret)).To(HaveHTTPStatus(http.StatusUnauthorized))
+	})
 })
 
-var _ = It("LocalMCPRegistration_AuthEnabledBasePathOAuthSession", func() {
-	t := GinkgoTB()
-	w := newLocalMCPAuthTestWiki(t)
-	router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
-	cookies := loginCookiesAt(t, router, "/wiki", "admin", "admin")
-	token := oauthAccessTokenWithCookiesAt(t, router, cookies, "/wiki", "base-path-session-state", "http://leafwiki.local/wiki/mcp")
+var _ = Describe("local MCP OAuth base paths", func() {
+	It("accepts API-key sessions on the configured base path", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
 
-	session := connectLocalMCPWithToken(t, router, "/wiki/mcp", token)
-	current := callToolStructured(t, session, "wiki_get_current_user", nil)
-	user := nestedMap(t, current, "user")
-	assertStringField(t, user, "username", "admin")
+		admin, err := w.UserService().GetUserByUsername("admin")
+		Expect(err).NotTo(HaveOccurred())
+		adminID := coreauth.UserIDFromString(admin.ID)
+		apiKey, err := w.APIKeyService().CreateAPIKey(adminID, "Base Path MCP", adminID)
+		Expect(err).NotTo(HaveOccurred())
+		session := connectLocalMCPWithToken(router, "/wiki/mcp", apiKey.Secret)
+		current := callToolStructured(session, "wiki_get_current_user", nil)
+		user := nestedMap(current, "user")
+		Expect(user).To(HaveKeyWithValue("username", "admin"))
 
-	config := callToolStructured(t, session, "wiki_get_config", nil)
-	assertStringField(t, config, "basePath", "/wiki")
-	assertToolNames(t, listAllToolNames(t, session), federatedToolNames())
+		config := callToolStructured(session, "wiki_get_config", nil)
+		Expect(config).To(HaveKeyWithValue("basePath", "/wiki"))
+	})
+
+	It("advertises the protected resource metadata for base-path challenges", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
+
+		rec := performRequest(router, http.MethodPost, "http://leafwiki.local/wiki/mcp", nil, strings.NewReader("{}"))
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
+		Expect(rec.Header().Get("WWW-Authenticate")).To(ContainSubstring(`resource_metadata="http://leafwiki.local/.well-known/oauth-protected-resource/wiki/mcp"`))
+	})
+
+	It("accepts OAuth sessions on the configured base path", func() {
+		w := newLocalMCPAuthTestWiki()
+		router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))
+		cookies := loginCookiesAt(router, "/wiki", "admin", "admin")
+		token := oauthAccessTokenWithCookiesAt(router, cookies, "/wiki", "base-path-session-state", "http://leafwiki.local/wiki/mcp")
+
+		session := connectLocalMCPWithToken(router, "/wiki/mcp", token)
+		current := callToolStructured(session, "wiki_get_current_user", nil)
+		user := nestedMap(current, "user")
+		Expect(user).To(HaveKeyWithValue("username", "admin"))
+
+		config := callToolStructured(session, "wiki_get_config", nil)
+		Expect(config).To(HaveKeyWithValue("basePath", "/wiki"))
+		Expect(listAllToolNames(session)).To(matchToolNames(federatedToolNames()))
+	})
 })
 
 type staticOAuthHandler struct {
@@ -1210,17 +1033,17 @@ func (h staticOAuthHandler) Authorize(context.Context, *http.Request, *http.Resp
 	return fmt.Errorf("unexpected oauth authorize callback")
 }
 
-func newLocalMCPAuthTestWiki(t testing.TB) *wiki.Wiki {
-	t.Helper()
+func newLocalMCPAuthTestWiki() *wiki.Wiki {
+	GinkgoHelper()
 
-	return newLocalMCPAuthTestWikiWithOptions(t, wiki.WikiOptions{})
+	return newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{})
 }
 
-func newLocalMCPAuthTestWikiWithOptions(t testing.TB, overrides wiki.WikiOptions) *wiki.Wiki {
-	t.Helper()
+func newLocalMCPAuthTestWikiWithOptions(overrides wiki.WikiOptions) *wiki.Wiki {
+	GinkgoHelper()
 
 	options := wiki.WikiOptions{
-		StorageDir:          t.TempDir(),
+		StorageDir:          oauthTestTempDir(),
 		Workspace:           overrides.Workspace,
 		AdminPassword:       "admin",
 		JWTSecret:           "secretkey",
@@ -1235,15 +1058,19 @@ func newLocalMCPAuthTestWikiWithOptions(t testing.TB, overrides wiki.WikiOptions
 	}
 
 	w, err := wiki.NewWiki(&options)
-	if err != nil {
-		t.Fatalf("NewWiki failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func() {
-		if err := w.Close(); err != nil {
-			t.Fatalf("Close wiki failed: %v", err)
-		}
+		Expect(w.Close()).To(Succeed())
 	})
 	return w
+}
+
+func oauthTestTempDir() string {
+	GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-mcp-oauth-test-*")
+	Expect(err).To(Succeed())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func oauthRouterOptions(basePath string) httpinternal.RouterOptions {
@@ -1258,33 +1085,29 @@ func oauthRouterOptions(basePath string) httpinternal.RouterOptions {
 	}
 }
 
-func getJSONMap(t testing.TB, router http.Handler, target string) map[string]any {
-	t.Helper()
+func getJSONMap(router http.Handler, target string) map[string]any {
+	GinkgoHelper()
 
-	return decodeJSONResponse(t, performRequest(t, router, http.MethodGet, target, nil, nil), http.StatusOK)
+	return decodeJSONResponse(performRequest(router, http.MethodGet, target, nil, nil), http.StatusOK)
 }
 
-func decodeJSONResponse(t testing.TB, rec *httptest.ResponseRecorder, wantStatus int) map[string]any {
-	t.Helper()
+func decodeJSONResponse(rec *httptest.ResponseRecorder, wantStatus int) map[string]any {
+	GinkgoHelper()
 
-	if rec.Code != wantStatus {
-		t.Fatalf("response status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(wantStatus), rec.Body.String())
 	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode JSON response: %v; body=%s", err, rec.Body.String())
-	}
+	Expect(json.Unmarshal(rec.Body.Bytes(), &out)).To(Succeed(), "response body should decode as JSON: %s", rec.Body.String())
 	return out
 }
 
-func performRequest(t testing.TB, router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader) *httptest.ResponseRecorder {
-	t.Helper()
+func performRequest(router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader) *httptest.ResponseRecorder {
+	GinkgoHelper()
 
-	return performRequestWithHeaders(t, router, method, target, cookies, body, nil)
+	return performRequestWithHeaders(router, method, target, cookies, body, nil)
 }
 
-func performRequestWithHeaders(t testing.TB, router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader, headers map[string]string) *httptest.ResponseRecorder {
-	t.Helper()
+func performRequestWithHeaders(router http.Handler, method, target string, cookies []*http.Cookie, body io.Reader, headers map[string]string) *httptest.ResponseRecorder {
+	GinkgoHelper()
 
 	req := httptest.NewRequest(method, target, body)
 	markLoopbackMCPTestRequest(req)
@@ -1309,8 +1132,8 @@ func markLoopbackMCPTestRequest(req *http.Request) {
 	}
 }
 
-func performJSON(t testing.TB, router http.Handler, target, body string) *httptest.ResponseRecorder {
-	t.Helper()
+func performJSON(router http.Handler, target, body string) *httptest.ResponseRecorder {
+	GinkgoHelper()
 
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1319,20 +1142,20 @@ func performJSON(t testing.TB, router http.Handler, target, body string) *httpte
 	return rec
 }
 
-func registerOAuthClient(t testing.TB, router http.Handler, basePath, body string) map[string]any {
-	t.Helper()
+func registerOAuthClient(router http.Handler, basePath, body string) map[string]any {
+	GinkgoHelper()
 
-	return decodeJSONResponse(t, performJSON(t, router, "http://leafwiki.local"+basePath+"/oauth/register", body), http.StatusCreated)
+	return decodeJSONResponse(performJSON(router, "http://leafwiki.local"+basePath+"/oauth/register", body), http.StatusCreated)
 }
 
-func performForm(t testing.TB, router http.Handler, target string, form url.Values) *httptest.ResponseRecorder {
-	t.Helper()
+func performForm(router http.Handler, target string, form url.Values) *httptest.ResponseRecorder {
+	GinkgoHelper()
 
-	return performFormWithCookiesAndHeaders(t, router, target, form, nil, nil)
+	return performFormWithCookiesAndHeaders(router, target, form, nil, nil)
 }
 
-func performFormWithCookiesAndHeaders(t testing.TB, router http.Handler, target string, form url.Values, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
-	t.Helper()
+func performFormWithCookiesAndHeaders(router http.Handler, target string, form url.Values, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
+	GinkgoHelper()
 
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1347,33 +1170,25 @@ func performFormWithCookiesAndHeaders(t testing.TB, router http.Handler, target 
 	return rec
 }
 
-func approvalFormFromAuthorizeRedirect(t testing.TB, rec *httptest.ResponseRecorder, basePath string) url.Values {
-	t.Helper()
+func approvalFormFromAuthorizeRedirect(rec *httptest.ResponseRecorder, basePath string) url.Values {
+	GinkgoHelper()
 
-	if rec.Code != http.StatusFound {
-		t.Fatalf("authorize approval redirect = %d, want 302: %s", rec.Code, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(http.StatusFound), rec.Body.String())
 	location := rec.Header().Get("Location")
 	redirected, err := url.Parse(location)
-	if err != nil {
-		t.Fatalf("parse approval redirect %q: %v", location, err)
-	}
-	if got, want := redirected.Path, basePath+"/oauth/approve"; got != want {
-		t.Fatalf("approval redirect path = %q, want %q; location=%s", got, want, location)
-	}
+	Expect(err).NotTo(HaveOccurred(), "approval redirect should parse: %s", location)
+	Expect(redirected.Path).To(Equal(basePath+"/oauth/approve"), "approval redirect should target the approve route: %s", location)
 	form := redirected.Query()
-	if form.Get("approval_token") == "" {
-		t.Fatalf("approval redirect missing approval_token: %s", location)
-	}
+	Expect(form.Get("approval_token")).NotTo(BeEmpty(), "approval redirect should include an approval token: %s", location)
 	form.Set("decision", "approve")
 	return form
 }
 
-func approvalDetails(t testing.TB, router http.Handler, basePath, token string, cookies []*http.Cookie, headers map[string]string) map[string]any {
-	t.Helper()
+func approvalDetails(router http.Handler, basePath, token string, cookies []*http.Cookie, headers map[string]string) map[string]any {
+	GinkgoHelper()
 
 	target := "http://leafwiki.local" + basePath + "/oauth/approval?approval_token=" + url.QueryEscape(token)
-	return decodeJSONResponse(t, performRequestWithHeaders(t, router, http.MethodGet, target, cookies, nil, headers), http.StatusOK)
+	return decodeJSONResponse(performRequestWithHeaders(router, http.MethodGet, target, cookies, nil, headers), http.StatusOK)
 }
 
 func validAuthorizeQuery(redirectURI, state, challenge, resource string) url.Values {
@@ -1401,71 +1216,61 @@ func pkceS256(verifier string) string {
 	return strings.TrimRight(base64.URLEncoding.EncodeToString(sum[:]), "=")
 }
 
-func loginCookies(t testing.TB, router http.Handler, identifier, password string) []*http.Cookie {
-	t.Helper()
+func loginCookies(router http.Handler, identifier, password string) []*http.Cookie {
+	GinkgoHelper()
 
-	return loginCookiesAt(t, router, "", identifier, password)
+	return loginCookiesAt(router, "", identifier, password)
 }
 
-func loginCookiesAt(t testing.TB, router http.Handler, basePath, identifier, password string) []*http.Cookie {
-	t.Helper()
+func loginCookiesAt(router http.Handler, basePath, identifier, password string) []*http.Cookie {
+	GinkgoHelper()
 
 	body := fmt.Sprintf(`{"identifier":%q,"password":%q}`, identifier, password)
 	req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local"+basePath+"/api/auth/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login %s = %d, want 200: %s", identifier, rec.Code, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "login for %s should succeed: %s", identifier, rec.Body.String())
 	return rec.Result().Cookies()
 }
 
-func authorizeCode(t testing.TB, router http.Handler, cookies []*http.Cookie, redirectURI, state, verifier, resource string) string {
-	t.Helper()
+func authorizeCode(router http.Handler, cookies []*http.Cookie, redirectURI, state, verifier, resource string) string {
+	GinkgoHelper()
 
-	return authorizeCodeAt(t, router, cookies, "", redirectURI, state, verifier, resource)
+	return authorizeCodeAt(router, cookies, "", redirectURI, state, verifier, resource)
 }
 
-func authorizeCodeAt(t testing.TB, router http.Handler, cookies []*http.Cookie, basePath, redirectURI, state, verifier, resource string) string {
-	t.Helper()
+func authorizeCodeAt(router http.Handler, cookies []*http.Cookie, basePath, redirectURI, state, verifier, resource string) string {
+	GinkgoHelper()
 
 	q := validAuthorizeQuery(redirectURI, state, pkceS256(verifier), resource)
 	authorizeURL := "http://leafwiki.local" + basePath + "/oauth/authorize"
-	rec := performRequest(t, router, http.MethodGet, authorizeURL+"?"+q.Encode(), cookies, nil)
-	form := approvalFormFromAuthorizeRedirect(t, rec, basePath)
-	approved := performFormWithCookiesAndHeaders(t, router, authorizeURL, form, cookies, nil)
-	if approved.Code != http.StatusFound {
-		t.Fatalf("approved authorize for code = %d, want 302: %s", approved.Code, approved.Body.String())
-	}
+	rec := performRequest(router, http.MethodGet, authorizeURL+"?"+q.Encode(), cookies, nil)
+	form := approvalFormFromAuthorizeRedirect(rec, basePath)
+	approved := performFormWithCookiesAndHeaders(router, authorizeURL, form, cookies, nil)
+	Expect(approved).To(HaveHTTPStatus(http.StatusFound), approved.Body.String())
 	redirected, err := url.Parse(approved.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse authorize redirect: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	code := redirected.Query().Get("code")
-	if code == "" {
-		t.Fatalf("authorize redirect missing code: %s", redirected.String())
-	}
-	if got := redirected.Query().Get("state"); got != state {
-		t.Fatalf("authorize redirect state = %q, want %q", got, state)
-	}
+	Expect(code).NotTo(BeEmpty(), "authorize redirect should include a code: %s", redirected.String())
+	Expect(redirected.Query().Get("state")).To(Equal(state))
 	return code
 }
 
-func exchangeCode(t testing.TB, router http.Handler, code, redirectURI, verifier string) map[string]any {
-	t.Helper()
+func exchangeCode(router http.Handler, code, redirectURI, verifier string) map[string]any {
+	GinkgoHelper()
 
-	return exchangeCodeAt(t, router, "", code, redirectURI, verifier)
+	return exchangeCodeAt(router, "", code, redirectURI, verifier)
 }
 
-func exchangeCodeAt(t testing.TB, router http.Handler, basePath, code, redirectURI, verifier string) map[string]any {
-	t.Helper()
+func exchangeCodeAt(router http.Handler, basePath, code, redirectURI, verifier string) map[string]any {
+	GinkgoHelper()
 
-	return exchangeCodeForClient(t, router, basePath, oauthClientID, code, redirectURI, verifier)
+	return exchangeCodeForClient(router, basePath, oauthClientID, code, redirectURI, verifier)
 }
 
-func exchangeCodeForClient(t testing.TB, router http.Handler, basePath, clientID, code, redirectURI, verifier string) map[string]any {
-	t.Helper()
+func exchangeCodeForClient(router http.Handler, basePath, clientID, code, redirectURI, verifier string) map[string]any {
+	GinkgoHelper()
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -1474,32 +1279,32 @@ func exchangeCodeForClient(t testing.TB, router http.Handler, basePath, clientID
 		"code":          {code},
 		"code_verifier": {verifier},
 	}
-	return decodeJSONResponse(t, performForm(t, router, "http://leafwiki.local"+basePath+"/oauth/token", form), http.StatusOK)
+	return decodeJSONResponse(performForm(router, "http://leafwiki.local"+basePath+"/oauth/token", form), http.StatusOK)
 }
 
-func oauthAccessTokenForUser(t testing.TB, router http.Handler, username, password, state string) string {
-	t.Helper()
+func oauthAccessTokenForUser(router http.Handler, username, password, state string) string {
+	GinkgoHelper()
 
-	cookies := loginCookies(t, router, username, password)
-	return oauthAccessTokenWithCookies(t, router, cookies, state)
+	cookies := loginCookies(router, username, password)
+	return oauthAccessTokenWithCookies(router, cookies, state)
 }
 
-func oauthAccessTokenWithCookies(t testing.TB, router http.Handler, cookies []*http.Cookie, state string) string {
-	t.Helper()
+func oauthAccessTokenWithCookies(router http.Handler, cookies []*http.Cookie, state string) string {
+	GinkgoHelper()
 
-	return oauthAccessTokenWithCookiesAt(t, router, cookies, "", state, "http://leafwiki.local/mcp")
+	return oauthAccessTokenWithCookiesAt(router, cookies, "", state, "http://leafwiki.local/mcp")
 }
 
-func oauthAccessTokenWithCookiesAt(t testing.TB, router http.Handler, cookies []*http.Cookie, basePath, state, resource string) string {
-	t.Helper()
+func oauthAccessTokenWithCookiesAt(router http.Handler, cookies []*http.Cookie, basePath, state, resource string) string {
+	GinkgoHelper()
 
 	verifier := "oauth-access-verifier-" + state + "-abcdefghijklmnopqrstuvwxyz0123456789"
-	code := authorizeCodeAt(t, router, cookies, basePath, "http://localhost:49152/callback", state, verifier, resource)
-	return stringFromMap(t, exchangeCodeAt(t, router, basePath, code, "http://localhost:49152/callback", verifier), "access_token")
+	code := authorizeCodeAt(router, cookies, basePath, "http://localhost:49152/callback", state, verifier, resource)
+	return stringFromMap(exchangeCodeAt(router, basePath, code, "http://localhost:49152/callback", verifier), "access_token")
 }
 
-func connectLocalMCPWithToken(t testing.TB, handler http.Handler, path, token string) *sdkmcp.ClientSession {
-	t.Helper()
+func connectLocalMCPWithToken(handler http.Handler, path, token string) *sdkmcp.ClientSession {
+	GinkgoHelper()
 
 	server := httptest.NewServer(handler)
 	DeferCleanup(server.Close)
@@ -1511,103 +1316,45 @@ func connectLocalMCPWithToken(t testing.TB, handler http.Handler, path, token st
 		DisableStandaloneSSE: true,
 		OAuthHandler:         staticOAuthHandler{token: token},
 	}, nil)
-	if err != nil {
-		t.Fatalf("Connect MCP client with token failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "MCP client should connect with OAuth token")
 	DeferCleanup(func() { _ = session.Close() })
 	return session
 }
 
-func callTypedToolStructuredError(t testing.TB, session *sdkmcp.ClientSession, name wikimcp.ToolID, args map[string]any) mcpToolErrorResult {
-	t.Helper()
+func callTypedToolStructuredError(session *sdkmcp.ClientSession, name wikimcp.ToolID, args map[string]any) mcpToolErrorResult {
+	GinkgoHelper()
 
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
 		Name:      name.String(),
 		Arguments: args,
 	})
-	if err != nil {
-		t.Fatalf("CallTool %s failed: %v", name, err)
-	}
-	if !result.IsError {
-		t.Fatalf("CallTool %s succeeded, want tool error: %#v", name, result.StructuredContent)
-	}
-	out := mcpToolErrorResult{}
-	for _, content := range result.Content {
-		if text, ok := content.(*sdkmcp.TextContent); ok {
-			out.Text = text.Text
-			break
-		}
-	}
-	if out.Text == "" {
-		t.Fatalf("CallTool %s returned error without text content: %#v", name, result.Content)
-	}
-	if errorPayload, ok := result.Meta["error"].(map[string]any); ok {
-		raw, err := json.Marshal(errorPayload)
-		if err != nil {
-			t.Fatalf("CallTool %s structured error marshal failed: %v payload=%#v", name, err, errorPayload)
-		}
-		var typed mcpToolErrorPayloadWire
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			t.Fatalf("CallTool %s structured error decode failed: %v payload=%#v", name, err, errorPayload)
-		}
-		out.Code = typed.Code
-		out.MessageID = typed.MessageID
-		out.Message = typed.Message
-		out.Args = typed.Args
-	}
-	if out.Code == "" || out.MessageID == "" || out.Message == "" {
-		t.Fatalf("CallTool %s structured error = %#v, want code/messageId/message", name, out)
-	}
-	return out
+	Expect(err).NotTo(HaveOccurred(), "CallTool %s should return a result", name)
+	return toolErrorResultFromCallResult(name, result)
 }
 
-func assertMCPBearerUnauthorized(t testing.TB, router http.Handler, path, token string) {
-	t.Helper()
+func mcpBearerAuthorizationAttempt(router http.Handler, path, token string) *httptest.ResponseRecorder {
+	GinkgoHelper()
 
-	rec := performRequestWithHeaders(t, router, http.MethodPost, "http://leafwiki.local"+path, nil, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`), map[string]string{
+	return performRequestWithHeaders(router, http.MethodPost, "http://leafwiki.local"+path, nil, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`), map[string]string{
 		"Authorization": "Bearer " + token,
 		"Content-Type":  "application/json",
 		"Accept":        "application/json, text/event-stream",
 	})
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST %s with bearer %q = %d, want 401: %s", path, token, rec.Code, rec.Body.String())
-	}
 }
 
-func assertStringField(t testing.TB, got map[string]any, field, want string) {
-	t.Helper()
-
-	if value := stringFromMap(t, got, field); value != want {
-		t.Fatalf("%s = %q, want %q; payload=%#v", field, value, want, got)
-	}
+func matchOAuthErrorField(want oauthErrorField) types.GomegaMatcher {
+	GinkgoHelper()
+	return gcustom.MakeMatcher(func(payload map[string]any) (bool, error) {
+		got, ok := payload["error"].(string)
+		return ok && oauthErrorField(got) == want, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} report OAuth error field")
 }
 
-func stringFromMap(t testing.TB, got map[string]any, field string) string {
-	t.Helper()
+func stringFromMap(got map[string]any, field string) string {
+	GinkgoHelper()
 
-	value, ok := got[field].(string)
-	if !ok {
-		t.Fatalf("%s has type %T, want string; payload=%#v", field, got[field], got)
-	}
-	return value
-}
-
-func assertStringSliceField(t testing.TB, got map[string]any, field string, want []string) {
-	t.Helper()
-
-	raw, ok := got[field].([]any)
-	if !ok {
-		t.Fatalf("%s has type %T, want array; payload=%#v", field, got[field], got)
-	}
-	if len(raw) != len(want) {
-		t.Fatalf("%s length = %d, want %d; payload=%#v", field, len(raw), len(want), got)
-	}
-	for i, expected := range want {
-		value, ok := raw[i].(string)
-		if !ok || value != expected {
-			t.Fatalf("%s[%d] = %#v, want %q; payload=%#v", field, i, raw[i], expected, got)
-		}
-	}
+	Expect(got).To(HaveKeyWithValue(field, BeAssignableToTypeOf("")))
+	return got[field].(string)
 }
 
 var _ sdkauth.OAuthHandler = staticOAuthHandler{}

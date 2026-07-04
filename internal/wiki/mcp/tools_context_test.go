@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/perber/wiki/internal/core/auth"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -22,7 +24,6 @@ import (
 
 var _ = Describe("context tool helpers", func() {
 	It("handles case-insensitive markdown path names", func() {
-		t := GinkgoT()
 		tests := map[string]string{
 			"Docs/API.MD":      "Docs/API",
 			"Docs/INDEX.MD":    "Docs",
@@ -32,119 +33,79 @@ var _ = Describe("context tool helpers", func() {
 			" Docs/Trim.MD \n": "Docs/Trim",
 		}
 		for input, want := range tests {
-			if got := tree.MarkdownPathToRoutePath(input); got != want {
-				t.Fatalf("MarkdownPathToRoutePath(%q) = %q, want %q", input, got, want)
-			}
+			Expect(tree.MarkdownPathToRoutePath(input)).To(Equal(want))
 		}
 	})
 
 	It("resolves root index markdown paths to the root page ID", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
+		routes := newContextToolTestRoutes()
 
 		got := routes.pageIDsForMarkdownPaths([]string{"index.md"})
 
-		if len(got) != 1 || got[0] != tree.RootPageID {
-			t.Fatalf("pageIDsForMarkdownPaths(index.md) = %v, want [root]", got)
-		}
+		Expect(got).To(Equal([]tree.PageID{tree.RootPageID}))
 	})
 
 	It("uses markdown file kind for same-basename twins", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
+		routes := newContextToolTestRoutes()
 
 		sectionID, err := routes.treeService.CreateNode("system", nil, "Sync Section", "sync", testNodeKindPtr(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
+		Expect(err).To(Succeed())
 		pageID, err := routes.treeService.CreateNode("system", nil, "Sync Page", "sync", testNodeKindPtr(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"sync.md"})
-		if len(pageIDs) != 1 || pageIDs[0] != *pageID {
-			t.Fatalf("pageIDsForMarkdownPaths(sync.md) = %v, want [%s]", pageIDs, pageID.String())
-		}
+		Expect(pageIDs).To(Equal([]tree.PageID{*pageID}))
 
 		sectionIDs := routes.pageIDsForMarkdownPaths([]string{"sync/index.md"})
-		if len(sectionIDs) != 1 || sectionIDs[0] != *sectionID {
-			t.Fatalf("pageIDsForMarkdownPaths(sync/index.md) = %v, want [%s]", sectionIDs, sectionID.String())
-		}
+		Expect(sectionIDs).To(Equal([]tree.PageID{*sectionID}))
 	})
 
 	It("resolves README fallback markdown paths to sections", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
+		routes := newContextToolTestRoutes()
 
 		sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/README.md"})
-		if len(pageIDs) != 1 || pageIDs[0] != *sectionID {
-			t.Fatalf("pageIDsForMarkdownPaths(guide/README.md) = %v, want [%s]", pageIDs, sectionID.String())
-		}
+		Expect(pageIDs).To(Equal([]tree.PageID{*sectionID}))
 	})
 
 	It("uses workspace route normalization for README sections", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
-		workspaceRoot := t.TempDir()
+		routes := newContextToolTestRoutes()
+		workspaceRoot := mcpTestTempDir()
 		routes.workspaceRootDir = workspaceRoot
-		if err := os.MkdirAll(filepath.Join(workspaceRoot, "User Guides"), 0o755); err != nil {
-			t.Fatalf("create workspace section: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(workspaceRoot, "User Guides", "README.md"), []byte("# User Guides\n"), 0o644); err != nil {
-			t.Fatalf("write workspace README: %v", err)
-		}
+		Expect(os.MkdirAll(filepath.Join(workspaceRoot, "User Guides"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(workspaceRoot, "User Guides", "README.md"), []byte("# User Guides\n"), 0o644)).To(Succeed())
 		sectionID, err := routes.treeService.CreateNode("system", nil, "User Guides", "user-guides", testNodeKindPtr(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"User Guides/README.md"})
-		if len(pageIDs) != 1 || pageIDs[0] != *sectionID {
-			t.Fatalf("pageIDsForMarkdownPaths(User Guides/README.md) = %v, want [%s]", pageIDs, sectionID.String())
-		}
+		Expect(pageIDs).To(Equal([]tree.PageID{*sectionID}))
 	})
 
 	It("does not fallback lowercase readme markdown paths", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
+		routes := newContextToolTestRoutes()
 
-		if _, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection)); err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
+		_, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
+		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/readme.md"})
-		if len(pageIDs) != 0 {
-			t.Fatalf("pageIDsForMarkdownPaths(guide/readme.md) = %v, want no fallback section", pageIDs)
-		}
+		Expect(pageIDs).To(BeEmpty())
 	})
 
 	It("uses workspace route normalization for plan paths", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
+		routes := newContextToolTestRoutes()
 		plansID, err := routes.treeService.CreateNode("system", nil, "Plans", "plans", testNodeKindPtr(tree.NodeKindSection))
-		if err != nil {
-			t.Fatalf("CreateNode section failed: %v", err)
-		}
+		Expect(err).To(Succeed())
 		pageID, err := routes.treeService.CreateNode("system", plansID, "Agent Hooks Plan", "agent-hooks-plan", testNodeKindPtr(tree.NodeKindPage))
-		if err != nil {
-			t.Fatalf("CreateNode page failed: %v", err)
-		}
+		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"plans/agent_hooks.PLAN.md"})
-		if len(pageIDs) != 1 || pageIDs[0] != *pageID {
-			t.Fatalf("pageIDsForMarkdownPaths(plans/agent_hooks.PLAN.md) = %v, want [%s]", pageIDs, pageID.String())
-		}
+		Expect(pageIDs).To(Equal([]tree.PageID{*pageID}))
 	})
 
 	It("resolves recent root index changes to the root page ID", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
+		routes := newContextToolTestRoutes()
 		ctx := context.Background()
 		createdAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
 		routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
@@ -160,17 +121,11 @@ var _ = Describe("context tool helpers", func() {
 
 		changes := routes.recentChanges(ctx, workspacesync.SyncStatus{}, 1)
 
-		if len(changes) != 1 {
-			t.Fatalf("recentChanges length = %d, want 1", len(changes))
-		}
-		if len(changes[0].PageIDs) != 1 || changes[0].PageIDs[0] != tree.RootPageID {
-			t.Fatalf("recentChanges[0].PageIDs = %v, want [root]", changes[0].PageIDs)
-		}
+		Expect(changes).To(HaveExactElements(HaveField("PageIDs", Equal([]tree.PageID{tree.RootPageID}))))
 	})
 
 	It("handles context sync modes and session history", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
+		routes := newContextToolTestRoutes()
 		actor := toolActor{ID: "editor-1", User: &auth.User{ID: "editor-1", Username: "editor", Role: auth.RoleEditor}}
 		opts := httpinternal.RouterOptions{AuthDisabled: true, EnableWorkspaceSync: true}
 		ctx := context.Background()
@@ -184,41 +139,28 @@ var _ = Describe("context tool helpers", func() {
 		}
 
 		healthy, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto})
-		if err != nil {
-			t.Fatalf("healthy auto context failed: %v", err)
-		}
-		if refreshCalls != 0 {
-			t.Fatalf("healthy auto refresh calls = %d, want 0", refreshCalls)
-		}
-		if healthy.ContextToken == "" {
-			t.Fatalf("healthy context token is empty")
-		}
+		Expect(err).To(Succeed())
+		Expect(refreshCalls).To(BeZero())
+		next, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeNone})
+		Expect(err).To(Succeed())
+		Expect(next.PreviousContextToken).To(Equal(healthy.ContextToken))
 
 		status.WatcherEnabled = false
 		status.WatcherRunning = false
-		if _, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto}); err != nil {
-			t.Fatalf("manual watcher auto context failed: %v", err)
-		}
-		if refreshCalls != 0 {
-			t.Fatalf("manual watcher auto refresh calls = %d, want 0", refreshCalls)
-		}
+		_, err = routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto})
+		Expect(err).To(Succeed())
+		Expect(refreshCalls).To(BeZero())
 		status.WatcherEnabled = true
-		if _, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto}); err != nil {
-			t.Fatalf("stopped watcher auto context failed: %v", err)
-		}
-		if refreshCalls != 1 {
-			t.Fatalf("stopped watcher auto refresh calls = %d, want 1", refreshCalls)
-		}
+		_, err = routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto})
+		Expect(err).To(Succeed())
+		Expect(refreshCalls).To(Equal(1))
 		status.WatcherRunning = true
 
 		status.PendingEventCount = 2
 		status.LastCommitHash = "pending"
-		if _, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto}); err != nil {
-			t.Fatalf("pending auto context failed: %v", err)
-		}
-		if refreshCalls != 2 {
-			t.Fatalf("pending auto refresh calls = %d, want 2", refreshCalls)
-		}
+		_, err = routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto})
+		Expect(err).To(Succeed())
+		Expect(refreshCalls).To(Equal(2))
 
 		status.PendingEventCount = 0
 		status.LastError = "previous sync failed"
@@ -228,17 +170,10 @@ var _ = Describe("context tool helpers", func() {
 			return status, errors.New("sync still failed")
 		}
 		errored, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto})
-		if err != nil {
-			t.Fatalf("errored auto context failed: %v", err)
-		}
-		if refreshCalls != 3 {
-			t.Fatalf("errored auto refresh calls = %d, want 3", refreshCalls)
-		}
-		erroredStatus, ok := errored.SyncStatus.(map[string]any)
-		lastErrorDetail, detailOK := erroredStatus["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
-		if !ok || !detailOK || lastErrorDetail == nil || lastErrorDetail.Code != errCodeMCPWorkspaceSyncFailed {
-			t.Fatalf("errored sync status = %#v, want structured refresh error detail", errored.SyncStatus)
-		}
+		Expect(err).To(Succeed())
+		Expect(refreshCalls).To(Equal(3))
+		Expect(errored.SyncStatus).To(HaveKeyWithValue("lastErrorDetail",
+			testmatchers.HaveStructuredError(errCodeMCPWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeMCPWorkspaceSyncFailed))))
 
 		routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
 			refreshCalls++
@@ -246,93 +181,55 @@ var _ = Describe("context tool helpers", func() {
 		}
 		status.LastError = ""
 		status.LastCommitHash = "force"
-		if _, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeForce}); err != nil {
-			t.Fatalf("force context failed: %v", err)
-		}
-		if refreshCalls != 4 {
-			t.Fatalf("force refresh calls = %d, want 4", refreshCalls)
-		}
+		_, err = routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeForce})
+		Expect(err).To(Succeed())
+		Expect(refreshCalls).To(Equal(4))
 
 		status.LastError = "reported without refresh"
 		status.LastCommitHash = "none"
 		none, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeNone})
-		if err != nil {
-			t.Fatalf("none context failed: %v", err)
-		}
-		if refreshCalls != 4 {
-			t.Fatalf("none refresh calls = %d, want still 4", refreshCalls)
-		}
-		noneStatus, ok := none.SyncStatus.(map[string]any)
-		lastErrorDetail, detailOK = noneStatus["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
-		if !ok || !detailOK || lastErrorDetail == nil || lastErrorDetail.Code != errCodeMCPWorkspaceSyncFailed {
-			t.Fatalf("none sync status = %#v, want existing last error", none.SyncStatus)
-		}
+		Expect(err).To(Succeed())
+		Expect(refreshCalls).To(Equal(4))
+		Expect(none.SyncStatus).To(HaveKeyWithValue("lastErrorDetail",
+			testmatchers.HaveStructuredError(errCodeMCPWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeMCPWorkspaceSyncFailed))))
 
 		missing, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SinceToken: "missing", SyncMode: contextSyncModeNone})
-		if err != nil {
-			t.Fatalf("missing-token context failed: %v", err)
-		}
-		if len(missing.Warnings) == 0 || missing.Warnings[0] != "unknown sinceToken; returned current context" {
-			t.Fatalf("missing token warnings = %#v, want unknown-token warning", missing.Warnings)
-		}
-		if missing.PreviousContextToken != "" {
-			t.Fatalf("missing token previousContextToken = %q, want no implicit fallback", missing.PreviousContextToken)
-		}
-		if len(missing.ChangesSincePreviousContext) != 0 {
-			t.Fatalf("missing token changesSincePreviousContext = %#v, want no implicit fallback delta", missing.ChangesSincePreviousContext)
-		}
+		Expect(err).To(Succeed())
+		Expect(missing).To(SatisfyAll(
+			HaveField("Warnings", HaveExactElements("unknown sinceToken; returned current context")),
+			HaveField("PreviousContextToken", BeEmpty()),
+			HaveField("ChangesSincePreviousContext", BeEmpty()),
+		))
 
 		var latest contextOutput
 		for i := 0; i < 12; i++ {
 			latest, err = routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeNone})
-			if err != nil {
-				t.Fatalf("history context %d failed: %v", i, err)
-			}
+			Expect(err).To(Succeed())
 		}
-		if len(latest.ContextHistory) != 10 {
-			t.Fatalf("context history len = %d, want 10", len(latest.ContextHistory))
-		}
+		Expect(latest.ContextHistory).To(HaveLen(10))
 
 		otherActor := toolActor{ID: "editor-2", User: &auth.User{ID: "editor-2", Username: "other", Role: auth.RoleEditor}}
 		other, err := routes.getContext(ctx, nil, otherActor, opts, getContextInput{SyncMode: contextSyncModeNone})
-		if err != nil {
-			t.Fatalf("other context failed: %v", err)
-		}
-		if len(other.ContextHistory) != 1 {
-			t.Fatalf("other context history len = %d, want isolated first checkpoint", len(other.ContextHistory))
-		}
+		Expect(err).To(Succeed())
+		Expect(other.ContextHistory).To(HaveLen(1))
 	})
 
 	It("clamps context input limits", func() {
-		t := GinkgoT()
 		huge := 999
 		negative := -1
 
-		if got := boundedContextTreeDepth(nil); got != defaultContextTreeDepth {
-			t.Fatalf("boundedContextTreeDepth(nil) = %d, want %d", got, defaultContextTreeDepth)
-		}
-		if got := boundedContextTreeDepth(&huge); got != maxContextTreeDepth {
-			t.Fatalf("boundedContextTreeDepth(999) = %d, want %d", got, maxContextTreeDepth)
-		}
-		if got := boundedContextTreeDepth(&negative); got != defaultContextTreeDepth {
-			t.Fatalf("boundedContextTreeDepth(-1) = %d, want %d", got, defaultContextTreeDepth)
-		}
-		if got := boundedRecentChangesLimit(nil); got != defaultContextRecentChangesLimit {
-			t.Fatalf("boundedRecentChangesLimit(nil) = %d, want %d", got, defaultContextRecentChangesLimit)
-		}
-		if got := boundedRecentChangesLimit(&huge); got != maxContextRecentChangesLimit {
-			t.Fatalf("boundedRecentChangesLimit(999) = %d, want %d", got, maxContextRecentChangesLimit)
-		}
-		if got := boundedRecentChangesLimit(&negative); got != defaultContextRecentChangesLimit {
-			t.Fatalf("boundedRecentChangesLimit(-1) = %d, want %d", got, defaultContextRecentChangesLimit)
-		}
+		Expect(boundedContextTreeDepth(nil)).To(Equal(treeDisplayDepth(defaultContextTreeDepth)))
+		Expect(boundedContextTreeDepth(&huge)).To(Equal(treeDisplayDepth(maxContextTreeDepth)))
+		Expect(boundedContextTreeDepth(&negative)).To(Equal(treeDisplayDepth(defaultContextTreeDepth)))
+		Expect(boundedRecentChangesLimit(nil)).To(Equal(defaultContextRecentChangesLimit))
+		Expect(boundedRecentChangesLimit(&huge)).To(Equal(maxContextRecentChangesLimit))
+		Expect(boundedRecentChangesLimit(&negative)).To(Equal(defaultContextRecentChangesLimit))
 	})
 
 	It("redacts sync status last-error paths", func() {
-		t := GinkgoT()
-		routes := newContextToolTestRoutes(t)
-		rootDir := filepath.Join(t.TempDir(), "content")
-		dataDir := filepath.Join(t.TempDir(), "data")
+		routes := newContextToolTestRoutes()
+		rootDir := filepath.Join(mcpTestTempDir(), "content")
+		dataDir := filepath.Join(mcpTestTempDir(), "data")
 		routes.workspaceRootDir = rootDir
 		routes.workspaceDataDir = dataDir
 		routes.workspaceSyncStatus = func() workspacesync.SyncStatus {
@@ -357,53 +254,25 @@ var _ = Describe("context tool helpers", func() {
 		actor := toolActor{ID: "editor-1", User: &auth.User{ID: "editor-1", Username: "editor", Role: auth.RoleEditor}}
 
 		out, err := routes.getContext(context.Background(), nil, actor, httpinternal.RouterOptions{EnableWorkspaceSync: true}, getContextInput{SyncMode: contextSyncModeNone})
-		if err != nil {
-			t.Fatalf("getContext failed: %v", err)
-		}
-		status, ok := out.SyncStatus.(map[string]any)
-		if !ok {
-			t.Fatalf("SyncStatus has type %T, want map", out.SyncStatus)
-		}
-		lastErrorDetail, ok := status["lastErrorDetail"].(*sharederrors.LocalizedErrorDetail)
-		if !ok || lastErrorDetail == nil {
-			t.Fatalf("lastErrorDetail has type %T, want structured detail", status["lastErrorDetail"])
-		}
-		for _, got := range []string{lastErrorDetail.Message, lastErrorDetail.Template} {
-			if strings.Contains(got, rootDir) || strings.Contains(got, dataDir) {
-				t.Fatalf("lastErrorDetail field = %q, want root/data paths omitted", got)
-			}
-		}
-		if lastErrorDetail.Code != errCodeMCPWorkspaceSyncFailed {
-			t.Fatalf("lastErrorDetail = %#v, want workspace sync failed code", lastErrorDetail)
-		}
-		validationErrors, ok := status["validationErrorDetails"].([]workspacesync.ValidationError)
-		if !ok || len(validationErrors) != 1 {
-			t.Fatalf("validationErrorDetails = %#v, want one redacted validation error", status["validationErrorDetails"])
-		}
-		for _, got := range []string{validationErrors[0].Path, validationErrors[0].Message} {
-			if strings.Contains(got, rootDir) || strings.Contains(got, dataDir) {
-				t.Fatalf("syncStatus validation error field = %q, want root/data paths redacted", got)
-			}
-		}
-		if validationErrors[0].Path != "<root-dir>/docs/bad.md" || !strings.Contains(validationErrors[0].Message, "<data-dir>/.leafwiki/work/bad.md") {
-			t.Fatalf("validationErrors = %#v, want redacted path and message", validationErrors)
-		}
-		if len(out.Validation.Issues) != 1 {
-			t.Fatalf("validation issues = %#v, want one issue", out.Validation.Issues)
-		}
-		issue := out.Validation.Issues[0]
-		for _, got := range []string{issue.Path, issue.Message} {
-			if strings.Contains(got, rootDir) || strings.Contains(got, dataDir) {
-				t.Fatalf("validation issue field = %q, want root/data paths redacted", got)
-			}
-		}
-		if issue.Path != "<root-dir>/docs/bad.md" || !strings.Contains(issue.Message, "<data-dir>/.leafwiki/work/bad.md") {
-			t.Fatalf("validation issues = %#v, want redacted path and message", out.Validation.Issues)
-		}
+		Expect(err).To(Succeed())
+		Expect(out.SyncStatus).To(SatisfyAll(
+			HaveKeyWithValue("lastErrorDetail", SatisfyAll(
+				testmatchers.HaveStructuredError(errCodeMCPWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeMCPWorkspaceSyncFailed)),
+				HaveField("Message", SatisfyAll(Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir)))),
+				HaveField("Template", SatisfyAll(Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir)))),
+			)),
+			HaveKeyWithValue("validationErrorDetails", HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Path":    Equal("<root-dir>/docs/bad.md"),
+				"Message": SatisfyAll(ContainSubstring("<data-dir>/.leafwiki/work/bad.md"), Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir))),
+			}))),
+		))
+		Expect(out.Validation.Issues).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Path":    Equal("<root-dir>/docs/bad.md"),
+			"Message": SatisfyAll(ContainSubstring("<data-dir>/.leafwiki/work/bad.md"), Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir))),
+		})))
 	})
 
 	It("evicts old checkpoint sessions", func() {
-		t := GinkgoT()
 		store := newContextCheckpointStore(2)
 		base := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 
@@ -412,24 +281,20 @@ var _ = Describe("context tool helpers", func() {
 		}
 
 		store.mu.Lock()
-		got := len(store.sessions)
-		_, firstExists := store.sessions["session-000"]
-		_, newestExists := store.sessions[fmt.Sprintf("session-%03d", defaultContextCheckpointSessions+3)]
+		sessions := map[string][]contextCheckpoint{}
+		for id, history := range store.sessions {
+			sessions[id] = history
+		}
 		store.mu.Unlock()
 
-		if got != defaultContextCheckpointSessions {
-			t.Fatalf("session count = %d, want %d", got, defaultContextCheckpointSessions)
-		}
-		if firstExists {
-			t.Fatalf("oldest session was not evicted")
-		}
-		if !newestExists {
-			t.Fatalf("newest session was evicted")
-		}
+		Expect(sessions).To(SatisfyAll(
+			HaveLen(defaultContextCheckpointSessions),
+			Not(HaveKey("session-000")),
+			HaveKey(fmt.Sprintf("session-%03d", defaultContextCheckpointSessions+3)),
+		))
 	})
 
 	It("preserves the current checkpoint session when overflow removes another session", func() {
-		t := GinkgoT()
 		store := newContextCheckpointStore(2)
 		store.maxSessions = 2
 		store.ttl = time.Hour
@@ -440,28 +305,25 @@ var _ = Describe("context tool helpers", func() {
 
 		_, history := store.record("current", contextCheckpoint{CreatedAt: base.Add(3 * time.Minute)})
 
-		if len(history) != 2 || history[0].Token != "current-old" {
-			t.Fatalf("current history = %#v, want preserved current session history", history)
-		}
+		Expect(history).To(HaveExactElements(
+			HaveField("Token", Equal("current-old")),
+			HaveField("CreatedAt", Equal(base.Add(3*time.Minute))),
+		))
 		store.mu.Lock()
-		_, currentExists := store.sessions["current"]
-		_, oldestExists := store.sessions["oldest"]
-		_, middleExists := store.sessions["middle"]
-		got := len(store.sessions)
+		sessions := map[string][]contextCheckpoint{}
+		for id, history := range store.sessions {
+			sessions[id] = history
+		}
 		store.mu.Unlock()
-		if !currentExists {
-			t.Fatalf("current session was evicted")
-		}
-		if oldestExists {
-			t.Fatalf("oldest session was not evicted")
-		}
-		if !middleExists || got != 2 {
-			t.Fatalf("sessions after overflow = current:%v oldest:%v middle:%v len:%d", currentExists, oldestExists, middleExists, got)
-		}
+		Expect(sessions).To(SatisfyAll(
+			HaveLen(2),
+			HaveKey("current"),
+			HaveKey("middle"),
+			Not(HaveKey("oldest")),
+		))
 	})
 
 	It("prunes expired checkpoint sessions", func() {
-		t := GinkgoT()
 		store := newContextCheckpointStore(2)
 		store.ttl = time.Minute
 		base := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
@@ -471,21 +333,20 @@ var _ = Describe("context tool helpers", func() {
 		store.record("current", contextCheckpoint{CreatedAt: base.Add(2 * time.Minute)})
 
 		store.mu.Lock()
-		_, expiredExists := store.sessions["expired"]
-		_, freshExists := store.sessions["fresh"]
-		_, currentExists := store.sessions["current"]
+		sessions := map[string][]contextCheckpoint{}
+		for id, history := range store.sessions {
+			sessions[id] = history
+		}
 		store.mu.Unlock()
 
-		if expiredExists || freshExists {
-			t.Fatalf("expired sessions remain: expired=%v fresh=%v", expiredExists, freshExists)
-		}
-		if !currentExists {
-			t.Fatalf("current session was pruned")
-		}
+		Expect(sessions).To(SatisfyAll(
+			HaveKey("current"),
+			Not(HaveKey("expired")),
+			Not(HaveKey("fresh")),
+		))
 	})
 
 	It("expires current-session checkpoint tokens", func() {
-		t := GinkgoT()
 		store := newContextCheckpointStore(2)
 		freshTime := time.Now().UTC()
 		expiredTime := freshTime.Add(-2 * time.Minute)
@@ -497,28 +358,27 @@ var _ = Describe("context tool helpers", func() {
 		freshToken := history[len(history)-1].Token
 		store.ttl = time.Minute
 
-		if checkpoint, ok := store.find("current", expiredToken); ok {
-			t.Fatalf("expired current-session checkpoint = %#v, want token pruned", checkpoint)
-		}
-		if _, ok := store.find("current", freshToken); !ok {
-			t.Fatalf("fresh current-session checkpoint %q was pruned", freshToken)
-		}
+		history = currentSessionHistoryAfterCheckpointLookup(store, expiredToken)
+		Expect(history).To(HaveExactElements(SatisfyAll(
+			HaveField("Token", Equal(freshToken)),
+			Not(HaveField("Token", Equal(expiredToken))),
+		)))
 	})
 
 	It("separates sync-status validation warnings from errors", func() {
-		t := GinkgoT()
 		validation := validationFromSyncStatus(workspacesync.SyncStatus{
 			ValidationErrors: []workspacesync.ValidationError{
 				{Path: "hidden.md", Message: "hidden markdown file", Severity: "warning"},
 			},
 		})
 
-		if !validation.OK {
-			t.Fatalf("validation.OK = false, want warnings-only status to be OK")
-		}
-		if validation.Summary.Errors != 0 || validation.Summary.WarningCount != 1 {
-			t.Fatalf("validation summary = %#v, want 0 errors and 1 warning", validation.Summary)
-		}
+		Expect(validation).To(SatisfyAll(
+			HaveField("OK", BeTrue()),
+			HaveField("Summary", SatisfyAll(
+				HaveField("Errors", BeZero()),
+				HaveField("WarningCount", Equal(1)),
+			)),
+		))
 	})
 })
 
@@ -526,32 +386,35 @@ func testNodeKindPtr(kind tree.NodeKind) *tree.NodeKind {
 	return &kind
 }
 
-type contextToolTestT interface {
-	Helper()
-	Fatalf(format string, args ...any)
-	TempDir() string
+func currentSessionHistoryAfterCheckpointLookup(store *contextCheckpointStore, token string) []contextCheckpoint {
+	GinkgoHelper()
+	_, found := store.find("current", token)
+	if found {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return append([]contextCheckpoint(nil), store.sessions["current"]...)
 }
 
-func newContextToolTestRoutes(t contextToolTestT) *Routes {
-	t.Helper()
+func newContextToolTestRoutes() *Routes {
+	GinkgoHelper()
 
 	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-		DataDir: t.TempDir(),
-		RootDir: t.TempDir(),
+		DataDir: mcpTestTempDir(),
+		RootDir: mcpTestTempDir(),
 	})
-	if err := treeService.LoadTree(); err != nil {
-		t.Fatalf("LoadTree failed: %v", err)
-	}
-	if id, err := treeService.CreateNode("system", nil, "Home", "home", nil); err != nil || id == nil {
-		t.Fatalf("CreateNode failed: id=%v err=%v", id, err)
-	}
+	Expect(treeService.LoadTree()).To(Succeed())
+	id, err := treeService.CreateNode("system", nil, "Home", "home", nil)
+	Expect(err).To(Succeed())
+	Expect(id).NotTo(BeNil())
 	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 	return &Routes{
 		treeService:      treeService,
 		contextStore:     newContextCheckpointStore(10),
 		userResolver:     nil,
 		getAssets:        nil,
-		workspaceRootDir: t.TempDir(),
+		workspaceRootDir: mcpTestTempDir(),
 		workspaceSyncStatus: func() workspacesync.SyncStatus {
 			return workspacesync.SyncStatus{Enabled: true, WatcherRunning: true, LastSyncTime: now}
 		},

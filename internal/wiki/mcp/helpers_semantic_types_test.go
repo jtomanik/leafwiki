@@ -7,7 +7,7 @@ import (
 )
 
 var _ = Describe("Semantic helper types", func() {
-	It("returns a semantic page ID from exactlyOneIDOrPageID", func() {
+	It("preserves page identifiers as typed page IDs", func() {
 		pageID, err := exactlyOneIDOrPageID("page-1", "")
 		Expect(err).NotTo(HaveOccurred())
 

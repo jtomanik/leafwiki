@@ -8,7 +8,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -36,16 +38,15 @@ var _ = Describe("Validation tool helpers", func() {
 	})
 
 	It("uses the section source for same-basename markdown twins", func() {
-		t := GinkgoT()
-		dataDir := t.TempDir()
-		rootDir := filepath.Join(t.TempDir(), "workspace")
-		writeValidationMarkdown(t, filepath.Join(rootDir, "docs", "sync.md"), `---
+		dataDir := mcpTestTempDir()
+		rootDir := filepath.Join(mcpTestTempDir(), "workspace")
+		writeValidationMarkdown(filepath.Join(rootDir, "docs", "sync.md"), `---
 leafwiki_id: sync-page
 leafwiki_title: Sync Page
 ---
 # Sync Page
 `)
-		writeValidationMarkdown(t, filepath.Join(rootDir, "docs", "sync", "index.md"), `---
+		writeValidationMarkdown(filepath.Join(rootDir, "docs", "sync", "index.md"), `---
 leafwiki_id: sync-section
 leafwiki_title: Sync Section
 ---
@@ -53,7 +54,7 @@ leafwiki_title: Sync Section
 
 [Child](./child.md)
 `)
-		writeValidationMarkdown(t, filepath.Join(rootDir, "docs", "sync", "child.md"), `---
+		writeValidationMarkdown(filepath.Join(rootDir, "docs", "sync", "child.md"), `---
 leafwiki_id: sync-child
 leafwiki_title: Sync Child
 ---
@@ -62,22 +63,23 @@ leafwiki_title: Sync Child
 
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		Expect(treeService.LoadTree()).To(Succeed())
-		moveChildKindFirst(t, treeService.GetTree(), "docs", tree.NodeKindPage)
+		Expect(moveChildKindFirst(treeService.GetTree(), "docs", tree.NodeKindPage)).To(Equal(validationChildKindMoved))
 		section, err := treeService.GetPage("sync-section")
 		Expect(err).NotTo(HaveOccurred())
 		routes := &Routes{treeService: treeService}
 
-		routePath := newFixtureRoutePath(section.CalculatePath())
-		result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, newFixturePageID(section.ID), section.Kind)
+		routePath := tree.RoutePathFromString(section.CalculatePath())
+		result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, tree.PageIDFromString(section.ID), section.Kind)
 
-		Expect(result.OK).To(BeTrue(), "validateMarkdownContent = %#v", result)
-		assertNoCoreValidationIssueCode(t, result, wikivalidation.IssueCodeBrokenLink)
+		Expect(result).To(SatisfyAll(
+			HaveField("OK", BeTrue()),
+			HaveField("Issues", Not(ContainElement(matchMarkdownValidationIssue(wikivalidation.IssueCodeBrokenLink)))),
+		), "validateMarkdownContent = %#v", result)
 	})
 
 	It("resolves markdown link root prefixes while validating workspace files", func() {
-		t := GinkgoT()
-		rootDir := filepath.Join(t.TempDir(), "repo", "docs")
-		writeValidationMarkdown(t, filepath.Join(rootDir, "index.md"), `---
+		rootDir := filepath.Join(mcpTestTempDir(), "repo", "docs")
+		writeValidationMarkdown(filepath.Join(rootDir, "index.md"), `---
 leafwiki_id: root
 leafwiki_title: Root
 ---
@@ -85,7 +87,7 @@ leafwiki_title: Root
 
 [Glossary](/docs/sync/glossary.md)
 `)
-		writeValidationMarkdown(t, filepath.Join(rootDir, "sync", "glossary.md"), `---
+		writeValidationMarkdown(filepath.Join(rootDir, "sync", "glossary.md"), `---
 leafwiki_id: glossary
 leafwiki_title: Glossary
 ---
@@ -98,13 +100,14 @@ leafwiki_title: Glossary
 
 		result := routes.validateWorkspaceMarkdownFiles(context.Background(), false)
 
-		Expect(result.OK).To(BeTrue(), "validateWorkspaceMarkdownFiles = %#v", result)
-		assertNoCoreValidationIssueCode(t, result, wikivalidation.IssueCodeBrokenLink)
+		Expect(result).To(SatisfyAll(
+			HaveField("OK", BeTrue()),
+			HaveField("Issues", Not(ContainElement(matchMarkdownValidationIssue(wikivalidation.IssueCodeBrokenLink)))),
+		), "validateWorkspaceMarkdownFiles = %#v", result)
 	})
 
 	It("validates loaded tree content when no workspace root is available", func() {
-		t := GinkgoT()
-		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: t.TempDir(), RootDir: t.TempDir()})
+		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})
 		Expect(treeService.LoadTree()).To(Succeed())
 		pageID, err := treeService.CreateNode("system", nil, "Broken", "broken", nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -136,24 +139,20 @@ leafwiki_title: Glossary
 	})
 
 	It("resolves validation source markdown files and page IDs for sections", func() {
-		t := GinkgoT()
-		rootDir := filepath.Join(t.TempDir(), "workspace")
-		writeValidationMarkdown(t, filepath.Join(rootDir, "docs", "index.md"), `---
+		rootDir := filepath.Join(mcpTestTempDir(), "workspace")
+		writeValidationMarkdown(filepath.Join(rootDir, "docs", "index.md"), `---
 leafwiki_id: docs-section
 leafwiki_title: Docs
 ---
 # Docs
 `)
-		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: t.TempDir(), RootDir: rootDir})
+		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: rootDir})
 		Expect(treeService.LoadTree()).To(Succeed())
 		routes := &Routes{treeService: treeService}
 
 		source := routes.validationSourceMarkdownFile("docs")
-		pageID, ok := routes.resolveValidationPageID("docs")
-
 		Expect(source).To(Equal(tree.MarkdownPathFromString("docs/index.md")))
-		Expect(ok).To(BeTrue())
-		Expect(pageID).To(Equal(newFixturePageID("docs-section")))
+		Expect(validationPageIDResolutionFor(routes, "docs")).To(matchValidationPageID(validationResolved, Equal(newFixturePageID("docs-section"))))
 	})
 
 	It("normalizes validation asset destinations before lookup", func() {
@@ -162,13 +161,16 @@ leafwiki_title: Docs
 	})
 })
 
-type validationTestT interface {
-	Helper()
-	Fatalf(format string, args ...any)
-}
+type validationChildKindMoveState string
 
-func moveChildKindFirst(t validationTestT, root *tree.PageNode, routePath string, kind tree.NodeKind) {
-	t.Helper()
+const (
+	validationChildKindMoved      validationChildKindMoveState = "moved child kind first"
+	validationChildRouteMissing   validationChildKindMoveState = "route missing"
+	validationChildKindNotPresent validationChildKindMoveState = "child kind not present"
+)
+
+func moveChildKindFirst(root *tree.PageNode, routePath string, kind tree.NodeKind) validationChildKindMoveState {
+	GinkgoHelper()
 	parent := root
 	for _, slug := range strings.Split(strings.Trim(routePath, "/"), "/") {
 		if slug == "" {
@@ -176,7 +178,7 @@ func moveChildKindFirst(t validationTestT, root *tree.PageNode, routePath string
 		}
 		parent = childBySlug(parent, slug)
 		if parent == nil {
-			t.Fatalf("route %q not found", routePath)
+			return validationChildRouteMissing
 		}
 	}
 	for i, child := range parent.Children {
@@ -184,9 +186,9 @@ func moveChildKindFirst(t validationTestT, root *tree.PageNode, routePath string
 			continue
 		}
 		parent.Children = append([]*tree.PageNode{child}, append(parent.Children[:i], parent.Children[i+1:]...)...)
-		return
+		return validationChildKindMoved
 	}
-	t.Fatalf("child kind %q not found under %q", kind, parent.ID)
+	return validationChildKindNotPresent
 }
 
 func childBySlug(parent *tree.PageNode, slug string) *tree.PageNode {
@@ -194,30 +196,17 @@ func childBySlug(parent *tree.PageNode, slug string) *tree.PageNode {
 		return nil
 	}
 	for _, child := range parent.Children {
-		if child.Slug == newFixtureSlug(slug) {
+		if child.Slug == tree.SlugFromString(slug) {
 			return child
 		}
 	}
 	return nil
 }
 
-func writeValidationMarkdown(t validationTestT, filePath string, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		t.Fatalf("MkdirAll %s: %v", filepath.Dir(filePath), err)
-	}
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile %s: %v", filePath, err)
-	}
-}
-
-func assertNoCoreValidationIssueCode(t validationTestT, result wikivalidation.Result, code wikivalidation.IssueCode) {
-	t.Helper()
-	for _, issue := range result.Issues {
-		if issue.Code == code {
-			t.Fatalf("unexpected validation issue %q in %#v", code, result.Issues)
-		}
-	}
+func writeValidationMarkdown(filePath string, content string) {
+	GinkgoHelper()
+	Expect(os.MkdirAll(filepath.Dir(filePath), 0o755)).To(Succeed())
+	Expect(os.WriteFile(filePath, []byte(content), 0o644)).To(Succeed())
 }
 
 func validationIssueCodeCount(result wikivalidation.Result, code wikivalidation.IssueCode) int {
@@ -228,4 +217,11 @@ func validationIssueCodeCount(result wikivalidation.Result, code wikivalidation.
 		}
 	}
 	return count
+}
+
+func matchMarkdownValidationIssue(code wikivalidation.IssueCode) types.GomegaMatcher {
+	GinkgoHelper()
+	return gcustom.MakeMatcher(func(issue wikivalidation.Issue) (bool, error) {
+		return issue.Code == code, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match markdown validation issue")
 }

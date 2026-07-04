@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,11 +26,12 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
+	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = Describe("MCP additional deterministic coverage", func() {
+var _ = Describe("MCP context checkpoints and route normalization", func() {
 	Describe("checkpoint eviction", func() {
 		It("evicts overflow and new sessions while preserving the active session", func() {
 			base := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
@@ -71,8 +73,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 	Describe("actor and route guards", func() {
 		It("resolves token-info actors and distinguishes not-found from lookup failures", func() {
-			t := GinkgoT()
-			userDir := t.TempDir()
+			userDir := mcpTestTempDir()
 			store, err := coreauth.NewUserStore(userDir)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() {
@@ -94,8 +95,8 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(user).To(BeNil())
 			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserNotFound, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserNotFound)))
 
-			blocker := beginExclusiveMCPTestSQLiteTransaction(t, filepath.Join(userDir, "users.db"))
-			DeferCleanup(blocker.rollback, t)
+			blocker := beginExclusiveMCPTestSQLiteTransaction(filepath.Join(userDir, "users.db"))
+			DeferCleanup(blocker.rollback)
 
 			user, err = routes.actorForRequest(mcpTokenInfoRequest(editor.ID))
 			Expect(user).To(BeNil())
@@ -105,24 +106,21 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 		It("requires private actor context headers when configured and propagates editor auth failures", func() {
 			routes := &Routes{actorContextAllowed: true, actorContextRequired: true}
 
-			user, ok, err := routes.actorFromPrivateContextHeader(http.Header{})
+			Expect(privateActorContextFor(routes, http.Header{})).To(matchPrivateActorContext(
+				privateActorContextHandled,
+				BeNil(),
+				matchLocalizedErrorCode(errCodeMCPActorContextMissing, sharederrors.MessageIDForCode(errCodeMCPActorContextMissing)),
+			))
 
-			Expect(ok).To(BeTrue())
-			Expect(user).To(BeNil())
-			Expect(err).To(matchLocalizedErrorCode(errCodeMCPActorContextMissing, sharederrors.MessageIDForCode(errCodeMCPActorContextMissing)))
-
-			user, err = (&Routes{}).editorActorForRequest(nil)
+			user, err := (&Routes{}).editorActorForRequest(nil)
 
 			Expect(user).To(BeNil())
 			Expect(err).To(matchLocalizedErrorCode(errCodeMCPTokenInfoMissing, sharederrors.MessageIDForCode(errCodeMCPTokenInfoMissing)))
 		})
 
-		It("covers private API-key success, verifier absence, and actor-context HTTP factory paths", func() {
-			t := GinkgoT()
-			_, apiKeyService, _, created, _ := newMCPAPIKeyAuthFixture(t)
-			called := false
+		It("accepts private API-key requests and rejects verifier storage failures", func() {
+			_, apiKeyService, _, created, _ := newMCPAPIKeyAuthFixture()
 			handler := (&Routes{apiKeys: apiKeyService}).requirePrivateStdioAPIKey(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				called = true
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
@@ -132,7 +130,6 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			handler.ServeHTTP(rec, req)
 
 			Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
-			Expect(called).To(BeTrue())
 
 			_, err := (&Routes{}).verifyBearerToken(context.Background(), created.Secret, nil)
 			Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
@@ -151,9 +148,9 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = session.Close() })
 
-			_, storageFailureService, _, storageFailureKey, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
-			blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
-			DeferCleanup(blocker.rollback, t)
+			_, storageFailureService, _, storageFailureKey, apiKeyDBPath := newMCPAPIKeyAuthFixture()
+			blocker := beginExclusiveMCPTestSQLiteTransaction(apiKeyDBPath)
+			DeferCleanup(blocker.rollback)
 			failingHandler := (&Routes{apiKeys: storageFailureService}).requirePrivateStdioAPIKey(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusNoContent)
 			}))
@@ -168,14 +165,14 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 	})
 
 	Describe("schema and context helpers", func() {
-		It("covers default schema and optional gate fallbacks", func() {
+		It("falls back to object schema and no optional tools for unknown gates", func() {
 			Expect(toolOutputSchema(ToolID("unknown_tool")).Type).To(Equal("object"))
 			Expect(toolNamesForGate(optionalToolGate("unknown"))).To(BeNil())
 		})
 
-		It("covers context helper edge branches", func() {
+		It("reports presence, refresh, and snapshot delta behavior", func() {
 			now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 			routes.webPresenceProvider = func(*coreauth.User) ([]wikipresence.Session, error) {
 				return []wikipresence.Session{{Type: wikipresence.SessionTypeWeb, SessionID: wikipresence.WebSessionIDFromString("web-session")}}, nil
 			}
@@ -202,23 +199,20 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(boundedContextTreeDepth(&huge)).To(Equal(treeDisplayDepth(maxContextTreeDepth)))
 			one := 1
 			Expect(boundedContextTreeDepth(&one)).To(Equal(treeDisplayDepth(1)))
-			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})}).contextTree(1)).To(BeNil())
+			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})}).contextTree(1)).To(BeNil())
 			Expect(func() { ensureNodeChildrenArray(nil) }).NotTo(Panic())
 
 			_, err := routes.getContext(context.Background(), nil, toolActor{ID: "viewer", User: &coreauth.User{ID: "viewer", Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{SyncMode: "invalid"})
 			Expect(err).To(MatchError(errContextSyncModeInvalid))
 
-			refreshCalled := false
 			routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
-				refreshCalled = true
-				return workspacesync.SyncStatus{}, nil
+				return workspacesync.SyncStatus{}, errors.New("viewer refresh should be skipped")
 			}
 			routes.workspaceSyncStatus = func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: true, PendingEventCount: 1}
 			}
 			out, err := routes.getContext(context.Background(), nil, toolActor{ID: "viewer", User: &coreauth.User{ID: "viewer", Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(refreshCalled).To(BeFalse())
 			Expect(out.Warnings).To(ContainElement("sync refresh skipped because current MCP user is not an editor or admin"))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
@@ -231,23 +225,26 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			}
 			Expect(routes.recentChanges(context.Background(), workspacesync.SyncStatus{}, 1)).To(HaveLen(1))
 
-			changes, ok := routes.changesSinceCommit(context.Background(), workspacesync.SyncStatus{}, "")
-			Expect(ok).To(BeTrue())
-			Expect(changes).To(HaveLen(2))
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "")).To(matchChangesSinceCommit(
+				changesReachedRequestedCommit,
+				HaveLen(2),
+			))
 
 			routes.listWorkspaceSnapshots = nil
-			changes, ok = routes.changesSinceCommit(context.Background(), workspacesync.SyncStatus{}, "missing")
-			Expect(ok).To(BeFalse())
-			Expect(changes).To(BeNil())
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "missing")).To(matchChangesSinceCommit(
+				changesStoppedBeforeRequestedCommit,
+				BeNil(),
+			))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 				return workspacesync.SnapshotList{
 					Snapshots: []workspacesync.Snapshot{{ID: "newer"}},
 				}, errors.New("snapshot backend failed")
 			}
-			changes, ok = routes.changesSinceCommit(context.Background(), workspacesync.SyncStatus{}, "target")
-			Expect(ok).To(BeFalse())
-			Expect(changes).To(HaveLen(0))
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "target")).To(matchChangesSinceCommit(
+				changesStoppedBeforeRequestedCommit,
+				HaveLen(0),
+			))
 
 			routes.listWorkspaceSnapshots = func(_ context.Context, _ workspacesync.CommitHash, limit workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 				snapshots := make([]workspacesync.Snapshot, int(limit))
@@ -256,16 +253,18 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 				}
 				return workspacesync.SnapshotList{Snapshots: snapshots, NextCursor: "next"}, nil
 			}
-			changes, ok = routes.changesSinceCommit(context.Background(), workspacesync.SyncStatus{}, "target")
-			Expect(ok).To(BeFalse())
-			Expect(changes).To(HaveLen(maxContextDeltaSnapshots))
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "target")).To(matchChangesSinceCommit(
+				changesStoppedBeforeRequestedCommit,
+				HaveLen(maxContextDeltaSnapshots),
+			))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 				return workspacesync.SnapshotList{NextCursor: "next"}, nil
 			}
-			changes, ok = routes.changesSinceCommit(context.Background(), workspacesync.SyncStatus{}, "target")
-			Expect(ok).To(BeFalse())
-			Expect(changes).To(BeEmpty())
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "target")).To(matchChangesSinceCommit(
+				changesStoppedBeforeRequestedCommit,
+				BeEmpty(),
+			))
 
 			routes.contextStore.record(contextSessionKey(nil, toolActor{ID: "viewer"}), contextCheckpoint{Token: "old-token", CommitHash: "old"})
 			routes.workspaceSyncStatus = func() workspacesync.SyncStatus {
@@ -283,8 +282,8 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(change.ChangedPaths).To(Equal([]string{"home.md"}))
 		})
 
-		It("covers markdown path lookup and workspace path redaction variants", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+		It("normalizes markdown paths and redacts workspace paths", func() {
+			routes := newContextToolTestRoutes()
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -294,17 +293,21 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(routes.pageIDForMarkdownPath("bad/ /README.md")).To(BeEmpty())
 			Expect(routes.pageIDForMarkdownPath("../bad.md")).To(BeEmpty())
 			Expect(routes.pageIDsForMarkdownPaths([]string{"home.md", "home.md"})).To(Equal([]tree.PageID{home.ID}))
-			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})}).pageIDForRecentChangeRoute("", tree.NodeKindSection)).To(BeEmpty())
+			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})}).pageIDForRecentChangeRoute("", tree.NodeKindSection)).To(BeEmpty())
 			Expect(routes.pageIDForRecentChangeRoute(newFixtureRoutePath("missing"), "")).To(BeEmpty())
 
-			readmeRoutes := newContextToolTestRoutes(GinkgoT())
+			readmeRoutes := newContextToolTestRoutes()
 			Expect(readmeRoutes.pageIDForMarkdownPath("README.md")).To(Equal(tree.RootPageID))
 
-			root := filepath.Join(GinkgoT().TempDir(), "workspace")
+			root := filepath.Join(mcpTestTempDir(), "workspace")
 			data := filepath.Join(root, ".leafwiki")
 			redacted := (&Routes{workspaceRootDir: root, workspaceDataDir: data}).redactWorkspacePaths(root + "/page.md and " + data + "/state.db")
-			Expect(redacted).To(ContainSubstring("<root-dir>/page.md"))
-			Expect(redacted).To(ContainSubstring("<data-dir>/state.db"))
+			Expect(redacted).To(matchRedactedWorkspacePaths(
+				root,
+				data,
+				"<root-dir>/page.md",
+				"<data-dir>/state.db",
+			))
 			Expect(redactWorkspacePath("unchanged", ".", "<dot>")).To(Equal("unchanged"))
 			Expect(redactWorkspacePath("unchanged", string(filepath.Separator), "<root>")).To(Equal("unchanged"))
 			Expect(redactWorkspacePath("keep /", "\\", "<slash>")).To(Equal("keep /"))
@@ -312,12 +315,12 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 	})
 
 	Describe("navigation and partial-edit helpers", func() {
-		It("covers subtree edge branches and partial-edit error mapping", func() {
-			unloadedTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})
+		It("maps subtree and partial-edit failures to semantic errors", func() {
+			unloadedTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})
 			_, err := (&Routes{treeService: unloadedTree}).getSubtree(context.Background(), getSubtreeInput{})
 			Expect(err).To(MatchError(tree.ErrPageNotFound))
 
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 			Expect(routes.subtreeContentPreview(newFixturePageID("missing"))).To(BeEmpty())
 			Expect(func() { ensureSubtreeNodeChildrenArray(&subtreeNode{}) }).NotTo(Panic())
 			parent := &tree.PageNode{Children: []*tree.PageNode{{Children: []*tree.PageNode{{}}}}}
@@ -329,58 +332,67 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(partialEditVersionPreflight("", home)).To(HaveOccurred())
-			Expect(partialEditVersionPreflight(tree.PageVersionFromString("stale"), home)).To(HaveOccurred())
+			Expect(partialEditVersionPreflight("", home)).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionRequired))
+			Expect(partialEditVersionPreflight(tree.PageVersionFromString("stale"), home)).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionConflict))
 			otherErr := errors.New("other")
 			Expect(partialEditWriteError(otherErr, nil)).To(MatchError(otherErr))
 			Expect(partialEditWriteError(otherErr, home)).To(MatchError(otherErr))
 
 			missingPage := &tree.Page{PageNode: &tree.PageNode{ID: "missing", Title: "Missing", Slug: "missing", Kind: tree.NodeKindPage}}
 			_, err = routes.partialEditOutput(context.Background(), missingPage, false, nil, false)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 			var input updatePageInput
-			Expect(input.UnmarshalJSON([]byte(`{`))).To(HaveOccurred())
+			Expect(input.UnmarshalJSON([]byte(`{`))).To(matchJSONSyntaxError())
 		})
 	})
 
 	Describe("validation and refresh helpers", func() {
-		It("covers validation link, path, and ID edge branches", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+		It("resolves validation links, paths, and page IDs semantically", func() {
+			routes := newContextToolTestRoutes()
 			routes.workspaceRootDir = ""
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
 			sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
 
-			pageID, kind, ok, code := ((*Routes)(nil)).resolveValidationMarkdownLink("", tree.NodeKindPage, "missing.md")
-			Expect(pageID).To(BeEmpty())
-			Expect(kind).To(BeEmpty())
-			Expect(ok).To(BeFalse())
-			Expect(code).To(Equal(wikivalidation.IssueCodeBrokenLink))
+			Expect(validationMarkdownLinkResolutionFor((*Routes)(nil), "", tree.NodeKindPage, "missing.md")).To(matchValidationMarkdownLink(
+				validationUnresolved,
+				BeEmpty(),
+				BeEmpty(),
+				Equal(wikivalidation.IssueCodeBrokenLink),
+			))
 
-			pageID, kind, ok, code = routes.resolveValidationMarkdownLink("", tree.NodeKindPage, "https://example.com")
-			Expect(pageID).To(BeEmpty())
-			Expect(kind).To(BeEmpty())
-			Expect(ok).To(BeTrue())
-			Expect(code).To(BeZero())
+			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "https://example.com")).To(matchValidationMarkdownLink(
+				validationResolved,
+				BeEmpty(),
+				BeEmpty(),
+				BeEmpty(),
+			))
 
-			_, _, ok, code = routes.resolveValidationMarkdownLink("", tree.NodeKindPage, "%zz")
-			Expect(ok).To(BeFalse())
-			Expect(code).To(Equal(wikivalidation.IssueCodeInvalidLink))
+			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "%zz")).To(matchValidationMarkdownLink(
+				validationUnresolved,
+				gstruct.Ignore(),
+				gstruct.Ignore(),
+				Equal(wikivalidation.IssueCodeInvalidLink),
+			))
 
-			_, _, ok, code = routes.resolveValidationMarkdownLink("", tree.NodeKindPage, "../escape.md")
-			Expect(ok).To(BeFalse())
-			Expect(code).To(Equal(wikivalidation.IssueCodeInvalidLink))
+			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "../escape.md")).To(matchValidationMarkdownLink(
+				validationUnresolved,
+				gstruct.Ignore(),
+				gstruct.Ignore(),
+				Equal(wikivalidation.IssueCodeInvalidLink),
+			))
 
-			pageID, kind, ok, code = routes.resolveValidationMarkdownLink("", tree.NodeKindPage, "/home.md")
-			Expect(pageID).To(Equal(home.ID))
-			Expect(kind).To(Equal(tree.NodeKindPage))
-			Expect(ok).To(BeTrue())
-			Expect(code).To(BeZero())
+			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "/home.md")).To(matchValidationMarkdownLink(
+				validationResolved,
+				Equal(home.ID),
+				Equal(tree.NodeKindPage),
+				BeEmpty(),
+			))
 
 			Expect((&Routes{}).validationMarkdownLinkIndex()).NotTo(BeNil())
-			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})}).validationMarkdownLinkIndex()).NotTo(BeNil())
+			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})}).validationMarkdownLinkIndex()).NotTo(BeNil())
 			Expect(validationContentLeafWikiID("not: [valid")).To(BeEmpty())
 			Expect(validationContentLeafWikiID("---\n: bad\n---\n# Page\n")).To(BeEmpty())
 			Expect(validationContentLeafWikiID("<!-- leafwiki extra\nversion: 1\npage:\n  id: page-123\n-->\nBody")).To(BeEmpty())
@@ -388,19 +400,19 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect((&Routes{}).validateLoadedTree(context.Background()).OK).To(BeTrue())
 
 			_, _, err = routes.normalizeValidationContentPathInput("../bad", "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", tree.NodeKindPage)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathInput("bad//route", tree.NodeKindPage)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathToolInput("home", "invalid-kind")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchMCPToolLocalizedError(wikipages.ErrCodePageInvalidKind))
 			_, _, err = routes.normalizeValidationContentPathToolInput("guide/README.md", "invalid-kind")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchMCPToolLocalizedError(wikipages.ErrCodePageInvalidKind))
 			_, _, err = routes.normalizeValidationContentPathInput("bad//README.md", "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			routePath, sourceKind, err := routes.normalizeValidationContentPathInput("README.md", "")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("README")))
@@ -409,7 +421,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(BeEmpty())
 			Expect(sourceKind).To(BeEmpty())
-			fallbackTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: GinkgoT().TempDir(), RootDir: GinkgoT().TempDir()})
+			fallbackTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})
 			Expect(fallbackTree.LoadTree()).To(Succeed())
 			fallbackRoutes := &Routes{treeService: fallbackTree}
 			guideDir := filepath.Join(fallbackTree.RootDir(), "guide")
@@ -425,7 +437,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide")))
 			Expect(sourceKind).To(Equal(tree.NodeKindSection))
 			_, _, err = routes.normalizeValidationContentPathInput("guide/README.md", tree.NodeKindSection)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(errValidationContentKindMismatch))
 			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("guide/README.md", tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide/README")))
@@ -435,15 +447,15 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(routePath).To(Equal(newFixtureRoutePath("home")))
 			Expect(sourceKind).To(Equal(tree.NodeKindPage))
 			_, _, err = routes.normalizeValidationContentPathInput("home.md", tree.NodeKindSection)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(errValidationContentKindMismatch))
 			_, _, err = routes.normalizeValidationContentPathInput("../bad", tree.NodeKindPage)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathInput("bad//README.md", tree.NodeKindPage)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", tree.NodeKindSection)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(errValidationContentKindMismatch))
 			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", "")
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, err = routes.treeService.CreateNode("system", sectionID, "Guide Readme", "README", nil)
 			Expect(err).NotTo(HaveOccurred())
 			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("guide/README.md", "")
@@ -451,27 +463,21 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide/README")))
 			Expect(sourceKind).To(Equal(tree.NodeKindPage))
 
-			_, ok = routes.resolveValidationPageIDForKind("", tree.NodeKindPage)
-			Expect(ok).To(BeFalse())
-			_, ok = ((*Routes)(nil)).resolveValidationPageIDForKind(newFixtureRoutePath("home"), tree.NodeKindPage)
-			Expect(ok).To(BeFalse())
-			pageID, ok = (&Routes{}).resolveValidationPageID(newFixtureRoutePath("home"))
-			Expect(ok).To(BeFalse())
-			Expect(pageID).To(BeEmpty())
-			pageID, ok = routes.resolveValidationPageID(newFixtureRoutePath("missing"))
-			Expect(ok).To(BeFalse())
-			Expect(pageID).To(BeEmpty())
+			Expect(validationPageIDKindResolutionFor(routes, "", tree.NodeKindPage)).To(matchValidationPageID(validationUnresolved, BeEmpty()))
+			Expect(validationPageIDKindResolutionFor((*Routes)(nil), newFixtureRoutePath("home"), tree.NodeKindPage)).To(matchValidationPageID(validationUnresolved, BeEmpty()))
+			Expect(validationPageIDResolutionFor(&Routes{}, newFixtureRoutePath("home"))).To(matchValidationPageID(validationUnresolved, BeEmpty()))
+			Expect(validationPageIDResolutionFor(routes, newFixtureRoutePath("missing"))).To(matchValidationPageID(validationUnresolved, BeEmpty()))
 			Expect(routes.validationSourceKind(newFixturePageID("missing"))).To(Equal(tree.NodeKindPage))
 			Expect(routes.validationPageIDExists(*sectionID)).To(BeTrue())
 			Expect((&Routes{}).validationPageIDExists(home.ID)).To(BeFalse())
 			Expect(routes.validationPageIDExists(home.ID)).To(BeTrue())
 		})
 
-		It("covers validation asset lookup normalization through the real list use case", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+		It("normalizes validation asset destinations through the real list use case", func() {
+			routes := newContextToolTestRoutes()
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
-			assetService := coreassets.NewAssetService(GinkgoT().TempDir(), tree.NewSlugService())
+			assetService := coreassets.NewAssetService(mcpTestTempDir(), tree.NewSlugService())
 			_, err = assetService.SaveAssetForPage(home.PageNode, &memoryMultipartFile{Reader: bytes.NewReader([]byte("logo"))}, "logo.png", 1024)
 			Expect(err).NotTo(HaveOccurred())
 			routes.getAssets = wikiassets.NewListAssetsUseCase(routes.treeService, assetService)
@@ -489,7 +495,7 @@ var _ = Describe("MCP additional deterministic coverage", func() {
 			Expect(validationAssetPredicate(home.ID, []string{"logo.png"})("/logo.png")).To(BeTrue())
 		})
 
-		It("covers workspace refresh disabled, source, error, and validation branches", func() {
+		It("reports workspace refresh disabled, source, backend, and validation outcomes", func() {
 			_, err := (&Routes{}).refreshWorkspaceSync(context.Background(), toolActor{}, refreshInput{})
 			Expect(err).To(MatchError(errWorkspaceSyncDisabled))
 
@@ -555,6 +561,168 @@ func matchPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
 func matchRefreshOutput(fields gstruct.Fields) types.GomegaMatcher {
 	GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+type privateActorContextState string
+
+const (
+	privateActorContextHandled  privateActorContextState = "handled"
+	privateActorContextDeferred privateActorContextState = "deferred"
+)
+
+type privateActorContextOutcome struct {
+	User  *coreauth.User
+	Err   error
+	State privateActorContextState
+}
+
+func privateActorContextFor(routes *Routes, header http.Header) privateActorContextOutcome {
+	GinkgoHelper()
+	user, handled, err := routes.actorFromPrivateContextHeader(header)
+	state := privateActorContextDeferred
+	if handled {
+		state = privateActorContextHandled
+	}
+	return privateActorContextOutcome{User: user, Err: err, State: state}
+}
+
+func matchPrivateActorContext(state privateActorContextState, userMatcher types.GomegaMatcher, errMatcher types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State": Equal(state),
+		"User":  userMatcher,
+		"Err":   errMatcher,
+	})
+}
+
+type changesSinceCommitState string
+
+const (
+	changesReachedRequestedCommit       changesSinceCommitState = "reached requested commit"
+	changesStoppedBeforeRequestedCommit changesSinceCommitState = "stopped before requested commit"
+)
+
+type changesSinceCommitOutcome struct {
+	Changes []recentChangeOutput
+	State   changesSinceCommitState
+}
+
+func changesSinceCommitOutcomeFor(routes *Routes, status workspacesync.SyncStatus, commitHash workspacesync.CommitHash) changesSinceCommitOutcome {
+	GinkgoHelper()
+	changes, complete := routes.changesSinceCommit(context.Background(), status, commitHash)
+	state := changesStoppedBeforeRequestedCommit
+	if complete {
+		state = changesReachedRequestedCommit
+	}
+	return changesSinceCommitOutcome{Changes: changes, State: state}
+}
+
+func matchChangesSinceCommit(state changesSinceCommitState, changesMatcher types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":   Equal(state),
+		"Changes": changesMatcher,
+	})
+}
+
+func matchRedactedWorkspacePaths(rootDir string, dataDir string, placeholders ...string) types.GomegaMatcher {
+	GinkgoHelper()
+	matchers := []types.GomegaMatcher{
+		Not(ContainSubstring(rootDir)),
+		Not(ContainSubstring(dataDir)),
+	}
+	for _, placeholder := range placeholders {
+		matchers = append(matchers, ContainSubstring(placeholder))
+	}
+	return SatisfyAll(matchers...)
+}
+
+func matchJSONSyntaxError() types.GomegaMatcher {
+	GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var syntaxErr *json.SyntaxError
+		return errors.As(err, &syntaxErr)
+	})
+}
+
+func matchJSONTypeError() types.GomegaMatcher {
+	GinkgoHelper()
+	return Satisfy(func(err error) bool {
+		var typeErr *json.UnmarshalTypeError
+		return errors.As(err, &typeErr)
+	})
+}
+
+type validationResolutionState string
+
+const (
+	validationResolved   validationResolutionState = "resolved"
+	validationUnresolved validationResolutionState = "unresolved"
+)
+
+type validationMarkdownLinkResolution struct {
+	PageID tree.PageID
+	Kind   tree.NodeKind
+	Code   wikivalidation.IssueCode
+	State  validationResolutionState
+}
+
+func validationMarkdownLinkResolutionFor(routes *Routes, sourceRoutePath tree.RoutePath, sourceKind tree.NodeKind, destination string) validationMarkdownLinkResolution {
+	GinkgoHelper()
+	pageID, kind, resolved, code := routes.resolveValidationMarkdownLink(sourceRoutePath, sourceKind, destination)
+	state := validationUnresolved
+	if resolved {
+		state = validationResolved
+	}
+	return validationMarkdownLinkResolution{
+		PageID: pageID,
+		Kind:   kind,
+		Code:   code,
+		State:  state,
+	}
+}
+
+func matchValidationMarkdownLink(state validationResolutionState, pageIDMatcher types.GomegaMatcher, kindMatcher types.GomegaMatcher, codeMatcher types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":  Equal(state),
+		"PageID": pageIDMatcher,
+		"Kind":   kindMatcher,
+		"Code":   codeMatcher,
+	})
+}
+
+type validationPageIDResolution struct {
+	PageID tree.PageID
+	State  validationResolutionState
+}
+
+func validationPageIDResolutionFor(routes *Routes, routePath tree.RoutePath) validationPageIDResolution {
+	GinkgoHelper()
+	pageID, resolved := routes.resolveValidationPageID(routePath)
+	state := validationUnresolved
+	if resolved {
+		state = validationResolved
+	}
+	return validationPageIDResolution{PageID: pageID, State: state}
+}
+
+func validationPageIDKindResolutionFor(routes *Routes, routePath tree.RoutePath, kind tree.NodeKind) validationPageIDResolution {
+	GinkgoHelper()
+	pageID, resolved := routes.resolveValidationPageIDForKind(routePath, kind)
+	state := validationUnresolved
+	if resolved {
+		state = validationResolved
+	}
+	return validationPageIDResolution{PageID: pageID, State: state}
+}
+
+func matchValidationPageID(state validationResolutionState, pageIDMatcher types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":  Equal(state),
+		"PageID": pageIDMatcher,
+	})
 }
 
 func mcpTokenInfoRequest(userID string) *sdkmcp.CallToolRequest {

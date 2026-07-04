@@ -24,7 +24,7 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = Describe("MCP deterministic edge coverage", func() {
+var _ = Describe("MCP deterministic edge behavior", func() {
 	Describe("checkpoint store guards", func() {
 		It("defaults limits and fills generated fields", func() {
 			store := newContextCheckpointStore(0)
@@ -111,11 +111,11 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 		It("allows optional private actor context headers to be absent", func() {
 			routes := &Routes{actorContextAllowed: true}
 
-			user, ok, err := routes.actorFromPrivateContextHeader(http.Header{})
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(ok).To(BeFalse())
-			Expect(user).To(BeNil())
+			Expect(privateActorContextFor(routes, http.Header{})).To(matchPrivateActorContext(
+				privateActorContextDeferred,
+				BeNil(),
+				Succeed(),
+			))
 		})
 
 		It("rejects invalid required private actor context headers", func() {
@@ -126,11 +126,11 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 				actorContextRequired: true,
 			}
 
-			user, ok, err := routes.actorFromPrivateContextHeader(header)
-
-			Expect(ok).To(BeTrue())
-			Expect(user).To(BeNil())
-			Expect(err).To(matchLocalizedErrorCode(errCodeMCPActorContextInvalid, sharederrors.MessageIDForCode(errCodeMCPActorContextInvalid)))
+			Expect(privateActorContextFor(routes, header)).To(matchPrivateActorContext(
+				privateActorContextHandled,
+				BeNil(),
+				matchLocalizedErrorCode(errCodeMCPActorContextInvalid, sharederrors.MessageIDForCode(errCodeMCPActorContextInvalid)),
+			))
 		})
 
 		It("reports unavailable API-key service for missing-token STDIO auth", func() {
@@ -159,9 +159,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 
 		It("protects private STDIO HTTP before constructing a server", func() {
 			routes := &Routes{}
-			called := false
 			handler := routes.requirePrivateStdioAPIKey(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				called = true
 				w.WriteHeader(http.StatusNoContent)
 			}))
 
@@ -174,11 +172,10 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 				handler.ServeHTTP(rec, req)
 
 				Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
-				Expect(called).To(BeFalse())
 			}
 
 			By("classifying an unavailable verifier separately")
-			_, _, _, created, _ := newMCPAPIKeyAuthFixture(GinkgoT())
+			_, _, _, created, _ := newMCPAPIKeyAuthFixture()
 			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 			req.Header.Set("Authorization", "Bearer "+created.Secret)
 			rec := httptest.NewRecorder()
@@ -186,7 +183,6 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			handler.ServeHTTP(rec, req)
 
 			Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
-			Expect(called).To(BeFalse())
 		})
 
 		It("constructs MCP handlers across authentication modes", func() {
@@ -218,7 +214,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 	})
 
 	Describe("context helper guards", func() {
-		It("covers default sync, session, actor, and formatting branches", func() {
+		It("reports default sync, session, actor, and formatting values", func() {
 			Expect(treeDisplayDepth(-1).ChildDepth()).To(Equal(treeDisplayDepth(-1)))
 			Expect(treeDisplayDepth(2).ChildDepth()).To(Equal(treeDisplayDepth(1)))
 			Expect((&Routes{}).currentWorkspaceSyncStatus()).To(Equal(workspacesync.SyncStatus{Enabled: false}))
@@ -231,7 +227,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 		})
 
 		It("falls back from snapshot listing to sync status changed paths", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
 			status := workspacesync.SyncStatus{
@@ -255,12 +251,13 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 		})
 
 		It("reports commit deltas across pagination outcomes", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 			status := workspacesync.SyncStatus{LastCommitHash: "latest"}
 
-			changes, ok := routes.changesSinceCommit(context.Background(), status, workspacesync.CommitHashFromString("missing"))
-			Expect(ok).To(BeFalse())
-			Expect(changes).To(BeNil())
+			Expect(changesSinceCommitOutcomeFor(routes, status, workspacesync.CommitHashFromString("missing"))).To(matchChangesSinceCommit(
+				changesStoppedBeforeRequestedCommit,
+				BeNil(),
+			))
 
 			calls := 0
 			routes.listWorkspaceSnapshots = func(_ context.Context, cursor workspacesync.CommitHash, limit workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
@@ -281,27 +278,29 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 				}
 			}
 
-			changes, ok = routes.changesSinceCommit(context.Background(), status, workspacesync.CommitHashFromString("target"))
+			completeChanges := changesSinceCommitOutcomeFor(routes, status, workspacesync.CommitHashFromString("target"))
 
-			Expect(ok).To(BeTrue())
 			Expect(calls).To(Equal(2))
-			Expect(changes).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"CommitID": Equal("newer"),
-			})))
+			Expect(completeChanges).To(matchChangesSinceCommit(
+				changesReachedRequestedCommit,
+				HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"CommitID": Equal("newer"),
+				})),
+			))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 				return workspacesync.SnapshotList{
 					Snapshots: []workspacesync.Snapshot{{ID: "newer"}},
 				}, nil
 			}
-			changes, ok = routes.changesSinceCommit(context.Background(), status, workspacesync.CommitHashFromString("missing"))
-
-			Expect(ok).To(BeFalse())
-			Expect(changes).To(HaveLen(1))
+			Expect(changesSinceCommitOutcomeFor(routes, status, workspacesync.CommitHashFromString("missing"))).To(matchChangesSinceCommit(
+				changesStoppedBeforeRequestedCommit,
+				HaveLen(1),
+			))
 		})
 
 		It("handles page ID lookup guard branches for recent changes", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 			sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
 
@@ -352,7 +351,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 		})
 
 		It("normalizes content validation paths and source kinds", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 			sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
 			pageID, err := routes.treeService.CreateNode("system", nil, "Guide Page", "guide-page", testNodeKindPtr(tree.NodeKindPage))
@@ -369,16 +368,10 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 			Expect(routes.validationSourceMarkdownFile(newFixtureRoutePath("guide"))).To(Equal(tree.MarkdownPath("guide/index.md")))
 			Expect((&Routes{}).validationSourceMarkdownFile(newFixtureRoutePath("guide"))).To(Equal(tree.MarkdownPath("guide.md")))
 
-			resolvedID, ok := routes.resolveValidationPageID(newFixtureRoutePath("guide"))
-			Expect(ok).To(BeTrue())
-			Expect(resolvedID).To(Equal(*sectionID))
-			_, ok = routes.resolveValidationPageID("")
-			Expect(ok).To(BeFalse())
-			resolvedID, ok = routes.resolveValidationPageIDForKind(newFixtureRoutePath("guide"), tree.NodeKindSection)
-			Expect(ok).To(BeTrue())
-			Expect(resolvedID).To(Equal(*sectionID))
-			_, ok = routes.resolveValidationPageIDForKind("", tree.NodeKindPage)
-			Expect(ok).To(BeFalse())
+			Expect(validationPageIDResolutionFor(routes, newFixtureRoutePath("guide"))).To(matchValidationPageID(validationResolved, Equal(*sectionID)))
+			Expect(validationPageIDResolutionFor(routes, "")).To(matchValidationPageID(validationUnresolved, BeEmpty()))
+			Expect(validationPageIDKindResolutionFor(routes, newFixtureRoutePath("guide"), tree.NodeKindSection)).To(matchValidationPageID(validationResolved, Equal(*sectionID)))
+			Expect(validationPageIDKindResolutionFor(routes, "", tree.NodeKindPage)).To(matchValidationPageID(validationUnresolved, BeEmpty()))
 
 			routePath, kind, err := routes.normalizeValidationContentPathInput("guide.md", "")
 			Expect(err).NotTo(HaveOccurred())
@@ -399,16 +392,17 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 		})
 
 		It("cleans validation asset destinations and resolves root markdown targets", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 
 			Expect(cleanValidationAssetDestination(" <image.png?size=large#preview> ")).To(Equal("image.png"))
 			Expect(markdownTargetNodeKind("unexpected")).To(Equal(tree.NodeKindPage))
 
-			pageID, kind, ok, code := routes.resolveValidationMarkdownLink("", tree.NodeKindSection, "/")
-			Expect(pageID).To(BeEmpty())
-			Expect(kind).To(Equal(tree.NodeKindSection))
-			Expect(ok).To(BeTrue())
-			Expect(code).To(BeZero())
+			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindSection, "/")).To(matchValidationMarkdownLink(
+				validationResolved,
+				BeEmpty(),
+				Equal(tree.NodeKindSection),
+				BeEmpty(),
+			))
 		})
 	})
 
@@ -441,7 +435,7 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 		})
 
 		It("builds content previews and reports truncation at the requested depth", func() {
-			routes := newContextToolTestRoutes(GinkgoT())
+			routes := newContextToolTestRoutes()
 			parentID, err := routes.treeService.CreateNode("system", nil, "Parent", "parent", testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
 			childID, err := routes.treeService.CreateNode("system", parentID, "Child", "child", testNodeKindPtr(tree.NodeKindPage))
@@ -484,9 +478,9 @@ var _ = Describe("MCP deterministic edge coverage", func() {
 				"Properties":        BeEmpty(),
 			}))
 
-			Expect(json.Unmarshal([]byte(`{"tags":{}}`), &input)).To(HaveOccurred())
-			Expect(json.Unmarshal([]byte(`{"properties":[]}`), &input)).To(HaveOccurred())
-			Expect(json.Unmarshal([]byte(`{`), &input)).To(HaveOccurred())
+			Expect(json.Unmarshal([]byte(`{"tags":{}}`), &input)).To(matchJSONTypeError())
+			Expect(json.Unmarshal([]byte(`{"properties":[]}`), &input)).To(matchJSONTypeError())
+			Expect(json.Unmarshal([]byte(`{`), &input)).To(matchJSONSyntaxError())
 		})
 
 		It("bounds degenerate base64 decoded sizes", func() {

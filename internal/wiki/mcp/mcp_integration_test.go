@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -17,11 +18,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/agenthooks"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -30,11 +34,13 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/projectdaemon"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikirevisions "github.com/perber/wiki/internal/wiki/revisions"
+	wikisearch "github.com/perber/wiki/internal/wiki/search"
 	wikitags "github.com/perber/wiki/internal/wiki/tags"
 )
 
@@ -87,6 +93,15 @@ const (
 	mcpLabelGetLatestRevisionMissingPage       = "get_latest_revision_missing_page"
 	mcpLabelRevisionMissingSuffix              = "missing_revision"
 	mcpLabelRevisionBlankInputSuffix           = "blank_revision_input"
+	mcpLabelSuggestSlugBlankHTTP               = "mcp.parity.suggest_slug.blank.http"
+	mcpLabelSuggestSlugPunctuationHTTP         = "mcp.parity.suggest_slug.punctuation.http"
+	mcpLabelGetPageByPathBlankMCP              = "mcp.parity.get_page_by_path.blank.mcp"
+	mcpLabelGetPageByPathBlankHTTP             = "mcp.parity.get_page_by_path.blank.http"
+	mcpLabelConvertPageInvalidTargetKindHTTP   = "mcp.parity.convert_page.invalid_target_kind.http"
+	mcpLabelConvertPagePaddedTargetKindHTTP    = "mcp.parity.convert_page.padded_target_kind.http"
+	mcpLabelGetPagesByTagsBlankMCP             = "mcp.parity.get_pages_by_tags.blank.mcp"
+	mcpLabelGetPagesByTagsBlankHTTP            = "mcp.parity.get_pages_by_tags.blank.http"
+	mcpLabelRevisionAssetGitBackedHTTP         = "mcp.parity.revision_asset.git_backed.http"
 )
 
 func mcpToolCaseLabel(tool string, suffix string) string {
@@ -250,14 +265,17 @@ func resetHTTPMCPParityCoverage() {
 	parityCoverage.seen = map[string]map[string]struct{}{}
 }
 
-func hasHTTPMCPParityRecorded(t testing.TB) bool {
-	t.Helper()
+func hasHTTPMCPParityRecorded() bool {
+	GinkgoHelper()
 
-	seenCases, expected := expectedHTTPMCPParityCases(t)
+	seenCases, expected := expectedHTTPMCPParityCases()
 	parityCoverage.Lock()
 	defer parityCoverage.Unlock()
 	for _, name := range expected {
-		tc := seenCases[name]
+		tc, ok := seenCases[name]
+		if !ok {
+			return false
+		}
 		if _, exercised := parityCoverage.seen[name][tc.HTTPRoute]; !exercised {
 			return false
 		}
@@ -265,57 +283,61 @@ func hasHTTPMCPParityRecorded(t testing.TB) bool {
 	return true
 }
 
-func recordHTTPMCPParity(t testing.TB, tool, httpRoute string) {
-	t.Helper()
-	found := false
+func recordHTTPMCPParity(tool, httpRoute string) {
+	GinkgoHelper()
 	for _, tc := range mcpHTTPParityCases {
 		if tc.Tool == tool {
-			found = true
-			if tc.HTTPRoute != httpRoute {
-				t.Fatalf("parity record for %s used route %q, want %q", tool, httpRoute, tc.HTTPRoute)
+			Expect(httpRoute).To(Equal(tc.HTTPRoute), "parity record for %s used route", tool)
+			parityCoverage.Lock()
+			defer parityCoverage.Unlock()
+			routes := parityCoverage.seen[tool]
+			if routes == nil {
+				routes = map[string]struct{}{}
+				parityCoverage.seen[tool] = routes
 			}
-			break
+			routes[httpRoute] = struct{}{}
+			return
 		}
 	}
-	if !found {
-		t.Fatalf("parity record for unknown tool %q", tool)
-	}
+	Expect(mcpHTTPParityCases).To(ContainElement(HaveField("Tool", tool)), "parity record for unknown tool %q", tool)
+}
+
+func snapshotHTTPMCPParityCoverage() map[string]map[string]struct{} {
+	GinkgoHelper()
 
 	parityCoverage.Lock()
 	defer parityCoverage.Unlock()
-	routes := parityCoverage.seen[tool]
-	if routes == nil {
-		routes = map[string]struct{}{}
-		parityCoverage.seen[tool] = routes
-	}
-	routes[httpRoute] = struct{}{}
-}
-
-func assertHTTPMCPParityRecorded(t testing.TB) {
-	t.Helper()
-
-	seenCases, expected := expectedHTTPMCPParityCases(t)
-	parityCoverage.Lock()
-	defer parityCoverage.Unlock()
-	for _, name := range expected {
-		tc := seenCases[name]
-		if _, exercised := parityCoverage.seen[name][tc.HTTPRoute]; !exercised {
-			t.Fatalf("parity case for tool %q route %q was not recorded by an executable assertion", name, tc.HTTPRoute)
+	snapshot := make(map[string]map[string]struct{}, len(parityCoverage.seen))
+	for tool, routes := range parityCoverage.seen {
+		snapshot[tool] = make(map[string]struct{}, len(routes))
+		for route := range routes {
+			snapshot[tool][route] = struct{}{}
 		}
 	}
+	return snapshot
 }
 
-func expectedHTTPMCPParityCases(t testing.TB) (map[string]httpMCPParityCase, []string) {
-	t.Helper()
+func matchRecordedHTTPMCPParity() types.GomegaMatcher {
+	GinkgoHelper()
 
+	seenCases, expected := expectedHTTPMCPParityCases()
+	return gcustom.MakeMatcher(func(seen map[string]map[string]struct{}) (bool, error) {
+		for _, name := range expected {
+			tc, ok := seenCases[name]
+			if !ok {
+				return false, nil
+			}
+			if _, exercised := seen[name][tc.HTTPRoute]; !exercised {
+				return false, nil
+			}
+		}
+		return true, nil
+	}).WithMessage("record expected HTTP/MCP route parity evidence")
+}
+
+func expectedHTTPMCPParityCases() (map[string]httpMCPParityCase, []string) {
 	seenCases := make(map[string]httpMCPParityCase, len(mcpHTTPParityCases))
 	for _, tc := range mcpHTTPParityCases {
-		if tc.Tool == "" || tc.HTTPRoute == "" || tc.Assertion == "" {
-			t.Fatalf("parity case must declare tool, HTTP route, and assertion text: %#v", tc)
-		}
-		if prior, exists := seenCases[tc.Tool]; exists {
-			t.Fatalf("duplicate parity case for %s: %#v and %#v", tc.Tool, prior, tc)
-		}
 		seenCases[tc.Tool] = tc
 	}
 
@@ -330,12 +352,6 @@ func expectedHTTPMCPParityCases(t testing.TB) (map[string]httpMCPParityCase, []s
 	expected = append(expected, wikimcp.LinkRefactorToolNames()...)
 	sort.Strings(expected)
 
-	for _, name := range expected {
-		_, exists := seenCases[name]
-		if !exists {
-			t.Fatalf("missing HTTP/MCP parity case for tool %q", name)
-		}
-	}
 	return seenCases, expected
 }
 
@@ -446,219 +462,182 @@ var toolOutputOptionalProperties = map[string][]string{
 	"wiki_replace_page_section": {"validation", "page", "linkStatus"},
 }
 
-var _ = It("LocalMCPRegistration_DisabledByDefaultAndToolListMatchesPlan", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
+var _ = Describe("local MCP registration", func() {
+	It("gates the endpoint by configuration and exposes the federated tool contract", func() {
+		w := newLocalMCPTestWiki(false)
 
-	embedFrontendOrig := httpinternal.EmbedFrontend
-	httpinternal.EmbedFrontend = "true"
-	DeferCleanup(func() {
-		httpinternal.EmbedFrontend = embedFrontendOrig
-	})
+		embedFrontendOrig := httpinternal.EmbedFrontend
+		httpinternal.EmbedFrontend = "true"
+		DeferCleanup(func() {
+			httpinternal.EmbedFrontend = embedFrontendOrig
+		})
 
-	disabledRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-	})
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		disabledRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		})
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			rec := httptest.NewRecorder()
+			disabledRouter.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
+			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+		}
+		for _, path := range []string{"/mcp/", "/mcp/anything"} {
+			rec := httptest.NewRecorder()
+			disabledRouter.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+		}
+
+		authEnabledRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            false,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+		})
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(method, "/mcp", strings.NewReader("{}"))
+			req.RemoteAddr = "127.0.0.1:12345"
+			authEnabledRouter.ServeHTTP(rec, req)
+			Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
+			challenge := rec.Header().Get("WWW-Authenticate")
+			Expect(challenge).To(SatisfyAll(
+				ContainSubstring("Bearer"),
+				ContainSubstring("resource_metadata=\"http://example.com/.well-known/oauth-protected-resource/mcp\""),
+				ContainSubstring("scope=\"leafwiki:mcp\""),
+			))
+		}
+
 		rec := httptest.NewRecorder()
-		disabledRouter.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s /mcp without MCP enabled = %d, want 404", method, rec.Code)
-		}
-	}
-	for _, path := range []string{"/mcp/", "/mcp/anything"} {
-		rec := httptest.NewRecorder()
-		disabledRouter.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("GET %s without MCP enabled = %d, want 404", path, rec.Code)
-		}
-	}
+		disabledRouter.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/not-real", nil))
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), rec.Body.String())
+		Expect(rec.Header().Get("Content-Type")).NotTo(HavePrefix("text/html"))
 
-	authEnabledRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            false,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
+		trustedProxies, err := authmw.ParseTrustedProxies("127.0.0.1")
+		Expect(err).NotTo(HaveOccurred())
+		remoteUserRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			HTTPRemoteUser: httpinternal.HTTPRemoteUserConfig{
+				Enabled:        true,
+				HeaderName:     "X-Remote-User",
+				TrustedProxies: trustedProxies,
+				UserService:    w.UserService(),
+			},
+		})
+		remoteUserSession := connectLocalMCP(remoteUserRouter, "/mcp")
+		current := callToolStructured(remoteUserSession, "wiki_get_current_user", nil)
+		user := nestedMap(current, "user")
+		Expect(user).To(SatisfyAll(
+			HaveKeyWithValue("username", "public-editor"),
+			HaveKeyWithValue("role", "editor"),
+		))
+
+		missingHostRouter := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+		})
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			rec := httptest.NewRecorder()
+			missingHostRouter.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
+			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+		}
+		nonLoopbackRouter := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPBindHost:             "0.0.0.0",
+		})
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(method, "/mcp", strings.NewReader("{}"))
+			req.RemoteAddr = "100.64.0.10:12345"
+			nonLoopbackRouter.ServeHTTP(rec, req)
+			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+		}
+		loopbackRec := httptest.NewRecorder()
+		loopbackReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}"))
+		loopbackReq.RemoteAddr = "127.0.0.1:12345"
+		nonLoopbackRouter.ServeHTTP(loopbackRec, loopbackReq)
+		Expect(loopbackRec).NotTo(HaveHTTPStatus(http.StatusNotFound))
+
+		enabledRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     5,
+		})
+		session := connectLocalMCP(enabledRouter, "/mcp")
+
+		firstPage, err := session.ListTools(context.Background(), &sdkmcp.ListToolsParams{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(firstPage).To(SatisfyAll(
+			HaveField("Tools", HaveLen(5)),
+			HaveField("NextCursor", Not(BeEmpty())),
+		))
+
+		got := listAllToolNames(session)
+		Expect(got).To(matchToolNames(federatedToolNames()))
+		Expect(got).To(ContainElement(wikimcp.ToolRefresh.ProtocolName().WireName()))
+		for _, name := range got {
+			Expect(name).To(HavePrefix("wiki_"))
+		}
+
+		tools := listAllTools(session)
+		Expect(tools).To(matchInputSchemas(federatedInputProperties(), federatedRequiredProperties()))
+		Expect(tools).To(matchOutputSchemas(federatedOutputProperties()))
+
+		for _, legacyName := range []string{
+			strings.Join([]string{"get", "page"}, "_"),
+			strings.Join([]string{"get", "tree"}, "_"),
+			strings.Join([]string{"update", "page"}, "_"),
+			strings.Join([]string{"list", "revisions"}, "_"),
+		} {
+			legacyErr := callToolProtocolError(session, legacyName, map[string]any{"id": "missing"})
+			Expect(legacyErr).To(matchJSONRPCErrorCode(jsonrpc.CodeInvalidParams))
+		}
+
+		ambiguousPageIDErr := callToolStructuredError(session, "wiki_get_page", map[string]any{
+			"id":     "missing-page",
+			"pageId": "missing-page",
+		})
+		Expect(ambiguousPageIDErr).To(testmatchers.HaveMCPStructuredError(wikimcp.ErrCodeMCPPageIdentifierAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageIdentifierAmbiguous)))
+		missingPageIDErr := callToolStructuredError(session, "wiki_get_page", map[string]any{})
+		Expect(missingPageIDErr).To(testmatchers.HaveMCPStructuredError(wikimcp.ErrCodeMCPPageIdentifierRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageIdentifierRequired)))
+
+		Expect(got).NotTo(ContainElement(HavePrefix("leafwiki_")))
+		for _, forbidden := range []string{
+			"create_import_plan",
+			"get_import_plan",
+			"execute_import_plan",
+			"clear_import_plan",
+			"get_branding",
+			"get_branding_asset",
+			"get_favicon",
+			"login",
+			"logout",
+			"create_user",
+		} {
+			Expect(got).NotTo(ContainElement(forbidden))
+		}
 	})
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(method, "/mcp", strings.NewReader("{}"))
-		req.RemoteAddr = "127.0.0.1:12345"
-		authEnabledRouter.ServeHTTP(rec, req)
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("%s /mcp with auth enabled = %d, want 401", method, rec.Code)
-		}
-		challenge := rec.Header().Get("WWW-Authenticate")
-		if !strings.Contains(challenge, "Bearer") ||
-			!strings.Contains(challenge, "resource_metadata=\"http://example.com/.well-known/oauth-protected-resource/mcp\"") ||
-			!strings.Contains(challenge, "scope=\"leafwiki:mcp\"") {
-			t.Fatalf("%s /mcp challenge = %q, want OAuth bearer challenge", method, challenge)
-		}
-	}
-
-	rec := httptest.NewRecorder()
-	disabledRouter.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/not-real", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("GET unknown well-known route = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-	if contentType := rec.Header().Get("Content-Type"); strings.HasPrefix(contentType, "text/html") {
-		t.Fatalf("GET unknown well-known route content-type = %q, want non-HTML 404", contentType)
-	}
-
-	trustedProxies, err := authmw.ParseTrustedProxies("127.0.0.1")
-	if err != nil {
-		t.Fatalf("ParseTrustedProxies failed: %v", err)
-	}
-	remoteUserRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		HTTPRemoteUser: httpinternal.HTTPRemoteUserConfig{
-			Enabled:        true,
-			HeaderName:     "X-Remote-User",
-			TrustedProxies: trustedProxies,
-			UserService:    w.UserService(),
-		},
-	})
-	remoteUserSession := connectLocalMCP(t, remoteUserRouter, "/mcp")
-	current := callToolStructured(t, remoteUserSession, "wiki_get_current_user", nil)
-	user := nestedMap(t, current, "user")
-	if user["username"] != "public-editor" || user["role"] != "editor" {
-		t.Fatalf("remote-user disabled-auth MCP current user = %#v, want public-editor editor", user)
-	}
-
-	missingHostRouter := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-	})
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
-		rec := httptest.NewRecorder()
-		missingHostRouter.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s /mcp without validated loopback host = %d, want 404", method, rec.Code)
-		}
-	}
-	nonLoopbackRouter := httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPBindHost:             "0.0.0.0",
-	})
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(method, "/mcp", strings.NewReader("{}"))
-		req.RemoteAddr = "100.64.0.10:12345"
-		nonLoopbackRouter.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s /mcp from non-loopback client = %d, want 404", method, rec.Code)
-		}
-	}
-	loopbackRec := httptest.NewRecorder()
-	loopbackReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}"))
-	loopbackReq.RemoteAddr = "127.0.0.1:12345"
-	nonLoopbackRouter.ServeHTTP(loopbackRec, loopbackReq)
-	if loopbackRec.Code == http.StatusNotFound {
-		t.Fatalf("loopback /mcp with non-loopback bind returned 404, want registered local MCP route")
-	}
-
-	enabledRouter := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     5,
-	})
-	session := connectLocalMCP(t, enabledRouter, "/mcp")
-
-	firstPage, err := session.ListTools(context.Background(), &sdkmcp.ListToolsParams{})
-	if err != nil {
-		t.Fatalf("ListTools first page failed: %v", err)
-	}
-	if len(firstPage.Tools) != 5 {
-		t.Fatalf("first ListTools page length = %d, want 5", len(firstPage.Tools))
-	}
-	if firstPage.NextCursor == "" {
-		t.Fatalf("first ListTools page did not include next cursor")
-	}
-
-	got := listAllToolNames(t, session)
-	assertToolNames(t, got, federatedToolNames())
-	if !containsToolProtocolName(got, wikimcp.ToolRefresh.ProtocolName()) {
-		t.Fatalf("%s was not registered in federated runtime", wikimcp.ToolRefresh.String())
-	}
-	for _, name := range got {
-		if !strings.HasPrefix(name, "wiki_") {
-			t.Fatalf("tool %q does not use required wiki_ prefix", name)
-		}
-	}
-
-	tools := listAllTools(t, session)
-	assertInputSchemasMatch(t, tools, federatedInputProperties(), federatedRequiredProperties())
-	assertOutputSchemasMatch(t, tools, federatedOutputProperties())
-
-	for _, legacyName := range []string{
-		strings.Join([]string{"get", "page"}, "_"),
-		strings.Join([]string{"get", "tree"}, "_"),
-		strings.Join([]string{"update", "page"}, "_"),
-		strings.Join([]string{"list", "revisions"}, "_"),
-	} {
-		legacyErr := callToolProtocolError(t, session, legacyName, map[string]any{"id": "missing"})
-		if !strings.Contains(strings.ToLower(legacyErr), "unknown") {
-			t.Fatalf("legacy %s error = %q, want unknown tool", legacyName, legacyErr)
-		}
-	}
-
-	typeErr := callToolError(t, session, "wiki_get_page", map[string]any{"id": float64(12)})
-	if !strings.Contains(strings.ToLower(typeErr), "validating") && !strings.Contains(strings.ToLower(typeErr), "string") {
-		t.Fatalf("wiki_get_page invalid type error = %q, want schema validation detail", typeErr)
-	}
-	ambiguousPageIDErr := callToolStructuredError(t, session, "wiki_get_page", map[string]any{
-		"id":     "missing-page",
-		"pageId": "missing-page",
-	})
-	assertMCPStructuredError(t, mcpLabelGetPageAmbiguousIdentifier, ambiguousPageIDErr, wikimcp.ErrCodeMCPPageIdentifierAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageIdentifierAmbiguous))
-	missingPageIDErr := callToolStructuredError(t, session, "wiki_get_page", map[string]any{})
-	assertMCPStructuredError(t, mcpLabelGetPageMissingIdentifier, missingPageIDErr, wikimcp.ErrCodeMCPPageIdentifierRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageIdentifierRequired))
-
-	for _, name := range got {
-		if strings.HasPrefix(name, "leafwiki_") {
-			t.Fatalf("tool %q has forbidden leafwiki_ prefix", name)
-		}
-	}
-	for _, forbidden := range []string{
-		"create_import_plan",
-		"get_import_plan",
-		"execute_import_plan",
-		"clear_import_plan",
-		"get_branding",
-		"get_branding_asset",
-		"get_favicon",
-		"login",
-		"logout",
-		"create_user",
-	} {
-		if contains(got, forbidden) {
-			t.Fatalf("forbidden tool %q was registered in MCP tool list", forbidden)
-		}
-	}
 })
 
-var _ = DescribeTable("LocalMCPRegistration_FeatureGatedTools",
+var _ = DescribeTable("local MCP tool registration honors feature gates",
 	func(enableLinkRefactor bool, extraTools []string) {
-		t := GinkgoTB()
-		w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
 		})
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -670,1910 +649,1805 @@ var _ = DescribeTable("LocalMCPRegistration_FeatureGatedTools",
 			MCPEnabled:              true,
 			MCPToolListPageSize:     200,
 		})
-		session := connectLocalMCP(t, router, "/mcp")
+		session := connectLocalMCP(router, "/mcp")
 
 		want := federatedToolNames(extraTools)
-		assertToolNames(t, listAllToolNames(t, session), want)
-		contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
-		server := nestedMap(t, contextOut, "server")
-		assertStringSet(t, "wiki_get_context server.tools", stringSliceField(t, server, "tools"), want)
+		Expect(listAllToolNames(session)).To(matchToolNames(want))
+		contextOut := callToolStructured(session, "wiki_get_context", map[string]any{"syncMode": "none"})
+		server := nestedMap(contextOut, "server")
+		Expect(stringSliceField(server, "tools")).To(matchStringSet(want))
 
-		tools := listAllTools(t, session)
-		assertInputSchemasMatch(t, tools, federatedInputProperties(extraTools), federatedRequiredProperties(extraTools))
-		assertOutputSchemasMatch(t, tools, federatedOutputProperties(extraTools))
+		tools := listAllTools(session)
+		Expect(tools).To(matchInputSchemas(federatedInputProperties(extraTools), federatedRequiredProperties(extraTools)))
+		Expect(tools).To(matchOutputSchemas(federatedOutputProperties(extraTools)))
 	},
 	Entry("federated runtime", false, []string(nil)),
 	Entry("link refactor", true, wikimcp.LinkRefactorToolNames()),
 )
 
 // - MCP agent context returns canonical examples
-var _ = It("LocalMCPGetContext_ReturnsAgentReadyContext", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
+var _ = Describe("local MCP context", func() {
+	It("returns agent-ready context state and canonical link examples", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	toolNames := listAllToolNames(t, session)
-	if !contains(toolNames, "wiki_get_context") {
-		t.Fatalf("wiki_get_context was not listed")
-	}
+		toolNames := listAllToolNames(session)
+		Expect(toolNames).To(ContainElement("wiki_get_context"))
 
-	out := callToolStructured(t, session, "wiki_get_context", nil)
-	if token := stringField(t, out, "contextToken"); token == "" {
-		t.Fatalf("contextToken is empty in %#v", out)
-	}
-	for _, key := range []string{
-		"changesSincePreviousContext",
-		"contextHistory",
-		"user",
-		"config",
-		"server",
-		"syncStatus",
-		"validation",
-		"recentChanges",
-		"activeSessions",
-		"presenceStatus",
-		"tree",
-		"recommendedTools",
-		"canonicalLinkExamples",
-	} {
-		if _, ok := out[key]; !ok {
-			t.Fatalf("wiki_get_context missing %s in %#v", key, out)
+		out := callToolStructured(session, "wiki_get_context", nil)
+		Expect(out).To(SatisfyAll(
+			HaveKey("contextToken"),
+			HaveKey("changesSincePreviousContext"),
+			HaveKey("contextHistory"),
+			HaveKey("user"),
+			HaveKey("config"),
+			HaveKey("server"),
+			HaveKey("syncStatus"),
+			HaveKey("validation"),
+			HaveKey("recentChanges"),
+			HaveKeyWithValue("activeSessions", BeEmpty()),
+			HaveKey("presenceStatus"),
+			HaveKey("tree"),
+			HaveKey("recommendedTools"),
+			HaveKey("canonicalLinkExamples"),
+		))
+		presence := nestedMap(out, "presenceStatus")
+		Expect(presence).To(SatisfyAll(
+			HaveKey("web"),
+			HaveKey("agentHooks"),
+		))
+		status := nestedMap(out, "syncStatus")
+		Expect(status).To(SatisfyAll(
+			HaveKey("enabled"),
+			Not(HaveKey("Enabled")),
+		))
+		for _, name := range stringSliceField(out, "recommendedTools") {
+			Expect(toolNames).To(ContainElement(name))
 		}
-	}
-	if sessions, ok := out["activeSessions"].([]any); !ok {
-		t.Fatalf("activeSessions has type %T, want array", out["activeSessions"])
-	} else if len(sessions) != 0 {
-		t.Fatalf("activeSessions = %#v, want no sessions in fresh fixture", sessions)
-	}
-	presence := nestedMap(t, out, "presenceStatus")
-	if presence["web"] == "" || presence["agentHooks"] == "" {
-		t.Fatalf("presenceStatus = %#v, want web and agentHooks states", presence)
-	}
-	status := nestedMap(t, out, "syncStatus")
-	if _, ok := status["enabled"]; !ok {
-		t.Fatalf("syncStatus = %#v, want camelCase enabled field", status)
-	}
-	if _, ok := status["Enabled"]; ok {
-		t.Fatalf("syncStatus = %#v, did not expect exported Go struct field names", status)
-	}
-	recommended, ok := out["recommendedTools"].([]any)
-	if !ok {
-		t.Fatalf("recommendedTools has type %T, want array", out["recommendedTools"])
-	}
-	for _, value := range recommended {
-		name, ok := value.(string)
-		if !ok {
-			t.Fatalf("recommendedTools contains non-string %T: %#v", value, recommended)
-		}
-		if !contains(toolNames, name) {
-			t.Fatalf("recommendedTools = %#v, recommended unregistered tool %q", recommended, name)
-		}
-	}
-	tree := nestedMap(t, out, "tree")
-	if tree["id"] == "" || tree["children"] == nil {
-		t.Fatalf("tree = %#v, want compact root node", tree)
-	}
-	examples, ok := out["canonicalLinkExamples"].([]any)
-	if !ok || len(examples) == 0 {
-		t.Fatalf("canonicalLinkExamples = %#v, want non-empty array", out["canonicalLinkExamples"])
-	}
-	exampleText := ""
-	for _, example := range examples {
-		text, ok := example.(string)
-		if !ok {
-			t.Fatalf("canonicalLinkExamples contains non-string %T: %#v", example, examples)
-		}
-		exampleText += "\n" + text
-	}
-	if !strings.Contains(exampleText, "](/docs/guide.md)") {
-		t.Fatalf("canonicalLinkExamples = %q, want .md page link example", exampleText)
-	}
-	if !strings.Contains(exampleText, "](/docs)") {
-		t.Fatalf("canonicalLinkExamples = %q, want extensionless section link example", exampleText)
-	}
+		tree := nestedMap(out, "tree")
+		Expect(tree).To(SatisfyAll(
+			HaveKey("id"),
+			HaveKey("children"),
+		))
+		examples := stringSliceField(out, "canonicalLinkExamples")
+		Expect(examples).To(ContainElement(ContainSubstring("](/docs/guide.md)")))
+		Expect(examples).To(ContainElement(ContainSubstring("](/docs)")))
+	})
 })
 
-var _ = It("LocalMCPGetContext_RecommendsRefreshInFederatedRuntime", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
+var _ = Describe("local MCP context recommendations", func() {
+	It("recommends workspace refresh when federated runtime tools are available", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	out := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
-	server := nestedMap(t, out, "server")
-	if !arrayContainsString(server["tools"], "wiki_refresh") {
-		t.Fatalf("server.tools = %#v, want wiki_refresh in federated runtime", server["tools"])
-	}
-	recommended := arrayField(t, out, "recommendedTools")
-	if !arrayContainsString(recommended, "wiki_refresh") {
-		t.Fatalf("recommendedTools = %#v, want wiki_refresh in federated runtime", recommended)
-	}
+		out := callToolStructured(session, "wiki_get_context", map[string]any{"syncMode": "none"})
+		server := nestedMap(out, "server")
+
+		Expect(server).To(HaveKeyWithValue("tools", ContainElement("wiki_refresh")))
+		Expect(out).To(HaveKeyWithValue("recommendedTools", ContainElement("wiki_refresh")))
+	})
 })
 
-var _ = It("LocalMCPGetContext_OmittedSinceTokenUsesSessionCheckpointOnly", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
+var _ = Describe("local MCP context checkpoints", func() {
+	It("uses the calling session checkpoint when no since token is supplied", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		sessionA := connectLocalMCP(router, "/mcp")
+		sessionB := connectLocalMCP(router, "/mcp")
+
+		firstA := callToolStructured(sessionA, "wiki_get_context", map[string]any{"syncMode": "none"})
+		firstAToken := stringField(firstA, "contextToken")
+
+		postHTTPJSON(router, "/api/pages", map[string]any{
+			"title": "Omitted Token Delta",
+			"slug":  "omitted-token-delta",
+			"kind":  "page",
+		}, http.StatusCreated)
+
+		secondA := callToolStructured(sessionA, "wiki_get_context", map[string]any{"syncMode": "none"})
+		assertContextHistoryOpaque(secondA)
+		Expect(secondA).To(HaveKeyWithValue("previousContextToken", firstAToken))
+		Expect(changedPathsFromContext(secondA)).To(HaveKey("omitted-token-delta.md"))
+
+		firstB := callToolStructured(sessionB, "wiki_get_context", map[string]any{"syncMode": "none"})
+		Expect(firstB).To(SatisfyAll(
+			HaveKeyWithValue("previousContextToken", ""),
+			HaveKeyWithValue("changesSincePreviousContext", BeEmpty()),
+			HaveKeyWithValue("contextHistory", HaveLen(1)),
+		))
 	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
+
+	It("does not fall back to the previous checkpoint when an explicit since token is unknown", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		first := callToolStructured(session, "wiki_get_context", map[string]any{"syncMode": "none"})
+		firstToken := stringField(first, "contextToken")
+		postHTTPJSON(router, "/api/pages", map[string]any{
+			"title": "Unknown Token Delta",
+			"slug":  "unknown-token-delta",
+			"kind":  "page",
+		}, http.StatusCreated)
+
+		second := callToolStructured(session, "wiki_get_context", map[string]any{
+			"syncMode":   "none",
+			"sinceToken": "not-a-token",
+		})
+
+		Expect(second).To(SatisfyAll(
+			HaveKeyWithValue("previousContextToken", ""),
+			HaveKeyWithValue("changesSincePreviousContext", BeEmpty()),
+			HaveKeyWithValue("warnings", ContainElement("unknown sinceToken; returned current context")),
+		))
+		Expect(stringField(first, "contextToken")).To(Equal(firstToken))
 	})
-	sessionA := connectLocalMCP(t, router, "/mcp")
-	sessionB := connectLocalMCP(t, router, "/mcp")
 
-	firstA := callToolStructured(t, sessionA, "wiki_get_context", map[string]any{"syncMode": "none"})
-	firstAToken := stringField(t, firstA, "contextToken")
+	It("returns all checkpoint changes even when recent changes are display-limited", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"title": "Omitted Token Delta",
-		"slug":  "omitted-token-delta",
-		"kind":  "page",
-	}, http.StatusCreated)
+		first := callToolStructured(session, "wiki_get_context", map[string]any{
+			"recentChangesLimit": float64(1),
+			"syncMode":           "none",
+		})
+		token := stringField(first, "contextToken")
+		for i := 0; i < 3; i++ {
+			slug := fmt.Sprintf("delta-page-%d", i)
+			callToolStructured(session, "wiki_create_page", map[string]any{
+				"title": fmt.Sprintf("Delta Page %d", i),
+				"slug":  slug,
+				"kind":  "page",
+			})
+		}
 
-	secondA := callToolStructured(t, sessionA, "wiki_get_context", map[string]any{"syncMode": "none"})
-	assertContextHistoryOpaque(t, secondA)
-	if secondA["previousContextToken"] != firstAToken {
-		t.Fatalf("session A previousContextToken = %#v, want first token %q", secondA["previousContextToken"], firstAToken)
-	}
-	pathsA := changedPathsFromContext(t, secondA)
-	if !pathsA["omitted-token-delta.md"] {
-		t.Fatalf("session A changesSincePreviousContext paths = %#v, missing omitted-token-delta.md", pathsA)
-	}
+		second := callToolStructured(session, "wiki_get_context", map[string]any{
+			"sinceToken":         token,
+			"recentChangesLimit": float64(1),
+			"syncMode":           "none",
+		})
+		Expect(arrayField(second, "recentChanges")).To(HaveLen(1))
+		changes := arrayField(second, "changesSincePreviousContext")
+		changedPaths := changedPathsFromChanges(changes)
+		Expect(changedPaths).To(SatisfyAll(
+			HaveKey("delta-page-0.md"),
+			HaveKey("delta-page-1.md"),
+			HaveKey("delta-page-2.md"),
+		))
+		Expect(second).To(Or(
+			Not(HaveKey("warnings")),
+			HaveKeyWithValue("warnings", BeEmpty()),
+		))
 
-	firstB := callToolStructured(t, sessionB, "wiki_get_context", map[string]any{"syncMode": "none"})
-	if firstB["previousContextToken"] != "" {
-		t.Fatalf("session B previousContextToken = %#v, want empty first-session checkpoint", firstB["previousContextToken"])
-	}
-	if changes := arrayField(t, firstB, "changesSincePreviousContext"); len(changes) != 0 {
-		t.Fatalf("session B changesSincePreviousContext = %#v, want no inherited session A delta", changes)
-	}
-	if history := arrayField(t, firstB, "contextHistory"); len(history) != 1 {
-		t.Fatalf("session B contextHistory len = %d, want isolated first checkpoint", len(history))
-	}
-})
-
-var _ = It("LocalMCPGetContext_UnknownExplicitSinceTokenDoesNotFallbackToPreviousContext", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	first := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
-	firstToken := stringField(t, first, "contextToken")
-	postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"title": "Unknown Token Delta",
-		"slug":  "unknown-token-delta",
-		"kind":  "page",
-	}, http.StatusCreated)
-
-	second := callToolStructured(t, session, "wiki_get_context", map[string]any{
-		"syncMode":   "none",
-		"sinceToken": "not-a-token",
-	})
-	if second["previousContextToken"] != "" {
-		t.Fatalf("previousContextToken = %#v, want no implicit fallback from explicit unknown token", second["previousContextToken"])
-	}
-	if changes := arrayField(t, second, "changesSincePreviousContext"); len(changes) != 0 {
-		t.Fatalf("changesSincePreviousContext = %#v, want no implicit fallback delta from explicit unknown token", changes)
-	}
-	warnings := arrayField(t, second, "warnings")
-	if !arrayContainsString(warnings, "unknown sinceToken; returned current context") {
-		t.Fatalf("warnings = %#v, want unknown-token warning", warnings)
-	}
-	if stringField(t, first, "contextToken") != firstToken {
-		t.Fatalf("first context token changed unexpectedly")
-	}
-})
-
-var _ = It("LocalMCPGetContext_ChangesSinceTokenIsNotClippedByRecentChangesLimit", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	first := callToolStructured(t, session, "wiki_get_context", map[string]any{
-		"recentChangesLimit": float64(1),
-		"syncMode":           "none",
-	})
-	token := stringField(t, first, "contextToken")
-	for i := 0; i < 3; i++ {
-		slug := fmt.Sprintf("delta-page-%d", i)
-		callToolStructured(t, session, "wiki_create_page", map[string]any{
-			"title": fmt.Sprintf("Delta Page %d", i),
-			"slug":  slug,
+		tokenB := stringField(second, "contextToken")
+		callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Delta Page After B",
+			"slug":  "delta-page-after-b",
 			"kind":  "page",
 		})
-	}
-
-	second := callToolStructured(t, session, "wiki_get_context", map[string]any{
-		"sinceToken":         token,
-		"recentChangesLimit": float64(1),
-		"syncMode":           "none",
-	})
-	recentChanges := arrayField(t, second, "recentChanges")
-	if len(recentChanges) != 1 {
-		t.Fatalf("recentChanges len = %d, want display limit 1 in %#v", len(recentChanges), second["recentChanges"])
-	}
-	changes := arrayField(t, second, "changesSincePreviousContext")
-	if len(changes) < 3 {
-		t.Fatalf("changesSincePreviousContext len = %d, want at least 3 changes after checkpoint: %#v", len(changes), second["changesSincePreviousContext"])
-	}
-	changedPaths := map[string]bool{}
-	for _, raw := range changes {
-		change, ok := raw.(map[string]any)
-		if !ok {
-			t.Fatalf("change has type %T: %#v", raw, raw)
+		third := callToolStructured(session, "wiki_get_context", map[string]any{
+			"sinceToken":         tokenB,
+			"recentChangesLimit": float64(1),
+			"syncMode":           "none",
+		})
+		changedPathsAfterB := changedPathsFromContext(third)
+		Expect(changedPathsAfterB).To(HaveKey("delta-page-after-b.md"))
+		for i := 0; i < 3; i++ {
+			Expect(changedPathsAfterB).NotTo(HaveKey(fmt.Sprintf("delta-page-%d.md", i)))
 		}
-		for _, value := range arrayFieldFromMap(t, change, "changedPaths") {
-			path, ok := value.(string)
-			if !ok {
-				t.Fatalf("changed path has type %T: %#v", value, value)
-			}
-			changedPaths[path] = true
+	})
+})
+
+var _ = Describe("local MCP presence", func() {
+	It("includes authenticated web heartbeat state in context", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		page := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Docs API",
+			"slug":  "docs-api",
+			"kind":  "page",
+		}), "page")
+		postHTTPJSON(router, "/api/presence/heartbeat", map[string]any{
+			"sessionId": "tab-web-1",
+			"mode":      "edit",
+			"pageId":    stringField(page, "id"),
+			"path":      "/docs-api",
+			"dirty":     true,
+		}, http.StatusOK)
+
+		out := callToolStructured(session, "wiki_get_context", nil)
+		Expect(nestedMap(out, "presenceStatus")).To(HaveKeyWithValue("web", "enabled"))
+		Expect(out).To(HaveKeyWithValue("activeSessions", HaveExactElements(SatisfyAll(
+			HaveKeyWithValue("type", "web"),
+			HaveKeyWithValue("sessionId", "tab-web-1"),
+			HaveKeyWithValue("mode", "edit"),
+			HaveKeyWithValue("dirty", true),
+			HaveKeyWithValue("user", SatisfyAll(
+				HaveKeyWithValue("id", "public-editor"),
+				HaveKeyWithValue("role", "editor"),
+				Not(HaveKey("email")),
+			)),
+			HaveKeyWithValue("page", SatisfyAll(
+				HaveKeyWithValue("id", stringField(page, "id")),
+				HaveKeyWithValue("path", "/docs-api"),
+				HaveKeyWithValue("title", "Docs API"),
+			)),
+			HaveKeyWithValue("lastSeenAt", SatisfyAll(BeAssignableToTypeOf(""), Not(BeEmpty()))),
+		))))
+	})
+
+	It("merges agent hook presence into context", func() {
+		w := newLocalMCPTestWiki(false)
+		agentPresence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
+		sessionHash := "sha256:" + strings.Repeat("a", 64)
+		agentPresence.Record(agenthooks.Event{
+			Provider:      agenthooks.ProviderCodex,
+			SessionIDHash: sessionHash,
+			EventName:     "SessionStart",
+			Model:         "gpt-5",
+			Source:        "hook",
+			SeenAt:        time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC),
+		})
+		agentPresence.Record(agenthooks.Event{
+			Provider:      agenthooks.ProviderCodex,
+			SessionIDHash: sessionHash,
+			EventName:     "SubagentStart",
+			SubagentDelta: 1,
+			SeenAt:        time.Date(2026, 6, 8, 12, 0, 1, 0, time.UTC),
+		})
+		w.SetAgentPresenceRegistry(agentPresence)
+
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		out := callToolStructured(session, "wiki_get_context", nil)
+		Expect(nestedMap(out, "presenceStatus")).To(HaveKeyWithValue("agentHooks", "enabled"))
+		Expect(out).To(HaveKeyWithValue("activeSessions", HaveExactElements(SatisfyAll(
+			HaveKeyWithValue("type", "agent"),
+			HaveKeyWithValue("sessionId", sessionHash),
+			HaveKeyWithValue("provider", "codex"),
+			HaveKeyWithValue("model", "gpt-5"),
+			HaveKeyWithValue("source", "hook"),
+			HaveKeyWithValue("lastEvent", "SubagentStart"),
+			HaveKeyWithValue("activeSubagents", float64(1)),
+		))))
+	})
+
+	It("requires authentication before accepting heartbeat updates", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            false,
+			PublicAccess:            false,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/api/presence/heartbeat", strings.NewReader(`{"sessionId":"tab-1","mode":"view"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized), rec.Body.String())
+	})
+
+	It("rejects missing CSRF and invalid heartbeat payloads without poisoning active sessions", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		req := httptest.NewRequest(http.MethodPost, "/api/presence/heartbeat", strings.NewReader(`{"sessionId":"tab-no-csrf","mode":"view"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden), rec.Body.String())
+
+		postHTTPJSON(router, "/api/presence/heartbeat", map[string]any{
+			"sessionId": "tab-valid",
+			"mode":      "view",
+		}, http.StatusOK)
+		postHTTPJSON(router, "/api/presence/heartbeat", map[string]any{
+			"sessionId": "tab-invalid",
+			"mode":      "invalid",
+		}, http.StatusBadRequest)
+		postHTTPJSON(router, "/api/presence/heartbeat", map[string]any{
+			"sessionId": "tab-missing-page",
+			"mode":      "view",
+			"path":      "/deleted-page",
+		}, http.StatusOK)
+
+		out := callToolStructured(session, "wiki_get_context", map[string]any{"syncMode": "none"})
+		Expect(out).To(HaveKeyWithValue("activeSessions", ConsistOf(
+			HaveKeyWithValue("sessionId", "tab-valid"),
+			SatisfyAll(
+				HaveKeyWithValue("sessionId", "tab-missing-page"),
+				Not(HaveKey("page")),
+			),
+		)))
+	})
+})
+
+var _ = Describe("local MCP workspace refresh", func() {
+	It("syncs direct markdown files into page and context results", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		Expect(os.WriteFile(filepath.Join(rootDir, "direct.md"), []byte("---\nleafwiki_id: direct\nleafwiki_title: Direct\n---\n# Direct\n"), 0o644)).To(Succeed())
+
+		out := callToolStructured(session, "wiki_refresh", nil)
+		Expect(nestedMap(out, "syncStatus")).To(SatisfyAll(
+			HaveKeyWithValue("lastCommitHash", BeAssignableToTypeOf("")),
+			Not(HaveKey("LastCommitHash")),
+		))
+		Expect(out).To(HaveKey("validation"))
+
+		readBack := callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "direct"})
+		Expect(nestedMap(readBack, "page")).To(SatisfyAll(
+			HaveKeyWithValue("id", "direct"),
+			HaveKeyWithValue("title", "Direct"),
+		))
+
+		contextOut := callToolStructured(session, "wiki_get_context", map[string]any{
+			"syncMode":           "none",
+			"recentChangesLimit": float64(1),
+		})
+		Expect(contextOut).To(HaveKeyWithValue("recentChanges", HaveExactElements(SatisfyAll(
+			HaveKeyWithValue("source", "mcp"),
+			HaveKeyWithValue("reason", "explicit_refresh"),
+			HaveKeyWithValue("commitId", BeAssignableToTypeOf("")),
+			HaveKeyWithValue("timestamp", BeAssignableToTypeOf("")),
+			HaveKeyWithValue("actor", BeAssignableToTypeOf("")),
+			HaveKeyWithValue("pageIds", ContainElement("direct")),
+		))))
+	})
+
+	It("normalizes workspace routes before validation and refresh results", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		Expect(os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), []byte("---\nleafwiki_id: plans\nleafwiki_title: Plans\n---\n# Plans\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), []byte("---\nleafwiki_id: agent-hooks-plan\nleafwiki_title: Agent Hooks Plan\n---\n# Agent Hooks Plan\n\ncontent\n"), 0o644)).To(Succeed())
+
+		validateOut := callToolStructured(session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+		Expect(validateOut).To(HaveKeyWithValue("ok", true))
+		Expect(validateOut).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{wikivalidation.IssueCodeInvalidSlug}))
+
+		refreshOut := callToolStructured(session, "wiki_refresh", map[string]any{"source": "filesystem"})
+		validation := nestedMap(refreshOut, "validation")
+		Expect(validation).To(HaveKeyWithValue("ok", true))
+		Expect(validation).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{wikivalidation.IssueCodeInvalidSlug}))
+
+		readBack := callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "plans/agent-hooks-plan", "kind": "page"})
+		Expect(nestedMap(readBack, "page")).To(SatisfyAll(
+			HaveKeyWithValue("id", "agent-hooks-plan"),
+			HaveKeyWithValue("title", "Agent Hooks Plan"),
+		))
+	})
+
+	It("omits validation details when validation is disabled", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		Expect(os.WriteFile(filepath.Join(rootDir, "skip-validation.md"), []byte("---\nleafwiki_id: skip-validation\nleafwiki_title: Skip Validation\n---\n# Skip Validation\n"), 0o644)).To(Succeed())
+
+		out := callToolStructured(session, "wiki_refresh", map[string]any{"validate": false})
+		Expect(out).NotTo(HaveKey("validation"))
+	})
+
+	It("returns validation errors without disabling later MCP calls", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		Expect(os.WriteFile(filepath.Join(rootDir, "a.md"), []byte("---\nleafwiki_id: duplicate\nleafwiki_title: A\n---\n# A\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "b.md"), []byte("---\nleafwiki_id: duplicate\nleafwiki_title: B\n---\n# B\n"), 0o644)).To(Succeed())
+
+		out := callToolStructured(session, "wiki_refresh", map[string]any{"source": "filesystem"})
+		validation := nestedMap(out, "validation")
+		Expect(nestedMap(validation, "summary")).To(HaveKeyWithValue("errors", BeNumerically(">", 0)))
+		Expect(validation).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeDuplicateLeafwikiID}))
+
+		currentUser := callToolStructured(session, "wiki_get_current_user", nil)
+		Expect(nestedMap(currentUser, "user")).To(HaveKeyWithValue("username", BeAssignableToTypeOf("")))
+	})
+
+	It("records an explicit filesystem refresh reason and caps context paths", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		for i := 0; i < 25; i++ {
+			slug := fmt.Sprintf("bulk-refresh-%02d", i)
+			Expect(os.WriteFile(filepath.Join(rootDir, slug+".md"), []byte("---\nleafwiki_id: "+slug+"\nleafwiki_title: "+slug+"\n---\n# "+slug+"\n"), 0o644)).To(Succeed())
 		}
-	}
-	for i := 0; i < 3; i++ {
-		want := fmt.Sprintf("delta-page-%d.md", i)
-		if !changedPaths[want] {
-			t.Fatalf("changesSincePreviousContext paths = %#v, missing %s", changedPaths, want)
-		}
-	}
-	if warnings, ok := second["warnings"].([]any); ok && len(warnings) > 0 {
-		t.Fatalf("warnings = %#v, want no truncation warning when checkpoint is reachable", warnings)
-	}
 
-	tokenB := stringField(t, second, "contextToken")
-	callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Delta Page After B",
-		"slug":  "delta-page-after-b",
-		"kind":  "page",
+		callToolStructured(session, "wiki_refresh", map[string]any{"source": "filesystem"})
+		contextOut := callToolStructured(session, "wiki_get_context", map[string]any{
+			"syncMode":           "none",
+			"recentChangesLimit": float64(1),
+		})
+		Expect(contextOut).To(HaveKeyWithValue("recentChanges", HaveExactElements(SatisfyAll(
+			HaveKeyWithValue("reason", "explicit_refresh"),
+			HaveKeyWithValue("source", "filesystem"),
+			HaveKeyWithValue("changedCount", BeNumerically(">=", 25)),
+			HaveKeyWithValue("changedPaths", HaveLen(20)),
+		))))
 	})
-	third := callToolStructured(t, session, "wiki_get_context", map[string]any{
-		"sinceToken":         tokenB,
-		"recentChangesLimit": float64(1),
-		"syncMode":           "none",
-	})
-	changesAfterB := arrayField(t, third, "changesSincePreviousContext")
-	changedPathsAfterB := map[string]bool{}
-	for _, raw := range changesAfterB {
-		change, ok := raw.(map[string]any)
-		if !ok {
-			t.Fatalf("change after B has type %T: %#v", raw, raw)
-		}
-		for _, value := range arrayFieldFromMap(t, change, "changedPaths") {
-			path, ok := value.(string)
-			if !ok {
-				t.Fatalf("changed path after B has type %T: %#v", value, value)
-			}
-			changedPathsAfterB[path] = true
-		}
-	}
-	if !changedPathsAfterB["delta-page-after-b.md"] {
-		t.Fatalf("changesSincePreviousContext after token B paths = %#v, missing delta-page-after-b.md", changedPathsAfterB)
-	}
-	for i := 0; i < 3; i++ {
-		oldPath := fmt.Sprintf("delta-page-%d.md", i)
-		if changedPathsAfterB[oldPath] {
-			t.Fatalf("changesSincePreviousContext after token B paths = %#v, did not expect old path %s", changedPathsAfterB, oldPath)
-		}
-	}
 })
 
-var _ = It("LocalMCPGetContext_IncludesWebHeartbeatPresence", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
+var _ = Describe("local MCP subtree lookup", func() {
+	It("returns path roots with breadcrumbs and requested expansion details", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		parentPage := postHTTPJSON(router, "/api/pages", map[string]any{
+			"title": "Docs",
+			"slug":  "docs",
+			"kind":  "section",
+		}, http.StatusCreated)
+		childPage := postHTTPJSON(router, "/api/pages", map[string]any{
+			"parentId": stringField(parentPage, "id"),
+			"title":    "Reference",
+			"slug":     "reference",
+			"kind":     "page",
+		}, http.StatusCreated)
+		postHTTPJSON(router, "/api/pages", map[string]any{
+			"title": "Target",
+			"slug":  "target",
+			"kind":  "page",
+		}, http.StatusCreated)
+		callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(childPage, "id"),
+			"version": stringField(childPage, "version"),
+			"title":   "Reference",
+			"slug":    "reference",
+			"content": "Reference content with [Target](/target.md).",
+		})
+
+		out := callToolStructured(session, "wiki_get_subtree", map[string]any{
+			"path":  "/docs",
+			"depth": float64(1),
+		})
+		Expect(nestedMap(out, "root")).To(SatisfyAll(
+			HaveKeyWithValue("path", "docs"),
+			HaveKeyWithValue("title", "Docs"),
+			HaveKeyWithValue("children", HaveExactElements(HaveKeyWithValue("title", "Reference"))),
+		))
+		Expect(arrayField(out, "breadcrumbs")).To(HaveLen(2))
+		Expect(out).To(SatisfyAll(
+			HaveKeyWithValue("depth", float64(1)),
+			HaveKeyWithValue("truncated", false),
+		))
+
+		expanded := callToolStructured(session, "wiki_get_subtree", map[string]any{
+			"path":                  "docs",
+			"depth":                 float64(1),
+			"includeMetadata":       false,
+			"includeLinkCounts":     true,
+			"includeContentPreview": true,
+		})
+		Expect(nestedMap(expanded, "root")).To(SatisfyAll(
+			Not(HaveKey("metadata")),
+			HaveKeyWithValue("children", HaveExactElements(SatisfyAll(
+				Not(HaveKey("metadata")),
+				HaveKeyWithValue("contentPreview", BeAssignableToTypeOf("")),
+				HaveKeyWithValue("linkCounts", HaveKeyWithValue("outgoings", float64(1))),
+			))),
+		))
+
+		rootOut := callToolStructured(session, "wiki_get_subtree", nil)
+		Expect(nestedMap(rootOut, "root")).To(SatisfyAll(
+			HaveKeyWithValue("slug", "root"),
+			HaveKeyWithValue("path", ""),
+		))
+		byID := callToolStructured(session, "wiki_get_subtree", map[string]any{
+			"pageId": stringField(parentPage, "id"),
+			"depth":  float64(0),
+		})
+		Expect(nestedMap(byID, "root")).To(HaveKeyWithValue("id", stringField(parentPage, "id")))
+
+		ambiguousSubtreeErr := callToolStructuredError(session, "wiki_get_subtree", map[string]any{
+			"pageId": stringField(parentPage, "id"),
+			"path":   "docs",
+		})
+		Expect(ambiguousSubtreeErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous)), mcpLabelGetSubtreeAmbiguousTarget)
+		missingSubtreeErr := callToolStructuredError(session, "wiki_get_subtree", map[string]any{"path": "missing-subtree"})
+		Expect(missingSubtreeErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound)))
+		negativeDepthErr := callToolStructuredError(session, "wiki_get_subtree", map[string]any{
+			"path":  "docs",
+			"depth": float64(-1),
+		})
+		Expect(negativeDepthErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPToolError, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPToolError)), mcpLabelGetSubtreeNegativeDepth)
+		hugeDepth := callToolStructured(session, "wiki_get_subtree", map[string]any{
+			"path":  "docs",
+			"depth": float64(999),
+		})
+		Expect(hugeDepth).To(HaveKeyWithValue("depth", float64(4)))
 	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	page := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Docs API",
-		"slug":  "docs-api",
-		"kind":  "page",
-	}), "page")
-	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
-		"sessionId": "tab-web-1",
-		"mode":      "edit",
-		"pageId":    stringField(t, page, "id"),
-		"path":      "/docs-api",
-		"dirty":     true,
-	}, http.StatusOK)
-
-	out := callToolStructured(t, session, "wiki_get_context", nil)
-	presence := nestedMap(t, out, "presenceStatus")
-	if presence["web"] != "enabled" {
-		t.Fatalf("presenceStatus.web = %v, want enabled in %#v", presence["web"], presence)
-	}
-	sessions, ok := out["activeSessions"].([]any)
-	if !ok || len(sessions) != 1 {
-		t.Fatalf("activeSessions = %#v, want one web session", out["activeSessions"])
-	}
-	webSession, ok := sessions[0].(map[string]any)
-	if !ok {
-		t.Fatalf("activeSessions[0] = %T %#v, want object", sessions[0], sessions[0])
-	}
-	if webSession["type"] != "web" || webSession["sessionId"] != "tab-web-1" || webSession["mode"] != "edit" || webSession["dirty"] != true {
-		t.Fatalf("web session = %#v, want typed edit dirty session", webSession)
-	}
-	user := nestedMap(t, webSession, "user")
-	if user["id"] != "public-editor" || user["role"] != "editor" {
-		t.Fatalf("web session user = %#v, want public editor", user)
-	}
-	if _, leaked := user["email"]; leaked {
-		t.Fatalf("web session user = %#v, did not expect email for editor MCP caller", user)
-	}
-	pageOut := nestedMap(t, webSession, "page")
-	if pageOut["id"] != stringField(t, page, "id") || pageOut["path"] != "/docs-api" || pageOut["title"] != "Docs API" {
-		t.Fatalf("web session page = %#v, want resolved page context", pageOut)
-	}
-	if webSession["lastSeenAt"] == "" {
-		t.Fatalf("web session = %#v, want lastSeenAt", webSession)
-	}
 })
 
-var _ = It("LocalMCPGetContext_MergesAgentHookPresence", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	agentPresence := projectdaemon.NewAgentPresenceRegistry(time.Minute, nil)
-	sessionHash := "sha256:" + strings.Repeat("a", 64)
-	agentPresence.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: sessionHash,
-		EventName:     "SessionStart",
-		Model:         "gpt-5",
-		Source:        "hook",
-		SeenAt:        time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC),
-	})
-	agentPresence.Record(agenthooks.Event{
-		Provider:      agenthooks.ProviderCodex,
-		SessionIDHash: sessionHash,
-		EventName:     "SubagentStart",
-		SubagentDelta: 1,
-		SeenAt:        time.Date(2026, 6, 8, 12, 0, 1, 0, time.UTC),
-	})
-	w.SetAgentPresenceRegistry(agentPresence)
+var _ = Describe("local MCP validation tools", func() {
+	It("validates the current filesystem snapshot instead of stale loaded tree links", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
+		page := postHTTPJSON(router, "/api/pages", map[string]any{
+			"title":   "Link Source",
+			"slug":    "link-source",
+			"kind":    "page",
+			"content": "[Missing](/missing-target)",
+		}, http.StatusCreated)
+		callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(page, "id"),
+			"version": stringField(page, "version"),
+			"title":   "Link Source",
+			"slug":    "link-source",
+			"content": "[Missing](/missing-target)",
+		})
+		Expect(os.WriteFile(filepath.Join(rootDir, "link-source.md"), []byte("---\nleafwiki_id: "+stringField(page, "id")+"\nleafwiki_title: Link Source\n---\n# Link Source\n\n[Fixed](/fixed-target.md)\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "fixed-target.md"), []byte("---\nleafwiki_id: fixed-target\nleafwiki_title: Fixed Target\n---\n# Fixed Target\n"), 0o644)).To(Succeed())
 
-	out := callToolStructured(t, session, "wiki_get_context", nil)
-	presence := nestedMap(t, out, "presenceStatus")
-	if presence["agentHooks"] != "enabled" {
-		t.Fatalf("presenceStatus.agentHooks = %v, want enabled in %#v", presence["agentHooks"], presence)
-	}
-	sessions, ok := out["activeSessions"].([]any)
-	if !ok || len(sessions) != 1 {
-		t.Fatalf("activeSessions = %#v, want one agent session", out["activeSessions"])
-	}
-	agentSession, ok := sessions[0].(map[string]any)
-	if !ok {
-		t.Fatalf("activeSessions[0] = %T %#v, want object", sessions[0], sessions[0])
-	}
-	if agentSession["type"] != "agent" || agentSession["sessionId"] != sessionHash || agentSession["provider"] != "codex" {
-		t.Fatalf("agent session = %#v, want sanitized codex session", agentSession)
-	}
-	if agentSession["model"] != "gpt-5" || agentSession["source"] != "hook" || agentSession["lastEvent"] != "SubagentStart" || agentSession["activeSubagents"] != float64(1) {
-		t.Fatalf("agent session = %#v, want hook metadata", agentSession)
-	}
+		validation := callToolStructured(session, "wiki_validate_wiki", nil)
+		Expect(validation).To(HaveKeyWithValue("ok", true))
+	})
+
+	It("reports broken links from the filesystem snapshot instead of stale loaded-tree pages", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		postHTTPJSON(router, "/api/pages", map[string]any{
+			"title": "Stale Target",
+			"slug":  "stale-target",
+			"kind":  "page",
+		}, http.StatusCreated)
+		Expect(os.WriteFile(filepath.Join(rootDir, "source.md"), []byte("---\nleafwiki_id: source\nleafwiki_title: Source\n---\n# Source\n\n[Stale](/stale-target)\n"), 0o644)).To(Succeed())
+		Expect(os.Remove(filepath.Join(rootDir, "stale-target.md"))).To(Succeed())
+
+		validation := callToolStructured(session, "wiki_validate_wiki", nil)
+		Expect(validation).To(HaveKeyWithValue("ok", false))
+		Expect(validation).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink}))
+	})
+
+	It("validates stored and proposed page content with typed issue results", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Valid Page",
+			"slug":  "valid-page",
+			"kind":  "page",
+		}), "page")
+
+		pageValidation := callToolStructured(session, "wiki_validate_page", map[string]any{
+			"pageId": stringField(created, "id"),
+		})
+		Expect(pageValidation).To(SatisfyAll(
+			HaveKeyWithValue("ok", true),
+			HaveKeyWithValue("issues", BeEmpty()),
+		))
+
+		ambiguousErr := callToolStructuredError(session, "wiki_validate_page", map[string]any{
+			"pageId": stringField(created, "id"),
+			"path":   "valid-page",
+		})
+		Expect(ambiguousErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous)), mcpLabelValidatePageAmbiguousInput)
+		missingTargetErr := callToolStructuredError(session, "wiki_validate_page", map[string]any{})
+		Expect(missingTargetErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired)), mcpLabelValidatePageMissingTarget)
+
+		proposed := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "draft",
+			"content": "---\nleafwiki_id: draft\nleafwiki_title: Draft\n---\n# Draft\n",
+		})
+		Expect(proposed).To(HaveKeyWithValue("ok", true))
+		missingDraft := callToolStructuredError(session, "wiki_get_page_by_path", map[string]any{"path": "draft"})
+		Expect(missingDraft).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound)), mcpLabelValidateContentDoesNotWrite)
+
+		canonicalPageLink := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "draft-canonical",
+			"content": "[Valid](/valid-page.md)\n",
+		})
+		Expect(canonicalPageLink).To(HaveKeyWithValue("ok", true))
+		canonicalPagePath := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "/valid-page.md",
+			"content": fmt.Sprintf("---\nleafwiki_id: %s\nleafwiki_title: Valid Page\n---\n[Valid](/valid-page.md)\n", stringField(created, "id")),
+		})
+		Expect(canonicalPagePath).To(HaveKeyWithValue("ok", true))
+		rootSectionLink := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "draft-root-link",
+			"content": "[Root](/)\n",
+		})
+		Expect(rootSectionLink).To(HaveKeyWithValue("ok", true))
+		sectionTarget := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Validation Section",
+			"slug":  "validation-section",
+			"kind":  "section",
+		}), "page")
+		sectionChildTarget := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"parentId": stringField(sectionTarget, "id"),
+			"title":    "Validation Section Child",
+			"slug":     "child",
+			"kind":     "page",
+		}), "page")
+		relativeSectionLink := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"existingPageId": stringField(sectionTarget, "id"),
+			"path":           "validation-section",
+			"content":        "[Child](./child.md)\n",
+		})
+		Expect(relativeSectionLink).To(HaveKeyWithValue("ok", true))
+		draftSectionLink := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "validation-section",
+			"kind":    "section",
+			"content": "[Child](./child.md)\n",
+		})
+		Expect(draftSectionLink).To(HaveKeyWithValue("ok", true))
+		omittedKindExistingSectionLink := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "validation-section",
+			"content": "[Child](./child.md)\n",
+		})
+		Expect(omittedKindExistingSectionLink).To(HaveKeyWithValue("ok", true))
+		pageTwin := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Validation Twin Page",
+			"slug":  "validation-twin",
+			"kind":  "page",
+		}), "page")
+		sectionTwin := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Validation Twin Section",
+			"slug":  "validation-twin",
+			"kind":  "section",
+		}), "page")
+		sectionTwinChild := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"parentId": stringField(sectionTwin, "id"),
+			"title":    "Validation Twin Child",
+			"slug":     "child",
+			"kind":     "page",
+		}), "page")
+		omittedKindExistingSectionTwinLink := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "validation-twin",
+			"content": "[Child](./child.md)\n",
+		})
+		Expect(omittedKindExistingSectionTwinLink).To(HaveKeyWithValue("ok", true))
+		_ = pageTwin
+		_ = sectionTwinChild
+		sectionMdLink := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "draft-section-md",
+			"content": "[Section as md](/validation-section.md)\n",
+		})
+		Expect(sectionMdLink).To(HaveKeyWithValue("ok", false))
+		Expect(sectionMdLink).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink}))
+		_ = sectionChildTarget
+
+		invalid := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "broken",
+			"content": "---\nleafwiki_title: [unterminated\n---\n# Broken\n",
+		})
+		Expect(invalid).To(HaveKeyWithValue("ok", false))
+		Expect(invalid).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeMetadataParseError}))
+
+		semantic := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path": "draft-dupe",
+			"content": "---\nleafwiki_id: " + stringField(created, "id") + "\nleafwiki_private: true\n---\n" +
+				"[Missing](/does-not-exist)\n[Missing asset](missing.png)\n",
+		})
+		Expect(semantic).To(HaveKeyWithValue("ok", false))
+		Expect(semantic).To(matchValidationIssueCodes([]wikivalidation.IssueCode{
+			wikivalidation.IssueCodeDuplicateLeafwikiID,
+			wikivalidation.IssueCodeReservedMetadata,
+			wikivalidation.IssueCodeBrokenLink,
+			wikivalidation.IssueCodeMissingAsset,
+		}))
+
+		assetOwner := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Asset Owner",
+			"slug":  "asset-owner",
+			"kind":  "page",
+		}), "page")
+		assetBorrower := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Asset Borrower",
+			"slug":  "asset-borrower",
+			"kind":  "page",
+		}), "page")
+		callToolStructured(session, "wiki_upload_asset", map[string]any{
+			"pageId":        stringField(assetOwner, "id"),
+			"filename":      "logo.png",
+			"contentBase64": base64.StdEncoding.EncodeToString([]byte("owner logo")),
+		})
+		wrongPageAsset := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"existingPageId": stringField(assetOwner, "id"),
+			"path":           "asset-owner",
+			"content":        "# Asset Owner\n\n![Wrong page asset](/assets/" + stringField(assetBorrower, "id") + "/logo.png)\n",
+		})
+		Expect(wrongPageAsset).To(HaveKeyWithValue("ok", false))
+		Expect(wrongPageAsset).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeMissingAsset}))
+
+		pathConflict := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "valid-page",
+			"content": "---\nleafwiki_id: draft-conflict\nleafwiki_title: Draft Conflict\n---\n# Draft\n",
+		})
+		Expect(pathConflict).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodePathConflict}))
+	})
 })
 
-var _ = It("PresenceHeartbeatRequiresAuthWhenAuthEnabled", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            false,
-		PublicAccess:            false,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-	})
+var _ = Describe("local MCP path tools", func() {
+	It("resolve same-basename page and section twins by canonical paths", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/presence/heartbeat", strings.NewReader(`{"sessionId":"tab-1","mode":"view"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST /api/presence/heartbeat without auth = %d, want 401: %s", rec.Code, rec.Body.String())
-	}
-})
-
-var _ = It("PresenceHeartbeatRouteRejectsMissingCSRFAndInvalidPayloadWithoutPoisoning", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	req := httptest.NewRequest(http.MethodPost, "/api/presence/heartbeat", strings.NewReader(`{"sessionId":"tab-no-csrf","mode":"view"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("POST /api/presence/heartbeat without CSRF = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-
-	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
-		"sessionId": "tab-valid",
-		"mode":      "view",
-	}, http.StatusOK)
-	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
-		"sessionId": "tab-invalid",
-		"mode":      "invalid",
-	}, http.StatusBadRequest)
-	postHTTPJSON(t, router, "/api/presence/heartbeat", map[string]any{
-		"sessionId": "tab-missing-page",
-		"mode":      "view",
-		"path":      "/deleted-page",
-	}, http.StatusOK)
-
-	out := callToolStructured(t, session, "wiki_get_context", map[string]any{"syncMode": "none"})
-	sessions, ok := out["activeSessions"].([]any)
-	if !ok || len(sessions) != 2 {
-		t.Fatalf("activeSessions = %#v, want valid plus missing-page sessions", out["activeSessions"])
-	}
-	if !arrayContainsObjectField(sessions, "sessionId", "tab-valid") {
-		t.Fatalf("activeSessions = %#v, want tab-valid", sessions)
-	}
-	missingPageSession := objectWithField(t, sessions, "sessionId", "tab-missing-page")
-	if _, exists := missingPageSession["page"]; exists {
-		t.Fatalf("missing-page session = %#v, did not expect unresolved page details", missingPageSession)
-	}
-})
-
-var _ = It("LocalMCPRefresh_SyncsDirectMarkdownCreate", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	if err := os.WriteFile(filepath.Join(rootDir, "direct.md"), []byte("---\nleafwiki_id: direct\nleafwiki_title: Direct\n---\n# Direct\n"), 0o644); err != nil {
-		t.Fatalf("write direct markdown: %v", err)
-	}
-
-	out := callToolStructured(t, session, "wiki_refresh", nil)
-	status := nestedMap(t, out, "syncStatus")
-	if status["lastCommitHash"] == "" {
-		t.Fatalf("wiki_refresh syncStatus = %#v, want lastCommitHash", status)
-	}
-	if _, ok := status["LastCommitHash"]; ok {
-		t.Fatalf("wiki_refresh syncStatus = %#v, did not expect exported Go struct field names", status)
-	}
-	if _, ok := out["validation"]; !ok {
-		t.Fatalf("wiki_refresh missing validation in %#v", out)
-	}
-
-	readBack := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "direct"})
-	page := nestedMap(t, readBack, "page")
-	if page["id"] != "direct" || page["title"] != "Direct" {
-		t.Fatalf("readBack page = %#v, want synced Direct page", page)
-	}
-
-	contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{
-		"syncMode":           "none",
-		"recentChangesLimit": float64(1),
-	})
-	recent := arrayField(t, contextOut, "recentChanges")
-	if len(recent) != 1 {
-		t.Fatalf("recentChanges = %#v, want one refresh entry", recent)
-	}
-	change, ok := recent[0].(map[string]any)
-	if !ok {
-		t.Fatalf("recentChanges[0] has type %T: %#v", recent[0], recent[0])
-	}
-	if change["source"] != "mcp" {
-		t.Fatalf("recent change source = %#v, want mcp in %#v", change["source"], change)
-	}
-	if change["reason"] != "explicit_refresh" {
-		t.Fatalf("recent change reason = %#v, want explicit_refresh in %#v", change["reason"], change)
-	}
-	if change["commitId"] == "" || change["timestamp"] == "" || change["actor"] == "" {
-		t.Fatalf("recent change provenance incomplete: %#v", change)
-	}
-	pageIDs := arrayFieldFromMap(t, change, "pageIds")
-	if !arrayContainsString(pageIDs, "direct") {
-		t.Fatalf("recent change pageIds = %#v, want direct", pageIDs)
-	}
-})
-
-var _ = It("LocalMCPValidateAndRefreshNormalizeWorkspaceRoutes", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	if err := os.MkdirAll(filepath.Join(rootDir, "plans"), 0o755); err != nil {
-		t.Fatalf("create plans dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "plans", "index.md"), []byte("---\nleafwiki_id: plans\nleafwiki_title: Plans\n---\n# Plans\n"), 0o644); err != nil {
-		t.Fatalf("write plans index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "plans", "agent_hooks.PLAN.md"), []byte("---\nleafwiki_id: agent-hooks-plan\nleafwiki_title: Agent Hooks Plan\n---\n# Agent Hooks Plan\n\ncontent\n"), 0o644); err != nil {
-		t.Fatalf("write plan markdown: %v", err)
-	}
-
-	validateOut := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	if ok, _ := validateOut["ok"].(bool); !ok {
-		t.Fatalf("wiki_validate_wiki = %#v, want normalizable plan filename to validate", validateOut)
-	}
-	assertValidationIssueCodesAbsent(t, validateOut, []wikivalidation.IssueCode{wikivalidation.IssueCodeInvalidSlug})
-
-	refreshOut := callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
-	validation := nestedMap(t, refreshOut, "validation")
-	if ok, _ := validation["ok"].(bool); !ok {
-		t.Fatalf("wiki_refresh validation = %#v, want normalized route validation to agree", validation)
-	}
-	assertValidationIssueCodesAbsent(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeInvalidSlug})
-
-	readBack := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "plans/agent-hooks-plan", "kind": "page"})
-	page := nestedMap(t, readBack, "page")
-	if page["id"] != "agent-hooks-plan" || page["title"] != "Agent Hooks Plan" {
-		t.Fatalf("readBack page = %#v, want normalized plan page", page)
-	}
-})
-
-var _ = It("LocalMCPRefresh_ValidateFalseOmitsValidation", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	if err := os.WriteFile(filepath.Join(rootDir, "skip-validation.md"), []byte("---\nleafwiki_id: skip-validation\nleafwiki_title: Skip Validation\n---\n# Skip Validation\n"), 0o644); err != nil {
-		t.Fatalf("write markdown: %v", err)
-	}
-
-	out := callToolStructured(t, session, "wiki_refresh", map[string]any{"validate": false})
-	if _, exists := out["validation"]; exists {
-		t.Fatalf("wiki_refresh validate=false output = %#v, did not expect validation", out)
-	}
-})
-
-var _ = It("LocalMCPRefresh_InvalidWorkspaceReturnsValidationAndKeepsMCPAvailable", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	if err := os.WriteFile(filepath.Join(rootDir, "a.md"), []byte("---\nleafwiki_id: duplicate\nleafwiki_title: A\n---\n# A\n"), 0o644); err != nil {
-		t.Fatalf("write a.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "b.md"), []byte("---\nleafwiki_id: duplicate\nleafwiki_title: B\n---\n# B\n"), 0o644); err != nil {
-		t.Fatalf("write b.md: %v", err)
-	}
-
-	out := callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
-	validation := nestedMap(t, out, "validation")
-	summary := nestedMap(t, validation, "summary")
-	if errors, ok := summary["errors"].(float64); !ok || errors == 0 {
-		t.Fatalf("wiki_refresh validation summary = %#v, want validation errors for duplicate IDs", summary)
-	}
-	assertValidationIssueCodes(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeDuplicateLeafwikiID})
-
-	currentUser := callToolStructured(t, session, "wiki_get_current_user", nil)
-	user := nestedMap(t, currentUser, "user")
-	if user["username"] == "" {
-		t.Fatalf("wiki_get_current_user after failed refresh = %#v, want MCP still available", currentUser)
-	}
-})
-
-var _ = It("LocalMCPRefresh_RecordsExplicitRefreshReasonAndCapsContextPaths", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	for i := 0; i < 25; i++ {
-		slug := fmt.Sprintf("bulk-refresh-%02d", i)
-		if err := os.WriteFile(filepath.Join(rootDir, slug+".md"), []byte("---\nleafwiki_id: "+slug+"\nleafwiki_title: "+slug+"\n---\n# "+slug+"\n"), 0o644); err != nil {
-			t.Fatalf("write %s: %v", slug, err)
-		}
-	}
-
-	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
-	contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{
-		"syncMode":           "none",
-		"recentChangesLimit": float64(1),
-	})
-	recent := arrayField(t, contextOut, "recentChanges")
-	if len(recent) != 1 {
-		t.Fatalf("recentChanges = %#v, want one entry", recent)
-	}
-	change, ok := recent[0].(map[string]any)
-	if !ok {
-		t.Fatalf("recentChanges[0] has type %T: %#v", recent[0], recent[0])
-	}
-	if change["reason"] != "explicit_refresh" {
-		t.Fatalf("recent change reason = %#v, want explicit_refresh in %#v", change["reason"], change)
-	}
-	if change["source"] != "filesystem" {
-		t.Fatalf("recent change source = %#v, want filesystem in %#v", change["source"], change)
-	}
-	if got := int(change["changedCount"].(float64)); got < 25 {
-		t.Fatalf("changedCount = %d, want at least 25 in %#v", got, change)
-	}
-	if paths := arrayFieldFromMap(t, change, "changedPaths"); len(paths) != 20 {
-		t.Fatalf("changedPaths len = %d, want cap 20 in %#v", len(paths), paths)
-	}
-})
-
-var _ = It("LocalMCPGetSubtree_ReturnsPathRootWithBreadcrumbs", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	parentPage := postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"title": "Docs",
-		"slug":  "docs",
-		"kind":  "section",
-	}, http.StatusCreated)
-	childPage := postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"parentId": stringField(t, parentPage, "id"),
-		"title":    "Reference",
-		"slug":     "reference",
-		"kind":     "page",
-	}, http.StatusCreated)
-	targetPage := postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"title": "Target",
-		"slug":  "target",
-		"kind":  "page",
-	}, http.StatusCreated)
-	_ = targetPage
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, childPage, "id"),
-		"version": stringField(t, childPage, "version"),
-		"title":   "Reference",
-		"slug":    "reference",
-		"content": "Reference content with [Target](/target.md).",
-	})
-
-	out := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
-		"path":  "/docs",
-		"depth": float64(1),
-	})
-	root := nestedMap(t, out, "root")
-	if root["path"] != "docs" || root["title"] != "Docs" {
-		t.Fatalf("root = %#v, want Docs subtree", root)
-	}
-	children, ok := root["children"].([]any)
-	if !ok || len(children) != 1 {
-		t.Fatalf("root children = %#v, want one Reference child", root["children"])
-	}
-	breadcrumbs, ok := out["breadcrumbs"].([]any)
-	if !ok || len(breadcrumbs) < 2 {
-		t.Fatalf("breadcrumbs = %#v, want root and docs", out["breadcrumbs"])
-	}
-	if out["depth"] != float64(1) || out["truncated"] != false {
-		t.Fatalf("depth/truncated = %#v/%#v, want 1/false", out["depth"], out["truncated"])
-	}
-
-	expanded := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
-		"path":                  "docs",
-		"depth":                 float64(1),
-		"includeMetadata":       false,
-		"includeLinkCounts":     true,
-		"includeContentPreview": true,
-	})
-	expandedRoot := nestedMap(t, expanded, "root")
-	if _, exists := expandedRoot["metadata"]; exists {
-		t.Fatalf("expanded root = %#v, did not expect metadata when includeMetadata=false", expandedRoot)
-	}
-	expandedChildren := expandedRoot["children"].([]any)
-	expandedChild := expandedChildren[0].(map[string]any)
-	if _, exists := expandedChild["metadata"]; exists {
-		t.Fatalf("expanded child = %#v, did not expect metadata when includeMetadata=false", expandedChild)
-	}
-	if expandedChild["contentPreview"] == "" {
-		t.Fatalf("expanded child = %#v, want contentPreview", expandedChild)
-	}
-	linkCounts := nestedMap(t, expandedChild, "linkCounts")
-	if linkCounts["outgoings"] != float64(1) {
-		t.Fatalf("linkCounts = %#v, want one outgoing link", linkCounts)
-	}
-
-	rootOut := callToolStructured(t, session, "wiki_get_subtree", nil)
-	wikiRoot := nestedMap(t, rootOut, "root")
-	if wikiRoot["slug"] != "root" || wikiRoot["path"] != "" {
-		t.Fatalf("root subtree = %#v, want wiki root", wikiRoot)
-	}
-	byID := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
-		"pageId": stringField(t, parentPage, "id"),
-		"depth":  float64(0),
-	})
-	byIDRoot := nestedMap(t, byID, "root")
-	if byIDRoot["id"] != stringField(t, parentPage, "id") {
-		t.Fatalf("pageId subtree root = %#v, want Docs id", byIDRoot)
-	}
-	ambiguousSubtreeErr := callToolStructuredError(t, session, "wiki_get_subtree", map[string]any{
-		"pageId": stringField(t, parentPage, "id"),
-		"path":   "docs",
-	})
-	assertMCPStructuredError(t, mcpLabelGetSubtreeAmbiguousTarget, ambiguousSubtreeErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
-	if errText := callToolError(t, session, "wiki_get_subtree", map[string]any{"path": "missing-subtree"}); !strings.Contains(strings.ToLower(errText), "not found") {
-		t.Fatalf("missing subtree error = %q, want not found detail", errText)
-	}
-	negativeDepthErr := callToolStructuredError(t, session, "wiki_get_subtree", map[string]any{
-		"path":  "docs",
-		"depth": float64(-1),
-	})
-	assertGenericToolErrorArgContainsAny(t, mcpLabelGetSubtreeNegativeDepth, negativeDepthErr, wikimcp.ErrSubtreeDepthInvalid.Error())
-	hugeDepth := callToolStructured(t, session, "wiki_get_subtree", map[string]any{
-		"path":  "docs",
-		"depth": float64(999),
-	})
-	if hugeDepth["depth"] != float64(4) {
-		t.Fatalf("huge subtree depth = %#v, want clamped depth 4", hugeDepth["depth"])
-	}
-})
-
-var _ = It("LocalMCPValidateWikiUsesCurrentFilesystemSnapshot", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	page := postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"title":   "Link Source",
-		"slug":    "link-source",
-		"kind":    "page",
-		"content": "[Missing](/missing-target)",
-	}, http.StatusCreated)
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, page, "id"),
-		"version": stringField(t, page, "version"),
-		"title":   "Link Source",
-		"slug":    "link-source",
-		"content": "[Missing](/missing-target)",
-	})
-	if err := os.WriteFile(filepath.Join(rootDir, "link-source.md"), []byte("---\nleafwiki_id: "+stringField(t, page, "id")+"\nleafwiki_title: Link Source\n---\n# Link Source\n\n[Fixed](/fixed-target.md)\n"), 0o644); err != nil {
-		t.Fatalf("write fixed source: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "fixed-target.md"), []byte("---\nleafwiki_id: fixed-target\nleafwiki_title: Fixed Target\n---\n# Fixed Target\n"), 0o644); err != nil {
-		t.Fatalf("write fixed target: %v", err)
-	}
-
-	out := callToolStructured(t, session, "wiki_validate_wiki", nil)
-	validation := out
-	if ok, _ := validation["ok"].(bool); !ok {
-		t.Fatalf("wiki_validate_wiki = %#v, want current filesystem snapshot to validate without stale loaded-tree link", validation)
-	}
-})
-
-var _ = It("LocalMCPValidateWikiDoesNotResolveLinksThroughStaleLoadedTree", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"title": "Stale Target",
-		"slug":  "stale-target",
-		"kind":  "page",
-	}, http.StatusCreated)
-	if err := os.WriteFile(filepath.Join(rootDir, "source.md"), []byte("---\nleafwiki_id: source\nleafwiki_title: Source\n---\n# Source\n\n[Stale](/stale-target)\n"), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-	if err := os.Remove(filepath.Join(rootDir, "stale-target.md")); err != nil {
-		t.Fatalf("remove stale target from filesystem: %v", err)
-	}
-
-	out := callToolStructured(t, session, "wiki_validate_wiki", nil)
-	if ok, _ := out["ok"].(bool); ok {
-		t.Fatalf("wiki_validate_wiki = %#v, want broken link when target is absent from filesystem snapshot", out)
-	}
-	validation := out
-	assertValidationIssueCodes(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
-})
-
-var _ = It("LocalMCPValidationTools_ValidateStoredAndProposedContent", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Valid Page",
-		"slug":  "valid-page",
-		"kind":  "page",
-	}), "page")
-
-	pageValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
-		"pageId": stringField(t, created, "id"),
-	})
-	if pageValidation["ok"] != true {
-		t.Fatalf("wiki_validate_page = %#v, want ok", pageValidation)
-	}
-	issues, ok := pageValidation["issues"].([]any)
-	if !ok || len(issues) != 0 {
-		t.Fatalf("wiki_validate_page issues = %#v, want empty", pageValidation["issues"])
-	}
-
-	ambiguousErr := callToolStructuredError(t, session, "wiki_validate_page", map[string]any{
-		"pageId": stringField(t, created, "id"),
-		"path":   "valid-page",
-	})
-	assertMCPStructuredError(t, mcpLabelValidatePageAmbiguousInput, ambiguousErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
-	missingTargetErr := callToolStructuredError(t, session, "wiki_validate_page", map[string]any{})
-	assertMCPStructuredError(t, mcpLabelValidatePageMissingTarget, missingTargetErr, wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired))
-
-	proposed := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "draft",
-		"content": "---\nleafwiki_id: draft\nleafwiki_title: Draft\n---\n# Draft\n",
-	})
-	if proposed["ok"] != true {
-		t.Fatalf("wiki_validate_content valid = %#v, want ok", proposed)
-	}
-	missingDraft := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{"path": "draft"})
-	assertMCPPageError(t, mcpLabelValidateContentDoesNotWrite, missingDraft, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
-
-	canonicalPageLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "draft-canonical",
-		"content": "[Valid](/valid-page.md)\n",
-	})
-	if canonicalPageLink["ok"] != true {
-		t.Fatalf("wiki_validate_content canonical page link = %#v, want ok", canonicalPageLink)
-	}
-	canonicalPagePath := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "/valid-page.md",
-		"content": fmt.Sprintf("---\nleafwiki_id: %s\nleafwiki_title: Valid Page\n---\n[Valid](/valid-page.md)\n", stringField(t, created, "id")),
-	})
-	if canonicalPagePath["ok"] != true {
-		t.Fatalf("wiki_validate_content canonical page path = %#v, want ok", canonicalPagePath)
-	}
-	rootSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "draft-root-link",
-		"content": "[Root](/)\n",
-	})
-	if rootSectionLink["ok"] != true {
-		t.Fatalf("wiki_validate_content root section link = %#v, want ok", rootSectionLink)
-	}
-	sectionTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Validation Section",
-		"slug":  "validation-section",
-		"kind":  "section",
-	}), "page")
-	sectionChildTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"parentId": stringField(t, sectionTarget, "id"),
-		"title":    "Validation Section Child",
-		"slug":     "child",
-		"kind":     "page",
-	}), "page")
-	relativeSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"existingPageId": stringField(t, sectionTarget, "id"),
-		"path":           "validation-section",
-		"content":        "[Child](./child.md)\n",
-	})
-	if relativeSectionLink["ok"] != true {
-		t.Fatalf("wiki_validate_content section-relative child link = %#v, want ok", relativeSectionLink)
-	}
-	draftSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "validation-section",
-		"kind":    "section",
-		"content": "[Child](./child.md)\n",
-	})
-	if draftSectionLink["ok"] != true {
-		t.Fatalf("wiki_validate_content draft section-relative child link = %#v, want ok", draftSectionLink)
-	}
-	omittedKindExistingSectionLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "validation-section",
-		"content": "[Child](./child.md)\n",
-	})
-	if omittedKindExistingSectionLink["ok"] != true {
-		t.Fatalf("wiki_validate_content omitted-kind existing section link = %#v, want ok", omittedKindExistingSectionLink)
-	}
-	pageTwin := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Validation Twin Page",
-		"slug":  "validation-twin",
-		"kind":  "page",
-	}), "page")
-	sectionTwin := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Validation Twin Section",
-		"slug":  "validation-twin",
-		"kind":  "section",
-	}), "page")
-	sectionTwinChild := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"parentId": stringField(t, sectionTwin, "id"),
-		"title":    "Validation Twin Child",
-		"slug":     "child",
-		"kind":     "page",
-	}), "page")
-	omittedKindExistingSectionTwinLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "validation-twin",
-		"content": "[Child](./child.md)\n",
-	})
-	if omittedKindExistingSectionTwinLink["ok"] != true {
-		t.Fatalf("wiki_validate_content omitted-kind same-basename section link = %#v, want ok", omittedKindExistingSectionTwinLink)
-	}
-	_ = pageTwin
-	_ = sectionTwinChild
-	sectionMdLink := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "draft-section-md",
-		"content": "[Section as md](/validation-section.md)\n",
-	})
-	if sectionMdLink["ok"] != false {
-		t.Fatalf("wiki_validate_content section .md link = %#v, want broken link", sectionMdLink)
-	}
-	assertValidationIssueCodes(t, sectionMdLink, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
-	_ = sectionChildTarget
-
-	invalid := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "broken",
-		"content": "---\nleafwiki_title: [unterminated\n---\n# Broken\n",
-	})
-	if invalid["ok"] != false {
-		t.Fatalf("wiki_validate_content invalid = %#v, want not ok", invalid)
-	}
-	invalidIssues, ok := invalid["issues"].([]any)
-	if !ok || len(invalidIssues) == 0 {
-		t.Fatalf("invalid issues = %#v, want parse issue", invalid["issues"])
-	}
-
-	semantic := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path": "draft-dupe",
-		"content": "---\nleafwiki_id: " + stringField(t, created, "id") + "\nleafwiki_private: true\n---\n" +
-			"[Missing](/does-not-exist)\n[Missing asset](missing.png)\n",
-	})
-	if semantic["ok"] != false {
-		t.Fatalf("semantic validation = %#v, want not ok", semantic)
-	}
-	assertValidationIssueCodes(t, semantic, []wikivalidation.IssueCode{
-		wikivalidation.IssueCodeDuplicateLeafwikiID,
-		wikivalidation.IssueCodeReservedMetadata,
-		wikivalidation.IssueCodeBrokenLink,
-		wikivalidation.IssueCodeMissingAsset,
-	})
-
-	assetOwner := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Asset Owner",
-		"slug":  "asset-owner",
-		"kind":  "page",
-	}), "page")
-	assetBorrower := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Asset Borrower",
-		"slug":  "asset-borrower",
-		"kind":  "page",
-	}), "page")
-	callToolStructured(t, session, "wiki_upload_asset", map[string]any{
-		"pageId":        stringField(t, assetOwner, "id"),
-		"filename":      "logo.png",
-		"contentBase64": base64.StdEncoding.EncodeToString([]byte("owner logo")),
-	})
-	wrongPageAsset := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"existingPageId": stringField(t, assetOwner, "id"),
-		"path":           "asset-owner",
-		"content":        "# Asset Owner\n\n![Wrong page asset](/assets/" + stringField(t, assetBorrower, "id") + "/logo.png)\n",
-	})
-	if wrongPageAsset["ok"] != false {
-		t.Fatalf("wrong-page asset validation = %#v, want not ok", wrongPageAsset)
-	}
-	assertValidationIssueCodes(t, wrongPageAsset, []wikivalidation.IssueCode{wikivalidation.IssueCodeMissingAsset})
-
-	pathConflict := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "valid-page",
-		"content": "---\nleafwiki_id: draft-conflict\nleafwiki_title: Draft Conflict\n---\n# Draft\n",
-	})
-	assertValidationIssueCodes(t, pathConflict, []wikivalidation.IssueCode{wikivalidation.IssueCodePathConflict})
-})
-
-var _ = It("LocalMCPPathToolsResolveCanonicalSameBasenameTwins", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	rootDir := w.GetRootDir()
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "sync"), 0o755); err != nil {
-		t.Fatalf("mkdir same-basename fixture: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "section-only"), 0o755); err != nil {
-		t.Fatalf("mkdir section-only fixture: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "sync.md"), []byte(`---
+		rootDir := w.GetRootDir()
+		Expect(os.MkdirAll(filepath.Join(rootDir, "docs", "sync"), 0o755)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(rootDir, "docs", "section-only"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "sync.md"), []byte(`---
 leafwiki_id: mcp-sync-page
 leafwiki_title: MCP Sync Page
 ---
 # MCP Sync Page
-`), 0o644); err != nil {
-		t.Fatalf("write page twin: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "sync", "index.md"), []byte(`---
+`), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "sync", "index.md"), []byte(`---
 leafwiki_id: mcp-sync-section
 leafwiki_title: MCP Sync Section
 ---
 # MCP Sync Section
-`), 0o644); err != nil {
-		t.Fatalf("write section twin: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "section-only", "index.md"), []byte(`---
+`), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "section-only", "index.md"), []byte(`---
 leafwiki_id: mcp-section-only
 leafwiki_title: MCP Section Only
 ---
 # MCP Section Only
-`), 0o644); err != nil {
-		t.Fatalf("write section-only fixture: %v", err)
-	}
-	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
+`), 0o644)).To(Succeed())
+		callToolStructured(session, "wiki_refresh", map[string]any{"source": "filesystem"})
 
-	pageByMarkdownPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/sync.md",
-	}), "page")
-	if stringField(t, pageByMarkdownPath, "id") != "mcp-sync-page" || stringField(t, pageByMarkdownPath, "kind") != "page" {
-		t.Fatalf("wiki_get_page_by_path /docs/sync.md = %#v, want page twin", pageByMarkdownPath)
-	}
+		Expect(nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/sync.md",
+		}), "page")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-sync-page"),
+			HaveKeyWithValue("kind", "page"),
+		))
+		Expect(nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/sync",
+		}), "page")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-sync-section"),
+			HaveKeyWithValue("kind", "section"),
+		))
+		Expect(nestedMap(callToolStructured(session, "wiki_get_subtree", map[string]any{
+			"path": "/docs/sync.md",
+		}), "root")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-sync-page"),
+			HaveKeyWithValue("kind", "page"),
+		))
+		Expect(nestedMap(callToolStructured(session, "wiki_get_subtree", map[string]any{
+			"path": "/docs/sync",
+		}), "root")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-sync-section"),
+			HaveKeyWithValue("kind", "section"),
+		))
+		Expect(callToolStructured(session, "wiki_validate_page", map[string]any{
+			"path": "/docs/sync.md",
+		})).To(HaveKeyWithValue("ok", true))
+		Expect(callToolStructured(session, "wiki_validate_page", map[string]any{
+			"path": "/docs/sync",
+		})).To(HaveKeyWithValue("ok", true))
 
-	sectionByCanonicalPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/sync",
-	}), "page")
-	if stringField(t, sectionByCanonicalPath, "id") != "mcp-sync-section" || stringField(t, sectionByCanonicalPath, "kind") != "section" {
-		t.Fatalf("wiki_get_page_by_path /docs/sync = %#v, want section twin", sectionByCanonicalPath)
-	}
-
-	pageSubtree := nestedMap(t, callToolStructured(t, session, "wiki_get_subtree", map[string]any{
-		"path": "/docs/sync.md",
-	}), "root")
-	if stringField(t, pageSubtree, "id") != "mcp-sync-page" || stringField(t, pageSubtree, "kind") != "page" {
-		t.Fatalf("wiki_get_subtree /docs/sync.md = %#v, want page twin", pageSubtree)
-	}
-
-	sectionSubtree := nestedMap(t, callToolStructured(t, session, "wiki_get_subtree", map[string]any{
-		"path": "/docs/sync",
-	}), "root")
-	if stringField(t, sectionSubtree, "id") != "mcp-sync-section" || stringField(t, sectionSubtree, "kind") != "section" {
-		t.Fatalf("wiki_get_subtree /docs/sync = %#v, want section twin", sectionSubtree)
-	}
-
-	pageValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
-		"path": "/docs/sync.md",
+		draftPageBesideSection := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "/docs/section-only.md",
+			"content": "---\nleafwiki_id: mcp-section-only-draft-page\nleafwiki_title: MCP Section Only Draft Page\n---\n# Draft Page\n",
+		})
+		Expect(draftPageBesideSection).To(HaveKeyWithValue("ok", true))
+		Expect(draftPageBesideSection).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{wikivalidation.IssueCodePathConflict}))
 	})
-	if pageValidation["ok"] != true {
-		t.Fatalf("wiki_validate_page /docs/sync.md = %#v, want page twin ok", pageValidation)
-	}
 
-	sectionValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
-		"path": "/docs/sync",
-	})
-	if sectionValidation["ok"] != true {
-		t.Fatalf("wiki_validate_page /docs/sync = %#v, want section twin ok", sectionValidation)
-	}
+	It("uses README markdown paths as section fallbacks", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	draftPageBesideSection := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "/docs/section-only.md",
-		"content": "---\nleafwiki_id: mcp-section-only-draft-page\nleafwiki_title: MCP Section Only Draft Page\n---\n# Draft Page\n",
+		rootDir := w.GetRootDir()
+		Expect(os.MkdirAll(filepath.Join(rootDir, "docs", "guides"), 0o755)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(rootDir, "docs", "indexed"), 0o755)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(rootDir, "docs", "no-readme"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "index.md"), []byte("---\nleafwiki_id: mcp-docs-section\nleafwiki_title: Docs\n---\n# Docs\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("---\nleafwiki_id: mcp-root-section\nleafwiki_title: Root\n---\n# Root\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "guides", "README.md"), []byte("---\nleafwiki_id: mcp-guides-section\nleafwiki_title: Guides\n---\n# Guides\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "indexed", "index.md"), []byte("---\nleafwiki_id: mcp-indexed-section\nleafwiki_title: Indexed\n---\n# Indexed\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "indexed", "README.md"), []byte("---\nleafwiki_id: mcp-indexed-readme-page\nleafwiki_title: Indexed README\n---\n# Indexed README\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "no-readme", "index.md"), []byte("---\nleafwiki_id: mcp-no-readme-section\nleafwiki_title: No README\n---\n# No README\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "guides", "child.md"), []byte("---\nleafwiki_id: mcp-guides-child\nleafwiki_title: Guides Child\n---\n# Guides Child\n"), 0o644)).To(Succeed())
+		callToolStructured(session, "wiki_refresh", map[string]any{"source": "filesystem"})
+
+		Expect(nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/guides/README.md",
+		}), "page")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-guides-section"),
+			HaveKeyWithValue("kind", "section"),
+		))
+		Expect(nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/guides/README.md",
+			"kind": "section",
+		}), "page")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-guides-section"),
+			HaveKeyWithValue("kind", "section"),
+		))
+		Expect(nestedMap(callToolStructured(session, "wiki_get_subtree", map[string]any{
+			"path": "/docs/guides/README.md",
+		}), "root")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-guides-section"),
+			HaveKeyWithValue("kind", "section"),
+		))
+		Expect(nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/indexed/README.md",
+		}), "page")).To(SatisfyAll(
+			HaveKeyWithValue("id", "mcp-indexed-readme-page"),
+			HaveKeyWithValue("kind", "page"),
+		))
+
+		inactiveExplicitSectionErr := callToolStructuredError(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/indexed/README.md",
+			"kind": "section",
+		})
+		Expect(inactiveExplicitSectionErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound)), mcpLabelGetPageByPathInactiveReadmeSection)
+
+		missingReadmeErr := callToolStructuredError(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/no-readme/README.md",
+		})
+		Expect(missingReadmeErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound)), mcpLabelGetPageByPathMissingReadme)
+
+		lowercaseReadmeErr := callToolStructuredError(session, "wiki_get_page_by_path", map[string]any{
+			"path": "/docs/guides/readme.md",
+		})
+		Expect(lowercaseReadmeErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound)), mcpLabelGetPageByPathLowercaseReadme)
+
+		traversalReadmeErr := callToolStructuredError(session, "wiki_get_page_by_path", map[string]any{
+			"path": "../README.md",
+			"kind": "section",
+		})
+		Expect(traversalReadmeErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageInvalidPath, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidPath)), mcpLabelGetPageByPathTraversalReadme)
+
+		Expect(callToolStructured(session, "wiki_validate_page", map[string]any{
+			"path": "/docs/guides/README.md",
+		})).To(HaveKeyWithValue("ok", true))
+
+		lowercaseValidationErr := callToolStructuredError(session, "wiki_validate_page", map[string]any{
+			"path": "/docs/guides/readme.md",
+		})
+		Expect(lowercaseValidationErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound)), mcpLabelValidatePageLowercaseReadme)
+
+		Expect(callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "/docs/guides/README.md",
+			"content": "---\nleafwiki_id: mcp-guides-section\nleafwiki_title: Guides\n---\n[Child](./child.md)\n",
+		})).To(HaveKeyWithValue("ok", true))
+
+		Expect(callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "/docs/guides/README.md",
+			"kind":    "section",
+			"content": "[Child](./child.md)\n",
+		})).To(HaveKeyWithValue("ok", true))
 	})
-	if draftPageBesideSection["ok"] != true {
-		t.Fatalf("wiki_validate_content draft page beside section = %#v, want ok", draftPageBesideSection)
-	}
-	assertValidationIssueCodesAbsent(t, draftPageBesideSection, []wikivalidation.IssueCode{wikivalidation.IssueCodePathConflict})
 })
 
-var _ = It("LocalMCPPathToolsResolveReadmeFallbackMarkdownPath", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
+var _ = Describe("local MCP wiki validation", func() {
+	It("reports unsynced markdown issues through structured validation codes", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Original Duplicate ID",
+			"slug":  "original-duplicate-id",
+			"kind":  "page",
+		}), "page")
+		duplicatePath := filepath.Join(w.GetRootDir(), "unsynced-duplicate-id.md")
+		Expect(os.WriteFile(duplicatePath, []byte(strings.Join([]string{
+			"---",
+			"leafwiki_id: " + stringField(created, "id"),
+			"leafwiki_title: Unsynced Duplicate ID",
+			"---",
+			"# Unsynced Duplicate ID",
+			"",
+			"This file has not been refreshed into the tree yet.",
+		}, "\n")), 0o644)).To(Succeed())
+
+		out := callToolStructured(session, "wiki_validate_wiki", nil)
+		Expect(out).To(HaveKeyWithValue("ok", false))
+		Expect(out).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeDuplicateLeafwikiID}))
+		Expect(validationIssueByCode(out, wikivalidation.IssueCodeDuplicateLeafwikiID)).To(SatisfyAll(
+			HaveKeyWithValue("path", "unsynced-duplicate-id.md"),
+			HaveKeyWithValue("pageId", stringField(created, "id")),
+		))
+		Expect(os.MkdirAll(filepath.Join(w.GetRootDir(), "guides"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), "guides", "README.md"), []byte(strings.Join([]string{
+			"---",
+			"leafwiki_id: guides",
+			"leafwiki_title: Guides",
+			"---",
+			"# Guides",
+		}, "\n")), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), "readme-fallback-link.md"), []byte(strings.Join([]string{
+			"---",
+			"leafwiki_id: readme-fallback-link",
+			"leafwiki_title: README Fallback Link",
+			"---",
+			"# README Fallback Link",
+			"",
+			"[Guides](/guides/README.md)",
+		}, "\n")), 0o644)).To(Succeed())
+		readmeFallbackOut := callToolStructured(session, "wiki_validate_wiki", nil)
+		Expect(readmeFallbackOut).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink}))
+
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), ".hidden.md"), []byte("# Hidden\n"), 0o644)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(w.GetRootDir(), ".scratch"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), ".scratch", "bad.md"), []byte("---\nleafwiki_private: true\n---\n[Missing](/missing-from-hidden-dir)\n"), 0o644)).To(Succeed())
+		withoutWarnings := callToolStructured(session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+		Expect(withoutWarnings).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{wikivalidation.IssueCodeHiddenMarkdownPath}))
+		withWarnings := callToolStructured(session, "wiki_validate_wiki", map[string]any{"includeWarnings": true})
+		Expect(withWarnings).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeHiddenMarkdownPath}))
+		assertNoValidationIssuePath(withWarnings, ".scratch/bad.md")
+
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), "!!!.md"), []byte("# Invalid Slug\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), "missing-asset.md"), []byte(strings.Join([]string{
+			"---",
+			"leafwiki_id: missing-asset",
+			"leafwiki_title: Missing Asset",
+			"---",
+			"# Missing Asset",
+			"",
+			"[Missing asset](nope.png)",
+		}, "\n")), 0o644)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(w.GetRootDir(), "route-conflict"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict", "index.md"), []byte("# Route Conflict Section\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict.md"), []byte("# Route Conflict Page\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict-link.md"), []byte(strings.Join([]string{
+			"---",
+			"leafwiki_id: route-conflict-link",
+			"leafwiki_title: Route Conflict Link",
+			"---",
+			"# Route Conflict Link",
+			"",
+			"[Ambiguous](/route-conflict)",
+		}, "\n")), 0o644)).To(Succeed())
+		conflicts := callToolStructured(session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+		Expect(conflicts).To(matchValidationIssueCodes([]wikivalidation.IssueCode{
+			wikivalidation.IssueCodeInvalidSlug,
+			wikivalidation.IssueCodeMissingAsset,
+		}))
+
+		Expect(conflicts).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{
+			wikivalidation.IssueCodePathConflict,
+			wikivalidation.IssueCodeAmbiguousLegacyLink,
+		}))
+
+		ambiguousContent := callToolStructured(session, "wiki_validate_content", map[string]any{
+			"path":    "draft-route-conflict",
+			"content": "[Ambiguous](/route-conflict)\n",
+		})
+		Expect(ambiguousContent).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{wikivalidation.IssueCodeAmbiguousLegacyLink}))
+
+		broken := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Broken Link",
+			"slug":  "broken-link",
+			"kind":  "page",
+		}), "page")
+		callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(broken, "id"),
+			"version": stringField(broken, "version"),
+			"title":   "Broken Link",
+			"slug":    "broken-link",
+			"content": "[Missing](/missing-validation-target)\n",
+		})
+		duplicated := callToolStructured(session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+		Expect(validationIssueCodeCount(duplicated, wikivalidation.IssueCodeBrokenLink, "broken-link")).To(Equal(1))
 	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
+
+	It("resolves links between unsynced markdown files before refresh", func() {
+		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			Workspace:    wiki.Workspace{RootDir: rootDir},
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		Expect(os.WriteFile(filepath.Join(rootDir, "unsynced-a.md"), []byte(strings.Join([]string{
+			"---",
+			"leafwiki_id: unsynced-a",
+			"leafwiki_title: Unsynced A",
+			"---",
+			"# Unsynced A",
+			"",
+			"[Unsynced B route](/unsynced-b)",
+			"[Unsynced B absolute markdown](/unsynced-b.md)",
+			"[Unsynced B relative markdown](./unsynced-b.md)",
+		}, "\n")), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(rootDir, "unsynced-b.md"), []byte(strings.Join([]string{
+			"---",
+			"leafwiki_id: unsynced-b",
+			"leafwiki_title: Unsynced B",
+			"---",
+			"# Unsynced B",
+		}, "\n")), 0o644)).To(Succeed())
+
+		out := callToolStructured(session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
+		Expect(out).To(matchValidationIssueCodesAbsent([]wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink}))
 	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	rootDir := w.GetRootDir()
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "guides"), 0o755); err != nil {
-		t.Fatalf("mkdir guides fixture: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "indexed"), 0o755); err != nil {
-		t.Fatalf("mkdir indexed fixture: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(rootDir, "docs", "no-readme"), 0o755); err != nil {
-		t.Fatalf("mkdir no-readme fixture: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "index.md"), []byte("---\nleafwiki_id: mcp-docs-section\nleafwiki_title: Docs\n---\n# Docs\n"), 0o644); err != nil {
-		t.Fatalf("write docs index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("---\nleafwiki_id: mcp-root-section\nleafwiki_title: Root\n---\n# Root\n"), 0o644); err != nil {
-		t.Fatalf("write root README fallback: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "guides", "README.md"), []byte("---\nleafwiki_id: mcp-guides-section\nleafwiki_title: Guides\n---\n# Guides\n"), 0o644); err != nil {
-		t.Fatalf("write guides README fallback: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "indexed", "index.md"), []byte("---\nleafwiki_id: mcp-indexed-section\nleafwiki_title: Indexed\n---\n# Indexed\n"), 0o644); err != nil {
-		t.Fatalf("write indexed index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "indexed", "README.md"), []byte("---\nleafwiki_id: mcp-indexed-readme-page\nleafwiki_title: Indexed README\n---\n# Indexed README\n"), 0o644); err != nil {
-		t.Fatalf("write indexed README page: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "no-readme", "index.md"), []byte("---\nleafwiki_id: mcp-no-readme-section\nleafwiki_title: No README\n---\n# No README\n"), 0o644); err != nil {
-		t.Fatalf("write no-readme index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "docs", "guides", "child.md"), []byte("---\nleafwiki_id: mcp-guides-child\nleafwiki_title: Guides Child\n---\n# Guides Child\n"), 0o644); err != nil {
-		t.Fatalf("write guides child: %v", err)
-	}
-	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
-
-	fallbackPage := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/guides/README.md",
-	}), "page")
-	if stringField(t, fallbackPage, "id") != "mcp-guides-section" || stringField(t, fallbackPage, "kind") != "section" {
-		t.Fatalf("wiki_get_page_by_path README fallback = %#v, want guides section", fallbackPage)
-	}
-
-	explicitFallbackPage := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/guides/README.md",
-		"kind": "section",
-	}), "page")
-	if stringField(t, explicitFallbackPage, "id") != "mcp-guides-section" || stringField(t, explicitFallbackPage, "kind") != "section" {
-		t.Fatalf("wiki_get_page_by_path explicit README fallback section = %#v, want guides section", explicitFallbackPage)
-	}
-
-	fallbackSubtree := nestedMap(t, callToolStructured(t, session, "wiki_get_subtree", map[string]any{
-		"path": "/docs/guides/README.md",
-	}), "root")
-	if stringField(t, fallbackSubtree, "id") != "mcp-guides-section" || stringField(t, fallbackSubtree, "kind") != "section" {
-		t.Fatalf("wiki_get_subtree README fallback = %#v, want guides section", fallbackSubtree)
-	}
-
-	readmeChildPage := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/indexed/README.md",
-	}), "page")
-	if stringField(t, readmeChildPage, "id") != "mcp-indexed-readme-page" || stringField(t, readmeChildPage, "kind") != "page" {
-		t.Fatalf("wiki_get_page_by_path README page = %#v, want indexed README page", readmeChildPage)
-	}
-
-	inactiveExplicitSectionErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/indexed/README.md",
-		"kind": "section",
-	})
-	assertMCPPageError(t, mcpLabelGetPageByPathInactiveReadmeSection, inactiveExplicitSectionErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
-
-	missingReadmeErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/no-readme/README.md",
-	})
-	assertMCPPageError(t, mcpLabelGetPageByPathMissingReadme, missingReadmeErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
-
-	lowercaseReadmeErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "/docs/guides/readme.md",
-	})
-	assertMCPPageError(t, mcpLabelGetPageByPathLowercaseReadme, lowercaseReadmeErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
-
-	traversalReadmeErr := callToolStructuredError(t, session, "wiki_get_page_by_path", map[string]any{
-		"path": "../README.md",
-		"kind": "section",
-	})
-	assertMCPPageError(t, mcpLabelGetPageByPathTraversalReadme, traversalReadmeErr, wikipages.ErrCodePageInvalidPath, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidPath))
-
-	fallbackValidation := callToolStructured(t, session, "wiki_validate_page", map[string]any{
-		"path": "/docs/guides/README.md",
-	})
-	if fallbackValidation["ok"] != true {
-		t.Fatalf("wiki_validate_page README fallback = %#v, want ok", fallbackValidation)
-	}
-
-	lowercaseValidationErr := callToolStructuredError(t, session, "wiki_validate_page", map[string]any{
-		"path": "/docs/guides/readme.md",
-	})
-	assertMCPPageError(t, mcpLabelValidatePageLowercaseReadme, lowercaseValidationErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
-
-	fallbackDraftValidation := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "/docs/guides/README.md",
-		"content": "---\nleafwiki_id: mcp-guides-section\nleafwiki_title: Guides\n---\n[Child](./child.md)\n",
-	})
-	if fallbackDraftValidation["ok"] != true {
-		t.Fatalf("wiki_validate_content README fallback = %#v, want ok", fallbackDraftValidation)
-	}
-
-	explicitFallbackDraftValidation := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "/docs/guides/README.md",
-		"kind":    "section",
-		"content": "[Child](./child.md)\n",
-	})
-	if explicitFallbackDraftValidation["ok"] != true {
-		t.Fatalf("wiki_validate_content explicit README fallback section = %#v, want ok", explicitFallbackDraftValidation)
-	}
 })
 
-var _ = It("LocalMCPValidateWikiScansUnsyncedMarkdownFiles", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
+var _ = Describe("local MCP page metadata updates", func() {
+	It("patches metadata without changing the page body", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Original Duplicate ID",
-		"slug":  "original-duplicate-id",
-		"kind":  "page",
-	}), "page")
-	duplicatePath := filepath.Join(w.GetRootDir(), "unsynced-duplicate-id.md")
-	if err := os.WriteFile(duplicatePath, []byte(strings.Join([]string{
-		"---",
-		"leafwiki_id: " + stringField(t, created, "id"),
-		"leafwiki_title: Unsynced Duplicate ID",
-		"---",
-		"# Unsynced Duplicate ID",
-		"",
-		"This file has not been refreshed into the tree yet.",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write unsynced duplicate: %v", err)
-	}
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Metadata Target",
+			"slug":  "metadata-target",
+			"kind":  "page",
+		}), "page")
+		originalVersion := stringField(created, "version")
+		updated := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(created, "id"),
+			"version": originalVersion,
+			"title":   "Metadata Target",
+			"slug":    "metadata-target",
+			"content": "Original body",
+			"tags":    []any{"old", "keep"},
+			"properties": map[string]any{
+				"status": "draft",
+				"owner":  "team",
+			},
+		}), "page")
 
-	out := callToolStructured(t, session, "wiki_validate_wiki", nil)
-	if out["ok"] != false {
-		t.Fatalf("wiki_validate_wiki = %#v, want duplicate ID error before refresh", out)
-	}
-	assertValidationIssueCodes(t, out, []wikivalidation.IssueCode{wikivalidation.IssueCodeDuplicateLeafwikiID})
-	duplicateIssue := validationIssueByCode(t, out, wikivalidation.IssueCodeDuplicateLeafwikiID)
-	if duplicateIssue["path"] != "unsynced-duplicate-id.md" {
-		t.Fatalf("duplicate_leafwiki_id path = %#v, want unsynced duplicate path in %#v", duplicateIssue["path"], duplicateIssue)
-	}
-	if duplicateIssue["pageId"] != stringField(t, created, "id") {
-		t.Fatalf("duplicate_leafwiki_id pageId = %#v, want existing page ID %q in %#v", duplicateIssue["pageId"], stringField(t, created, "id"), duplicateIssue)
-	}
-	if message, ok := duplicateIssue["message"].(string); !ok || !strings.Contains(message, "original-duplicate-id.md") {
-		t.Fatalf("duplicate_leafwiki_id message = %#v, want first path detail in %#v", duplicateIssue["message"], duplicateIssue)
-	}
+		result := callToolStructured(session, "wiki_update_page_metadata", map[string]any{
+			"pageId":           stringField(updated, "id"),
+			"version":          stringField(updated, "version"),
+			"addTags":          []any{"new"},
+			"removeTags":       []any{"old"},
+			"setProperties":    map[string]any{"status": "ready"},
+			"removeProperties": []any{"owner"},
+			"includePage":      true,
+		})
+		page := nestedMap(result, "page")
+		Expect(page).To(HaveKeyWithValue("content", "Original body"))
+		Expect(stringSliceField(page, "tags")).To(matchStringSet([]string{"keep", "new"}))
+		Expect(nestedMap(page, "properties")).To(SatisfyAll(
+			HaveKeyWithValue("status", "ready"),
+			Not(HaveKey("owner")),
+		))
 
-	if err := os.MkdirAll(filepath.Join(w.GetRootDir(), "guides"), 0o755); err != nil {
-		t.Fatalf("mkdir guides: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "guides", "README.md"), []byte(strings.Join([]string{
-		"---",
-		"leafwiki_id: guides",
-		"leafwiki_title: Guides",
-		"---",
-		"# Guides",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write guides README: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "readme-fallback-link.md"), []byte(strings.Join([]string{
-		"---",
-		"leafwiki_id: readme-fallback-link",
-		"leafwiki_title: README Fallback Link",
-		"---",
-		"# README Fallback Link",
-		"",
-		"[Guides](/guides/README.md)",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write README fallback link source: %v", err)
-	}
-	readmeFallbackOut := callToolStructured(t, session, "wiki_validate_wiki", nil)
-	assertValidationIssueCodesAbsent(t, readmeFallbackOut, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
+		compact := callToolStructured(session, "wiki_update_page_metadata", map[string]any{
+			"path":              "/metadata-target",
+			"version":           stringField(result, "version"),
+			"addTags":           []any{"quiet"},
+			"includeValidation": false,
+		})
+		Expect(compact).NotTo(HaveKey("validation"))
 
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), ".hidden.md"), []byte("# Hidden\n"), 0o644); err != nil {
-		t.Fatalf("write hidden markdown: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(w.GetRootDir(), ".scratch"), 0o755); err != nil {
-		t.Fatalf("mkdir hidden scratch dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), ".scratch", "bad.md"), []byte("---\nleafwiki_private: true\n---\n[Missing](/missing-from-hidden-dir)\n"), 0o644); err != nil {
-		t.Fatalf("write hidden scratch markdown: %v", err)
-	}
-	withoutWarnings := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	assertValidationIssueCodesAbsent(t, withoutWarnings, []wikivalidation.IssueCode{wikivalidation.IssueCodeHiddenMarkdownPath})
-	withWarnings := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": true})
-	assertValidationIssueCodes(t, withWarnings, []wikivalidation.IssueCode{wikivalidation.IssueCodeHiddenMarkdownPath})
-	assertNoValidationIssuePath(t, withWarnings, ".scratch/bad.md")
+		missingTargetErr := callToolStructuredError(session, "wiki_update_page_metadata", map[string]any{
+			"version": stringField(compact, "version"),
+			"addTags": []any{"missing-target"},
+		})
+		Expect(missingTargetErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired)), mcpLabelUpdateMetadataMissingTarget)
+		ambiguousTargetErr := callToolStructuredError(session, "wiki_update_page_metadata", map[string]any{
+			"pageId":  stringField(updated, "id"),
+			"path":    "/metadata-target",
+			"version": stringField(compact, "version"),
+			"addTags": []any{"ambiguous-target"},
+		})
+		Expect(ambiguousTargetErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous)), mcpLabelUpdateMetadataAmbiguousTarget)
 
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "!!!.md"), []byte("# Invalid Slug\n"), 0o644); err != nil {
-		t.Fatalf("write invalid slug markdown: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "missing-asset.md"), []byte(strings.Join([]string{
-		"---",
-		"leafwiki_id: missing-asset",
-		"leafwiki_title: Missing Asset",
-		"---",
-		"# Missing Asset",
-		"",
-		"[Missing asset](nope.png)",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write missing asset markdown: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(w.GetRootDir(), "route-conflict"), 0o755); err != nil {
-		t.Fatalf("mkdir route conflict: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict", "index.md"), []byte("# Route Conflict Section\n"), 0o644); err != nil {
-		t.Fatalf("write route conflict index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict.md"), []byte("# Route Conflict Page\n"), 0o644); err != nil {
-		t.Fatalf("write route conflict page: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.GetRootDir(), "route-conflict-link.md"), []byte(strings.Join([]string{
-		"---",
-		"leafwiki_id: route-conflict-link",
-		"leafwiki_title: Route Conflict Link",
-		"---",
-		"# Route Conflict Link",
-		"",
-		"[Ambiguous](/route-conflict)",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write route conflict link: %v", err)
-	}
-	conflicts := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	assertValidationIssueCodes(t, conflicts, []wikivalidation.IssueCode{
-		wikivalidation.IssueCodeInvalidSlug,
-		wikivalidation.IssueCodeMissingAsset,
+		beforeReserved := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{
+			"pageId": stringField(updated, "id"),
+		}), "page")
+		reservedErr := callToolStructuredError(session, "wiki_update_page_metadata", map[string]any{
+			"pageId":        stringField(updated, "id"),
+			"version":       stringField(beforeReserved, "version"),
+			"setProperties": map[string]any{"leafwiki_private": "true"},
+		})
+		Expect(reservedErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPToolError, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPToolError)), mcpLabelUpdateMetadataReservedKey)
+		afterReserved := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{
+			"pageId": stringField(updated, "id"),
+		}), "page")
+		Expect(afterReserved).To(SatisfyAll(
+			HaveKeyWithValue("version", stringField(beforeReserved, "version")),
+			HaveKeyWithValue("content", stringField(beforeReserved, "content")),
+		))
+		Expect(stringSliceField(afterReserved, "tags")).To(matchStringSet([]string{"keep", "new", "quiet"}))
+		Expect(nestedMap(afterReserved, "properties")).To(SatisfyAll(
+			Not(HaveKey("leafwiki_private")),
+			HaveKeyWithValue("status", "ready"),
+		))
+
+		setTagsResult := callToolStructured(session, "wiki_update_page_metadata", map[string]any{
+			"pageId":      stringField(updated, "id"),
+			"version":     stringField(afterReserved, "version"),
+			"setTags":     []any{"final"},
+			"includePage": true,
+		})
+		setTagsPage := nestedMap(setTagsResult, "page")
+		Expect(stringSliceField(setTagsPage, "tags")).To(matchStringSet([]string{"final"}))
+
+		staleReservedErr := callToolStructuredError(session, "wiki_update_page_metadata", map[string]any{
+			"pageId":        stringField(updated, "id"),
+			"version":       originalVersion,
+			"setProperties": map[string]any{"leafwiki_private": "true"},
+		})
+		Expect(staleReservedErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict)), mcpLabelUpdateMetadataStaleBeforeReserved)
+
+		staleErr := callToolStructuredError(session, "wiki_update_page_metadata", map[string]any{
+			"pageId":  stringField(updated, "id"),
+			"version": originalVersion,
+			"addTags": []any{"late"},
+		})
+		Expect(staleErr).To(matchMCPStructuredError(wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict)), mcpLabelUpdateMetadataStaleVersion)
+		afterStale := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{
+			"pageId": stringField(updated, "id"),
+		}), "page")
+		Expect(stringSliceField(afterStale, "tags")).NotTo(ContainElement("late"))
+		Expect(afterStale).To(HaveKeyWithValue("content", "Original body"))
 	})
-	assertValidationIssueCodesAbsent(t, conflicts, []wikivalidation.IssueCode{
-		wikivalidation.IssueCodePathConflict,
-		wikivalidation.IssueCodeAmbiguousLegacyLink,
-	})
-	ambiguousContent := callToolStructured(t, session, "wiki_validate_content", map[string]any{
-		"path":    "draft-route-conflict",
-		"content": "[Ambiguous](/route-conflict)\n",
-	})
-	assertValidationIssueCodesAbsent(t, ambiguousContent, []wikivalidation.IssueCode{wikivalidation.IssueCodeAmbiguousLegacyLink})
-
-	broken := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Broken Link",
-		"slug":  "broken-link",
-		"kind":  "page",
-	}), "page")
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, broken, "id"),
-		"version": stringField(t, broken, "version"),
-		"title":   "Broken Link",
-		"slug":    "broken-link",
-		"content": "[Missing](/missing-validation-target)\n",
-	})
-	duplicated := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	if got := validationIssueCodeCount(t, duplicated, wikivalidation.IssueCodeBrokenLink, "broken-link"); got != 1 {
-		t.Fatalf("broken_link issue count for broken-link = %d, want 1 in %#v", got, duplicated["issues"])
-	}
 })
 
-var _ = It("LocalMCPValidateWikiResolvesLinksBetweenUnsyncedMarkdownFiles", func() {
-	t := GinkgoTB()
-	rootDir := filepath.Join(t.TempDir(), "content")
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		Workspace:    wiki.Workspace{RootDir: rootDir},
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
+var _ = Describe("local MCP page frontmatter preservation", func() {
+	It("preserves unmanaged frontmatter while patching metadata", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	if err := os.WriteFile(filepath.Join(rootDir, "unsynced-a.md"), []byte(strings.Join([]string{
-		"---",
-		"leafwiki_id: unsynced-a",
-		"leafwiki_title: Unsynced A",
-		"---",
-		"# Unsynced A",
-		"",
-		"[Unsynced B route](/unsynced-b)",
-		"[Unsynced B absolute markdown](/unsynced-b.md)",
-		"[Unsynced B relative markdown](./unsynced-b.md)",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write unsynced-a.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "unsynced-b.md"), []byte(strings.Join([]string{
-		"---",
-		"leafwiki_id: unsynced-b",
-		"leafwiki_title: Unsynced B",
-		"---",
-		"# Unsynced B",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write unsynced-b.md: %v", err)
-	}
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Metadata Preserve",
+			"slug":  "metadata-preserve",
+			"kind":  "page",
+		}), "page")
+		updated := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(created, "id"),
+			"version": stringField(created, "version"),
+			"title":   "Metadata Preserve",
+			"slug":    "metadata-preserve",
+			"content": "# Metadata Preserve\n\nBody",
+			"tags":    []any{"draft"},
+			"properties": map[string]any{
+				"status": "draft",
+			},
+		}), "page")
+		rawPath := filepath.Join(w.GetRootDir(), "metadata-preserve.md")
+		Expect(os.WriteFile(rawPath, []byte(strings.Join([]string{
+			"---",
+			"tags:",
+			"  - draft",
+			"status: draft",
+			"pinned: true",
+			"audiences:",
+			"  - internal",
+			"  - external",
+			"nested:",
+			"  owner: docs",
+			"leafwiki_id: " + stringField(updated, "id"),
+			"leafwiki_title: Metadata Preserve",
+			"---",
+			"# Metadata Preserve",
+			"",
+			"Body",
+		}, "\n")), 0o644)).To(Succeed())
+		callToolStructured(session, "wiki_refresh", map[string]any{"source": "filesystem"})
+		refreshed := nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "/metadata-preserve"}), "page")
 
-	out := callToolStructured(t, session, "wiki_validate_wiki", map[string]any{"includeWarnings": false})
-	assertValidationIssueCodesAbsent(t, out, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
-})
+		result := callToolStructured(session, "wiki_update_page_metadata", map[string]any{
+			"path":          "/metadata-preserve",
+			"version":       stringField(refreshed, "version"),
+			"addTags":       []any{"ready"},
+			"setProperties": map[string]any{"status": "published"},
+			"includePage":   true,
+		})
+		Expect(nestedMap(result, "page")).To(HaveKeyWithValue("content", "# Metadata Preserve\n\nBody"))
 
-var _ = It("LocalMCPUpdatePageMetadata_PatchesMetadataWithoutChangingBody", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Metadata Target",
-		"slug":  "metadata-target",
-		"kind":  "page",
-	}), "page")
-	originalVersion := stringField(t, created, "version")
-	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, created, "id"),
-		"version": originalVersion,
-		"title":   "Metadata Target",
-		"slug":    "metadata-target",
-		"content": "Original body",
-		"tags":    []any{"old", "keep"},
-		"properties": map[string]any{
-			"status": "draft",
-			"owner":  "team",
-		},
-	}), "page")
-
-	result := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
-		"pageId":           stringField(t, updated, "id"),
-		"version":          stringField(t, updated, "version"),
-		"addTags":          []any{"new"},
-		"removeTags":       []any{"old"},
-		"setProperties":    map[string]any{"status": "ready"},
-		"removeProperties": []any{"owner"},
-		"includePage":      true,
-	})
-	page := nestedMap(t, result, "page")
-	if page["content"] != "Original body" {
-		t.Fatalf("content = %#v, want unchanged body", page["content"])
-	}
-	assertStringSet(t, "metadata tags", stringSliceField(t, page, "tags"), []string{"keep", "new"})
-	props := nestedMap(t, page, "properties")
-	if props["status"] != "ready" {
-		t.Fatalf("properties = %#v, want status ready", props)
-	}
-	if _, exists := props["owner"]; exists {
-		t.Fatalf("properties = %#v, want owner removed", props)
-	}
-
-	compact := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
-		"path":              "/metadata-target",
-		"version":           stringField(t, result, "version"),
-		"addTags":           []any{"quiet"},
-		"includeValidation": false,
-	})
-	if _, exists := compact["validation"]; exists {
-		t.Fatalf("compact metadata output = %#v, did not expect validation when includeValidation=false", compact)
-	}
-
-	missingTargetErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
-		"version": stringField(t, compact, "version"),
-		"addTags": []any{"missing-target"},
-	})
-	assertMCPStructuredError(t, mcpLabelUpdateMetadataMissingTarget, missingTargetErr, wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired))
-	ambiguousTargetErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
-		"pageId":  stringField(t, updated, "id"),
-		"path":    "/metadata-target",
-		"version": stringField(t, compact, "version"),
-		"addTags": []any{"ambiguous-target"},
-	})
-	assertMCPStructuredError(t, mcpLabelUpdateMetadataAmbiguousTarget, ambiguousTargetErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
-
-	beforeReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
-		"pageId": stringField(t, updated, "id"),
-	}), "page")
-	reservedErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
-		"pageId":        stringField(t, updated, "id"),
-		"version":       stringField(t, beforeReserved, "version"),
-		"setProperties": map[string]any{"leafwiki_private": "true"},
-	})
-	assertGenericToolErrorArgContainsAny(t, mcpLabelUpdateMetadataReservedKey, reservedErr, "reserved", "validation")
-	afterReserved := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
-		"pageId": stringField(t, updated, "id"),
-	}), "page")
-	if afterReserved["version"] != beforeReserved["version"] || afterReserved["content"] != beforeReserved["content"] {
-		t.Fatalf("page after reserved metadata edit = %#v, want unchanged %#v", afterReserved, beforeReserved)
-	}
-	assertStringSet(t, "metadata tags after reserved failure", stringSliceField(t, afterReserved, "tags"), []string{"keep", "new", "quiet"})
-	if props := nestedMap(t, afterReserved, "properties"); props["leafwiki_private"] != nil || props["status"] != "ready" {
-		t.Fatalf("properties after reserved metadata edit = %#v, want unchanged status and no reserved key", props)
-	}
-
-	setTagsResult := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
-		"pageId":      stringField(t, updated, "id"),
-		"version":     stringField(t, afterReserved, "version"),
-		"setTags":     []any{"final"},
-		"includePage": true,
-	})
-	setTagsPage := nestedMap(t, setTagsResult, "page")
-	assertStringSet(t, "metadata setTags replacement", stringSliceField(t, setTagsPage, "tags"), []string{"final"})
-
-	staleReservedErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
-		"pageId":        stringField(t, updated, "id"),
-		"version":       originalVersion,
-		"setProperties": map[string]any{"leafwiki_private": "true"},
-	})
-	assertMCPPageError(t, mcpLabelUpdateMetadataStaleBeforeReserved, staleReservedErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
-	assertErrorDoesNotContainAny(t, mcpLabelUpdateMetadataStaleBeforeReserved, staleReservedErr.Text, "reserved", "validation")
-
-	staleErr := callToolStructuredError(t, session, "wiki_update_page_metadata", map[string]any{
-		"pageId":  stringField(t, updated, "id"),
-		"version": originalVersion,
-		"addTags": []any{"late"},
-	})
-	assertMCPStructuredError(t, mcpLabelUpdateMetadataStaleVersion, staleErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
-	afterStale := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
-		"pageId": stringField(t, updated, "id"),
-	}), "page")
-	if slices := stringSliceField(t, afterStale, "tags"); contains(slices, "late") {
-		t.Fatalf("tags after stale metadata edit = %#v, did not expect failed tag", slices)
-	}
-	if afterStale["content"] != "Original body" {
-		t.Fatalf("content after stale metadata edit = %#v, want unchanged body", afterStale["content"])
-	}
-})
-
-var _ = It("LocalMCPUpdatePageMetadata_PreservesUnmanagedFrontmatter", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
-	})
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Metadata Preserve",
-		"slug":  "metadata-preserve",
-		"kind":  "page",
-	}), "page")
-	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, created, "id"),
-		"version": stringField(t, created, "version"),
-		"title":   "Metadata Preserve",
-		"slug":    "metadata-preserve",
-		"content": "# Metadata Preserve\n\nBody",
-		"tags":    []any{"draft"},
-		"properties": map[string]any{
-			"status": "draft",
-		},
-	}), "page")
-	rawPath := filepath.Join(w.GetRootDir(), "metadata-preserve.md")
-	if err := os.WriteFile(rawPath, []byte(strings.Join([]string{
-		"---",
-		"tags:",
-		"  - draft",
-		"status: draft",
-		"pinned: true",
-		"audiences:",
-		"  - internal",
-		"  - external",
-		"nested:",
-		"  owner: docs",
-		"leafwiki_id: " + stringField(t, updated, "id"),
-		"leafwiki_title: Metadata Preserve",
-		"---",
-		"# Metadata Preserve",
-		"",
-		"Body",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write custom frontmatter: %v", err)
-	}
-	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
-	refreshed := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "/metadata-preserve"}), "page")
-
-	result := callToolStructured(t, session, "wiki_update_page_metadata", map[string]any{
-		"path":          "/metadata-preserve",
-		"version":       stringField(t, refreshed, "version"),
-		"addTags":       []any{"ready"},
-		"setProperties": map[string]any{"status": "published"},
-		"includePage":   true,
-	})
-	page := nestedMap(t, result, "page")
-	if page["content"] != "# Metadata Preserve\n\nBody" {
-		t.Fatalf("page body = %#v, want body without frontmatter", page["content"])
-	}
-
-	raw := readPageMarkdownByRoutePath(t, w.GetRootDir(), "metadata-preserve")
-	doc := assertCanonicalPageMarkdown(t, "wiki_update_page_metadata raw markdown", raw)
-	if strings.Contains(raw, "leafwiki_id:") {
-		t.Fatalf("raw metadata after patch retained legacy leafwiki_id:\n%s", raw)
-	}
-	if doc.Metadata.Fields["status"] != "published" {
-		t.Fatalf("canonical fields after patch = %#v, want status=published", doc.Metadata.Fields)
-	}
-	for _, want := range []string{
-		"pinned: true",
-		"audiences:",
-		"- internal",
-		"- external",
-		"nested:",
-		"owner: docs",
-		"status: published",
-		"- ready",
-	} {
-		if !strings.Contains(raw, want) {
-			t.Fatalf("raw metadata after patch missing %q:\n%s", want, raw)
+		raw := readPageMarkdownByRoutePath(w.GetRootDir(), "metadata-preserve")
+		doc := canonicalPageMarkdown("wiki_update_page_metadata raw markdown", raw)
+		Expect(raw).NotTo(ContainSubstring("leafwiki_id:"))
+		Expect(doc.Metadata.Fields).To(HaveKeyWithValue("status", "published"))
+		for _, want := range []string{
+			"pinned: true",
+			"audiences:",
+			"- internal",
+			"- external",
+			"nested:",
+			"owner: docs",
+			"status: published",
+			"- ready",
+		} {
+			Expect(raw).To(ContainSubstring(want))
 		}
-	}
-	contextOut := callToolStructured(t, session, "wiki_get_context", map[string]any{
-		"syncMode":           "none",
-		"recentChangesLimit": float64(5),
+		contextOut := callToolStructured(session, "wiki_get_context", map[string]any{
+			"syncMode":           "none",
+			"recentChangesLimit": float64(5),
+		})
+		assertRecentChangesIncludePath(contextOut, "metadata-preserve.md")
 	})
-	assertRecentChangesIncludePath(t, contextOut, "metadata-preserve.md")
+
+	It("preserves omitted metadata and clears explicit empty metadata", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "MCP Metadata Preserve",
+			"slug":  "mcp-metadata-preserve",
+			"kind":  "page",
+		}), "page")
+		first := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(created, "id"),
+			"version": stringField(created, "version"),
+			"title":   "MCP Metadata Preserve",
+			"slug":    "mcp-metadata-preserve",
+			"content": "# MCP Metadata Preserve\n\nFirst",
+			"tags":    []any{"draft"},
+			"properties": map[string]any{
+				"status": "draft",
+			},
+		}), "page")
+		rawAfterFirst := readPageMarkdownByRoutePath(w.GetRootDir(), "mcp-metadata-preserve")
+		firstDoc := canonicalPageMarkdown("wiki_update_page metadata preserve first update", rawAfterFirst)
+		Expect(firstDoc.Metadata).To(SatisfyAll(
+			HaveField("Tags", Equal([]string{"draft"})),
+			HaveField("Fields", HaveKeyWithValue("status", "draft")),
+		))
+
+		metadataOnly := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(first, "id"),
+			"version": stringField(first, "version"),
+			"title":   "MCP Metadata Preserve",
+			"slug":    "mcp-metadata-preserve",
+			"tags":    []any{"ready"},
+			"properties": map[string]any{
+				"status": "ready",
+			},
+		}), "page")
+		Expect(metadataOnly).To(HaveKeyWithValue("content", "# MCP Metadata Preserve\n\nFirst"))
+		Expect(stringSliceField(metadataOnly, "tags")).To(matchStringSet([]string{"ready"}))
+		Expect(nestedMap(metadataOnly, "properties")).To(HaveKeyWithValue("status", "ready"))
+
+		omitted := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(metadataOnly, "id"),
+			"version": stringField(metadataOnly, "version"),
+			"title":   "MCP Metadata Preserve",
+			"slug":    "mcp-metadata-preserve",
+			"content": "# MCP Metadata Preserve\n\nSecond",
+		}), "page")
+		Expect(stringSliceField(omitted, "tags")).To(matchStringSet([]string{"ready"}))
+		Expect(nestedMap(omitted, "properties")).To(HaveKeyWithValue("status", "ready"))
+
+		cleared := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":         stringField(omitted, "id"),
+			"version":    stringField(omitted, "version"),
+			"title":      "MCP Metadata Preserve",
+			"slug":       "mcp-metadata-preserve",
+			"content":    "# MCP Metadata Preserve\n\nThird",
+			"tags":       []any{},
+			"properties": map[string]any{},
+		}), "page")
+		Expect(stringSliceField(cleared, "tags")).To(matchStringSet(nil))
+		Expect(nestedMap(cleared, "properties")).To(BeEmpty())
+		rawAfterClear := readPageMarkdownByRoutePath(w.GetRootDir(), "mcp-metadata-preserve")
+		clearDoc := canonicalPageMarkdown("wiki_update_page metadata preserve clear update", rawAfterClear)
+		Expect(clearDoc.Metadata).To(SatisfyAll(
+			HaveField("Tags", BeEmpty()),
+			HaveField("Fields", BeEmpty()),
+		))
+	})
 })
 
-var _ = It("LocalMCPUpdatePage_PreservesTagsAndPropertiesWhenOmittedAndClearsWhenExplicitEmpty", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
+var _ = Describe("local MCP page section replacement", func() {
+	It("preserves frontmatter while replacing a section body", func() {
+		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
+			AuthDisabled: true,
+		})
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			EnableWorkspaceSync:     true,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Section Preserve",
+			"slug":  "section-preserve",
+			"kind":  "page",
+		}), "page")
+		rawPath := filepath.Join(w.GetRootDir(), "section-preserve.md")
+		Expect(os.WriteFile(rawPath, []byte(strings.Join([]string{
+			"---",
+			"tags:",
+			"  - draft",
+			"status: draft",
+			"pinned: true",
+			"audiences:",
+			"  - internal",
+			"  - external",
+			"leafwiki_id: " + stringField(created, "id"),
+			"leafwiki_title: Section Preserve",
+			"---",
+			"# Section Preserve",
+			"",
+			"## API",
+			"",
+			"old api",
+		}, "\n")), 0o644)).To(Succeed())
+		callToolStructured(session, "wiki_refresh", map[string]any{"source": "filesystem"})
+		refreshed := nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "/section-preserve"}), "page")
+
+		result := callToolStructured(session, "wiki_replace_page_section", map[string]any{
+			"path":              "/section-preserve",
+			"version":           stringField(refreshed, "version"),
+			"headingPath":       []any{"API"},
+			"content":           "new api\n",
+			"includePage":       true,
+			"includeValidation": false,
+		})
+		page := nestedMap(result, "page")
+		Expect(stringSliceField(page, "tags")).To(matchStringSet([]string{"draft"}))
+		Expect(nestedMap(page, "properties")).To(HaveKeyWithValue("status", "draft"))
+
+		raw := readPageMarkdownByRoutePath(w.GetRootDir(), "section-preserve")
+		for _, want := range []string{
+			"pinned: true",
+			"audiences:",
+			"- internal",
+			"- external",
+			"status: draft",
+			"## API\nnew api",
+		} {
+			Expect(raw).To(ContainSubstring(want))
+		}
+		Expect(raw).NotTo(ContainSubstring("old api"))
 	})
-	session := connectLocalMCP(t, router, "/mcp")
 
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "MCP Metadata Preserve",
-		"slug":  "mcp-metadata-preserve",
-		"kind":  "page",
-	}), "page")
-	first := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, created, "id"),
-		"version": stringField(t, created, "version"),
-		"title":   "MCP Metadata Preserve",
-		"slug":    "mcp-metadata-preserve",
-		"content": "# MCP Metadata Preserve\n\nFirst",
-		"tags":    []any{"draft"},
-		"properties": map[string]any{
-			"status": "draft",
-		},
-	}), "page")
-	rawAfterFirst := readPageMarkdownByRoutePath(t, w.GetRootDir(), "mcp-metadata-preserve")
-	firstDoc := assertCanonicalPageMarkdown(t, "wiki_update_page metadata preserve first update", rawAfterFirst)
-	if len(firstDoc.Metadata.Tags) != 1 || firstDoc.Metadata.Tags[0] != "draft" {
-		t.Fatalf("first raw tags = %#v, want [draft]", firstDoc.Metadata.Tags)
-	}
-	if firstDoc.Metadata.Fields["status"] != "draft" {
-		t.Fatalf("first raw fields = %#v, want status=draft", firstDoc.Metadata.Fields)
-	}
+	It("replaces only the targeted markdown section", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	metadataOnly := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, first, "id"),
-		"version": stringField(t, first, "version"),
-		"title":   "MCP Metadata Preserve",
-		"slug":    "mcp-metadata-preserve",
-		"tags":    []any{"ready"},
-		"properties": map[string]any{
-			"status": "ready",
-		},
-	}), "page")
-	if metadataOnly["content"] != "# MCP Metadata Preserve\n\nFirst" {
-		t.Fatalf("expected metadata-only wiki_update_page to preserve body, got %#v", metadataOnly["content"])
-	}
-	assertStringSet(t, "metadata-only wiki_update_page tags", stringSliceField(t, metadataOnly, "tags"), []string{"ready"})
-	metadataOnlyProperties := nestedMap(t, metadataOnly, "properties")
-	if metadataOnlyProperties["status"] != "ready" {
-		t.Fatalf("expected metadata-only properties to update, got %#v", metadataOnlyProperties)
-	}
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Section Target",
+			"slug":  "section-target",
+			"kind":  "page",
+		}), "page")
+		originalVersion := stringField(created, "version")
+		body := "# Guide\n\nIntro\n\n```\n## API\nfake code heading\n```\n\n## API\n\nold api\n\n## Other\n\nkeep me\n"
+		updated := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(created, "id"),
+			"version": originalVersion,
+			"title":   "Section Target",
+			"slug":    "section-target",
+			"content": body,
+		}), "page")
 
-	omitted := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, metadataOnly, "id"),
-		"version": stringField(t, metadataOnly, "version"),
-		"title":   "MCP Metadata Preserve",
-		"slug":    "mcp-metadata-preserve",
-		"content": "# MCP Metadata Preserve\n\nSecond",
-	}), "page")
-	assertStringSet(t, "omitted wiki_update_page tags", stringSliceField(t, omitted, "tags"), []string{"ready"})
-	omittedProperties := nestedMap(t, omitted, "properties")
-	if omittedProperties["status"] != "ready" {
-		t.Fatalf("expected omitted properties to be preserved, got %#v", omittedProperties)
-	}
+		result := callToolStructured(session, "wiki_replace_page_section", map[string]any{
+			"path":              "/section-target",
+			"version":           stringField(updated, "version"),
+			"headingPath":       []any{"API"},
+			"content":           "new api\n",
+			"includePage":       true,
+			"includeValidation": false,
+		})
+		Expect(result).NotTo(HaveKey("validation"))
+		content := stringField(nestedMap(result, "page"), "content")
+		Expect(content).To(SatisfyAll(
+			ContainSubstring("## API\nnew api\n"),
+			ContainSubstring("```\n## API\nfake code heading\n```"),
+			ContainSubstring("## Other\n\nkeep me"),
+			Not(ContainSubstring("old api")),
+		))
 
-	cleared := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":         stringField(t, omitted, "id"),
-		"version":    stringField(t, omitted, "version"),
-		"title":      "MCP Metadata Preserve",
-		"slug":       "mcp-metadata-preserve",
-		"content":    "# MCP Metadata Preserve\n\nThird",
-		"tags":       []any{},
-		"properties": map[string]any{},
-	}), "page")
-	assertStringSet(t, "explicit empty wiki_update_page tags", stringSliceField(t, cleared, "tags"), nil)
-	clearedProperties := nestedMap(t, cleared, "properties")
-	if len(clearedProperties) != 0 {
-		t.Fatalf("expected explicit empty properties to clear metadata, got %#v", clearedProperties)
-	}
-	rawAfterClear := readPageMarkdownByRoutePath(t, w.GetRootDir(), "mcp-metadata-preserve")
-	clearDoc := assertCanonicalPageMarkdown(t, "wiki_update_page metadata preserve clear update", rawAfterClear)
-	if len(clearDoc.Metadata.Tags) != 0 || len(clearDoc.Metadata.Fields) != 0 {
-		t.Fatalf("clear raw metadata = tags %#v fields %#v, want both empty", clearDoc.Metadata.Tags, clearDoc.Metadata.Fields)
-	}
+		missingTargetErr := callToolStructuredError(session, "wiki_replace_page_section", map[string]any{
+			"version":     stringField(result, "version"),
+			"headingPath": []any{"API"},
+			"content":     "missing target",
+		})
+		Expect(missingTargetErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired)), mcpLabelReplaceSectionMissingTarget)
+		ambiguousTargetErr := callToolStructuredError(session, "wiki_replace_page_section", map[string]any{
+			"pageId":      stringField(updated, "id"),
+			"path":        "/section-target",
+			"version":     stringField(result, "version"),
+			"headingPath": []any{"API"},
+			"content":     "ambiguous target",
+		})
+		Expect(ambiguousTargetErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous)), mcpLabelReplaceSectionAmbiguousTarget)
+
+		withValidation := callToolStructured(session, "wiki_replace_page_section", map[string]any{
+			"path":              "/section-target",
+			"version":           stringField(result, "version"),
+			"headingPath":       []any{"API"},
+			"content":           "new api with [Missing](/missing-section-target)\n",
+			"includePage":       true,
+			"includeValidation": true,
+		})
+		validation := nestedMap(withValidation, "validation")
+		Expect(validation).To(matchValidationIssueCodes([]wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink}))
+
+		staleMissingHeadingErr := callToolStructuredError(session, "wiki_replace_page_section", map[string]any{
+			"pageId":      stringField(updated, "id"),
+			"version":     originalVersion,
+			"headingPath": []any{"Missing"},
+			"content":     "late missing",
+		})
+		Expect(staleMissingHeadingErr).To(testmatchers.HaveMCPStructuredError(wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict)), mcpLabelReplaceSectionStaleBeforeMissing)
+
+		staleErr := callToolStructuredError(session, "wiki_replace_page_section", map[string]any{
+			"pageId":      stringField(updated, "id"),
+			"version":     originalVersion,
+			"headingPath": []any{"API"},
+			"content":     "late change",
+		})
+		Expect(staleErr).To(matchMCPStructuredError(wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict)), mcpLabelReplaceSectionStaleVersion)
+		afterStale := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{
+			"pageId": stringField(updated, "id"),
+		}), "page")
+		Expect(stringField(afterStale, "content")).To(SatisfyAll(
+			Not(ContainSubstring("late change")),
+			Not(ContainSubstring("old api")),
+		))
+	})
+
+	It("leaves the page unchanged when section targeting fails", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		created := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Section Failure Target",
+			"slug":  "section-failure-target",
+			"kind":  "page",
+		}), "page")
+		body := "# Guide\n\n## Notes\n\nfirst\n\n## Notes\n\nsecond\n"
+		updated := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(created, "id"),
+			"version": stringField(created, "version"),
+			"title":   "Section Failure Target",
+			"slug":    "section-failure-target",
+			"content": body,
+		}), "page")
+
+		ambiguousErr := callToolStructuredError(session, "wiki_replace_page_section", map[string]any{
+			"pageId":      stringField(updated, "id"),
+			"version":     stringField(updated, "version"),
+			"headingPath": []any{"Notes"},
+			"content":     "ambiguous mutation",
+		})
+		Expect(ambiguousErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPToolError, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPToolError)), mcpLabelReplaceSectionAmbiguousHeading)
+		Expect(nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{
+			"pageId": stringField(updated, "id"),
+		}), "page")).To(SatisfyAll(
+			HaveKeyWithValue("version", stringField(updated, "version")),
+			HaveKeyWithValue("content", body),
+		))
+
+		missingErr := callToolStructuredError(session, "wiki_replace_page_section", map[string]any{
+			"pageId":      stringField(updated, "id"),
+			"version":     stringField(updated, "version"),
+			"headingPath": []any{"Missing"},
+			"content":     "missing mutation",
+		})
+		Expect(missingErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPToolError, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPToolError)), mcpLabelReplaceSectionMissingHeading)
+		Expect(nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{
+			"pageId": stringField(updated, "id"),
+		}), "page")).To(SatisfyAll(
+			HaveKeyWithValue("version", stringField(updated, "version")),
+			HaveKeyWithValue("content", body),
+		))
+
+		replaced := callToolStructured(session, "wiki_replace_page_section", map[string]any{
+			"pageId":      stringField(updated, "id"),
+			"version":     stringField(updated, "version"),
+			"headingPath": []any{"Notes"},
+			"occurrence":  float64(2),
+			"content":     "second updated\n",
+			"includePage": true,
+		})
+		replacedContent := stringField(nestedMap(replaced, "page"), "content")
+		Expect(replacedContent).To(SatisfyAll(
+			ContainSubstring("## Notes\n\nfirst"),
+			ContainSubstring("## Notes\nsecond updated"),
+		))
+	})
 })
 
-var _ = It("LocalMCPReplacePageSection_PreservesFrontmatter", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWikiWithOptions(t, wiki.WikiOptions{
-		AuthDisabled: true,
+var _ = Describe("local MCP base path registration", func() {
+	It("mounts the endpoint only under the configured base path", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			BasePath:                "/wiki",
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
+			Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+		}
+
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(method, "/wiki/mcp", strings.NewReader("{}"))
+			req.RemoteAddr = "127.0.0.1:12345"
+			router.ServeHTTP(rec, req)
+			Expect(rec).NotTo(HaveHTTPStatus(http.StatusNotFound))
+		}
+
+		session := connectLocalMCP(router, "/wiki/mcp")
+		Expect(listAllToolNames(session)).To(matchToolNames(federatedToolNames()))
 	})
+})
+
+var _ = Describe("local MCP page mutation parity", func() {
+	It("keeps page mutation tools aligned with HTTP routes", func() {
+		runLocalMCPProtocolPageMutationParity()
+	})
+})
+
+func runLocalMCPProtocolPageMutationParity() {
+	GinkgoHelper()
+
+	w, _ := newLocalMCPTestWikiWithStorage()
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
 		PublicAccess:            true,
@@ -2583,412 +2457,108 @@ var _ = It("LocalMCPReplacePageSection_PreservesFrontmatter", func() {
 		MCPEnabled:              true,
 		MCPToolListPageSize:     200,
 	})
-	session := connectLocalMCP(t, router, "/mcp")
+	session := connectLocalMCP(router, "/mcp")
 
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Section Preserve",
-		"slug":  "section-preserve",
-		"kind":  "page",
-	}), "page")
-	rawPath := filepath.Join(w.GetRootDir(), "section-preserve.md")
-	if err := os.WriteFile(rawPath, []byte(strings.Join([]string{
-		"---",
-		"tags:",
-		"  - draft",
-		"status: draft",
-		"pinned: true",
-		"audiences:",
-		"  - internal",
-		"  - external",
-		"leafwiki_id: " + stringField(t, created, "id"),
-		"leafwiki_title: Section Preserve",
-		"---",
-		"# Section Preserve",
-		"",
-		"## API",
-		"",
-		"old api",
-	}, "\n")), 0o644); err != nil {
-		t.Fatalf("write section preserve frontmatter: %v", err)
-	}
-	callToolStructured(t, session, "wiki_refresh", map[string]any{"source": "filesystem"})
-	refreshed := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "/section-preserve"}), "page")
-
-	result := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
-		"path":              "/section-preserve",
-		"version":           stringField(t, refreshed, "version"),
-		"headingPath":       []any{"API"},
-		"content":           "new api\n",
-		"includePage":       true,
-		"includeValidation": false,
-	})
-	page := nestedMap(t, result, "page")
-	assertStringSet(t, "section replacement tags", stringSliceField(t, page, "tags"), []string{"draft"})
-	props := nestedMap(t, page, "properties")
-	if props["status"] != "draft" {
-		t.Fatalf("section replacement properties = %#v, want status draft", props)
-	}
-
-	raw := readPageMarkdownByRoutePath(t, w.GetRootDir(), "section-preserve")
-	for _, want := range []string{
-		"pinned: true",
-		"audiences:",
-		"- internal",
-		"- external",
-		"status: draft",
-		"## API\nnew api",
-	} {
-		if !strings.Contains(raw, want) {
-			t.Fatalf("raw section replacement markdown missing %q:\n%s", want, raw)
-		}
-	}
-	if strings.Contains(raw, "old api") {
-		t.Fatalf("raw section replacement markdown kept old section body:\n%s", raw)
-	}
-})
-
-var _ = It("LocalMCPReplacePageSection_ReplacesTargetSectionOnly", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Section Target",
-		"slug":  "section-target",
-		"kind":  "page",
-	}), "page")
-	originalVersion := stringField(t, created, "version")
-	body := "# Guide\n\nIntro\n\n```\n## API\nfake code heading\n```\n\n## API\n\nold api\n\n## Other\n\nkeep me\n"
-	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, created, "id"),
-		"version": originalVersion,
-		"title":   "Section Target",
-		"slug":    "section-target",
-		"content": body,
-	}), "page")
-
-	result := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
-		"path":              "/section-target",
-		"version":           stringField(t, updated, "version"),
-		"headingPath":       []any{"API"},
-		"content":           "new api\n",
-		"includePage":       true,
-		"includeValidation": false,
-	})
-	if _, exists := result["validation"]; exists {
-		t.Fatalf("compact section output = %#v, did not expect validation when includeValidation=false", result)
-	}
-	page := nestedMap(t, result, "page")
-	content := stringField(t, page, "content")
-	if !strings.Contains(content, "## API\nnew api\n") {
-		t.Fatalf("content after section replace = %q, want new API body", content)
-	}
-	if !strings.Contains(content, "```\n## API\nfake code heading\n```") {
-		t.Fatalf("content after section replace = %q, want fenced heading preserved", content)
-	}
-	if !strings.Contains(content, "## Other\n\nkeep me") {
-		t.Fatalf("content after section replace = %q, want unrelated section preserved", content)
-	}
-	if strings.Contains(content, "old api") {
-		t.Fatalf("content after section replace = %q, want old API body removed", content)
-	}
-
-	missingTargetErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
-		"version":     stringField(t, result, "version"),
-		"headingPath": []any{"API"},
-		"content":     "missing target",
-	})
-	assertMCPStructuredError(t, mcpLabelReplaceSectionMissingTarget, missingTargetErr, wikimcp.ErrCodeMCPPageTargetRequired, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetRequired))
-	ambiguousTargetErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
-		"pageId":      stringField(t, updated, "id"),
-		"path":        "/section-target",
-		"version":     stringField(t, result, "version"),
-		"headingPath": []any{"API"},
-		"content":     "ambiguous target",
-	})
-	assertMCPStructuredError(t, mcpLabelReplaceSectionAmbiguousTarget, ambiguousTargetErr, wikimcp.ErrCodeMCPPageTargetAmbiguous, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPPageTargetAmbiguous))
-
-	withValidation := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
-		"path":              "/section-target",
-		"version":           stringField(t, result, "version"),
-		"headingPath":       []any{"API"},
-		"content":           "new api with [Missing](/missing-section-target)\n",
-		"includePage":       true,
-		"includeValidation": true,
-	})
-	validation := nestedMap(t, withValidation, "validation")
-	assertValidationIssueCodes(t, validation, []wikivalidation.IssueCode{wikivalidation.IssueCodeBrokenLink})
-
-	staleMissingHeadingErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
-		"pageId":      stringField(t, updated, "id"),
-		"version":     originalVersion,
-		"headingPath": []any{"Missing"},
-		"content":     "late missing",
-	})
-	assertMCPPageError(t, mcpLabelReplaceSectionStaleBeforeMissing, staleMissingHeadingErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
-	assertErrorDoesNotContainAny(t, mcpLabelReplaceSectionStaleBeforeMissing, staleMissingHeadingErr.Text, wikipages.ErrCodeSectionHeadingNotFound.String())
-
-	staleErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
-		"pageId":      stringField(t, updated, "id"),
-		"version":     originalVersion,
-		"headingPath": []any{"API"},
-		"content":     "late change",
-	})
-	assertMCPStructuredError(t, mcpLabelReplaceSectionStaleVersion, staleErr, wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
-	afterStale := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
-		"pageId": stringField(t, updated, "id"),
-	}), "page")
-	afterContent := stringField(t, afterStale, "content")
-	if strings.Contains(afterContent, "late change") || strings.Contains(afterContent, "old api") {
-		t.Fatalf("content after stale section edit = %q, want previously successful edit only", afterContent)
-	}
-})
-
-var _ = It("LocalMCPReplacePageSection_FailuresDoNotMutate", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	created := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Section Failure Target",
-		"slug":  "section-failure-target",
-		"kind":  "page",
-	}), "page")
-	body := "# Guide\n\n## Notes\n\nfirst\n\n## Notes\n\nsecond\n"
-	updated := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, created, "id"),
-		"version": stringField(t, created, "version"),
-		"title":   "Section Failure Target",
-		"slug":    "section-failure-target",
-		"content": body,
-	}), "page")
-
-	ambiguousErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
-		"pageId":      stringField(t, updated, "id"),
-		"version":     stringField(t, updated, "version"),
-		"headingPath": []any{"Notes"},
-		"content":     "ambiguous mutation",
-	})
-	assertGenericToolErrorArgContainsAny(t, mcpLabelReplaceSectionAmbiguousHeading, ambiguousErr, wikipages.ErrCodeSectionAmbiguousHeading.String())
-	afterAmbiguous := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
-		"pageId": stringField(t, updated, "id"),
-	}), "page")
-	if afterAmbiguous["version"] != updated["version"] || afterAmbiguous["content"] != body {
-		t.Fatalf("page after ambiguous heading = %#v, want unchanged %#v", afterAmbiguous, updated)
-	}
-
-	missingErr := callToolStructuredError(t, session, "wiki_replace_page_section", map[string]any{
-		"pageId":      stringField(t, updated, "id"),
-		"version":     stringField(t, updated, "version"),
-		"headingPath": []any{"Missing"},
-		"content":     "missing mutation",
-	})
-	assertGenericToolErrorArgContainsAny(t, mcpLabelReplaceSectionMissingHeading, missingErr, wikipages.ErrCodeSectionHeadingNotFound.String())
-	afterMissing := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{
-		"pageId": stringField(t, updated, "id"),
-	}), "page")
-	if afterMissing["version"] != updated["version"] || afterMissing["content"] != body {
-		t.Fatalf("page after missing heading = %#v, want unchanged %#v", afterMissing, updated)
-	}
-
-	replaced := callToolStructured(t, session, "wiki_replace_page_section", map[string]any{
-		"pageId":      stringField(t, updated, "id"),
-		"version":     stringField(t, updated, "version"),
-		"headingPath": []any{"Notes"},
-		"occurrence":  float64(2),
-		"content":     "second updated\n",
-		"includePage": true,
-	})
-	replacedPage := nestedMap(t, replaced, "page")
-	replacedContent := stringField(t, replacedPage, "content")
-	if !strings.Contains(replacedContent, "## Notes\n\nfirst") || !strings.Contains(replacedContent, "## Notes\nsecond updated") {
-		t.Fatalf("content after occurrence replace = %q, want second Notes replaced only", replacedContent)
-	}
-})
-
-var _ = It("LocalMCPRegistration_RespectsBasePath", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		BasePath:                "/wiki",
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(method, "/mcp", strings.NewReader("{}")))
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s /mcp without base path = %d, want 404", method, rec.Code)
-		}
-	}
-
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(method, "/wiki/mcp", strings.NewReader("{}"))
-		req.RemoteAddr = "127.0.0.1:12345"
-		router.ServeHTTP(rec, req)
-		if rec.Code == http.StatusNotFound {
-			t.Fatalf("%s /wiki/mcp = 404, want route mounted", method)
-		}
-	}
-
-	session := connectLocalMCP(t, router, "/wiki/mcp")
-	assertToolNames(t, listAllToolNames(t, session), federatedToolNames())
-})
-
-var _ = It("LocalMCPProtocol_PageMutationParity", func() {
-	t := GinkgoTB()
-	runLocalMCPProtocolPageMutationParity(t)
-})
-
-func runLocalMCPProtocolPageMutationParity(t testing.TB) {
-	w, _ := newLocalMCPTestWikiWithStorage(t)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		EnableWorkspaceSync:     true,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	invalidCreateKindErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
+	invalidCreateKindErr := callToolStructuredError(session, "wiki_create_page", map[string]any{
 		"title": "Invalid Kind",
 		"slug":  "invalid-kind",
 		"kind":  "folder",
 	})
-	assertMCPPageError(t, mcpLabelCreatePageInvalidKind, invalidCreateKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
-	assertErrorDoesNotContainAny(t, mcpLabelCreatePageInvalidKind, invalidCreateKindErr.Text, "enum", "validating")
-	paddedCreateKindErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
+	Expect(invalidCreateKindErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)), mcpLabelCreatePageInvalidKind)
+	paddedCreateKindErr := callToolStructuredError(session, "wiki_create_page", map[string]any{
 		"title": "Padded Kind",
 		"slug":  "padded-kind",
 		"kind":  " page ",
 	})
-	assertMCPPageError(t, mcpLabelCreatePagePaddedKind, paddedCreateKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
-	assertErrorDoesNotContainAny(t, mcpLabelCreatePagePaddedKind, paddedCreateKindErr.Text, "enum", "validating")
-	invalidCreateKindHTTP := postHTTPJSONBody(t, router, "/api/pages", map[string]any{
+	Expect(paddedCreateKindErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)), mcpLabelCreatePagePaddedKind)
+	invalidCreateKindHTTP := postHTTPJSONBody(router, "/api/pages", map[string]any{
 		"title": "Invalid Kind HTTP",
 		"slug":  "invalid-kind-http",
 		"kind":  "folder",
 	}, http.StatusBadRequest)
-	if !strings.Contains(invalidCreateKindHTTP, "page_invalid_kind") {
-		t.Fatalf("HTTP create_page invalid kind error = %q, want page_invalid_kind", invalidCreateKindHTTP)
-	}
-	paddedCreateKindHTTP := postHTTPJSONBody(t, router, "/api/pages", map[string]any{
+	Expect(invalidCreateKindHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)))
+	paddedCreateKindHTTP := postHTTPJSONBody(router, "/api/pages", map[string]any{
 		"title": "Padded Kind HTTP",
 		"slug":  "padded-kind-http",
 		"kind":  " page ",
 	}, http.StatusBadRequest)
-	if !strings.Contains(paddedCreateKindHTTP, "page_invalid_kind") {
-		t.Fatalf("HTTP create_page padded kind error = %q, want page_invalid_kind", paddedCreateKindHTTP)
-	}
-	nullKindCreated := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	Expect(paddedCreateKindHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)))
+	nullKindCreated := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Null Kind",
 		"slug":  "null-kind",
 		"kind":  nil,
 	}), "page")
-	if got := nullKindCreated["kind"]; got != "page" {
-		t.Fatalf("MCP create_page null kind = %v, want page", got)
-	}
+	Expect(nullKindCreated).To(HaveKeyWithValue("kind", "page"))
 
-	created := callToolStructured(t, session, "wiki_create_page", map[string]any{
+	created := callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "MCP Draft",
 		"slug":  "mcp-draft",
 		"kind":  "page",
 	})
-	createdPage := nestedMap(t, created, "page")
-	pageID := stringField(t, createdPage, "id")
-	version := stringField(t, createdPage, "version")
+	createdPage := nestedMap(created, "page")
+	pageID := stringField(createdPage, "id")
+	version := stringField(createdPage, "version")
 
-	httpPage := getHTTPPageByPath(t, router, "mcp-draft")
-	if httpPage["id"] != pageID {
-		t.Fatalf("HTTP page id = %v, want MCP-created id %q", httpPage["id"], pageID)
-	}
-	assertJSONEqual(t, "create_page HTTP page", createdPage, getHTTPPageByID(t, router, pageID))
+	httpPage := getHTTPPageByPath(router, "mcp-draft")
+	Expect(httpPage).To(HaveKeyWithValue("id", pageID))
+	Expect(createdPage).To(matchJSONEqual(getHTTPPageByID(router, pageID)), "create_page HTTP page")
 
-	mcpCreateParent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	mcpCreateParent := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "MCP Create Parent",
 		"slug":  "mcp-create-parent",
 		"kind":  "section",
 	}), "page")
-	httpCreateParent := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	httpCreateParent := postHTTPJSON(router, "/api/pages", map[string]any{
 		"title": "HTTP Create Parent",
 		"slug":  "http-create-parent",
 		"kind":  "section",
 	}, http.StatusCreated)
-	whitespaceParentCreateErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
+	whitespaceParentCreateErr := callToolStructuredError(session, "wiki_create_page", map[string]any{
 		"parentId": " ",
 		"title":    "Whitespace Parent",
 		"slug":     "whitespace-parent",
 		"kind":     "page",
 	})
-	assertMCPPageError(t, mcpLabelCreatePageWhitespaceParentID, whitespaceParentCreateErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
-	whitespaceParentCreateHTTP := postHTTPJSONBody(t, router, "/api/pages", map[string]any{
+	Expect(whitespaceParentCreateErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)), mcpLabelCreatePageWhitespaceParentID)
+	whitespaceParentCreateHTTP := postHTTPJSONBody(router, "/api/pages", map[string]any{
 		"parentId": " ",
 		"title":    "Whitespace Parent HTTP",
 		"slug":     "whitespace-parent-http",
 		"kind":     "page",
 	}, http.StatusBadRequest)
-	if !strings.Contains(whitespaceParentCreateHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP create_page whitespace parentId error = %q, want page_invalid_parent_id", whitespaceParentCreateHTTP)
-	}
-	paddedParentCreateErr := callToolStructuredError(t, session, "wiki_create_page", map[string]any{
-		"parentId": " " + stringField(t, mcpCreateParent, "id") + " ",
+	Expect(whitespaceParentCreateHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
+	paddedParentCreateErr := callToolStructuredError(session, "wiki_create_page", map[string]any{
+		"parentId": " " + stringField(mcpCreateParent, "id") + " ",
 		"title":    "Padded Parent",
 		"slug":     "padded-parent",
 		"kind":     "page",
 	})
-	assertMCPPageError(t, mcpLabelCreatePagePaddedParentID, paddedParentCreateErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
-	paddedParentCreateHTTP := postHTTPJSONBody(t, router, "/api/pages", map[string]any{
-		"parentId": " " + stringField(t, httpCreateParent, "id") + " ",
+	Expect(paddedParentCreateErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)), mcpLabelCreatePagePaddedParentID)
+	paddedParentCreateHTTP := postHTTPJSONBody(router, "/api/pages", map[string]any{
+		"parentId": " " + stringField(httpCreateParent, "id") + " ",
 		"title":    "Padded Parent HTTP",
 		"slug":     "padded-parent-http",
 		"kind":     "page",
 	}, http.StatusBadRequest)
-	if !strings.Contains(paddedParentCreateHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP create_page padded parentId error = %q, want page_invalid_parent_id", paddedParentCreateHTTP)
-	}
-	mcpCreatedChild := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"parentId": stringField(t, mcpCreateParent, "id"),
+	Expect(paddedParentCreateHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
+	mcpCreatedChild := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+		"parentId": stringField(mcpCreateParent, "id"),
 		"title":    "Created Child",
 		"slug":     "created-child",
 		"kind":     "section",
 	}), "page")
-	httpCreatedChild := postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"parentId": stringField(t, httpCreateParent, "id"),
+	httpCreatedChild := postHTTPJSON(router, "/api/pages", map[string]any{
+		"parentId": stringField(httpCreateParent, "id"),
 		"title":    "Created Child",
 		"slug":     "created-child",
 		"kind":     "section",
 	}, http.StatusCreated)
-	assertPageState(t, "MCP create_page child", getHTTPPageByPath(t, router, "mcp-create-parent/created-child"), stringField(t, mcpCreatedChild, "id"), "Created Child", "created-child", "mcp-create-parent/created-child", "section", "")
-	assertPageState(t, "HTTP create_page child", getHTTPPageByPath(t, router, "http-create-parent/created-child"), stringField(t, httpCreatedChild, "id"), "Created Child", "created-child", "http-create-parent/created-child", "section", "")
-	recordHTTPMCPParity(t, "wiki_create_page", "POST /api/pages")
+	Expect(getHTTPPageByPath(router, "mcp-create-parent/created-child")).To(matchPageState(stringField(mcpCreatedChild, "id"), "Created Child", "created-child", "mcp-create-parent/created-child", "section", ""), "MCP create_page child")
+	Expect(getHTTPPageByPath(router, "http-create-parent/created-child")).To(matchPageState(stringField(httpCreatedChild, "id"), "Created Child", "created-child", "http-create-parent/created-child", "section", ""), "HTTP create_page child")
+	recordHTTPMCPParity("wiki_create_page", "POST /api/pages")
 
 	content := "Hello from MCP\n"
-	updated := callToolStructured(t, session, "wiki_update_page", map[string]any{
+	updated := callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": version,
 		"title":   "MCP Draft Updated",
@@ -2999,44 +2569,36 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 			"status": "draft",
 		},
 	})
-	updatedPage := nestedMap(t, updated, "page")
-	if got := updatedPage["content"]; got != content {
-		t.Fatalf("updated MCP content = %v, want %q", got, content)
-	}
+	updatedPage := nestedMap(updated, "page")
+	Expect(updatedPage).To(HaveKeyWithValue("content", content))
 
-	httpPage = getHTTPPageByPath(t, router, "mcp-draft")
-	if got := httpPage["title"]; got != "MCP Draft Updated" {
-		t.Fatalf("HTTP title after MCP update = %v, want updated title", got)
-	}
-	if got := httpPage["content"]; got != content {
-		t.Fatalf("HTTP content after MCP update = %v, want %q", got, content)
-	}
-	assertJSONEqual(t, "wiki_update_page HTTP page", updatedPage, getHTTPPageByID(t, router, pageID))
-	if got := stringSliceField(t, httpPage, "tags"); strings.Join(got, ",") != "mcp,parity" {
-		t.Fatalf("HTTP tags after MCP update = %v, want [mcp parity]", got)
-	}
-	props := nestedMap(t, httpPage, "properties")
-	if got := props["status"]; got != "draft" {
-		t.Fatalf("HTTP properties.status after MCP update = %v, want draft", got)
-	}
-	rawMCPMetadata := readPageMarkdownByRoutePath(t, w.GetRootDir(), "mcp-draft")
-	mcpDoc := assertCanonicalPageMarkdown(t, "MCP update raw markdown", rawMCPMetadata)
-	if len(mcpDoc.Metadata.Tags) != 2 || mcpDoc.Metadata.Tags[0] != "mcp" || mcpDoc.Metadata.Tags[1] != "parity" {
-		t.Fatalf("MCP update raw tags = %#v, want [mcp parity]", mcpDoc.Metadata.Tags)
-	}
-	if mcpDoc.Metadata.Fields["status"] != "draft" {
-		t.Fatalf("MCP update raw fields = %#v, want status=draft", mcpDoc.Metadata.Fields)
-	}
-	if !strings.Contains(rawMCPMetadata, "tags:") || !strings.Contains(rawMCPMetadata, "- mcp") || !strings.Contains(rawMCPMetadata, "status: draft") {
-		t.Fatalf("MCP update raw markdown missing metadata frontmatter:\n%s", rawMCPMetadata)
-	}
-	httpMetadataPage := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	httpPage = getHTTPPageByPath(router, "mcp-draft")
+	Expect(httpPage).To(SatisfyAll(
+		HaveKeyWithValue("title", "MCP Draft Updated"),
+		HaveKeyWithValue("content", content),
+	))
+	Expect(updatedPage).To(matchJSONEqual(getHTTPPageByID(router, pageID)), "wiki_update_page HTTP page")
+	Expect(stringSliceField(httpPage, "tags")).To(Equal([]string{"mcp", "parity"}))
+	props := nestedMap(httpPage, "properties")
+	Expect(props).To(HaveKeyWithValue("status", "draft"))
+	rawMCPMetadata := readPageMarkdownByRoutePath(w.GetRootDir(), "mcp-draft")
+	mcpDoc := canonicalPageMarkdown("MCP update raw markdown", rawMCPMetadata)
+	Expect(mcpDoc.Metadata).To(SatisfyAll(
+		HaveField("Tags", Equal([]string{"mcp", "parity"})),
+		HaveField("Fields", HaveKeyWithValue("status", "draft")),
+	))
+	Expect(rawMCPMetadata).To(SatisfyAll(
+		ContainSubstring("tags:"),
+		ContainSubstring("- mcp"),
+		ContainSubstring("status: draft"),
+	))
+	httpMetadataPage := postHTTPJSON(router, "/api/pages", map[string]any{
 		"title": "HTTP Metadata",
 		"slug":  "http-metadata",
 		"kind":  "page",
 	}, http.StatusCreated)
-	httpMetadataUpdated := updateHTTPPage(t, router, stringField(t, httpMetadataPage, "id"), map[string]any{
-		"version": stringField(t, httpMetadataPage, "version"),
+	httpMetadataUpdated := updateHTTPPage(router, stringField(httpMetadataPage, "id"), map[string]any{
+		"version": stringField(httpMetadataPage, "version"),
 		"title":   "HTTP Metadata Updated",
 		"slug":    "http-metadata",
 		"content": "HTTP metadata content\n",
@@ -3045,29 +2607,25 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 			"status": "review",
 		},
 	})
-	if got := strings.Join(stringSliceField(t, httpMetadataUpdated, "tags"), ","); got != "http,metadata" {
-		t.Fatalf("HTTP update tags = %v, want http,metadata", got)
-	}
-	httpMetadataProps := nestedMap(t, httpMetadataUpdated, "properties")
-	if got := httpMetadataProps["status"]; got != "review" {
-		t.Fatalf("HTTP update properties.status = %v, want review", got)
-	}
-	rawHTTPMetadata := readPageMarkdownByRoutePath(t, w.GetRootDir(), "http-metadata")
-	httpDoc := assertCanonicalPageMarkdown(t, "HTTP update raw markdown", rawHTTPMetadata)
-	if len(httpDoc.Metadata.Tags) != 2 || httpDoc.Metadata.Tags[0] != "http" || httpDoc.Metadata.Tags[1] != "metadata" {
-		t.Fatalf("HTTP update raw tags = %#v, want [http metadata]", httpDoc.Metadata.Tags)
-	}
-	if httpDoc.Metadata.Fields["status"] != "review" {
-		t.Fatalf("HTTP update raw fields = %#v, want status=review", httpDoc.Metadata.Fields)
-	}
-	if !strings.Contains(rawHTTPMetadata, "tags:") || !strings.Contains(rawHTTPMetadata, "- http") || !strings.Contains(rawHTTPMetadata, "status: review") {
-		t.Fatalf("HTTP update raw markdown missing metadata frontmatter:\n%s", rawHTTPMetadata)
-	}
-	recordHTTPMCPParity(t, "wiki_update_page", "PUT /api/pages/:id")
+	Expect(stringSliceField(httpMetadataUpdated, "tags")).To(Equal([]string{"http", "metadata"}))
+	httpMetadataProps := nestedMap(httpMetadataUpdated, "properties")
+	Expect(httpMetadataProps).To(HaveKeyWithValue("status", "review"))
+	rawHTTPMetadata := readPageMarkdownByRoutePath(w.GetRootDir(), "http-metadata")
+	httpDoc := canonicalPageMarkdown("HTTP update raw markdown", rawHTTPMetadata)
+	Expect(httpDoc.Metadata).To(SatisfyAll(
+		HaveField("Tags", Equal([]string{"http", "metadata"})),
+		HaveField("Fields", HaveKeyWithValue("status", "review")),
+	))
+	Expect(rawHTTPMetadata).To(SatisfyAll(
+		ContainSubstring("tags:"),
+		ContainSubstring("- http"),
+		ContainSubstring("status: review"),
+	))
+	recordHTTPMCPParity("wiki_update_page", "PUT /api/pages/:id")
 
-	metadataErr := callToolStructuredError(t, session, "wiki_update_page", map[string]any{
+	metadataErr := callToolStructuredError(session, "wiki_update_page", map[string]any{
 		"id":      pageID,
-		"version": stringField(t, updatedPage, "version"),
+		"version": stringField(updatedPage, "version"),
 		"title":   "MCP Draft Updated",
 		"slug":    "mcp-draft",
 		"content": content,
@@ -3076,9 +2634,9 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 			"leafwiki_hidden": "forbidden",
 		},
 	})
-	assertGenericToolErrorArgContainsAny(t, mcpLabelMetadataValidationError, metadataErr, "validation", "reserved")
+	Expect(metadataErr).To(matchMCPStructuredError(wikimcp.ErrCodeMCPToolError, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPToolError)), mcpLabelMetadataValidationError)
 
-	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
+	csrfToken, csrfCookies := issueHTTPCSRF(router)
 	staleHTTPBody := strings.NewReader(`{"version":"` + version + `","title":"MCP Draft Stale","slug":"mcp-draft","content":"stale"}`)
 	staleHTTPReq := httptest.NewRequest(http.MethodPut, "/api/pages/"+pageID, staleHTTPBody)
 	staleHTTPReq.Header.Set("Content-Type", "application/json")
@@ -3088,96 +2646,85 @@ func runLocalMCPProtocolPageMutationParity(t testing.TB) {
 	}
 	staleHTTPRec := httptest.NewRecorder()
 	router.ServeHTTP(staleHTTPRec, staleHTTPReq)
-	if staleHTTPRec.Code != http.StatusConflict {
-		t.Fatalf("HTTP stale update status = %d, want 409: %s", staleHTTPRec.Code, staleHTTPRec.Body.String())
-	}
+	Expect(staleHTTPRec).To(HaveHTTPStatus(http.StatusConflict), staleHTTPRec.Body.String())
 
-	mcpErr := callToolStructuredError(t, session, "wiki_update_page", map[string]any{
+	mcpErr := callToolStructuredError(session, "wiki_update_page", map[string]any{
 		"id":      pageID,
 		"version": version,
 		"title":   "MCP Draft Stale",
 		"slug":    "mcp-draft",
 		"content": "stale",
 	})
-	assertPageVersionConflictParity(t, "stale wiki_update_page", mcpErr, staleHTTPRec.Body.String())
+	Expect(mcpErr).To(matchMCPPageVersionConflict(), "stale wiki_update_page MCP")
+	Expect(staleHTTPRec.Body.String()).To(matchHTTPPageVersionConflict(), "stale wiki_update_page HTTP")
 
-	search := callToolStructured(t, session, "wiki_search_pages", map[string]any{
+	search := callToolStructured(session, "wiki_search_pages", map[string]any{
 		"q":      "Hello",
 		"offset": float64(0),
 		"limit":  float64(10),
 	})
-	httpSearch := getHTTPSearch(t, router, url.Values{
+	httpSearch := getHTTPSearch(router, url.Values{
 		"q":      {"Hello"},
 		"offset": {"0"},
 		"limit":  {"10"},
 	})
-	assertSearchResultsMatch(t, search, httpSearch)
-	if got := search["count"]; got != float64(1) {
-		t.Fatalf("MCP search count = %v, want 1", got)
-	}
-	items, ok := search["items"].([]any)
-	if !ok || len(items) != 1 {
-		t.Fatalf("MCP search items = %#v, want one item", search["items"])
-	}
-	item, ok := items[0].(map[string]any)
-	if !ok {
-		t.Fatalf("MCP search item has type %T", items[0])
-	}
-	if got := item["page_id"]; got != pageID {
-		t.Fatalf("MCP search page_id = %v, want %q", got, pageID)
-	}
-	tagSearch := callToolStructured(t, session, "wiki_search_pages", map[string]any{
+	Expect(search).To(matchSearchResults(httpSearch))
+	Expect(search).To(HaveKeyWithValue("count", float64(1)))
+	items := arrayFieldFromMap(search, "items")
+	Expect(items).To(HaveExactElements(HaveKeyWithValue("page_id", pageID)))
+	tagSearch := callToolStructured(session, "wiki_search_pages", map[string]any{
 		"tags":   []any{"mcp"},
 		"offset": float64(0),
 		"limit":  float64(10),
 	})
-	tagHTTPSearch := getHTTPSearch(t, router, url.Values{
+	tagHTTPSearch := getHTTPSearch(router, url.Values{
 		"tags":   {"mcp"},
 		"offset": {"0"},
 		"limit":  {"10"},
 	})
-	assertSearchResultsMatch(t, tagSearch, tagHTTPSearch)
+	Expect(tagSearch).To(matchSearchResults(tagHTTPSearch))
 
 	for i := 1; i <= 2; i++ {
-		extra := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+		extra := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 			"title": "Hello Extra " + strconv.Itoa(i),
 			"slug":  "hello-extra-" + strconv.Itoa(i),
 			"kind":  "page",
 		}), "page")
 		extraContent := "Hello paginated search " + strconv.Itoa(i)
-		callToolStructured(t, session, "wiki_update_page", map[string]any{
-			"id":      stringField(t, extra, "id"),
-			"version": stringField(t, extra, "version"),
+		callToolStructured(session, "wiki_update_page", map[string]any{
+			"id":      stringField(extra, "id"),
+			"version": stringField(extra, "version"),
 			"title":   extra["title"],
 			"slug":    extra["slug"],
 			"content": extraContent,
 			"tags":    []any{"mcp"},
 		})
 	}
-	paginatedSearch := callToolStructured(t, session, "wiki_search_pages", map[string]any{
+	paginatedSearch := callToolStructured(session, "wiki_search_pages", map[string]any{
 		"q":      "Hello",
 		"offset": float64(0),
 		"limit":  float64(1),
 	})
-	paginatedHTTP := getHTTPSearch(t, router, url.Values{
+	paginatedHTTP := getHTTPSearch(router, url.Values{
 		"q":      {"Hello"},
 		"offset": {"0"},
 		"limit":  {"1"},
 	})
-	assertSearchResultsMatch(t, paginatedSearch, paginatedHTTP)
-	if paginatedSearch["hasMore"] != true {
-		t.Fatalf("paginated MCP search hasMore = %v, want true", paginatedSearch["hasMore"])
-	}
-	recordHTTPMCPParity(t, "wiki_search_pages", "GET /api/search")
+	Expect(paginatedSearch).To(matchSearchResults(paginatedHTTP))
+	Expect(paginatedSearch).To(HaveKeyWithValue("hasMore", true))
+	recordHTTPMCPParity("wiki_search_pages", "GET /api/search")
 }
 
-var _ = It("LocalMCPProtocol_PageOperationParity", func() {
-	t := GinkgoTB()
-	runLocalMCPProtocolPageOperationParity(t)
+var _ = Describe("local MCP page operation parity", func() {
+	It("keeps page operation tools aligned with HTTP routes", func() {
+		runLocalMCPProtocolPageOperationParity()
+	})
 })
 
-func runLocalMCPProtocolPageOperationParity(t testing.TB) {
-	w := newLocalMCPTestWiki(t, false)
+func runLocalMCPProtocolPageOperationParity() {
+	GinkgoHelper()
+
+	w := newLocalMCPTestWiki(false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
 		PublicAccess:            true,
@@ -3188,31 +2735,26 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 		MCPEnabled:              true,
 		MCPToolListPageSize:     200,
 	})
-	session := connectLocalMCP(t, router, "/mcp")
+	session := connectLocalMCP(router, "/mcp")
 
-	current := callToolStructured(t, session, "wiki_get_current_user", nil)
-	user := nestedMap(t, current, "user")
-	if user["username"] != "public-editor" || user["role"] != "editor" {
-		t.Fatalf("current user = %#v, want public-editor editor", user)
-	}
-	httpUser := getHTTPMap(t, router, "/api/auth/me")
-	assertJSONEqual(t, "wiki_get_current_user", user, httpUser)
-	recordHTTPMCPParity(t, "wiki_get_current_user", "GET /api/auth/me")
-	config := callToolStructured(t, session, "wiki_get_config", nil)
-	if config["authDisabled"] != true {
-		t.Fatalf("config authDisabled = %v, want true", config["authDisabled"])
-	}
-	if config["maxAssetUploadSizeBytes"] != float64(assets.DefaultMaxUploadSizeBytes) {
-		t.Fatalf("config maxAssetUploadSizeBytes = %v, want default", config["maxAssetUploadSizeBytes"])
-	}
-	if config["enableWorkspaceSync"] != true {
-		t.Fatalf("config enableWorkspaceSync = %v, want true", config["enableWorkspaceSync"])
-	}
-	if config["markdownLinkRootPrefix"] != "/docs" {
-		t.Fatalf("config markdownLinkRootPrefix = %v, want /docs", config["markdownLinkRootPrefix"])
-	}
-	httpConfig := getHTTPMap(t, router, "/api/config")
-	assertMapFieldsEqual(t, "wiki_get_config", config, httpConfig, []string{
+	current := callToolStructured(session, "wiki_get_current_user", nil)
+	user := nestedMap(current, "user")
+	Expect(user).To(SatisfyAll(
+		HaveKeyWithValue("username", "public-editor"),
+		HaveKeyWithValue("role", "editor"),
+	))
+	httpUser := getHTTPMap(router, "/api/auth/me")
+	Expect(user).To(matchJSONEqual(httpUser), "wiki_get_current_user")
+	recordHTTPMCPParity("wiki_get_current_user", "GET /api/auth/me")
+	config := callToolStructured(session, "wiki_get_config", nil)
+	Expect(config).To(SatisfyAll(
+		HaveKeyWithValue("authDisabled", true),
+		HaveKeyWithValue("maxAssetUploadSizeBytes", float64(assets.DefaultMaxUploadSizeBytes)),
+		HaveKeyWithValue("enableWorkspaceSync", true),
+		HaveKeyWithValue("markdownLinkRootPrefix", "/docs"),
+	))
+	httpConfig := getHTTPMap(router, "/api/config")
+	Expect(config).To(matchMapFields(httpConfig, []string{
 		"publicAccess",
 		"hideLinkMetadataSection",
 		"authDisabled",
@@ -3223,527 +2765,463 @@ func runLocalMCPProtocolPageOperationParity(t testing.TB) {
 		"enableLinkRefactor",
 		"httpRemoteUserEnabled",
 		"httpRemoteUserLogoutUrl",
-	})
-	recordHTTPMCPParity(t, "wiki_get_config", "GET /api/config")
+	}), "wiki_get_config")
 
-	slug := callToolStructured(t, session, "wiki_suggest_slug", map[string]any{"title": "Parent Section"})
-	httpSlug := getHTTPMap(t, router, "/api/pages/slug-suggestion?title=Parent+Section")
-	assertJSONEqual(t, "wiki_suggest_slug", slug, httpSlug)
-	recordHTTPMCPParity(t, "wiki_suggest_slug", "GET /api/pages/slug-suggestion")
-	if got := slug["slug"]; got != "parent-section" {
-		t.Fatalf("suggest_slug = %v, want parent-section", got)
-	}
-	blankSlugErr := callToolError(t, session, "wiki_suggest_slug", map[string]any{"title": "   "})
-	if !strings.Contains(strings.ToLower(blankSlugErr), "title") {
-		t.Fatalf("MCP blank suggest_slug error = %q, want title detail", blankSlugErr)
-	}
-	blankSlugHTTP := getHTTPStatus(t, router, "/api/pages/slug-suggestion?title=+++",
-		http.StatusBadRequest)
-	if !strings.Contains(blankSlugHTTP, wikipages.ErrCodePageMissingTitle.String()) {
-		t.Fatalf("HTTP blank suggest_slug error = %q, want %s", blankSlugHTTP, wikipages.ErrCodePageMissingTitle.String())
-	}
-	punctuationSlugErr := callToolError(t, session, "wiki_suggest_slug", map[string]any{"title": "!!!"})
-	if !strings.Contains(strings.ToLower(punctuationSlugErr), "title") {
-		t.Fatalf("MCP punctuation-only suggest_slug error = %q, want title detail", punctuationSlugErr)
-	}
-	punctuationSlugHTTP := getHTTPStatus(t, router, "/api/pages/slug-suggestion?title=%21%21%21",
-		http.StatusBadRequest)
-	if !strings.Contains(punctuationSlugHTTP, wikipages.ErrCodePageInvalidTitle.String()) {
-		t.Fatalf("HTTP punctuation-only suggest_slug error = %q, want %s", punctuationSlugHTTP, wikipages.ErrCodePageInvalidTitle.String())
-	}
+	recordHTTPMCPParity("wiki_get_config", "GET /api/config")
 
-	parent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	slug := callToolStructured(session, "wiki_suggest_slug", map[string]any{"title": "Parent Section"})
+	httpSlug := getHTTPMap(router, "/api/pages/slug-suggestion?title=Parent+Section")
+	Expect(slug).To(matchJSONEqual(httpSlug), "wiki_suggest_slug")
+	recordHTTPMCPParity("wiki_suggest_slug", "GET /api/pages/slug-suggestion")
+	Expect(slug).To(HaveKeyWithValue("slug", "parent-section"))
+	blankSlugErr := callToolStructuredError(session, "wiki_suggest_slug", map[string]any{"title": "   "})
+	Expect(blankSlugErr).To(matchMCPPageError(wikipages.ErrCodePageMissingTitle, sharederrors.MessageIDForCode(wikipages.ErrCodePageMissingTitle)))
+	blankSlugHTTP := getHTTPStatus(router, "/api/pages/slug-suggestion?title=+++",
+		http.StatusBadRequest)
+	Expect(blankSlugHTTP).To(matchHTTPPageError(wikipages.ErrCodePageMissingTitle, sharederrors.MessageIDForCode(wikipages.ErrCodePageMissingTitle)), mcpLabelSuggestSlugBlankHTTP)
+	punctuationSlugErr := callToolStructuredError(session, "wiki_suggest_slug", map[string]any{"title": "!!!"})
+	Expect(punctuationSlugErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidTitle, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTitle)))
+	punctuationSlugHTTP := getHTTPStatus(router, "/api/pages/slug-suggestion?title=%21%21%21",
+		http.StatusBadRequest)
+	Expect(punctuationSlugHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidTitle, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTitle)), mcpLabelSuggestSlugPunctuationHTTP)
+
+	parent := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Parent Section",
 		"slug":  "parent-section",
 		"kind":  "section",
 	}), "page")
-	parentID := stringField(t, parent, "id")
-	parentViaGet := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": parentID}), "page")
-	assertJSONEqual(t, "wiki_get_page", parentViaGet, getHTTPPageByID(t, router, parentID))
-	recordHTTPMCPParity(t, "wiki_get_page", "GET /api/pages/:id")
-	treeResult := callToolStructured(t, session, "wiki_get_tree", map[string]any{"depth": float64(1)})
-	if treeResult["tree"] == nil {
-		t.Fatalf("wiki_get_tree returned no tree: %#v", treeResult)
-	}
-	httpTree := getHTTPMap(t, router, "/api/tree?depth=1")
-	assertJSONEqual(t, "wiki_get_tree", treeResult["tree"], httpTree)
-	recordHTTPMCPParity(t, "wiki_get_tree", "GET /api/tree")
+	parentID := stringField(parent, "id")
+	parentViaGet := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"id": parentID}), "page")
+	Expect(parentViaGet).To(matchJSONEqual(getHTTPPageByID(router, parentID)), "wiki_get_page")
+	recordHTTPMCPParity("wiki_get_page", "GET /api/pages/:id")
+	treeResult := callToolStructured(session, "wiki_get_tree", map[string]any{"depth": float64(1)})
+	Expect(treeResult).To(HaveKey("tree"))
+	httpTree := getHTTPMap(router, "/api/tree?depth=1")
+	Expect(treeResult).To(HaveKeyWithValue("tree", matchJSONEqual(httpTree)), "wiki_get_tree")
+	recordHTTPMCPParity("wiki_get_tree", "GET /api/tree")
 
-	pageByPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "parent-section"}), "page")
-	httpPageByPath := getHTTPPageByPath(t, router, "parent-section")
-	assertJSONEqual(t, "wiki_get_page_by_path", pageByPath, httpPageByPath)
-	leadingSlashPageByPath := nestedMap(t, callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "/parent-section"}), "page")
-	assertJSONEqual(t, "wiki_get_page_by_path leading slash", leadingSlashPageByPath, httpPageByPath)
-	recordHTTPMCPParity(t, "wiki_get_page_by_path", "GET /api/pages/by-path")
-	blankPathErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{"path": "  "})
-	if !strings.Contains(blankPathErr, wikipages.ErrCodePageMissingPath.String()) && !strings.Contains(strings.ToLower(blankPathErr), "missing path") {
-		t.Fatalf("MCP blank get_page_by_path error = %q, want %s", blankPathErr, wikipages.ErrCodePageMissingPath.String())
-	}
-	blankPathHTTP := getHTTPStatus(t, router, "/api/pages/by-path?path=++", http.StatusBadRequest)
-	if !strings.Contains(blankPathHTTP, wikipages.ErrCodePageMissingPath.String()) {
-		t.Fatalf("HTTP blank get_page_by_path error = %q, want %s", blankPathHTTP, wikipages.ErrCodePageMissingPath.String())
-	}
+	pageByPath := nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "parent-section"}), "page")
+	httpPageByPath := getHTTPPageByPath(router, "parent-section")
+	Expect(pageByPath).To(matchJSONEqual(httpPageByPath), "wiki_get_page_by_path")
+	leadingSlashPageByPath := nestedMap(callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "/parent-section"}), "page")
+	Expect(leadingSlashPageByPath).To(matchJSONEqual(httpPageByPath), "wiki_get_page_by_path leading slash")
+	recordHTTPMCPParity("wiki_get_page_by_path", "GET /api/pages/by-path")
+	blankPathErr := callToolStructuredError(session, "wiki_get_page_by_path", map[string]any{"path": "  "})
+	Expect(blankPathErr).To(matchMCPPageError(wikipages.ErrCodePageMissingPath, sharederrors.MessageIDForCode(wikipages.ErrCodePageMissingPath)), mcpLabelGetPageByPathBlankMCP)
+	blankPathHTTP := getHTTPStatus(router, "/api/pages/by-path?path=++", http.StatusBadRequest)
+	Expect(blankPathHTTP).To(matchHTTPPageError(wikipages.ErrCodePageMissingPath, sharederrors.MessageIDForCode(wikipages.ErrCodePageMissingPath)), mcpLabelGetPageByPathBlankHTTP)
 	for _, invalidPath := range []string{"docs//intro", "docs/.", "docs/..", `docs\..\secret`} {
-		mcpPathErr := callToolError(t, session, "wiki_get_page_by_path", map[string]any{"path": invalidPath})
-		if !strings.Contains(mcpPathErr, "page_invalid_path") && !strings.Contains(strings.ToLower(mcpPathErr), "invalid path") {
-			t.Fatalf("MCP invalid get_page_by_path path %q error = %q, want invalid path detail", invalidPath, mcpPathErr)
-		}
-		httpPathErr := getHTTPStatus(t, router, "/api/pages/by-path?path="+url.QueryEscape(invalidPath), http.StatusBadRequest)
-		if !strings.Contains(httpPathErr, "page_invalid_path") {
-			t.Fatalf("HTTP invalid get_page_by_path path %q error = %q, want page_invalid_path", invalidPath, httpPathErr)
-		}
+		mcpPathErr := callToolStructuredError(session, "wiki_get_page_by_path", map[string]any{"path": invalidPath})
+		Expect(mcpPathErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidPath, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidPath)), "invalid MCP path %q", invalidPath)
+		httpPathErr := getHTTPStatus(router, "/api/pages/by-path?path="+url.QueryEscape(invalidPath), http.StatusBadRequest)
+		Expect(httpPathErr).To(matchHTTPPageError(wikipages.ErrCodePageInvalidPath, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidPath)), "invalid HTTP path %q", invalidPath)
 	}
 
-	childA := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	childA := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"parentId": parentID,
 		"title":    "Child A",
 		"slug":     "child-a",
 		"kind":     "page",
 	}), "page")
-	childB := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	childB := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"parentId": parentID,
 		"title":    "Child B",
 		"slug":     "child-b",
 		"kind":     "page",
 	}), "page")
 
-	callToolStructured(t, session, "wiki_sort_pages", map[string]any{
+	callToolStructured(session, "wiki_sort_pages", map[string]any{
 		"parentId":   parentID,
-		"orderedIds": []any{stringField(t, childB, "id"), stringField(t, childA, "id")},
+		"orderedIds": []any{stringField(childB, "id"), stringField(childA, "id")},
 	})
-	httpSort := putHTTPJSON(t, router, "/api/pages/"+parentID+"/sort", map[string]any{
-		"orderedIds": []string{stringField(t, childB, "id"), stringField(t, childA, "id")},
+	httpSort := putHTTPJSON(router, "/api/pages/"+parentID+"/sort", map[string]any{
+		"orderedIds": []string{stringField(childB, "id"), stringField(childA, "id")},
 	}, http.StatusOK)
-	mcpSort := callToolStructured(t, session, "wiki_sort_pages", map[string]any{
+	mcpSort := callToolStructured(session, "wiki_sort_pages", map[string]any{
 		"parentId":   parentID,
-		"orderedIds": []any{stringField(t, childB, "id"), stringField(t, childA, "id")},
+		"orderedIds": []any{stringField(childB, "id"), stringField(childA, "id")},
 	})
-	assertScopedSuccessPayloadsEqual(t, "wiki_sort_pages", mcpSort, httpSort, "mcp.tools.wiki_sort_pages.success", "api.pages.sort.success")
-	parentAfterSort := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": parentID}), "page")
-	assertChildOrder(t, "sort_pages shared parent", parentAfterSort, stringField(t, childB, "id"), stringField(t, childA, "id"))
-	mcpSortParent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	Expect(mcpSort).To(matchScopedSuccessPayload(httpSort, "mcp.tools.wiki_sort_pages.success", "api.pages.sort.success"), "wiki_sort_pages")
+	parentAfterSort := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"id": parentID}), "page")
+	Expect(parentAfterSort).To(matchChildOrder(stringField(childB, "id"), stringField(childA, "id")), "sort_pages shared parent")
+	mcpSortParent := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "MCP Sort Parent",
 		"slug":  "mcp-sort-parent",
 		"kind":  "section",
 	}), "page")
-	mcpSortA := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"parentId": stringField(t, mcpSortParent, "id"),
+	mcpSortA := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+		"parentId": stringField(mcpSortParent, "id"),
 		"title":    "MCP Sort A",
 		"slug":     "mcp-sort-a",
 		"kind":     "page",
 	}), "page")
-	mcpSortB := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"parentId": stringField(t, mcpSortParent, "id"),
+	mcpSortB := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+		"parentId": stringField(mcpSortParent, "id"),
 		"title":    "MCP Sort B",
 		"slug":     "mcp-sort-b",
 		"kind":     "page",
 	}), "page")
-	httpSortParent := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	httpSortParent := postHTTPJSON(router, "/api/pages", map[string]any{
 		"title": "HTTP Sort Parent",
 		"slug":  "http-sort-parent",
 		"kind":  "section",
 	}, http.StatusCreated)
-	httpSortA := postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"parentId": stringField(t, httpSortParent, "id"),
+	httpSortA := postHTTPJSON(router, "/api/pages", map[string]any{
+		"parentId": stringField(httpSortParent, "id"),
 		"title":    "HTTP Sort A",
 		"slug":     "http-sort-a",
 		"kind":     "page",
 	}, http.StatusCreated)
-	httpSortB := postHTTPJSON(t, router, "/api/pages", map[string]any{
-		"parentId": stringField(t, httpSortParent, "id"),
+	httpSortB := postHTTPJSON(router, "/api/pages", map[string]any{
+		"parentId": stringField(httpSortParent, "id"),
 		"title":    "HTTP Sort B",
 		"slug":     "http-sort-b",
 		"kind":     "page",
 	}, http.StatusCreated)
-	callToolStructured(t, session, "wiki_sort_pages", map[string]any{
-		"parentId":   stringField(t, mcpSortParent, "id"),
-		"orderedIds": []any{stringField(t, mcpSortB, "id"), stringField(t, mcpSortA, "id")},
+	callToolStructured(session, "wiki_sort_pages", map[string]any{
+		"parentId":   stringField(mcpSortParent, "id"),
+		"orderedIds": []any{stringField(mcpSortB, "id"), stringField(mcpSortA, "id")},
 	})
-	putHTTPJSON(t, router, "/api/pages/"+stringField(t, httpSortParent, "id")+"/sort", map[string]any{
-		"orderedIds": []string{stringField(t, httpSortB, "id"), stringField(t, httpSortA, "id")},
+	putHTTPJSON(router, "/api/pages/"+stringField(httpSortParent, "id")+"/sort", map[string]any{
+		"orderedIds": []string{stringField(httpSortB, "id"), stringField(httpSortA, "id")},
 	}, http.StatusOK)
-	assertChildOrder(t, "MCP sort_pages parent", getHTTPPageByPath(t, router, "mcp-sort-parent"), stringField(t, mcpSortB, "id"), stringField(t, mcpSortA, "id"))
-	assertChildOrder(t, "HTTP sort_pages parent", getHTTPPageByPath(t, router, "http-sort-parent"), stringField(t, httpSortB, "id"), stringField(t, httpSortA, "id"))
-	recordHTTPMCPParity(t, "wiki_sort_pages", "PUT /api/pages/:id/sort")
-	parentByAlias := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"pageId": parentID}), "page")
-	if parentByAlias["id"] != parentID {
-		t.Fatalf("wiki_get_page pageId alias returned id = %v, want %q", parentByAlias["id"], parentID)
-	}
+	Expect(getHTTPPageByPath(router, "mcp-sort-parent")).To(matchChildOrder(stringField(mcpSortB, "id"), stringField(mcpSortA, "id")), "MCP sort_pages parent")
+	Expect(getHTTPPageByPath(router, "http-sort-parent")).To(matchChildOrder(stringField(httpSortB, "id"), stringField(httpSortA, "id")), "HTTP sort_pages parent")
+	recordHTTPMCPParity("wiki_sort_pages", "PUT /api/pages/:id/sort")
+	parentByAlias := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"pageId": parentID}), "page")
+	Expect(parentByAlias).To(HaveKeyWithValue("id", parentID))
 
-	ensured := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
+	ensured := nestedMap(callToolStructured(session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/ensured",
 		"title": "Ensured Page",
 		"kind":  "page",
 	}), "page")
-	ensuredID := stringField(t, ensured, "id")
-	httpEnsured := postHTTPJSON(t, router, "/api/pages/ensure", map[string]any{
+	ensuredID := stringField(ensured, "id")
+	httpEnsured := postHTTPJSON(router, "/api/pages/ensure", map[string]any{
 		"path":  "parent-section/ensured",
 		"title": "Ensured Page",
 		"kind":  "page",
 	}, http.StatusOK)
-	assertJSONEqual(t, "wiki_ensure_page", ensured, httpEnsured)
-	mcpEnsuredIndependent := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
+	Expect(ensured).To(matchJSONEqual(httpEnsured), "wiki_ensure_page")
+	mcpEnsuredIndependent := nestedMap(callToolStructured(session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/ensured-mcp",
 		"title": "Ensured Independent",
 		"kind":  "section",
 	}), "page")
-	httpEnsuredIndependent := postHTTPJSON(t, router, "/api/pages/ensure", map[string]any{
+	httpEnsuredIndependent := postHTTPJSON(router, "/api/pages/ensure", map[string]any{
 		"path":  "parent-section/ensured-http",
 		"title": "Ensured Independent",
 		"kind":  "section",
 	}, http.StatusOK)
-	assertPageState(t, "MCP ensure_page independent", getHTTPPageByPath(t, router, "parent-section/ensured-mcp"), stringField(t, mcpEnsuredIndependent, "id"), "Ensured Independent", "ensured-mcp", "parent-section/ensured-mcp", "section", "")
-	assertPageState(t, "HTTP ensure_page independent", getHTTPPageByPath(t, router, "parent-section/ensured-http"), stringField(t, httpEnsuredIndependent, "id"), "Ensured Independent", "ensured-http", "parent-section/ensured-http", "section", "")
-	nullKindEnsured := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
+	Expect(getHTTPPageByPath(router, "parent-section/ensured-mcp")).To(matchPageState(stringField(mcpEnsuredIndependent, "id"), "Ensured Independent", "ensured-mcp", "parent-section/ensured-mcp", "section", ""), "MCP ensure_page independent")
+	Expect(getHTTPPageByPath(router, "parent-section/ensured-http")).To(matchPageState(stringField(httpEnsuredIndependent, "id"), "Ensured Independent", "ensured-http", "parent-section/ensured-http", "section", ""), "HTTP ensure_page independent")
+	nullKindEnsured := nestedMap(callToolStructured(session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/ensured-null-kind",
 		"title": "Ensured Null Kind",
 		"kind":  nil,
 	}), "page")
-	if got := nullKindEnsured["kind"]; got != "page" {
-		t.Fatalf("MCP ensure_page null kind = %v, want page", got)
-	}
+	Expect(nullKindEnsured).To(HaveKeyWithValue("kind", "page"))
 
-	mcpPageBase := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	mcpPageBase := postHTTPJSON(router, "/api/pages", map[string]any{
 		"parentId": parentID,
 		"title":    "MCP Section Twin Base",
 		"slug":     "mcp-section-twin",
 		"kind":     "page",
 	}, http.StatusCreated)
-	mcpEnsuredSectionTwin := nestedMap(t, callToolStructured(t, session, "wiki_ensure_page", map[string]any{
+	mcpEnsuredSectionTwin := nestedMap(callToolStructured(session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/mcp-section-twin",
 		"title": "MCP Ensured Section Twin",
 		"kind":  "section",
 	}), "page")
-	if stringField(t, mcpEnsuredSectionTwin, "id") == stringField(t, mcpPageBase, "id") {
-		t.Fatalf("MCP ensure_page returned existing page %q instead of section twin", stringField(t, mcpPageBase, "id"))
-	}
-	if got := mcpEnsuredSectionTwin["kind"]; got != "section" {
-		t.Fatalf("MCP ensure_page section twin kind = %v, want section", got)
-	}
+	Expect(stringField(mcpEnsuredSectionTwin, "id")).NotTo(Equal(stringField(mcpPageBase, "id")))
+	Expect(mcpEnsuredSectionTwin).To(HaveKeyWithValue("kind", "section"))
 
-	httpPageBase := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	httpPageBase := postHTTPJSON(router, "/api/pages", map[string]any{
 		"parentId": parentID,
 		"title":    "HTTP Section Twin Base",
 		"slug":     "http-section-twin",
 		"kind":     "page",
 	}, http.StatusCreated)
-	httpEnsuredSectionTwin := postHTTPJSON(t, router, "/api/pages/ensure", map[string]any{
+	httpEnsuredSectionTwin := postHTTPJSON(router, "/api/pages/ensure", map[string]any{
 		"path":  "parent-section/http-section-twin",
 		"title": "HTTP Ensured Section Twin",
 		"kind":  "section",
 	}, http.StatusOK)
-	if stringField(t, httpEnsuredSectionTwin, "id") == stringField(t, httpPageBase, "id") {
-		t.Fatalf("HTTP ensure returned existing page %q instead of section twin", stringField(t, httpPageBase, "id"))
-	}
-	if got := httpEnsuredSectionTwin["kind"]; got != "section" {
-		t.Fatalf("HTTP ensure section twin kind = %v, want section", got)
-	}
-	recordHTTPMCPParity(t, "wiki_ensure_page", "POST /api/pages/ensure")
+	Expect(stringField(httpEnsuredSectionTwin, "id")).NotTo(Equal(stringField(httpPageBase, "id")))
+	Expect(httpEnsuredSectionTwin).To(HaveKeyWithValue("kind", "section"))
+	recordHTTPMCPParity("wiki_ensure_page", "POST /api/pages/ensure")
 
-	lookup := callToolStructured(t, session, "wiki_lookup_path", map[string]any{"path": "parent-section/ensured"})
-	httpLookup := getHTTPMap(t, router, "/api/pages/lookup?path=parent-section%2Fensured")
-	assertJSONEqual(t, "wiki_lookup_path", lookup["lookup"], httpLookup)
-	recordHTTPMCPParity(t, "wiki_lookup_path", "GET /api/pages/lookup")
-	if lookup["lookup"] == nil {
-		t.Fatalf("lookup_path returned no lookup: %#v", lookup)
-	}
+	lookup := callToolStructured(session, "wiki_lookup_path", map[string]any{"path": "parent-section/ensured"})
+	httpLookup := getHTTPMap(router, "/api/pages/lookup?path=parent-section%2Fensured")
+	Expect(lookup).To(HaveKeyWithValue("lookup", matchJSONEqual(httpLookup)), "wiki_lookup_path")
+	recordHTTPMCPParity("wiki_lookup_path", "GET /api/pages/lookup")
+	Expect(lookup).To(HaveKey("lookup"))
 
-	pageTwin := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	pageTwin := postHTTPJSON(router, "/api/pages", map[string]any{
 		"parentId": parentID,
 		"title":    "Lookup Page Twin",
 		"slug":     "lookup-twin",
 		"kind":     "page",
 	}, http.StatusCreated)
-	sectionTwin := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	sectionTwin := postHTTPJSON(router, "/api/pages", map[string]any{
 		"parentId": parentID,
 		"title":    "Lookup Section Twin",
 		"slug":     "lookup-twin",
 		"kind":     "section",
 	}, http.StatusCreated)
-	mcpLookupPageTwin := nestedMap(t, callToolStructured(t, session, "wiki_lookup_path", map[string]any{
+	mcpLookupPageTwin := nestedMap(callToolStructured(session, "wiki_lookup_path", map[string]any{
 		"path": "parent-section/lookup-twin",
 		"kind": "page",
 	}), "lookup")
-	httpLookupPageTwin := getHTTPMap(t, router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=page")
-	assertJSONEqual(t, "wiki_lookup_path page twin", mcpLookupPageTwin, httpLookupPageTwin)
-	assertLookupFinalID(t, "wiki_lookup_path page twin", mcpLookupPageTwin, stringField(t, pageTwin, "id"), "page")
+	httpLookupPageTwin := getHTTPMap(router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=page")
+	Expect(mcpLookupPageTwin).To(matchJSONEqual(httpLookupPageTwin), "wiki_lookup_path page twin")
+	Expect(mcpLookupPageTwin).To(matchLookupFinalID(stringField(pageTwin, "id"), "page"), "wiki_lookup_path page twin")
 
-	mcpLookupSectionTwin := nestedMap(t, callToolStructured(t, session, "wiki_lookup_path", map[string]any{
+	mcpLookupSectionTwin := nestedMap(callToolStructured(session, "wiki_lookup_path", map[string]any{
 		"path": "parent-section/lookup-twin",
 		"kind": "section",
 	}), "lookup")
-	httpLookupSectionTwin := getHTTPMap(t, router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=section")
-	assertJSONEqual(t, "wiki_lookup_path section twin", mcpLookupSectionTwin, httpLookupSectionTwin)
-	assertLookupFinalID(t, "wiki_lookup_path section twin", mcpLookupSectionTwin, stringField(t, sectionTwin, "id"), "section")
+	httpLookupSectionTwin := getHTTPMap(router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=section")
+	Expect(mcpLookupSectionTwin).To(matchJSONEqual(httpLookupSectionTwin), "wiki_lookup_path section twin")
+	Expect(mcpLookupSectionTwin).To(matchLookupFinalID(stringField(sectionTwin, "id"), "section"), "wiki_lookup_path section twin")
 
-	invalidLookupKindErr := callToolStructuredError(t, session, "wiki_lookup_path", map[string]any{
+	invalidLookupKindErr := callToolStructuredError(session, "wiki_lookup_path", map[string]any{
 		"path": "parent-section/lookup-twin",
 		"kind": "folder",
 	})
-	assertMCPPageError(t, mcpLabelLookupPathInvalidKind, invalidLookupKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
-	invalidLookupKindHTTP := getHTTPStatus(t, router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=folder", http.StatusBadRequest)
-	if !strings.Contains(invalidLookupKindHTTP, "page_invalid_kind") {
-		t.Fatalf("HTTP lookup_path invalid kind error = %q, want page_invalid_kind", invalidLookupKindHTTP)
-	}
+	Expect(invalidLookupKindErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)), mcpLabelLookupPathInvalidKind)
+	invalidLookupKindHTTP := getHTTPStatus(router, "/api/pages/lookup?path=parent-section%2Flookup-twin&kind=folder", http.StatusBadRequest)
+	Expect(invalidLookupKindHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)))
 
-	permalink := callToolStructured(t, session, "wiki_resolve_permalink", map[string]any{"id": ensuredID})
-	httpPermalink := getHTTPMap(t, router, "/api/pages/permalink/"+ensuredID)
-	assertJSONEqual(t, "wiki_resolve_permalink", permalink["target"], httpPermalink)
-	recordHTTPMCPParity(t, "wiki_resolve_permalink", "GET /api/pages/permalink/:id")
-	target := nestedMap(t, permalink, "target")
-	if got := target["path"]; got != "parent-section/ensured" {
-		t.Fatalf("resolve_permalink path = %v, want parent-section/ensured", got)
-	}
-	permalinkByAlias := callToolStructured(t, session, "wiki_resolve_permalink", map[string]any{"pageId": ensuredID})
-	targetByAlias := nestedMap(t, permalinkByAlias, "target")
-	if got := targetByAlias["path"]; got != "parent-section/ensured" {
-		t.Fatalf("resolve_permalink pageId alias path = %v, want parent-section/ensured", got)
-	}
+	permalink := callToolStructured(session, "wiki_resolve_permalink", map[string]any{"id": ensuredID})
+	httpPermalink := getHTTPMap(router, "/api/pages/permalink/"+ensuredID)
+	Expect(permalink).To(HaveKeyWithValue("target", matchJSONEqual(httpPermalink)), "wiki_resolve_permalink")
+	recordHTTPMCPParity("wiki_resolve_permalink", "GET /api/pages/permalink/:id")
+	target := nestedMap(permalink, "target")
+	Expect(target).To(HaveKeyWithValue("path", "parent-section/ensured"))
+	permalinkByAlias := callToolStructured(session, "wiki_resolve_permalink", map[string]any{"pageId": ensuredID})
+	targetByAlias := nestedMap(permalinkByAlias, "target")
+	Expect(targetByAlias).To(HaveKeyWithValue("path", "parent-section/ensured"))
 
-	invalidEnsureKindErr := callToolStructuredError(t, session, "wiki_ensure_page", map[string]any{
+	invalidEnsureKindErr := callToolStructuredError(session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/invalid-kind",
 		"title": "Invalid Ensure Kind",
 		"kind":  "folder",
 	})
-	assertMCPPageError(t, mcpLabelEnsurePageInvalidKind, invalidEnsureKindErr, wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind))
-	assertErrorDoesNotContainAny(t, mcpLabelEnsurePageInvalidKind, invalidEnsureKindErr.Text, "enum", "validating")
-	invalidEnsureKindHTTP := postHTTPJSONBody(t, router, "/api/pages/ensure", map[string]any{
+	Expect(invalidEnsureKindErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)), mcpLabelEnsurePageInvalidKind)
+	invalidEnsureKindHTTP := postHTTPJSONBody(router, "/api/pages/ensure", map[string]any{
 		"path":  "parent-section/invalid-kind-http",
 		"title": "Invalid Ensure Kind HTTP",
 		"kind":  "folder",
 	}, http.StatusBadRequest)
-	if !strings.Contains(invalidEnsureKindHTTP, "page_invalid_kind") {
-		t.Fatalf("HTTP ensure_page invalid kind error = %q, want page_invalid_kind", invalidEnsureKindHTTP)
-	}
+	Expect(invalidEnsureKindHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidKind)))
 
-	mcpMove := callToolStructured(t, session, "wiki_move_page", map[string]any{
-		"id":       stringField(t, childA, "id"),
-		"version":  stringField(t, childA, "version"),
+	mcpMove := callToolStructured(session, "wiki_move_page", map[string]any{
+		"id":       stringField(childA, "id"),
+		"version":  stringField(childA, "version"),
 		"parentId": "",
 	})
-	httpMove := putHTTPJSON(t, router, "/api/pages/"+stringField(t, childB, "id")+"/move", map[string]any{
-		"version":  stringField(t, childB, "version"),
+	httpMove := putHTTPJSON(router, "/api/pages/"+stringField(childB, "id")+"/move", map[string]any{
+		"version":  stringField(childB, "version"),
 		"parentId": "",
 	}, http.StatusOK)
-	assertScopedSuccessPayloadsEqual(t, "wiki_move_page", mcpMove, httpMove, "mcp.tools.wiki_move_page.success", "api.pages.move.success")
-	httpMoved := getHTTPPageByPath(t, router, "child-a")
-	assertPageState(t, "MCP moved child A", httpMoved, stringField(t, childA, "id"), "Child A", "child-a", "child-a", "page", "")
-	httpMovedB := getHTTPPageByPath(t, router, "child-b")
-	assertPageState(t, "HTTP moved child B", httpMovedB, stringField(t, childB, "id"), "Child B", "child-b", "child-b", "page", "")
-	parentAfterMove := getHTTPPageByPath(t, router, "parent-section")
-	assertChildrenDoNotContain(t, "parent after move", parentAfterMove, stringField(t, childA, "id"), stringField(t, childB, "id"))
-	staleMoveErr := callToolStructuredError(t, session, "wiki_move_page", map[string]any{
-		"id":       stringField(t, childA, "id"),
-		"version":  stringField(t, childA, "version"),
+	Expect(mcpMove).To(matchScopedSuccessPayload(httpMove, "mcp.tools.wiki_move_page.success", "api.pages.move.success"), "wiki_move_page")
+	httpMoved := getHTTPPageByPath(router, "child-a")
+	Expect(httpMoved).To(matchPageState(stringField(childA, "id"), "Child A", "child-a", "child-a", "page", ""), "MCP moved child A")
+	httpMovedB := getHTTPPageByPath(router, "child-b")
+	Expect(httpMovedB).To(matchPageState(stringField(childB, "id"), "Child B", "child-b", "child-b", "page", ""), "HTTP moved child B")
+	parentAfterMove := getHTTPPageByPath(router, "parent-section")
+	Expect(parentAfterMove).To(matchChildrenExcludingIDs(stringField(childA, "id"), stringField(childB, "id")), "parent after move")
+	staleMoveErr := callToolStructuredError(session, "wiki_move_page", map[string]any{
+		"id":       stringField(childA, "id"),
+		"version":  stringField(childA, "version"),
 		"parentId": parentID,
 	})
-	staleMoveHTTP := putHTTPJSONBody(t, router, "/api/pages/"+stringField(t, childA, "id")+"/move", map[string]any{
-		"version":  stringField(t, childA, "version"),
+	staleMoveHTTP := putHTTPJSONBody(router, "/api/pages/"+stringField(childA, "id")+"/move", map[string]any{
+		"version":  stringField(childA, "version"),
 		"parentId": parentID,
 	}, http.StatusConflict)
-	assertPageVersionConflictParity(t, "stale move_page", staleMoveErr, staleMoveHTTP)
-	mcpWhitespaceMove := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	Expect(staleMoveErr).To(matchMCPPageVersionConflict(), "stale move_page MCP")
+	Expect(staleMoveHTTP).To(matchHTTPPageVersionConflict(), "stale move_page HTTP")
+	mcpWhitespaceMove := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "MCP Whitespace Move",
 		"slug":  "mcp-whitespace-move",
 		"kind":  "page",
 	}), "page")
-	whitespaceMoveErr := callToolStructuredError(t, session, "wiki_move_page", map[string]any{
-		"id":       stringField(t, mcpWhitespaceMove, "id"),
-		"version":  stringField(t, mcpWhitespaceMove, "version"),
+	whitespaceMoveErr := callToolStructuredError(session, "wiki_move_page", map[string]any{
+		"id":       stringField(mcpWhitespaceMove, "id"),
+		"version":  stringField(mcpWhitespaceMove, "version"),
 		"parentId": " ",
 	})
-	assertMCPPageError(t, mcpLabelMovePageWhitespaceParentID, whitespaceMoveErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
-	httpWhitespaceMove := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	Expect(whitespaceMoveErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)), mcpLabelMovePageWhitespaceParentID)
+	httpWhitespaceMove := postHTTPJSON(router, "/api/pages", map[string]any{
 		"title": "HTTP Whitespace Move",
 		"slug":  "http-whitespace-move",
 		"kind":  "page",
 	}, http.StatusCreated)
-	whitespaceMoveHTTP := putHTTPJSONBody(t, router, "/api/pages/"+stringField(t, httpWhitespaceMove, "id")+"/move", map[string]any{
-		"version":  stringField(t, httpWhitespaceMove, "version"),
+	whitespaceMoveHTTP := putHTTPJSONBody(router, "/api/pages/"+stringField(httpWhitespaceMove, "id")+"/move", map[string]any{
+		"version":  stringField(httpWhitespaceMove, "version"),
 		"parentId": " ",
 	}, http.StatusBadRequest)
-	if !strings.Contains(whitespaceMoveHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP whitespace move parentId error = %q, want page_invalid_parent_id", whitespaceMoveHTTP)
-	}
-	mcpMissingParentMove := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	Expect(whitespaceMoveHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
+	mcpMissingParentMove := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"parentId": parentID,
 		"title":    "MCP Missing Parent Move",
 		"slug":     "mcp-missing-parent-move",
 		"kind":     "page",
 	}), "page")
-	missingParentMove := callToolStructured(t, session, "wiki_move_page", map[string]any{
-		"id":      stringField(t, mcpMissingParentMove, "id"),
-		"version": stringField(t, mcpMissingParentMove, "version"),
+	missingParentMove := callToolStructured(session, "wiki_move_page", map[string]any{
+		"id":      stringField(mcpMissingParentMove, "id"),
+		"version": stringField(mcpMissingParentMove, "version"),
 	})
-	if missingParentMove["message"] != "Page moved" {
-		t.Fatalf("MCP move_page missing parentId message = %v, want Page moved", missingParentMove["message"])
-	}
-	assertPageState(t, "MCP move_page missing parentId", getHTTPPageByPath(t, router, "mcp-missing-parent-move"), stringField(t, mcpMissingParentMove, "id"), "MCP Missing Parent Move", "mcp-missing-parent-move", "mcp-missing-parent-move", "page", "")
-	recordHTTPMCPParity(t, "wiki_move_page", "PUT /api/pages/:id/move")
+	Expect(messageOutputFromStructuredContent(missingParentMove)).To(HaveField("MessageID", Equal(wikimcp.ToolMessageMovePageSuccess)))
+	Expect(getHTTPPageByPath(router, "mcp-missing-parent-move")).To(matchPageState(stringField(mcpMissingParentMove, "id"), "MCP Missing Parent Move", "mcp-missing-parent-move", "mcp-missing-parent-move", "page", ""), "MCP move_page missing parentId")
+	recordHTTPMCPParity("wiki_move_page", "PUT /api/pages/:id/move")
 
-	convertMe := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	convertMe := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Convert Me",
 		"slug":  "convert-me",
 		"kind":  "section",
 	}), "page")
-	mcpConvert := callToolStructured(t, session, "wiki_convert_page", map[string]any{
-		"id":         stringField(t, convertMe, "id"),
-		"version":    stringField(t, convertMe, "version"),
+	mcpConvert := callToolStructured(session, "wiki_convert_page", map[string]any{
+		"id":         stringField(convertMe, "id"),
+		"version":    stringField(convertMe, "version"),
 		"targetKind": "page",
 	})
-	if mcpConvert["message"] != "Page converted" {
-		t.Fatalf("convert_page message = %v, want Page converted", mcpConvert["message"])
-	}
-	httpConverted := getHTTPPageByPath(t, router, "convert-me")
-	if httpConverted["kind"] != "page" {
-		t.Fatalf("converted kind = %v, want page", httpConverted["kind"])
-	}
-	assertPageState(t, "MCP converted page", httpConverted, stringField(t, convertMe, "id"), "Convert Me", "convert-me", "convert-me", "page", "")
-	convertHTTP := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	Expect(messageOutputFromStructuredContent(mcpConvert)).To(HaveField("MessageID", Equal(wikimcp.ToolMessageConvertPageSuccess)))
+	httpConverted := getHTTPPageByPath(router, "convert-me")
+	Expect(httpConverted).To(HaveKeyWithValue("kind", "page"))
+	Expect(httpConverted).To(matchPageState(stringField(convertMe, "id"), "Convert Me", "convert-me", "convert-me", "page", ""), "MCP converted page")
+	convertHTTP := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Convert HTTP",
 		"slug":  "convert-http",
 		"kind":  "section",
 	}), "page")
-	postHTTPJSONNoContent(t, router, "/api/pages/convert/"+stringField(t, convertHTTP, "id"), map[string]any{
-		"version":    stringField(t, convertHTTP, "version"),
+	postHTTPJSONNoContent(router, "/api/pages/convert/"+stringField(convertHTTP, "id"), map[string]any{
+		"version":    stringField(convertHTTP, "version"),
 		"targetKind": "page",
 	}, http.StatusNoContent)
-	httpConvertedPeer := getHTTPPageByPath(t, router, "convert-http")
-	assertPageState(t, "HTTP converted page", httpConvertedPeer, stringField(t, convertHTTP, "id"), "Convert HTTP", "convert-http", "convert-http", "page", "")
-	staleConvertErr := callToolStructuredError(t, session, "wiki_convert_page", map[string]any{
-		"id":         stringField(t, convertMe, "id"),
-		"version":    stringField(t, convertMe, "version"),
+	httpConvertedPeer := getHTTPPageByPath(router, "convert-http")
+	Expect(httpConvertedPeer).To(matchPageState(stringField(convertHTTP, "id"), "Convert HTTP", "convert-http", "convert-http", "page", ""), "HTTP converted page")
+	staleConvertErr := callToolStructuredError(session, "wiki_convert_page", map[string]any{
+		"id":         stringField(convertMe, "id"),
+		"version":    stringField(convertMe, "version"),
 		"targetKind": "section",
 	})
-	staleConvertHTTP := postHTTPJSONBody(t, router, "/api/pages/convert/"+stringField(t, convertMe, "id"), map[string]any{
-		"version":    stringField(t, convertMe, "version"),
+	staleConvertHTTP := postHTTPJSONBody(router, "/api/pages/convert/"+stringField(convertMe, "id"), map[string]any{
+		"version":    stringField(convertMe, "version"),
 		"targetKind": "section",
 	}, http.StatusConflict)
-	assertPageVersionConflictParity(t, "stale convert_page", staleConvertErr, staleConvertHTTP)
-	invalidConvertErr := callToolStructuredError(t, session, "wiki_convert_page", map[string]any{
-		"id":         stringField(t, convertMe, "id"),
-		"version":    stringField(t, httpConverted, "version"),
+	Expect(staleConvertErr).To(matchMCPPageVersionConflict(), "stale convert_page MCP")
+	Expect(staleConvertHTTP).To(matchHTTPPageVersionConflict(), "stale convert_page HTTP")
+	invalidConvertErr := callToolStructuredError(session, "wiki_convert_page", map[string]any{
+		"id":         stringField(convertMe, "id"),
+		"version":    stringField(httpConverted, "version"),
 		"targetKind": "folder",
 	})
-	assertMCPPageError(t, mcpLabelConvertPageInvalidTargetKind, invalidConvertErr, wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind))
-	assertErrorDoesNotContainAny(t, mcpLabelConvertPageInvalidTargetKind, invalidConvertErr.Text, "enum", "validating")
-	paddedConvertErr := callToolStructuredError(t, session, "wiki_convert_page", map[string]any{
-		"id":         stringField(t, convertMe, "id"),
-		"version":    stringField(t, httpConverted, "version"),
+	Expect(invalidConvertErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind)), mcpLabelConvertPageInvalidTargetKind)
+	paddedConvertErr := callToolStructuredError(session, "wiki_convert_page", map[string]any{
+		"id":         stringField(convertMe, "id"),
+		"version":    stringField(httpConverted, "version"),
 		"targetKind": " page ",
 	})
-	assertMCPPageError(t, mcpLabelConvertPagePaddedTargetKind, paddedConvertErr, wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind))
-	assertErrorDoesNotContainAny(t, mcpLabelConvertPagePaddedTargetKind, paddedConvertErr.Text, "enum", "validating")
-	invalidConvertHTTP := postHTTPJSONBody(t, router, "/api/pages/convert/"+stringField(t, convertMe, "id"), map[string]any{
-		"version":    stringField(t, httpConverted, "version"),
+	Expect(paddedConvertErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind)), mcpLabelConvertPagePaddedTargetKind)
+	invalidConvertHTTP := postHTTPJSONBody(router, "/api/pages/convert/"+stringField(convertMe, "id"), map[string]any{
+		"version":    stringField(httpConverted, "version"),
 		"targetKind": "folder",
 	}, http.StatusBadRequest)
-	if !strings.Contains(invalidConvertHTTP, wikipages.ErrCodePageInvalidTargetKind.String()) {
-		t.Fatalf("HTTP invalid convert_page targetKind error = %q, want %s", invalidConvertHTTP, wikipages.ErrCodePageInvalidTargetKind.String())
-	}
-	paddedConvertHTTP := postHTTPJSONBody(t, router, "/api/pages/convert/"+stringField(t, convertMe, "id"), map[string]any{
-		"version":    stringField(t, httpConverted, "version"),
+	Expect(invalidConvertHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind)), mcpLabelConvertPageInvalidTargetKindHTTP)
+	paddedConvertHTTP := postHTTPJSONBody(router, "/api/pages/convert/"+stringField(convertMe, "id"), map[string]any{
+		"version":    stringField(httpConverted, "version"),
 		"targetKind": " page ",
 	}, http.StatusBadRequest)
-	if !strings.Contains(paddedConvertHTTP, wikipages.ErrCodePageInvalidTargetKind.String()) {
-		t.Fatalf("HTTP padded convert_page targetKind error = %q, want %s", paddedConvertHTTP, wikipages.ErrCodePageInvalidTargetKind.String())
-	}
-	recordHTTPMCPParity(t, "wiki_convert_page", "POST /api/pages/convert/:id")
+	Expect(paddedConvertHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidTargetKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidTargetKind)), mcpLabelConvertPagePaddedTargetKindHTTP)
+	recordHTTPMCPParity("wiki_convert_page", "POST /api/pages/convert/:id")
 
-	copied := nestedMap(t, callToolStructured(t, session, "wiki_copy_page", map[string]any{
-		"id":    stringField(t, childA, "id"),
+	copied := nestedMap(callToolStructured(session, "wiki_copy_page", map[string]any{
+		"id":    stringField(childA, "id"),
 		"title": "Child A Copy",
 		"slug":  "child-a-copy",
 	}), "page")
-	httpCopied := postHTTPJSON(t, router, "/api/pages/copy/"+stringField(t, childA, "id"), map[string]any{
+	httpCopied := postHTTPJSON(router, "/api/pages/copy/"+stringField(childA, "id"), map[string]any{
 		"title": "Child A Copy",
 		"slug":  "child-a-http-copy",
 	}, http.StatusCreated)
-	whitespaceCopyErr := callToolStructuredError(t, session, "wiki_copy_page", map[string]any{
-		"id":             stringField(t, childA, "id"),
+	whitespaceCopyErr := callToolStructuredError(session, "wiki_copy_page", map[string]any{
+		"id":             stringField(childA, "id"),
 		"targetParentId": " ",
 		"title":          "Whitespace Copy",
 		"slug":           "whitespace-copy",
 	})
-	assertMCPPageError(t, mcpLabelCopyPageWhitespaceTargetParentID, whitespaceCopyErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
-	whitespaceCopyHTTP := postHTTPJSONBody(t, router, "/api/pages/copy/"+stringField(t, childB, "id"), map[string]any{
+	Expect(whitespaceCopyErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)), mcpLabelCopyPageWhitespaceTargetParentID)
+	whitespaceCopyHTTP := postHTTPJSONBody(router, "/api/pages/copy/"+stringField(childB, "id"), map[string]any{
 		"targetParentId": " ",
 		"title":          "Whitespace Copy HTTP",
 		"slug":           "whitespace-copy-http",
 	}, http.StatusBadRequest)
-	if !strings.Contains(whitespaceCopyHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP copy_page whitespace targetParentId error = %q, want page_invalid_parent_id", whitespaceCopyHTTP)
-	}
-	paddedCopyErr := callToolStructuredError(t, session, "wiki_copy_page", map[string]any{
-		"id":             stringField(t, childA, "id"),
+	Expect(whitespaceCopyHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
+	paddedCopyErr := callToolStructuredError(session, "wiki_copy_page", map[string]any{
+		"id":             stringField(childA, "id"),
 		"targetParentId": " " + parentID + " ",
 		"title":          "Padded Copy",
 		"slug":           "padded-copy",
 	})
-	assertMCPPageError(t, mcpLabelCopyPagePaddedTargetParentID, paddedCopyErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
-	paddedCopyHTTP := postHTTPJSONBody(t, router, "/api/pages/copy/"+stringField(t, childB, "id"), map[string]any{
+	Expect(paddedCopyErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)), mcpLabelCopyPagePaddedTargetParentID)
+	paddedCopyHTTP := postHTTPJSONBody(router, "/api/pages/copy/"+stringField(childB, "id"), map[string]any{
 		"targetParentId": " " + parentID + " ",
 		"title":          "Padded Copy HTTP",
 		"slug":           "padded-copy-http",
 	}, http.StatusBadRequest)
-	if !strings.Contains(paddedCopyHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP copy_page padded targetParentId error = %q, want page_invalid_parent_id", paddedCopyHTTP)
-	}
-	assertMapFieldsEqual(t, "wiki_copy_page", copied, httpCopied, []string{"title", "kind", "content"})
-	assertPageState(t, "MCP copied page", getHTTPPageByPath(t, router, "child-a-copy"), stringField(t, copied, "id"), "Child A Copy", "child-a-copy", "child-a-copy", "page", "")
-	assertPageState(t, "HTTP copied page", getHTTPPageByPath(t, router, "child-a-http-copy"), stringField(t, httpCopied, "id"), "Child A Copy", "child-a-http-copy", "child-a-http-copy", "page", "")
-	assertPageState(t, "copy_page source preserved", getHTTPPageByPath(t, router, "child-a"), stringField(t, childA, "id"), "Child A", "child-a", "child-a", "page", "")
-	recordHTTPMCPParity(t, "wiki_copy_page", "POST /api/pages/copy/:id")
+	Expect(paddedCopyHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
+	Expect(copied).To(matchMapFields(httpCopied, []string{"title", "kind", "content"}), "wiki_copy_page")
+	Expect(getHTTPPageByPath(router, "child-a-copy")).To(matchPageState(stringField(copied, "id"), "Child A Copy", "child-a-copy", "child-a-copy", "page", ""), "MCP copied page")
+	Expect(getHTTPPageByPath(router, "child-a-http-copy")).To(matchPageState(stringField(httpCopied, "id"), "Child A Copy", "child-a-http-copy", "child-a-http-copy", "page", ""), "HTTP copied page")
+	Expect(getHTTPPageByPath(router, "child-a")).To(matchPageState(stringField(childA, "id"), "Child A", "child-a", "child-a", "page", ""), "copy_page source preserved")
+	recordHTTPMCPParity("wiki_copy_page", "POST /api/pages/copy/:id")
 
-	missingDeleteVersionErr := callToolError(t, session, "wiki_delete_page", map[string]any{"id": stringField(t, copied, "id")})
-	if !strings.Contains(strings.ToLower(missingDeleteVersionErr), "version") {
-		t.Fatalf("MCP delete without version error = %q, want version detail", missingDeleteVersionErr)
-	}
-	missingDeleteHTTP := deleteHTTPStatus(t, router, "/api/pages/"+stringField(t, copied, "id"), http.StatusBadRequest)
-	if !strings.Contains(strings.ToLower(missingDeleteHTTP), "version") {
-		t.Fatalf("HTTP delete without version error = %q, want version detail", missingDeleteHTTP)
-	}
+	missingDeleteHTTP := deleteHTTPStatus(router, "/api/pages/"+stringField(copied, "id"), http.StatusBadRequest)
+	Expect(missingDeleteHTTP).To(matchHTTPPageError(wikipages.ErrCodePageVersionRequired, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionRequired)))
 
-	staleDelete := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, copied, "id"),
-		"version": stringField(t, copied, "version"),
+	staleDelete := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
+		"id":      stringField(copied, "id"),
+		"version": stringField(copied, "version"),
 		"title":   "Child A Copy Updated",
 		"slug":    "child-a-copy",
 		"content": "updated",
 	}), "page")
-	staleDeleteErr := callToolStructuredError(t, session, "wiki_delete_page", map[string]any{
-		"id":      stringField(t, copied, "id"),
-		"version": stringField(t, copied, "version"),
+	staleDeleteErr := callToolStructuredError(session, "wiki_delete_page", map[string]any{
+		"id":      stringField(copied, "id"),
+		"version": stringField(copied, "version"),
 	})
-	staleDeleteHTTP := deleteHTTPStatus(t, router, "/api/pages/"+stringField(t, copied, "id")+"?version="+url.QueryEscape(stringField(t, copied, "version")), http.StatusConflict)
-	assertPageVersionConflictParity(t, "stale delete_page", staleDeleteErr, staleDeleteHTTP)
+	staleDeleteHTTP := deleteHTTPStatus(router, "/api/pages/"+stringField(copied, "id")+"?version="+url.QueryEscape(stringField(copied, "version")), http.StatusConflict)
+	Expect(staleDeleteErr).To(matchMCPPageVersionConflict(), "stale delete_page MCP")
+	Expect(staleDeleteHTTP).To(matchHTTPPageVersionConflict(), "stale delete_page HTTP")
 
-	mcpDeletedPage := callToolStructured(t, session, "wiki_delete_page", map[string]any{
-		"id":      stringField(t, copied, "id"),
-		"version": stringField(t, staleDelete, "version"),
+	mcpDeletedPage := callToolStructured(session, "wiki_delete_page", map[string]any{
+		"id":      stringField(copied, "id"),
+		"version": stringField(staleDelete, "version"),
 	})
-	httpDeletedPageBody := deleteHTTPStatus(t, router, "/api/pages/"+stringField(t, httpCopied, "id")+"?version="+url.QueryEscape(stringField(t, httpCopied, "version")), http.StatusOK)
-	assertScopedSuccessPayloadsEqual(t, "wiki_delete_page", mcpDeletedPage, decodeJSONMap(t, "HTTP delete_page", []byte(httpDeletedPageBody)), "mcp.tools.wiki_delete_page.success", "api.pages.delete.success")
+	httpDeletedPageBody := deleteHTTPStatus(router, "/api/pages/"+stringField(httpCopied, "id")+"?version="+url.QueryEscape(stringField(httpCopied, "version")), http.StatusOK)
+	Expect(mcpDeletedPage).To(matchScopedSuccessPayload(decodeJSONMap("HTTP delete_page", []byte(httpDeletedPageBody)), "mcp.tools.wiki_delete_page.success", "api.pages.delete.success"), "wiki_delete_page")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path=child-a-copy", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("GET deleted copy = %d, want 404", rec.Code)
-	}
+	Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path=child-a-http-copy", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("GET HTTP-deleted copy = %d, want 404", rec.Code)
-	}
-	recordHTTPMCPParity(t, "wiki_delete_page", "DELETE /api/pages/:id")
+	Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
+	recordHTTPMCPParity("wiki_delete_page", "DELETE /api/pages/:id")
 }
 
-var _ = It("LocalMCPProtocol_IndexAndAssetParity", func() {
-	t := GinkgoTB()
-	runLocalMCPProtocolIndexAndAssetParity(t)
+var _ = Describe("local MCP index and asset parity", func() {
+	It("keeps index and asset tools aligned with HTTP routes", func() {
+		runLocalMCPProtocolIndexAndAssetParity()
+	})
 })
 
-func runLocalMCPProtocolIndexAndAssetParity(t testing.TB) {
-	w := newLocalMCPTestWiki(t, false)
+func runLocalMCPProtocolIndexAndAssetParity() {
+	GinkgoHelper()
+
+	w := newLocalMCPTestWiki(false)
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
 		PublicAccess:            true,
@@ -3752,32 +3230,28 @@ func runLocalMCPProtocolIndexAndAssetParity(t testing.TB) {
 		MCPEnabled:              true,
 		MCPToolListPageSize:     200,
 	})
-	session := connectLocalMCP(t, router, "/mcp")
+	session := connectLocalMCP(router, "/mcp")
 
-	searchErr := callToolError(t, session, "wiki_search_pages", map[string]any{})
-	if !strings.Contains(searchErr, "search_missing_query") && !strings.Contains(strings.ToLower(searchErr), "query") {
-		t.Fatalf("empty search_pages error = %q, want missing query detail", searchErr)
-	}
-	blankTagSearchErr := callToolError(t, session, "wiki_search_pages", map[string]any{"tags": []any{" "}})
-	if !strings.Contains(blankTagSearchErr, "search_missing_query") && !strings.Contains(strings.ToLower(blankTagSearchErr), "query") {
-		t.Fatalf("blank-tag search_pages error = %q, want missing query detail", blankTagSearchErr)
-	}
+	searchErr := callToolStructuredError(session, "wiki_search_pages", map[string]any{})
+	Expect(searchErr).To(matchMCPStructuredError(wikisearch.ErrCodeSearchMissingQuery, sharederrors.MessageIDForCode(wikisearch.ErrCodeSearchMissingQuery)))
+	blankTagSearchErr := callToolStructuredError(session, "wiki_search_pages", map[string]any{"tags": []any{" "}})
+	Expect(blankTagSearchErr).To(matchMCPStructuredError(wikisearch.ErrCodeSearchMissingQuery, sharederrors.MessageIDForCode(wikisearch.ErrCodeSearchMissingQuery)))
 
-	target := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	target := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Target",
 		"slug":  "target",
 		"kind":  "page",
 	}), "page")
-	source := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	source := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Source",
 		"slug":  "source",
 		"kind":  "page",
 	}), "page")
-	sourceID := stringField(t, source, "id")
+	sourceID := stringField(source, "id")
 	content := "Tagged source with [Target](/target.md) and [Missing](/missing-target)"
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
+	callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      sourceID,
-		"version": stringField(t, source, "version"),
+		"version": stringField(source, "version"),
 		"title":   "Source",
 		"slug":    "source",
 		"content": content,
@@ -3787,296 +3261,230 @@ func runLocalMCPProtocolIndexAndAssetParity(t testing.TB) {
 		},
 	})
 
-	status := callToolStructured(t, session, "wiki_get_search_status", nil)
-	httpStatus := getHTTPValue(t, router, "/api/search/status")
-	assertJSONEqual(t, "wiki_get_search_status", status["status"], httpStatus)
-	recordHTTPMCPParity(t, "wiki_get_search_status", "GET /api/search/status")
-	if status["status"] == nil {
-		t.Fatalf("get_search_status returned no status: %#v", status)
-	}
+	status := callToolStructured(session, "wiki_get_search_status", nil)
+	httpStatus := getHTTPValue(router, "/api/search/status")
+	Expect(status).To(HaveKeyWithValue("status", matchJSONEqual(httpStatus)), "wiki_get_search_status")
+	recordHTTPMCPParity("wiki_get_search_status", "GET /api/search/status")
+	Expect(status).To(HaveKey("status"))
 
-	tags := callToolStructured(t, session, "wiki_list_tags", map[string]any{"q": "mc", "limit": float64(10)})
-	httpTags := getHTTPValue(t, router, "/api/tags?q=mc&limit=10")
-	assertJSONEqual(t, "wiki_list_tags", tags["tags"], httpTags)
-	recordHTTPMCPParity(t, "wiki_list_tags", "GET /api/tags")
-	if !arrayContainsObjectField(tags["tags"], "tag", "mcp") {
-		t.Fatalf("list_tags = %#v, want mcp tag", tags["tags"])
-	}
-	tagPages := callToolStructured(t, session, "wiki_get_pages_by_tags", map[string]any{"tags": []any{"mcp"}})
-	httpTagPages := getHTTPValue(t, router, "/api/tags/pages?tags=mcp")
-	assertJSONEqual(t, "wiki_get_pages_by_tags", tagPages["pages"], httpTagPages)
-	recordHTTPMCPParity(t, "wiki_get_pages_by_tags", "GET /api/tags/pages")
-	if !arrayContainsObjectField(tagPages["pages"], "id", sourceID) {
-		t.Fatalf("get_pages_by_tags = %#v, want source page", tagPages["pages"])
-	}
-	blankTagsErr := callToolError(t, session, "wiki_get_pages_by_tags", map[string]any{"tags": []any{" "}})
-	if !strings.Contains(blankTagsErr, wikitags.ErrCodeTagsMissingParam.String()) && !strings.Contains(strings.ToLower(blankTagsErr), "tags") {
-		t.Fatalf("MCP blank get_pages_by_tags error = %q, want tags missing detail", blankTagsErr)
-	}
-	blankTagsHTTP := getHTTPStatus(t, router, "/api/tags/pages?tags=+", http.StatusBadRequest)
-	if !strings.Contains(blankTagsHTTP, wikitags.ErrCodeTagsMissingParam.String()) {
-		t.Fatalf("HTTP blank get_pages_by_tags error = %q, want %s", blankTagsHTTP, wikitags.ErrCodeTagsMissingParam.String())
-	}
+	tags := callToolStructured(session, "wiki_list_tags", map[string]any{"q": "mc", "limit": float64(10)})
+	httpTags := getHTTPValue(router, "/api/tags?q=mc&limit=10")
+	Expect(tags).To(HaveKeyWithValue("tags", matchJSONEqual(httpTags)), "wiki_list_tags")
+	recordHTTPMCPParity("wiki_list_tags", "GET /api/tags")
+	Expect(arrayFieldFromMap(tags, "tags")).To(ContainElement(HaveKeyWithValue("tag", "mcp")))
+	tagPages := callToolStructured(session, "wiki_get_pages_by_tags", map[string]any{"tags": []any{"mcp"}})
+	httpTagPages := getHTTPValue(router, "/api/tags/pages?tags=mcp")
+	Expect(tagPages).To(HaveKeyWithValue("pages", matchJSONEqual(httpTagPages)), "wiki_get_pages_by_tags")
+	recordHTTPMCPParity("wiki_get_pages_by_tags", "GET /api/tags/pages")
+	Expect(arrayFieldFromMap(tagPages, "pages")).To(ContainElement(HaveKeyWithValue("id", sourceID)))
+	blankTagsErr := callToolStructuredError(session, "wiki_get_pages_by_tags", map[string]any{"tags": []any{" "}})
+	Expect(blankTagsErr).To(matchMCPStructuredError(wikitags.ErrCodeTagsMissingParam, sharederrors.MessageIDForCode(wikitags.ErrCodeTagsMissingParam)), mcpLabelGetPagesByTagsBlankMCP)
+	blankTagsHTTP := getHTTPStatus(router, "/api/tags/pages?tags=+", http.StatusBadRequest)
+	Expect(blankTagsHTTP).To(matchHTTPPageError(wikitags.ErrCodeTagsMissingParam, sharederrors.MessageIDForCode(wikitags.ErrCodeTagsMissingParam)), mcpLabelGetPagesByTagsBlankHTTP)
 
-	keys := callToolStructured(t, session, "wiki_list_property_keys", map[string]any{"q": "sta", "limit": float64(10)})
-	httpKeys := getHTTPValue(t, router, "/api/properties?q=sta&limit=10")
-	assertJSONEqual(t, "wiki_list_property_keys", keys["keys"], httpKeys)
-	recordHTTPMCPParity(t, "wiki_list_property_keys", "GET /api/properties")
-	if !arrayContainsObjectField(keys["keys"], "key", "status") {
-		t.Fatalf("list_property_keys = %#v, want status key", keys["keys"])
-	}
-	propertyPages := callToolStructured(t, session, "wiki_get_pages_by_property", map[string]any{"key": "status", "value": "draft"})
-	httpPropertyPages := getHTTPValue(t, router, "/api/properties/pages?key=status&value=draft")
-	assertJSONEqual(t, "wiki_get_pages_by_property", propertyPages["pages"], httpPropertyPages)
-	recordHTTPMCPParity(t, "wiki_get_pages_by_property", "GET /api/properties/pages")
-	if !arrayContainsObjectField(propertyPages["pages"], "id", sourceID) {
-		t.Fatalf("get_pages_by_property = %#v, want source page", propertyPages["pages"])
-	}
+	keys := callToolStructured(session, "wiki_list_property_keys", map[string]any{"q": "sta", "limit": float64(10)})
+	httpKeys := getHTTPValue(router, "/api/properties?q=sta&limit=10")
+	Expect(keys).To(HaveKeyWithValue("keys", matchJSONEqual(httpKeys)), "wiki_list_property_keys")
+	recordHTTPMCPParity("wiki_list_property_keys", "GET /api/properties")
+	Expect(arrayFieldFromMap(keys, "keys")).To(ContainElement(HaveKeyWithValue("key", "status")))
+	propertyPages := callToolStructured(session, "wiki_get_pages_by_property", map[string]any{"key": "status", "value": "draft"})
+	httpPropertyPages := getHTTPValue(router, "/api/properties/pages?key=status&value=draft")
+	Expect(propertyPages).To(HaveKeyWithValue("pages", matchJSONEqual(httpPropertyPages)), "wiki_get_pages_by_property")
+	recordHTTPMCPParity("wiki_get_pages_by_property", "GET /api/properties/pages")
+	Expect(arrayFieldFromMap(propertyPages, "pages")).To(ContainElement(HaveKeyWithValue("id", sourceID)))
 
-	links := callToolStructured(t, session, "wiki_get_link_status", map[string]any{"pageId": sourceID})
-	linkStatus := nestedMap(t, links, "status")
-	httpLinkStatus := getHTTPMap(t, router, "/api/pages/"+sourceID+"/links")
-	assertJSONEqual(t, "wiki_get_link_status", linkStatus, httpLinkStatus)
-	recordHTTPMCPParity(t, "wiki_get_link_status", "GET /api/pages/:id/links")
-	counts := nestedMap(t, linkStatus, "counts")
-	if counts["outgoings"] != float64(1) {
-		t.Fatalf("link outgoing count = %v, want 1; target=%s", counts["outgoings"], target["id"])
-	}
-	if counts["broken_outgoings"] != float64(1) {
-		t.Fatalf("broken outgoing count = %v, want 1", counts["broken_outgoings"])
-	}
+	links := callToolStructured(session, "wiki_get_link_status", map[string]any{"pageId": sourceID})
+	linkStatus := nestedMap(links, "status")
+	httpLinkStatus := getHTTPMap(router, "/api/pages/"+sourceID+"/links")
+	Expect(linkStatus).To(matchJSONEqual(httpLinkStatus), "wiki_get_link_status")
+	recordHTTPMCPParity("wiki_get_link_status", "GET /api/pages/:id/links")
+	counts := nestedMap(linkStatus, "counts")
+	Expect(counts).To(SatisfyAll(
+		HaveKeyWithValue("outgoings", float64(1)),
+		HaveKeyWithValue("broken_outgoings", float64(1)),
+	))
 
-	targetID := stringField(t, target, "id")
-	targetStandaloneStatus := nestedMap(t, callToolStructured(t, session, "wiki_get_link_status", map[string]any{"pageId": targetID}), "status")
-	targetFromGet := callToolStructured(t, session, "wiki_get_page", map[string]any{"id": targetID})
-	assertJSONEqual(t, "wiki_get_page linkStatus", nestedMap(t, targetFromGet, "linkStatus"), targetStandaloneStatus)
-	if !arrayContainsObjectField(nestedMap(t, targetFromGet, "linkStatus")["backlinks"], "from_page_id", sourceID) {
-		t.Fatalf("wiki_get_page linkStatus backlinks = %#v, want backlink from source %s", nestedMap(t, targetFromGet, "linkStatus")["backlinks"], sourceID)
-	}
+	targetID := stringField(target, "id")
+	targetStandaloneStatus := nestedMap(callToolStructured(session, "wiki_get_link_status", map[string]any{"pageId": targetID}), "status")
+	targetFromGet := callToolStructured(session, "wiki_get_page", map[string]any{"id": targetID})
+	Expect(nestedMap(targetFromGet, "linkStatus")).To(matchJSONEqual(targetStandaloneStatus), "wiki_get_page linkStatus")
+	Expect(arrayFieldFromMap(nestedMap(targetFromGet, "linkStatus"), "backlinks")).To(ContainElement(HaveKeyWithValue("from_page_id", sourceID)))
 
-	targetFromPath := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "target"})
-	assertJSONEqual(t, "get_page_by_path linkStatus", nestedMap(t, targetFromPath, "linkStatus"), targetStandaloneStatus)
+	targetFromPath := callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "target"})
+	Expect(nestedMap(targetFromPath, "linkStatus")).To(matchJSONEqual(targetStandaloneStatus), "get_page_by_path linkStatus")
 
-	sourceFromGet := callToolStructured(t, session, "wiki_get_page", map[string]any{"id": sourceID})
-	assertJSONEqual(t, "wiki_get_page source linkStatus", nestedMap(t, sourceFromGet, "linkStatus"), linkStatus)
+	sourceFromGet := callToolStructured(session, "wiki_get_page", map[string]any{"id": sourceID})
+	Expect(nestedMap(sourceFromGet, "linkStatus")).To(matchJSONEqual(linkStatus), "wiki_get_page source linkStatus")
 
-	sourceFromPath := callToolStructured(t, session, "wiki_get_page_by_path", map[string]any{"path": "source"})
-	assertJSONEqual(t, "get_page_by_path source linkStatus", nestedMap(t, sourceFromPath, "linkStatus"), linkStatus)
+	sourceFromPath := callToolStructured(session, "wiki_get_page_by_path", map[string]any{"path": "source"})
+	Expect(nestedMap(sourceFromPath, "linkStatus")).To(matchJSONEqual(linkStatus), "get_page_by_path source linkStatus")
 
 	assetContent := []byte("asset content")
 	cssContent := []byte("body { color: rebeccapurple; }\n")
 	httpAssetContent := []byte("asset content from http")
-	uploaded := callToolStructured(t, session, "wiki_upload_asset", map[string]any{
+	uploaded := callToolStructured(session, "wiki_upload_asset", map[string]any{
 		"pageId":        sourceID,
 		"filename":      "note.txt",
 		"contentBase64": base64.StdEncoding.EncodeToString(assetContent),
 	})
-	if uploaded["file"] != "/assets/"+sourceID+"/note.txt" {
-		t.Fatalf("upload_asset file = %v, want note asset URL", uploaded["file"])
-	}
-	httpUploaded := uploadHTTPAsset(t, router, sourceID, "http-note.txt", httpAssetContent, http.StatusCreated)
-	assertAssetURLResult(t, "wiki_upload_asset", uploaded, "file", sourceID)
-	assertAssetURLResult(t, "HTTP upload asset", httpUploaded, "file", sourceID)
-	asset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"})
-	if asset["filename"] != "note.txt" {
-		t.Fatalf("get_asset filename = %v, want note.txt", asset["filename"])
-	}
-	if got := asset["contentBase64"]; got != base64.StdEncoding.EncodeToString(assetContent) {
-		t.Fatalf("get_asset contentBase64 = %v, want uploaded content", got)
-	}
-	httpNoteBody, httpNoteContentType := getHTTPAssetWithContentType(t, router, sourceID, "note.txt")
-	if httpNoteBody != string(assetContent) {
-		t.Fatalf("HTTP asset content = %q, want uploaded content", httpNoteBody)
-	}
-	if !strings.HasPrefix(httpNoteContentType, asset["mimeType"].(string)) {
-		t.Fatalf("HTTP note content type = %q, want MCP mime type %q", httpNoteContentType, asset["mimeType"])
-	}
-	httpAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"})
-	if got := httpAsset["contentBase64"]; got != base64.StdEncoding.EncodeToString(httpAssetContent) {
-		t.Fatalf("MCP read of HTTP-uploaded asset = %v, want HTTP uploaded content", got)
-	}
-	httpAssetBody, httpAssetContentType := getHTTPAssetWithContentType(t, router, sourceID, "http-note.txt")
-	if httpAssetBody != string(httpAssetContent) {
-		t.Fatalf("HTTP-uploaded asset content = %q, want HTTP uploaded content", httpAssetBody)
-	}
-	if !strings.HasPrefix(httpAssetContentType, httpAsset["mimeType"].(string)) {
-		t.Fatalf("HTTP-uploaded content type = %q, want MCP mime type %q", httpAssetContentType, httpAsset["mimeType"])
-	}
-	listed := callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
-	if !arrayContainsString(listed["files"], "/assets/"+sourceID+"/note.txt") {
-		t.Fatalf("list_assets = %#v, want uploaded note", listed["files"])
-	}
-	httpListed := getHTTPAssets(t, router, sourceID)
-	if !arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/note.txt") {
-		t.Fatalf("HTTP asset list = %#v, want uploaded note", httpListed["files"])
-	}
-	assertJSONEqual(t, "wiki_list_assets", listed, httpListed)
-	recordHTTPMCPParity(t, "wiki_upload_asset", "POST /api/pages/:id/assets")
-	recordHTTPMCPParity(t, "wiki_list_assets", "GET /api/pages/:id/assets")
-	recordHTTPMCPParity(t, "wiki_get_asset", "GET /assets/:pageId/:filename")
-	callToolStructured(t, session, "wiki_upload_asset", map[string]any{
+	Expect(uploaded).To(HaveKeyWithValue("file", "/assets/"+sourceID+"/note.txt"))
+	httpUploaded := uploadHTTPAsset(router, sourceID, "http-note.txt", httpAssetContent, http.StatusCreated)
+	Expect(uploaded).To(matchAssetURLResult("file", sourceID), "wiki_upload_asset")
+	Expect(httpUploaded).To(matchAssetURLResult("file", sourceID), "HTTP upload asset")
+	asset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"})
+	Expect(asset).To(SatisfyAll(
+		HaveKeyWithValue("filename", "note.txt"),
+		HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(assetContent)),
+	))
+	httpNoteBody, httpNoteContentType := getHTTPAssetWithContentType(router, sourceID, "note.txt")
+	Expect(httpNoteBody).To(Equal(string(assetContent)))
+	Expect(httpNoteContentType).To(HavePrefix(asset["mimeType"].(string)))
+	httpAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"})
+	Expect(httpAsset).To(HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(httpAssetContent)))
+	httpAssetBody, httpAssetContentType := getHTTPAssetWithContentType(router, sourceID, "http-note.txt")
+	Expect(httpAssetBody).To(Equal(string(httpAssetContent)))
+	Expect(httpAssetContentType).To(HavePrefix(httpAsset["mimeType"].(string)))
+	listed := callToolStructured(session, "wiki_list_assets", map[string]any{"pageId": sourceID})
+	Expect(stringSliceField(listed, "files")).To(ContainElement("/assets/" + sourceID + "/note.txt"))
+	httpListed := getHTTPAssets(router, sourceID)
+	Expect(stringSliceField(httpListed, "files")).To(ContainElement("/assets/" + sourceID + "/note.txt"))
+	Expect(listed).To(matchJSONEqual(httpListed), "wiki_list_assets")
+	recordHTTPMCPParity("wiki_upload_asset", "POST /api/pages/:id/assets")
+	recordHTTPMCPParity("wiki_list_assets", "GET /api/pages/:id/assets")
+	recordHTTPMCPParity("wiki_get_asset", "GET /assets/:pageId/:filename")
+	callToolStructured(session, "wiki_upload_asset", map[string]any{
 		"pageId":        sourceID,
 		"filename":      "style.css",
 		"contentBase64": base64.StdEncoding.EncodeToString(cssContent),
 	})
-	cssAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "style.css"})
-	httpCSSBody, httpCSSContentType := getHTTPAssetWithContentType(t, router, sourceID, "style.css")
-	if httpCSSBody != string(cssContent) {
-		t.Fatalf("HTTP CSS asset content = %q, want uploaded CSS", httpCSSBody)
-	}
-	if !strings.HasPrefix(httpCSSContentType, cssAsset["mimeType"].(string)) {
-		t.Fatalf("HTTP CSS asset content type = %q, want MCP mime type %q", httpCSSContentType, cssAsset["mimeType"])
-	}
+	cssAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "style.css"})
+	httpCSSBody, httpCSSContentType := getHTTPAssetWithContentType(router, sourceID, "style.css")
+	Expect(httpCSSBody).To(Equal(string(cssContent)))
+	Expect(httpCSSContentType).To(HavePrefix(cssAsset["mimeType"].(string)))
 
-	renamed := callToolStructured(t, session, "wiki_rename_asset", map[string]any{
+	renamed := callToolStructured(session, "wiki_rename_asset", map[string]any{
 		"pageId":      sourceID,
 		"oldFilename": "note.txt",
 		"newFilename": "renamed.txt",
 	})
-	if renamed["url"] != "/assets/"+sourceID+"/renamed.txt" {
-		t.Fatalf("rename_asset url = %v, want renamed URL", renamed["url"])
-	}
-	httpRenamed := putHTTPJSON(t, router, "/api/pages/"+sourceID+"/assets/rename", map[string]any{
+	Expect(renamed).To(HaveKeyWithValue("url", "/assets/"+sourceID+"/renamed.txt"))
+	httpRenamed := putHTTPJSON(router, "/api/pages/"+sourceID+"/assets/rename", map[string]any{
 		"old_filename": "http-note.txt",
 		"new_filename": "http-renamed.txt",
 	}, http.StatusOK)
-	assertAssetURLResult(t, "wiki_rename_asset", renamed, "url", sourceID)
-	assertAssetURLResult(t, "HTTP rename_asset", httpRenamed, "url", sourceID)
-	renamedAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
-	if got := renamedAsset["contentBase64"]; got != base64.StdEncoding.EncodeToString(assetContent) {
-		t.Fatalf("MCP renamed asset content = %v, want original MCP asset content", got)
-	}
-	httpRenamedBody, httpRenamedContentType := getHTTPAssetWithContentType(t, router, sourceID, "renamed.txt")
-	if httpRenamedBody != string(assetContent) {
-		t.Fatalf("HTTP renamed asset content = %q, want original MCP asset content", httpRenamedBody)
-	}
-	if !strings.HasPrefix(httpRenamedContentType, renamedAsset["mimeType"].(string)) {
-		t.Fatalf("HTTP renamed content type = %q, want MCP mime type %q", httpRenamedContentType, renamedAsset["mimeType"])
-	}
-	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "note.txt"}, "asset")
-	getHTTPStatus(t, router, "/assets/"+sourceID+"/note.txt", http.StatusNotFound)
-	httpRenamedAsset := callToolStructured(t, session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})
-	if got := httpRenamedAsset["contentBase64"]; got != base64.StdEncoding.EncodeToString(httpAssetContent) {
-		t.Fatalf("MCP read of HTTP-renamed asset content = %v, want HTTP asset content", got)
-	}
-	if got := getHTTPAsset(t, router, sourceID, "http-renamed.txt"); got != string(httpAssetContent) {
-		t.Fatalf("HTTP-renamed asset content = %q, want HTTP asset content", got)
-	}
-	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-note.txt"}, "asset")
-	getHTTPStatus(t, router, "/assets/"+sourceID+"/http-note.txt", http.StatusNotFound)
-	httpListed = getHTTPAssets(t, router, sourceID)
-	listed = callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
-	assertJSONEqual(t, "list_assets after rename", listed, httpListed)
-	if !arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/renamed.txt") || !arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/http-renamed.txt") {
-		t.Fatalf("HTTP asset list after rename = %#v, want renamed assets", httpListed["files"])
-	}
-	recordHTTPMCPParity(t, "wiki_rename_asset", "PUT /api/pages/:id/assets/rename")
-	mcpDeleted := callToolStructured(t, session, "wiki_delete_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
-	httpDeletedBody := deleteHTTPStatus(t, router, "/api/pages/"+sourceID+"/assets/http-renamed.txt", http.StatusOK)
-	httpDeleted := decodeJSONMap(t, "HTTP delete_asset", []byte(httpDeletedBody))
-	assertScopedSuccessPayloadsEqual(t, "wiki_delete_asset", mcpDeleted, httpDeleted, "mcp.tools.wiki_delete_asset.success", "api.assets.delete.success")
-	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "renamed.txt"}, "asset")
-	getHTTPStatus(t, router, "/assets/"+sourceID+"/renamed.txt", http.StatusNotFound)
-	assertMCPToolErrorContains(t, session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"}, "asset")
-	getHTTPStatus(t, router, "/assets/"+sourceID+"/http-renamed.txt", http.StatusNotFound)
-	listed = callToolStructured(t, session, "wiki_list_assets", map[string]any{"pageId": sourceID})
-	if arrayContainsString(listed["files"], "/assets/"+sourceID+"/renamed.txt") {
-		t.Fatalf("delete_asset left renamed asset in list: %#v", listed["files"])
-	}
-	httpListed = getHTTPAssets(t, router, sourceID)
-	assertJSONEqual(t, "list_assets after delete", listed, httpListed)
-	if arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/renamed.txt") || arrayContainsString(httpListed["files"], "/assets/"+sourceID+"/http-renamed.txt") {
-		t.Fatalf("HTTP asset list after delete = %#v, want renamed assets absent", httpListed["files"])
-	}
-	recordHTTPMCPParity(t, "wiki_delete_asset", "DELETE /api/pages/:id/assets/:name")
+	Expect(renamed).To(matchAssetURLResult("url", sourceID), "wiki_rename_asset")
+	Expect(httpRenamed).To(matchAssetURLResult("url", sourceID), "HTTP rename_asset")
+	renamedAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
+	Expect(renamedAsset).To(HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(assetContent)))
+	httpRenamedBody, httpRenamedContentType := getHTTPAssetWithContentType(router, sourceID, "renamed.txt")
+	Expect(httpRenamedBody).To(Equal(string(assetContent)))
+	Expect(httpRenamedContentType).To(HavePrefix(renamedAsset["mimeType"].(string)))
+	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "note.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
+	getHTTPStatus(router, "/assets/"+sourceID+"/note.txt", http.StatusNotFound)
+	httpRenamedAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})
+	Expect(httpRenamedAsset).To(HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(httpAssetContent)))
+	Expect(getHTTPAsset(router, sourceID, "http-renamed.txt")).To(Equal(string(httpAssetContent)))
+	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-note.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
+	getHTTPStatus(router, "/assets/"+sourceID+"/http-note.txt", http.StatusNotFound)
+	httpListed = getHTTPAssets(router, sourceID)
+	listed = callToolStructured(session, "wiki_list_assets", map[string]any{"pageId": sourceID})
+	Expect(listed).To(matchJSONEqual(httpListed), "list_assets after rename")
+	Expect(stringSliceField(httpListed, "files")).To(ContainElements("/assets/"+sourceID+"/renamed.txt", "/assets/"+sourceID+"/http-renamed.txt"))
+	recordHTTPMCPParity("wiki_rename_asset", "PUT /api/pages/:id/assets/rename")
+	mcpDeleted := callToolStructured(session, "wiki_delete_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
+	httpDeletedBody := deleteHTTPStatus(router, "/api/pages/"+sourceID+"/assets/http-renamed.txt", http.StatusOK)
+	httpDeleted := decodeJSONMap("HTTP delete_asset", []byte(httpDeletedBody))
+	Expect(mcpDeleted).To(matchScopedSuccessPayload(httpDeleted, "mcp.tools.wiki_delete_asset.success", "api.assets.delete.success"), "wiki_delete_asset")
+	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "renamed.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
+	getHTTPStatus(router, "/assets/"+sourceID+"/renamed.txt", http.StatusNotFound)
+	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
+	getHTTPStatus(router, "/assets/"+sourceID+"/http-renamed.txt", http.StatusNotFound)
+	listed = callToolStructured(session, "wiki_list_assets", map[string]any{"pageId": sourceID})
+	Expect(stringSliceField(listed, "files")).NotTo(ContainElement("/assets/" + sourceID + "/renamed.txt"))
+	httpListed = getHTTPAssets(router, sourceID)
+	Expect(listed).To(matchJSONEqual(httpListed), "list_assets after delete")
+	Expect(stringSliceField(httpListed, "files")).NotTo(ContainElements("/assets/"+sourceID+"/renamed.txt", "/assets/"+sourceID+"/http-renamed.txt"))
+	recordHTTPMCPParity("wiki_delete_asset", "DELETE /api/pages/:id/assets/:name")
 }
 
-var _ = It("LocalMCPProtocol_UploadAssetRejectsOversizedInputBeforePageLookup", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: 2,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
+var _ = Describe("local MCP asset protocol errors", func() {
+	It("rejects oversized uploads before page lookup", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: 2,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
 
-	errText := callToolError(t, session, "wiki_upload_asset", map[string]any{
-		"pageId":        "missing-page",
-		"filename":      "too-large.txt",
-		"contentBase64": base64.StdEncoding.EncodeToString([]byte("abc")),
+		errResult := callToolStructuredError(session, "wiki_upload_asset", map[string]any{
+			"pageId":        "missing-page",
+			"filename":      "too-large.txt",
+			"contentBase64": base64.StdEncoding.EncodeToString([]byte("abc")),
+		})
+		Expect(errResult).To(testmatchers.HaveMCPStructuredError(wikiassets.ErrCodeAssetFileTooLarge, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetFileTooLarge)))
 	})
-	if !strings.Contains(errText, "asset_file_too_large") && !strings.Contains(strings.ToLower(errText), "too large") {
-		t.Fatalf("oversized upload error = %q, want asset_file_too_large before page lookup", errText)
-	}
+
+	It("reports malformed base64 as an asset payload error", func() {
+		w := newLocalMCPTestWiki(false)
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		page := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
+			"title": "Asset Payload",
+			"slug":  "asset-payload",
+			"kind":  "page",
+		}), "page")
+
+		errResult := callToolStructuredError(session, "wiki_upload_asset", map[string]any{
+			"pageId":        stringField(page, "id"),
+			"filename":      "bad.txt",
+			"contentBase64": "not base64 %",
+		})
+		Expect(errResult).To(testmatchers.HaveMCPStructuredError(wikiassets.ErrCodeAssetInvalidPayload, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetInvalidPayload)))
+	})
+
+	It("validates the owning page before serving stored asset blobs", func() {
+		w, storageDir := newLocalMCPTestWikiWithStorage()
+		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
+			AuthDisabled:            true,
+			PublicAccess:            true,
+			AllowInsecure:           true,
+			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
+			MCPEnabled:              true,
+			MCPToolListPageSize:     200,
+		})
+		session := connectLocalMCP(router, "/mcp")
+
+		orphanAssetDir := filepath.Join(storageDir, "assets", "missing-page")
+		Expect(os.MkdirAll(orphanAssetDir, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(orphanAssetDir, "orphan.txt"), []byte("orphan"), 0o644)).To(Succeed())
+
+		errResult := callToolStructuredError(session, "wiki_get_asset", map[string]any{"pageId": "missing-page", "filename": "orphan.txt"})
+		Expect(errResult).To(testmatchers.HaveMCPStructuredError(wikiassets.ErrCodeAssetPageNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetPageNotFound)))
+	})
 })
 
-var _ = It("LocalMCPProtocol_UploadAssetRejectsMalformedBase64AsAssetPayload", func() {
-	t := GinkgoTB()
-	w := newLocalMCPTestWiki(t, false)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
+var _ = Describe("local MCP feature-gated tool parity", func() {
+	It("keeps feature-gated tools aligned with HTTP routes", func() {
+		runLocalMCPProtocolFeatureGatedToolParity()
 	})
-	session := connectLocalMCP(t, router, "/mcp")
-
-	page := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
-		"title": "Asset Payload",
-		"slug":  "asset-payload",
-		"kind":  "page",
-	}), "page")
-
-	errText := callToolError(t, session, "wiki_upload_asset", map[string]any{
-		"pageId":        stringField(t, page, "id"),
-		"filename":      "bad.txt",
-		"contentBase64": "not base64 %",
-	})
-	if !strings.Contains(errText, wikiassets.ErrCodeAssetInvalidPayload.String()) && !strings.Contains(strings.ToLower(errText), "invalid asset payload") {
-		t.Fatalf("malformed base64 upload error = %q, want %s", errText, wikiassets.ErrCodeAssetInvalidPayload.String())
-	}
 })
 
-var _ = It("LocalMCPProtocol_GetAssetUsesPageBoundaryValidation", func() {
-	t := GinkgoTB()
-	w, storageDir := newLocalMCPTestWikiWithStorage(t)
-	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
-		AuthDisabled:            true,
-		PublicAccess:            true,
-		AllowInsecure:           true,
-		MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
-		MCPEnabled:              true,
-		MCPToolListPageSize:     200,
-	})
-	session := connectLocalMCP(t, router, "/mcp")
+func runLocalMCPProtocolFeatureGatedToolParity() {
+	GinkgoHelper()
 
-	orphanAssetDir := filepath.Join(storageDir, "assets", "missing-page")
-	if err := os.MkdirAll(orphanAssetDir, 0755); err != nil {
-		t.Fatalf("create orphan asset dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(orphanAssetDir, "orphan.txt"), []byte("orphan"), 0644); err != nil {
-		t.Fatalf("write orphan asset: %v", err)
-	}
-
-	errText := callToolError(t, session, "wiki_get_asset", map[string]any{"pageId": "missing-page", "filename": "orphan.txt"})
-	if !strings.Contains(errText, "asset_page_not_found") && !strings.Contains(strings.ToLower(errText), "page not found") {
-		t.Fatalf("orphan get_asset error = %q, want page boundary validation", errText)
-	}
-})
-
-var _ = It("LocalMCPProtocol_FeatureGatedToolParity", func() {
-	t := GinkgoTB()
-	runLocalMCPProtocolFeatureGatedToolParity(t)
-})
-
-func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
-	w, _ := newLocalMCPTestWikiWithStorage(t)
+	w, _ := newLocalMCPTestWikiWithStorage()
 	router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
 		AuthDisabled:            true,
 		PublicAccess:            true,
@@ -4087,10 +3495,10 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 		MCPEnabled:              true,
 		MCPToolListPageSize:     200,
 	})
-	session := connectLocalMCP(t, router, "/mcp")
+	session := connectLocalMCP(router, "/mcp")
 
-	missingLatestErr := callToolStructuredError(t, session, "wiki_get_latest_revision", map[string]any{"pageId": "missing-page"})
-	assertMCPStructuredError(t, mcpLabelGetLatestRevisionMissingPage, missingLatestErr, wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound))
+	missingLatestErr := callToolStructuredError(session, "wiki_get_latest_revision", map[string]any{"pageId": "missing-page"})
+	Expect(missingLatestErr).To(matchMCPStructuredError(wikipages.ErrCodePageNotFound, sharederrors.MessageIDForCode(wikipages.ErrCodePageNotFound)), mcpLabelGetLatestRevisionMissingPage)
 	for _, tc := range []struct {
 		name     string
 		args     map[string]any
@@ -4100,11 +3508,8 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": "target-revision"}, wantCode: wikipages.ErrCodePageNotFound},
 		{name: "wiki_get_revision_asset", args: map[string]any{"pageId": "missing-page", "revisionId": "missing-revision", "assetName": "missing.txt"}, wantCode: wikirevisions.ErrCodeRevisionNotFound},
 	} {
-		errResult := callToolStructuredError(t, session, tc.name, tc.args)
-		assertMCPStructuredError(t, mcpToolCaseLabel(tc.name, mcpLabelRevisionMissingSuffix), errResult, tc.wantCode, sharederrors.MessageIDForCode(tc.wantCode))
-		if strings.Contains(strings.ToLower(errResult.Text), "file does not exist") || strings.Contains(strings.ToLower(errResult.Text), "no such file") {
-			t.Fatalf("%s missing revision error = %q, want structured revision error instead of raw storage error", tc.name, errResult.Text)
-		}
+		errResult := callToolStructuredError(session, tc.name, tc.args)
+		Expect(errResult).To(matchMCPStructuredError(tc.wantCode, sharederrors.MessageIDForCode(tc.wantCode)), mcpToolCaseLabel(tc.name, mcpLabelRevisionMissingSuffix))
 	}
 	for _, tc := range []struct {
 		name     string
@@ -4116,356 +3521,313 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": " ", "targetRevisionId": "target-revision"}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest},
 		{name: "wiki_compare_revisions", args: map[string]any{"pageId": "missing-page", "baseRevisionId": "base-revision", "targetRevisionId": " "}, wantCode: wikirevisions.ErrCodeRevisionCompareInvalidRequest},
 	} {
-		errResult := callToolStructuredError(t, session, tc.name, tc.args)
-		assertMCPStructuredError(t, mcpToolCaseLabel(tc.name, mcpLabelRevisionBlankInputSuffix), errResult, tc.wantCode, sharederrors.MessageIDForCode(tc.wantCode))
+		errResult := callToolStructuredError(session, tc.name, tc.args)
+		Expect(errResult).To(matchMCPStructuredError(tc.wantCode, sharederrors.MessageIDForCode(tc.wantCode)), mcpToolCaseLabel(tc.name, mcpLabelRevisionBlankInputSuffix))
 	}
 
-	target := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	target := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Target",
 		"slug":  "target",
 		"kind":  "page",
 	}), "page")
-	targetID := stringField(t, target, "id")
-	ref := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	targetID := stringField(target, "id")
+	ref := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Ref",
 		"slug":  "ref",
 		"kind":  "page",
 	}), "page")
-	refID := stringField(t, ref, "id")
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
+	refID := stringField(ref, "id")
+	callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      refID,
-		"version": stringField(t, ref, "version"),
+		"version": stringField(ref, "version"),
 		"title":   "Ref",
 		"slug":    "ref",
 		"content": "[Target](/target.md)",
 	})
 
-	first := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+	first := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      targetID,
-		"version": stringField(t, target, "version"),
+		"version": stringField(target, "version"),
 		"title":   "Target",
 		"slug":    "target",
 		"content": "First content",
 	}), "page")
-	second := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+	second := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      targetID,
-		"version": stringField(t, first, "version"),
+		"version": stringField(first, "version"),
 		"title":   "Target",
 		"slug":    "target",
 		"content": "Second content",
 	}), "page")
-	httpUpdated := updateHTTPPage(t, router, targetID, map[string]any{
-		"version": stringField(t, second, "version"),
+	httpUpdated := updateHTTPPage(router, targetID, map[string]any{
+		"version": stringField(second, "version"),
 		"title":   "Target",
 		"slug":    "target",
 		"content": "Third content from HTTP",
 	})
 
-	limitErr := callToolStructuredError(t, session, "wiki_list_revisions", map[string]any{"pageId": targetID, "limit": float64(201)})
-	if limitErr.Code != wikirevisions.ErrCodeRevisionInvalidLimit ||
-		limitErr.MessageID != sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionInvalidLimit) ||
-		!strings.Contains(limitErr.Message, "limit") {
-		t.Fatalf("invalid wiki_list_revisions limit error = %#v, want structured invalid limit", limitErr)
-	}
+	limitErr := callToolStructuredError(session, "wiki_list_revisions", map[string]any{"pageId": targetID, "limit": float64(201)})
+	Expect(limitErr).To(testmatchers.HaveMCPStructuredError(
+		wikirevisions.ErrCodeRevisionInvalidLimit,
+		sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionInvalidLimit),
+	))
 
-	revisions := callToolStructured(t, session, "wiki_list_revisions", map[string]any{"pageId": targetID, "limit": float64(20)})
-	httpRevisions := getHTTPMap(t, router, "/api/pages/"+targetID+"/revisions?limit=20")
-	assertJSONEqual(t, "wiki_list_revisions", revisions, httpRevisions)
-	recordHTTPMCPParity(t, "wiki_list_revisions", "GET /api/pages/:id/revisions")
-	revisionItems, ok := revisions["revisions"].([]any)
-	if !ok || len(revisionItems) < 2 {
-		t.Fatalf("wiki_list_revisions = %#v, want at least two revisions", revisions["revisions"])
-	}
+	revisions := callToolStructured(session, "wiki_list_revisions", map[string]any{"pageId": targetID, "limit": float64(20)})
+	httpRevisions := getHTTPMap(router, "/api/pages/"+targetID+"/revisions?limit=20")
+	Expect(revisions).To(matchJSONEqual(httpRevisions), "wiki_list_revisions")
+	recordHTTPMCPParity("wiki_list_revisions", "GET /api/pages/:id/revisions")
+	revisionItems := arrayFieldFromMap(revisions, "revisions")
+	Expect(revisionItems).To(ContainElements(
+		BeAssignableToTypeOf(map[string]any{}),
+		BeAssignableToTypeOf(map[string]any{}),
+	))
 	firstRevision := revisionItems[0].(map[string]any)
-	if _, exists := firstRevision["page_id"]; exists {
-		t.Fatalf("wiki_list_revisions returned raw snake_case revision: %#v", firstRevision)
-	}
-	if firstRevision["pageId"] != targetID {
-		t.Fatalf("wiki_list_revisions pageId = %v, want %q", firstRevision["pageId"], targetID)
-	}
-	latest := callToolStructured(t, session, "wiki_get_latest_revision", map[string]any{"pageId": targetID})
-	latestRevision := nestedMap(t, latest, "revision")
-	httpLatestRevision := getHTTPLatestRevision(t, router, targetID)
-	assertJSONEqual(t, "wiki_get_latest_revision", latestRevision, httpLatestRevision)
-	recordHTTPMCPParity(t, "wiki_get_latest_revision", "GET /api/pages/:id/revisions/latest")
-	latestRevisionID := stringField(t, latestRevision, "id")
-	if _, exists := latestRevision["page_id"]; exists {
-		t.Fatalf("wiki_get_latest_revision returned raw snake_case revision: %#v", latestRevision)
-	}
-	if latestRevision["pageId"] != targetID {
-		t.Fatalf("wiki_get_latest_revision pageId = %v, want %q", latestRevision["pageId"], targetID)
-	}
-	snapshot := callToolStructured(t, session, "wiki_get_revision", map[string]any{"pageId": targetID, "revisionId": latestRevisionID})
-	httpSnapshotAtLatest := getHTTPRevision(t, router, targetID, latestRevisionID)
-	assertJSONEqual(t, "wiki_get_revision", snapshot, httpSnapshotAtLatest)
-	recordHTTPMCPParity(t, "wiki_get_revision", "GET /api/pages/:id/revisions/:revisionId")
-	if !strings.Contains(stringField(t, snapshot, "content"), "Third content from HTTP") {
-		t.Fatalf("wiki_get_revision content = %v, want HTTP-updated content in Git-backed document", snapshot["content"])
-	}
-	snapshotRevision := nestedMap(t, snapshot, "revision")
-	if snapshotRevision["pageId"] != targetID {
-		t.Fatalf("wiki_get_revision revision.pageId = %v, want %q", snapshotRevision["pageId"], targetID)
-	}
-	mcpAfterHTTP := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+	Expect(firstRevision).NotTo(HaveKey("page_id"))
+	Expect(firstRevision).To(HaveKeyWithValue("pageId", targetID))
+	latest := callToolStructured(session, "wiki_get_latest_revision", map[string]any{"pageId": targetID})
+	latestRevision := nestedMap(latest, "revision")
+	httpLatestRevision := getHTTPLatestRevision(router, targetID)
+	Expect(latestRevision).To(matchJSONEqual(httpLatestRevision), "wiki_get_latest_revision")
+	recordHTTPMCPParity("wiki_get_latest_revision", "GET /api/pages/:id/revisions/latest")
+	latestRevisionID := stringField(latestRevision, "id")
+	Expect(latestRevision).NotTo(HaveKey("page_id"))
+	Expect(latestRevision).To(HaveKeyWithValue("pageId", targetID))
+	snapshot := callToolStructured(session, "wiki_get_revision", map[string]any{"pageId": targetID, "revisionId": latestRevisionID})
+	httpSnapshotAtLatest := getHTTPRevision(router, targetID, latestRevisionID)
+	Expect(snapshot).To(matchJSONEqual(httpSnapshotAtLatest), "wiki_get_revision")
+	recordHTTPMCPParity("wiki_get_revision", "GET /api/pages/:id/revisions/:revisionId")
+	Expect(stringField(snapshot, "content")).To(ContainSubstring("Third content from HTTP"))
+	snapshotRevision := nestedMap(snapshot, "revision")
+	Expect(snapshotRevision).To(HaveKeyWithValue("pageId", targetID))
+	mcpAfterHTTP := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      targetID,
-		"version": stringField(t, httpUpdated, "version"),
+		"version": stringField(httpUpdated, "version"),
 		"title":   "Target",
 		"slug":    "target",
 		"content": "Fourth content from MCP",
 	}), "page")
-	if mcpAfterHTTP["content"] != "Fourth content from MCP" {
-		t.Fatalf("MCP update after HTTP content = %v, want MCP-updated content", mcpAfterHTTP["content"])
-	}
-	httpLatest := getHTTPLatestRevision(t, router, targetID)
-	httpLatestRevisionID := stringField(t, httpLatest, "id")
-	httpSnapshot := getHTTPRevision(t, router, targetID, httpLatestRevisionID)
-	if !strings.Contains(stringField(t, httpSnapshot, "content"), "Fourth content from MCP") {
-		t.Fatalf("HTTP revision content after MCP update = %v, want MCP-updated content in Git-backed document", httpSnapshot["content"])
-	}
+	Expect(mcpAfterHTTP).To(HaveKeyWithValue("content", "Fourth content from MCP"))
+	httpLatest := getHTTPLatestRevision(router, targetID)
+	httpLatestRevisionID := stringField(httpLatest, "id")
+	httpSnapshot := getHTTPRevision(router, targetID, httpLatestRevisionID)
+	Expect(stringField(httpSnapshot, "content")).To(ContainSubstring("Fourth content from MCP"))
 
 	olderRevision := revisionItems[1].(map[string]any)
-	comparison := callToolStructured(t, session, "wiki_compare_revisions", map[string]any{
+	comparison := callToolStructured(session, "wiki_compare_revisions", map[string]any{
 		"pageId":           targetID,
-		"baseRevisionId":   stringField(t, olderRevision, "id"),
+		"baseRevisionId":   stringField(olderRevision, "id"),
 		"targetRevisionId": httpLatestRevisionID,
 	})
-	httpComparison := getHTTPMap(t, router, "/api/pages/"+targetID+"/revisions/compare?base="+url.QueryEscape(stringField(t, olderRevision, "id"))+"&target="+url.QueryEscape(httpLatestRevisionID))
-	assertJSONEqual(t, "wiki_compare_revisions", comparison, httpComparison)
-	recordHTTPMCPParity(t, "wiki_compare_revisions", "GET /api/pages/:id/revisions/compare")
-	if comparison["contentChanged"] != true {
-		t.Fatalf("wiki_compare_revisions contentChanged = %v, want true", comparison["contentChanged"])
-	}
+	httpComparison := getHTTPMap(router, "/api/pages/"+targetID+"/revisions/compare?base="+url.QueryEscape(stringField(olderRevision, "id"))+"&target="+url.QueryEscape(httpLatestRevisionID))
+	Expect(comparison).To(matchJSONEqual(httpComparison), "wiki_compare_revisions")
+	recordHTTPMCPParity("wiki_compare_revisions", "GET /api/pages/:id/revisions/compare")
+	Expect(comparison).To(HaveKeyWithValue("contentChanged", true))
 
-	callToolStructured(t, session, "wiki_upload_asset", map[string]any{
+	callToolStructured(session, "wiki_upload_asset", map[string]any{
 		"pageId":        targetID,
 		"filename":      "style.css",
 		"contentBase64": base64.StdEncoding.EncodeToString([]byte("body { color: green; }\n")),
 	})
-	assetRevision := nestedMap(t, callToolStructured(t, session, "wiki_get_latest_revision", map[string]any{"pageId": targetID}), "revision")
-	assetRevisionID := stringField(t, assetRevision, "id")
-	revisionAssetErr := callToolStructuredError(t, session, "wiki_get_revision_asset", map[string]any{
+	assetRevision := nestedMap(callToolStructured(session, "wiki_get_latest_revision", map[string]any{"pageId": targetID}), "revision")
+	assetRevisionID := stringField(assetRevision, "id")
+	revisionAssetErr := callToolStructuredError(session, "wiki_get_revision_asset", map[string]any{
 		"pageId":     targetID,
 		"revisionId": assetRevisionID,
 		"assetName":  "style.css",
 	})
-	if revisionAssetErr.Code != wikirevisions.ErrCodeRevisionNotFound ||
-		revisionAssetErr.MessageID != sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionNotFound) ||
-		!strings.Contains(strings.ToLower(revisionAssetErr.Message), "asset") {
-		t.Fatalf("MCP Git-backed revision asset error = %#v, want structured revision asset error", revisionAssetErr)
-	}
-	httpRevisionAssetErr := getHTTPStatus(t, router, "/api/pages/"+targetID+"/revisions/"+assetRevisionID+"/assets/style.css", http.StatusNotFound)
-	if !strings.Contains(httpRevisionAssetErr, wikirevisions.ErrCodeRevisionPreviewAssetNotFound.String()) && !strings.Contains(httpRevisionAssetErr, "workspace sync revisions do not track assets") {
-		t.Fatalf("HTTP Git-backed revision asset error = %q, want unsupported revision asset detail", httpRevisionAssetErr)
-	}
-	recordHTTPMCPParity(t, "wiki_get_revision_asset", "GET /api/pages/:id/revisions/:revisionId/assets/:name")
+	Expect(revisionAssetErr).To(testmatchers.HaveMCPStructuredError(
+		wikirevisions.ErrCodeRevisionNotFound,
+		sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionNotFound),
+	))
+	httpRevisionAssetErr := getHTTPStatus(router, "/api/pages/"+targetID+"/revisions/"+assetRevisionID+"/assets/style.css", http.StatusNotFound)
+	Expect(httpRevisionAssetErr).To(matchHTTPPageError(wikirevisions.ErrCodeRevisionPreviewAssetNotFound, sharederrors.MessageIDForCode(wikirevisions.ErrCodeRevisionPreviewAssetNotFound)), mcpLabelRevisionAssetGitBackedHTTP)
+	recordHTTPMCPParity("wiki_get_revision_asset", "GET /api/pages/:id/revisions/:revisionId/assets/:name")
 
-	invalidRefactorKindErr := callToolStructuredError(t, session, "wiki_preview_page_refactor", map[string]any{
+	invalidRefactorKindErr := callToolStructuredError(session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  "copy",
 		"title": "Target",
 		"slug":  "target-copy",
 	})
-	assertMCPPageError(t, mcpLabelPreviewRefactorInvalidKind, invalidRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind))
-	assertErrorDoesNotContainAny(t, mcpLabelPreviewRefactorInvalidKind, invalidRefactorKindErr.Text, "enum", "validating")
-	invalidRefactorKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
+	Expect(invalidRefactorKindErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind)), mcpLabelPreviewRefactorInvalidKind)
+	invalidRefactorKindHTTP := postHTTPJSONBody(router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":  "copy",
 		"title": "Target",
 		"slug":  "target-copy",
 	}, http.StatusBadRequest)
-	if !strings.Contains(invalidRefactorKindHTTP, "page_invalid_refactor_kind") {
-		t.Fatalf("HTTP invalid wiki_preview_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidRefactorKindHTTP)
-	}
-	paddedRefactorKindErr := callToolStructuredError(t, session, "wiki_preview_page_refactor", map[string]any{
+	Expect(invalidRefactorKindHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind)))
+	paddedRefactorKindErr := callToolStructuredError(session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  " rename ",
 		"title": "Target",
 		"slug":  "target-padded",
 	})
-	assertMCPPageError(t, mcpLabelPreviewRefactorPaddedKind, paddedRefactorKindErr, wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind))
-	assertErrorDoesNotContainAny(t, mcpLabelPreviewRefactorPaddedKind, paddedRefactorKindErr.Text, "enum", "validating")
-	paddedRefactorKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
+	Expect(paddedRefactorKindErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind)), mcpLabelPreviewRefactorPaddedKind)
+	paddedRefactorKindHTTP := postHTTPJSONBody(router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":  " rename ",
 		"title": "Target",
 		"slug":  "target-padded",
 	}, http.StatusBadRequest)
-	if !strings.Contains(paddedRefactorKindHTTP, "page_invalid_refactor_kind") {
-		t.Fatalf("HTTP padded wiki_preview_page_refactor kind error = %q, want page_invalid_refactor_kind", paddedRefactorKindHTTP)
-	}
-	currentForInvalidApply := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": targetID}), "page")
-	invalidApplyKindErr := callToolStructuredError(t, session, "wiki_apply_page_refactor", map[string]any{
+	Expect(paddedRefactorKindHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind)))
+	currentForInvalidApply := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"id": targetID}), "page")
+	invalidApplyKindErr := callToolStructuredError(session, "wiki_apply_page_refactor", map[string]any{
 		"id":      targetID,
-		"version": stringField(t, currentForInvalidApply, "version"),
+		"version": stringField(currentForInvalidApply, "version"),
 		"kind":    "copy",
 		"title":   "Target",
 		"slug":    "target-copy",
 	})
-	assertMCPPageError(t, mcpLabelApplyRefactorInvalidKind, invalidApplyKindErr, wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind))
-	assertErrorDoesNotContainAny(t, mcpLabelApplyRefactorInvalidKind, invalidApplyKindErr.Text, "enum", "validating")
-	invalidApplyKindHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/apply", map[string]any{
-		"version": stringField(t, currentForInvalidApply, "version"),
+	Expect(invalidApplyKindErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind)), mcpLabelApplyRefactorInvalidKind)
+	invalidApplyKindHTTP := postHTTPJSONBody(router, "/api/pages/"+targetID+"/refactor/apply", map[string]any{
+		"version": stringField(currentForInvalidApply, "version"),
 		"kind":    "copy",
 		"title":   "Target",
 		"slug":    "target-copy",
 	}, http.StatusBadRequest)
-	if !strings.Contains(invalidApplyKindHTTP, "page_invalid_refactor_kind") {
-		t.Fatalf("HTTP invalid wiki_apply_page_refactor kind error = %q, want page_invalid_refactor_kind", invalidApplyKindHTTP)
-	}
-	whitespaceRefactorParentErr := callToolStructuredError(t, session, "wiki_preview_page_refactor", map[string]any{
+	Expect(invalidApplyKindHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidRefactorKind, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidRefactorKind)))
+	whitespaceRefactorParentErr := callToolStructuredError(session, "wiki_preview_page_refactor", map[string]any{
 		"id":       targetID,
 		"kind":     "move",
 		"parentId": " ",
 	})
-	assertMCPPageError(t, mcpLabelPreviewRefactorWhitespaceParentID, whitespaceRefactorParentErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
-	whitespaceRefactorParentHTTP := postHTTPJSONBody(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
+	Expect(whitespaceRefactorParentErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)), mcpLabelPreviewRefactorWhitespaceParentID)
+	whitespaceRefactorParentHTTP := postHTTPJSONBody(router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":     "move",
 		"parentId": " ",
 	}, http.StatusBadRequest)
-	if !strings.Contains(whitespaceRefactorParentHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP wiki_preview_page_refactor whitespace parentId error = %q, want page_invalid_parent_id", whitespaceRefactorParentHTTP)
-	}
-	refactorPaddedParent := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	Expect(whitespaceRefactorParentHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
+	refactorPaddedParent := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Refactor Padded Parent",
 		"slug":  "refactor-padded-parent",
 		"kind":  "section",
 	}), "page")
-	refactorPaddedTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	refactorPaddedTarget := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Refactor Padded Target",
 		"slug":  "refactor-padded-target",
 		"kind":  "page",
 	}), "page")
-	paddedApplyParentErr := callToolStructuredError(t, session, "wiki_apply_page_refactor", map[string]any{
-		"id":       stringField(t, refactorPaddedTarget, "id"),
-		"version":  stringField(t, refactorPaddedTarget, "version"),
+	paddedApplyParentErr := callToolStructuredError(session, "wiki_apply_page_refactor", map[string]any{
+		"id":       stringField(refactorPaddedTarget, "id"),
+		"version":  stringField(refactorPaddedTarget, "version"),
 		"kind":     "move",
-		"parentId": " " + stringField(t, refactorPaddedParent, "id") + " ",
+		"parentId": " " + stringField(refactorPaddedParent, "id") + " ",
 	})
-	assertMCPPageError(t, mcpLabelApplyRefactorPaddedParentID, paddedApplyParentErr, wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID))
-	paddedApplyParentHTTP := postHTTPJSONBody(t, router, "/api/pages/"+stringField(t, refactorPaddedTarget, "id")+"/refactor/apply", map[string]any{
-		"version":  stringField(t, refactorPaddedTarget, "version"),
+	Expect(paddedApplyParentErr).To(matchMCPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)), mcpLabelApplyRefactorPaddedParentID)
+	paddedApplyParentHTTP := postHTTPJSONBody(router, "/api/pages/"+stringField(refactorPaddedTarget, "id")+"/refactor/apply", map[string]any{
+		"version":  stringField(refactorPaddedTarget, "version"),
 		"kind":     "move",
-		"parentId": " " + stringField(t, refactorPaddedParent, "id") + " ",
+		"parentId": " " + stringField(refactorPaddedParent, "id") + " ",
 	}, http.StatusBadRequest)
-	if !strings.Contains(paddedApplyParentHTTP, "page_invalid_parent_id") {
-		t.Fatalf("HTTP wiki_apply_page_refactor padded parentId error = %q, want page_invalid_parent_id", paddedApplyParentHTTP)
-	}
+	Expect(paddedApplyParentHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
 
-	preview := callToolStructured(t, session, "wiki_preview_page_refactor", map[string]any{
+	preview := callToolStructured(session, "wiki_preview_page_refactor", map[string]any{
 		"id":    targetID,
 		"kind":  "rename",
 		"title": "Target",
 		"slug":  "target-renamed",
 	})
-	httpPreview := postHTTPJSON(t, router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
+	httpPreview := postHTTPJSON(router, "/api/pages/"+targetID+"/refactor/preview", map[string]any{
 		"kind":  "rename",
 		"title": "Target",
 		"slug":  "target-renamed",
 	}, http.StatusOK)
-	assertJSONEqual(t, "wiki_preview_page_refactor", preview, httpPreview)
-	recordHTTPMCPParity(t, "wiki_preview_page_refactor", "POST /api/pages/:id/refactor/preview")
-	counts := nestedMap(t, preview, "counts")
-	if counts["affectedPages"] != float64(1) {
-		t.Fatalf("preview affectedPages = %v, want 1", counts["affectedPages"])
-	}
+	Expect(preview).To(matchJSONEqual(httpPreview), "wiki_preview_page_refactor")
+	recordHTTPMCPParity("wiki_preview_page_refactor", "POST /api/pages/:id/refactor/preview")
+	counts := nestedMap(preview, "counts")
+	Expect(counts).To(HaveKeyWithValue("affectedPages", float64(1)))
 
-	staleRefactor := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	staleRefactor := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Stale Refactor",
 		"slug":  "stale-refactor",
 		"kind":  "page",
 	}), "page")
-	staleRefactorID := stringField(t, staleRefactor, "id")
-	updateHTTPPage(t, router, staleRefactorID, map[string]any{
-		"version": stringField(t, staleRefactor, "version"),
+	staleRefactorID := stringField(staleRefactor, "id")
+	updateHTTPPage(router, staleRefactorID, map[string]any{
+		"version": stringField(staleRefactor, "version"),
 		"title":   "Stale Refactor",
 		"slug":    "stale-refactor",
 		"content": "newer version",
 	})
-	staleRefactorErr := callToolStructuredError(t, session, "wiki_apply_page_refactor", map[string]any{
+	staleRefactorErr := callToolStructuredError(session, "wiki_apply_page_refactor", map[string]any{
 		"id":           staleRefactorID,
-		"version":      stringField(t, staleRefactor, "version"),
+		"version":      stringField(staleRefactor, "version"),
 		"kind":         "rename",
 		"title":        "Stale Refactor",
 		"slug":         "stale-refactor-mcp",
 		"rewriteLinks": true,
 	})
-	staleRefactorHTTP := postHTTPJSONBody(t, router, "/api/pages/"+staleRefactorID+"/refactor/apply", map[string]any{
-		"version":      stringField(t, staleRefactor, "version"),
+	staleRefactorHTTP := postHTTPJSONBody(router, "/api/pages/"+staleRefactorID+"/refactor/apply", map[string]any{
+		"version":      stringField(staleRefactor, "version"),
 		"kind":         "rename",
 		"title":        "Stale Refactor",
 		"slug":         "stale-refactor-http",
 		"rewriteLinks": true,
 	}, http.StatusConflict)
-	assertPageVersionConflictParity(t, "stale wiki_apply_page_refactor", staleRefactorErr, staleRefactorHTTP)
+	Expect(staleRefactorErr).To(matchMCPPageVersionConflict(), "stale wiki_apply_page_refactor MCP")
+	Expect(staleRefactorHTTP).To(matchHTTPPageVersionConflict(), "stale wiki_apply_page_refactor HTTP")
 
-	httpApplyTarget := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	httpApplyTarget := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "HTTP Apply Target",
 		"slug":  "http-apply-target",
 		"kind":  "page",
 	}), "page")
-	httpApplyRef := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	httpApplyRef := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "HTTP Apply Ref",
 		"slug":  "http-apply-ref",
 		"kind":  "page",
 	}), "page")
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
-		"id":      stringField(t, httpApplyRef, "id"),
-		"version": stringField(t, httpApplyRef, "version"),
+	callToolStructured(session, "wiki_update_page", map[string]any{
+		"id":      stringField(httpApplyRef, "id"),
+		"version": stringField(httpApplyRef, "version"),
 		"title":   "HTTP Apply Ref",
 		"slug":    "http-apply-ref",
 		"content": "[HTTP Apply Target](/http-apply-target.md)",
 	})
-	httpAppliedViaRoute := postHTTPJSON(t, router, "/api/pages/"+stringField(t, httpApplyTarget, "id")+"/refactor/apply", map[string]any{
-		"version":      stringField(t, httpApplyTarget, "version"),
+	httpAppliedViaRoute := postHTTPJSON(router, "/api/pages/"+stringField(httpApplyTarget, "id")+"/refactor/apply", map[string]any{
+		"version":      stringField(httpApplyTarget, "version"),
 		"kind":         "rename",
 		"title":        "HTTP Apply Target",
 		"slug":         "http-apply-target-renamed",
 		"rewriteLinks": true,
 	}, http.StatusOK)
-	assertPageState(t, "HTTP wiki_apply_page_refactor success", httpAppliedViaRoute, stringField(t, httpApplyTarget, "id"), "HTTP Apply Target", "http-apply-target-renamed", "http-apply-target-renamed", "page", "")
-	httpApplyRefAfter := getHTTPPageByPath(t, router, "http-apply-ref")
-	if httpApplyRefAfter["content"] != "[HTTP Apply Target](/http-apply-target-renamed.md)" {
-		t.Fatalf("HTTP apply ref content = %v, want rewritten link", httpApplyRefAfter["content"])
-	}
+	Expect(httpAppliedViaRoute).To(matchPageState(stringField(httpApplyTarget, "id"), "HTTP Apply Target", "http-apply-target-renamed", "http-apply-target-renamed", "page", ""), "HTTP wiki_apply_page_refactor success")
+	httpApplyRefAfter := getHTTPPageByPath(router, "http-apply-ref")
+	Expect(httpApplyRefAfter).To(HaveKeyWithValue("content", "[HTTP Apply Target](/http-apply-target-renamed.md)"))
 
-	currentTarget := nestedMap(t, callToolStructured(t, session, "wiki_get_page", map[string]any{"id": targetID}), "page")
-	applied := nestedMap(t, callToolStructured(t, session, "wiki_apply_page_refactor", map[string]any{
+	currentTarget := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"id": targetID}), "page")
+	applied := nestedMap(callToolStructured(session, "wiki_apply_page_refactor", map[string]any{
 		"id":           targetID,
-		"version":      stringField(t, currentTarget, "version"),
+		"version":      stringField(currentTarget, "version"),
 		"kind":         "rename",
 		"title":        "Target",
 		"slug":         "target-renamed",
 		"rewriteLinks": true,
 	}), "page")
-	if applied["slug"] != "target-renamed" {
-		t.Fatalf("wiki_apply_page_refactor slug = %v, want target-renamed", applied["slug"])
-	}
-	httpApplied := getHTTPPageByID(t, router, targetID)
-	assertJSONEqual(t, "wiki_apply_page_refactor", applied, httpApplied)
-	assertPageState(t, "MCP wiki_apply_page_refactor success", applied, targetID, "Target", "target-renamed", "target-renamed", "page", "")
-	refHTTP := getHTTPPageByPath(t, router, "ref")
-	if refHTTP["content"] != "[Target](/target-renamed.md)" {
-		t.Fatalf("ref content after refactor = %v, want rewritten link", refHTTP["content"])
-	}
-	recordHTTPMCPParity(t, "wiki_apply_page_refactor", "POST /api/pages/:id/refactor/apply")
+	Expect(applied).To(HaveKeyWithValue("slug", "target-renamed"))
+	httpApplied := getHTTPPageByID(router, targetID)
+	Expect(applied).To(matchJSONEqual(httpApplied), "wiki_apply_page_refactor")
+	Expect(applied).To(matchPageState(targetID, "Target", "target-renamed", "target-renamed", "page", ""), "MCP wiki_apply_page_refactor success")
+	refHTTP := getHTTPPageByPath(router, "ref")
+	Expect(refHTTP).To(HaveKeyWithValue("content", "[Target](/target-renamed.md)"))
+	recordHTTPMCPParity("wiki_apply_page_refactor", "POST /api/pages/:id/refactor/apply")
 
-	restored := nestedMap(t, callToolStructured(t, session, "wiki_restore_revision", map[string]any{
+	restored := nestedMap(callToolStructured(session, "wiki_restore_revision", map[string]any{
 		"pageId":     targetID,
 		"revisionId": latestRevisionID,
 	}), "page")
-	if restored["content"] != "Third content from HTTP" {
-		t.Fatalf("wiki_restore_revision content = %v, want HTTP-updated content", restored["content"])
-	}
-	httpRestored := getHTTPPageByID(t, router, targetID)
-	assertJSONEqual(t, "wiki_restore_revision", restored, httpRestored)
+	Expect(restored).To(HaveKeyWithValue("content", "Third content from HTTP"))
+	httpRestored := getHTTPPageByID(router, targetID)
+	Expect(restored).To(matchJSONEqual(httpRestored), "wiki_restore_revision")
 
-	mcpRestoreMeta := nestedMap(t, callToolStructured(t, session, "wiki_create_page", map[string]any{
+	mcpRestoreMeta := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "MCP Restore Metadata",
 		"slug":  "mcp-restore-metadata",
 		"kind":  "page",
 	}), "page")
-	mcpRestoreMetaID := stringField(t, mcpRestoreMeta, "id")
-	mcpRestoreMetaRevision := nestedMap(t, callToolStructured(t, session, "wiki_update_page", map[string]any{
+	mcpRestoreMetaID := stringField(mcpRestoreMeta, "id")
+	mcpRestoreMetaRevision := nestedMap(callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      mcpRestoreMetaID,
-		"version": stringField(t, mcpRestoreMeta, "version"),
+		"version": stringField(mcpRestoreMeta, "version"),
 		"title":   "MCP Restore Metadata",
 		"slug":    "mcp-restore-metadata",
 		"content": "metadata revision\n",
@@ -4474,38 +3836,40 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 			"status": "archived",
 		},
 	}), "page")
-	mcpRestoreMetaLatest := nestedMap(t, callToolStructured(t, session, "wiki_get_latest_revision", map[string]any{"pageId": mcpRestoreMetaID}), "revision")
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
+	mcpRestoreMetaLatest := nestedMap(callToolStructured(session, "wiki_get_latest_revision", map[string]any{"pageId": mcpRestoreMetaID}), "revision")
+	callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      mcpRestoreMetaID,
-		"version": stringField(t, mcpRestoreMetaRevision, "version"),
+		"version": stringField(mcpRestoreMetaRevision, "version"),
 		"title":   "MCP Restore Metadata",
 		"slug":    "mcp-restore-metadata",
 		"content": "current revision\n",
 	})
-	mcpRestoredMeta := nestedMap(t, callToolStructured(t, session, "wiki_restore_revision", map[string]any{
+	mcpRestoredMeta := nestedMap(callToolStructured(session, "wiki_restore_revision", map[string]any{
 		"pageId":     mcpRestoreMetaID,
-		"revisionId": stringField(t, mcpRestoreMetaLatest, "id"),
+		"revisionId": stringField(mcpRestoreMetaLatest, "id"),
 	}), "page")
-	assertRestoredMetadata(t, "MCP restore metadata", mcpRestoredMeta)
-	callToolStructured(t, session, "wiki_update_page", map[string]any{
+	Expect(mcpRestoredMeta).To(matchRestoredMetadata(), "MCP restore metadata")
+	callToolStructured(session, "wiki_update_page", map[string]any{
 		"id":      mcpRestoreMetaID,
-		"version": stringField(t, mcpRestoredMeta, "version"),
+		"version": stringField(mcpRestoredMeta, "version"),
 		"title":   "MCP Restore Metadata",
 		"slug":    "mcp-restore-metadata",
 		"content": "current revision before HTTP restore\n",
 	})
-	httpRestoredMCPMeta := postHTTPJSON(t, router, "/api/pages/"+mcpRestoreMetaID+"/revisions/"+stringField(t, mcpRestoreMetaLatest, "id")+"/restore", nil, http.StatusOK)
-	assertRestoredMetadata(t, "HTTP restore metadata on MCP fixture", httpRestoredMCPMeta)
-	assertRestorePayloadsMatch(t, mcpRestoredMeta, httpRestoredMCPMeta)
+	httpRestoredMCPMeta := postHTTPJSON(router, "/api/pages/"+mcpRestoreMetaID+"/revisions/"+stringField(mcpRestoreMetaLatest, "id")+"/restore", nil, http.StatusOK)
+	Expect(httpRestoredMCPMeta).To(matchRestoredMetadata(), "HTTP restore metadata on MCP fixture")
+	Expect(mcpRestoredMeta).To(matchRestoreVolatileFields(), "MCP wiki_restore_revision")
+	Expect(httpRestoredMCPMeta).To(matchRestoreVolatileFields(), "HTTP wiki_restore_revision")
+	Expect(normalizeRestorePayload(mcpRestoredMeta)).To(matchJSONEqual(normalizeRestorePayload(httpRestoredMCPMeta)), "wiki_restore_revision response payload")
 
-	httpRestoreMeta := postHTTPJSON(t, router, "/api/pages", map[string]any{
+	httpRestoreMeta := postHTTPJSON(router, "/api/pages", map[string]any{
 		"title": "HTTP Restore Metadata",
 		"slug":  "http-restore-metadata",
 		"kind":  "page",
 	}, http.StatusCreated)
-	httpRestoreMetaID := stringField(t, httpRestoreMeta, "id")
-	httpRestoreMetaRevision := updateHTTPPage(t, router, httpRestoreMetaID, map[string]any{
-		"version": stringField(t, httpRestoreMeta, "version"),
+	httpRestoreMetaID := stringField(httpRestoreMeta, "id")
+	httpRestoreMetaRevision := updateHTTPPage(router, httpRestoreMetaID, map[string]any{
+		"version": stringField(httpRestoreMeta, "version"),
 		"title":   "HTTP Restore Metadata",
 		"slug":    "http-restore-metadata",
 		"content": "metadata revision\n",
@@ -4514,64 +3878,65 @@ func runLocalMCPProtocolFeatureGatedToolParity(t testing.TB) {
 			"status": "archived",
 		},
 	})
-	httpRestoreMetaLatest := getHTTPLatestRevision(t, router, httpRestoreMetaID)
-	updateHTTPPage(t, router, httpRestoreMetaID, map[string]any{
-		"version": stringField(t, httpRestoreMetaRevision, "version"),
+	httpRestoreMetaLatest := getHTTPLatestRevision(router, httpRestoreMetaID)
+	updateHTTPPage(router, httpRestoreMetaID, map[string]any{
+		"version": stringField(httpRestoreMetaRevision, "version"),
 		"title":   "HTTP Restore Metadata",
 		"slug":    "http-restore-metadata",
 		"content": "current revision\n",
 	})
-	httpRestoredMeta := postHTTPJSON(t, router, "/api/pages/"+httpRestoreMetaID+"/revisions/"+stringField(t, httpRestoreMetaLatest, "id")+"/restore", nil, http.StatusOK)
-	assertRestoredMetadata(t, "HTTP restore metadata", httpRestoredMeta)
-	assertRestoredMetadata(t, "HTTP restore metadata persisted", getHTTPPageByID(t, router, httpRestoreMetaID))
-	recordHTTPMCPParity(t, "wiki_restore_revision", "POST /api/pages/:id/revisions/:revisionId/restore")
+	httpRestoredMeta := postHTTPJSON(router, "/api/pages/"+httpRestoreMetaID+"/revisions/"+stringField(httpRestoreMetaLatest, "id")+"/restore", nil, http.StatusOK)
+	Expect(httpRestoredMeta).To(matchRestoredMetadata(), "HTTP restore metadata")
+	Expect(getHTTPPageByID(router, httpRestoreMetaID)).To(matchRestoredMetadata(), "HTTP restore metadata persisted")
+	recordHTTPMCPParity("wiki_restore_revision", "POST /api/pages/:id/revisions/:revisionId/restore")
 }
 
-var _ = It("LocalMCPProtocol_HTTPParityCoverageRecordedForPlanTools", func() {
-	t := GinkgoTB()
-	runHTTPMCPParityCoverage(t)
+var _ = Describe("local MCP HTTP parity evidence", func() {
+	It("confirms plan-traced MCP tools have matching HTTP route evidence", func() {
+		runHTTPMCPParityCoverage()
+	})
 })
 
-func runHTTPMCPParityCoverage(t testing.TB) {
-	t.Helper()
+func runHTTPMCPParityCoverage() {
+	GinkgoHelper()
 
-	if !hasHTTPMCPParityRecorded(t) {
+	if !hasHTTPMCPParityRecorded() {
 		resetHTTPMCPParityCoverage()
-		runLocalMCPProtocolPageMutationParity(t)
-		runLocalMCPProtocolPageOperationParity(t)
-		runLocalMCPProtocolIndexAndAssetParity(t)
-		runLocalMCPProtocolFeatureGatedToolParity(t)
+		runLocalMCPProtocolPageMutationParity()
+		runLocalMCPProtocolPageOperationParity()
+		runLocalMCPProtocolIndexAndAssetParity()
+		runLocalMCPProtocolFeatureGatedToolParity()
 	}
-	assertHTTPMCPParityRecorded(t)
+	Expect(snapshotHTTPMCPParityCoverage()).To(matchRecordedHTTPMCPParity())
 }
 
-func newLocalMCPTestWiki(t testing.TB, _ bool) *wiki.Wiki {
-	t.Helper()
+func newLocalMCPTestWiki(_ bool) *wiki.Wiki {
+	GinkgoHelper()
 
-	w, _ := newLocalMCPTestWikiWithStorage(t)
+	w, _ := newLocalMCPTestWikiWithStorage()
 	return w
 }
 
-func newLocalMCPTestWikiWithStorage(t testing.TB) (*wiki.Wiki, string) {
-	t.Helper()
+func newLocalMCPTestWikiWithStorage() (*wiki.Wiki, string) {
+	GinkgoHelper()
 
-	return newLocalMCPTestWikiWithOptionsAndStorage(t, wiki.WikiOptions{
+	return newLocalMCPTestWikiWithOptionsAndStorage(wiki.WikiOptions{
 		AuthDisabled: true,
 	})
 }
 
-func newLocalMCPTestWikiWithOptions(t testing.TB, opts wiki.WikiOptions) *wiki.Wiki {
-	t.Helper()
+func newLocalMCPTestWikiWithOptions(opts wiki.WikiOptions) *wiki.Wiki {
+	GinkgoHelper()
 
-	w, _ := newLocalMCPTestWikiWithOptionsAndStorage(t, opts)
+	w, _ := newLocalMCPTestWikiWithOptionsAndStorage(opts)
 	return w
 }
 
-func newLocalMCPTestWikiWithOptionsAndStorage(t testing.TB, opts wiki.WikiOptions) (*wiki.Wiki, string) {
-	t.Helper()
+func newLocalMCPTestWikiWithOptionsAndStorage(opts wiki.WikiOptions) (*wiki.Wiki, string) {
+	GinkgoHelper()
 
-	storageDir := filepath.Join(t.TempDir(), "data")
-	rootDir := filepath.Join(t.TempDir(), "content")
+	storageDir := filepath.Join(mcpIntegrationTempDir(), "data")
+	rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
 	if opts.Workspace.ID == "" {
 		opts.Workspace.ID = "default"
 	}
@@ -4601,15 +3966,20 @@ func newLocalMCPTestWikiWithOptionsAndStorage(t testing.TB, opts wiki.WikiOption
 		RefreshTokenTimeout: opts.RefreshTokenTimeout,
 		AuthDisabled:        opts.AuthDisabled,
 	})
-	if err != nil {
-		t.Fatalf("NewWiki failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func() {
-		if err := w.Close(); err != nil {
-			t.Fatalf("Close wiki failed: %v", err)
-		}
+		Expect(w.Close()).To(Succeed())
 	})
 	return w, storageDir
+}
+
+func mcpIntegrationTempDir() string {
+	GinkgoHelper()
+
+	dir, err := os.MkdirTemp("", "leafwiki-mcp-integration-*")
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
 }
 
 func newLocalMCPTestRouter(w *wiki.Wiki, opts httpinternal.RouterOptions) http.Handler {
@@ -4619,8 +3989,8 @@ func newLocalMCPTestRouter(w *wiki.Wiki, opts httpinternal.RouterOptions) http.H
 	return httpinternal.NewRouter(w.Registrars(), w.FrontendConfig(), opts)
 }
 
-func connectLocalMCP(t testing.TB, handler http.Handler, path string) *sdkmcp.ClientSession {
-	t.Helper()
+func connectLocalMCP(handler http.Handler, path string) *sdkmcp.ClientSession {
+	GinkgoHelper()
 
 	server := httptest.NewServer(handler)
 	DeferCleanup(server.Close)
@@ -4631,17 +4001,15 @@ func connectLocalMCP(t testing.TB, handler http.Handler, path string) *sdkmcp.Cl
 		HTTPClient:           server.Client(),
 		DisableStandaloneSSE: true,
 	}, nil)
-	if err != nil {
-		t.Fatalf("Connect MCP client failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "MCP client should connect")
 	DeferCleanup(func() { _ = session.Close() })
 	return session
 }
 
-func listAllToolNames(t testing.TB, session *sdkmcp.ClientSession) []string {
-	t.Helper()
+func listAllToolNames(session *sdkmcp.ClientSession) []string {
+	GinkgoHelper()
 
-	tools := listAllTools(t, session)
+	tools := listAllTools(session)
 	var names []string
 	for _, tool := range tools {
 		names = append(names, tool.Name)
@@ -4650,16 +4018,14 @@ func listAllToolNames(t testing.TB, session *sdkmcp.ClientSession) []string {
 	return names
 }
 
-func listAllTools(t testing.TB, session *sdkmcp.ClientSession) []*sdkmcp.Tool {
-	t.Helper()
+func listAllTools(session *sdkmcp.ClientSession) []*sdkmcp.Tool {
+	GinkgoHelper()
 
 	var tools []*sdkmcp.Tool
 	cursor := ""
 	for {
 		result, err := session.ListTools(context.Background(), &sdkmcp.ListToolsParams{Cursor: cursor})
-		if err != nil {
-			t.Fatalf("ListTools failed: %v", err)
-		}
+		Expect(err).NotTo(HaveOccurred(), "ListTools should return a page")
 		for _, tool := range result.Tools {
 			tools = append(tools, tool)
 		}
@@ -4674,76 +4040,116 @@ func listAllTools(t testing.TB, session *sdkmcp.ClientSession) []*sdkmcp.Tool {
 	return tools
 }
 
-func assertInputSchemasMatch(t testing.TB, tools []*sdkmcp.Tool, expected, expectedRequired map[string][]string) {
-	t.Helper()
+func matchInputSchemas(expected, expectedRequired map[string][]string) types.GomegaMatcher {
+	GinkgoHelper()
 
-	for _, tool := range tools {
-		if _, ok := expected[tool.Name]; !ok {
-			t.Fatalf("missing input schema expectation for tool %q", tool.Name)
+	return gcustom.MakeMatcher(func(tools []*sdkmcp.Tool) (bool, error) {
+		if err := inputSchemasMatch(tools, expected, expectedRequired); err != nil {
+			return false, err
 		}
-		if _, ok := expectedRequired[tool.Name]; !ok {
-			t.Fatalf("missing input schema required expectation for tool %q", tool.Name)
-		}
-	}
-	for name, props := range expected {
-		tool := findTool(t, tools, name)
-		schema := decodeToolSchema(t, "input", tool.Name, tool.InputSchema)
-		assertNoRootSchemaCombinators(t, "input", name, schema)
-		properties := schemaProperties(t, "input", tool.Name, schema)
-		gotProps := make([]string, 0, len(properties))
-		for prop := range properties {
-			gotProps = append(gotProps, prop)
-			assertSchemaPropertyHasType(t, "input", name, prop, properties[prop])
-		}
-		assertPreciseInputPropertySchemas(t, name, properties)
-		sort.Strings(gotProps)
-		assertSchemaPropertyOrderSorted(t, "input", name, schema)
-
-		wantProps := append([]string{}, props...)
-		sort.Strings(wantProps)
-		if strings.Join(gotProps, "\n") != strings.Join(wantProps, "\n") {
-			t.Fatalf("input schema for %s properties mismatch\n got: %v\nwant: %v", name, gotProps, wantProps)
-		}
-
-		assertStringSet(t, "input schema required for "+name, schemaStringSlice(schema["required"]), expectedRequired[name])
-	}
+		return true, nil
+	}).WithMessage("match MCP input schema contracts")
 }
 
-func assertOutputSchemasMatch(t testing.TB, tools []*sdkmcp.Tool, expected map[string][]string) {
-	t.Helper()
+func matchOutputSchemas(expected map[string][]string) types.GomegaMatcher {
+	GinkgoHelper()
 
-	for _, tool := range tools {
-		if tool.OutputSchema == nil {
-			t.Fatalf("tool %s has no output schema", tool.Name)
+	return gcustom.MakeMatcher(func(tools []*sdkmcp.Tool) (bool, error) {
+		if err := outputSchemasMatch(tools, expected); err != nil {
+			return false, err
 		}
+		return true, nil
+	}).WithMessage("match MCP output schema contracts")
+}
+
+func inputSchemasMatch(tools []*sdkmcp.Tool, expected, expectedRequired map[string][]string) error {
+	toolByName := toolSchemaIndex(tools)
+	for _, tool := range tools {
 		if _, ok := expected[tool.Name]; !ok {
-			t.Fatalf("missing output schema expectation for tool %q", tool.Name)
+			return fmt.Errorf("input schema contract missing expected tool %s", tool.Name)
+		}
+		if _, ok := expectedRequired[tool.Name]; !ok {
+			return fmt.Errorf("input schema contract missing required-property list for %s", tool.Name)
 		}
 	}
 	for name, props := range expected {
-		tool := findTool(t, tools, name)
-		if tool.OutputSchema == nil {
-			t.Fatalf("tool %s has no output schema", tool.Name)
+		tool, ok := toolByName[name]
+		if !ok {
+			return fmt.Errorf("input schema contract missing listed tool %s", name)
 		}
-		schema := decodeToolSchema(t, "output", tool.Name, tool.OutputSchema)
-		assertNoRootSchemaCombinators(t, "output", name, schema)
-		properties := schemaProperties(t, "output", tool.Name, schema)
+		schema, err := decodeToolSchemaValue("input", tool.Name, tool.InputSchema)
+		if err != nil {
+			return err
+		}
+		if err := rootSchemaHasNoCombinators("input", name, schema); err != nil {
+			return err
+		}
+		properties := schemaProperties(schema)
 		gotProps := make([]string, 0, len(properties))
-		for prop := range properties {
+		for prop, property := range properties {
 			gotProps = append(gotProps, prop)
-			assertSchemaPropertyHasType(t, "output", name, prop, properties[prop])
+			if err := schemaPropertyHasType("input", name, prop, property); err != nil {
+				return err
+			}
 		}
-		sort.Strings(gotProps)
-		assertSchemaPropertyOrderSorted(t, "output", name, schema)
+		if err := preciseInputPropertySchemas(name, properties); err != nil {
+			return err
+		}
+		if err := schemaPropertyOrderSorted("input", name, schema); err != nil {
+			return err
+		}
+		if !sameStringSet(gotProps, props) {
+			return fmt.Errorf("input schema for %s properties = %v, want %v", name, sortedStrings(gotProps), sortedStrings(props))
+		}
+		if !sameStringSet(schemaStringSlice(schema["required"]), expectedRequired[name]) {
+			return fmt.Errorf("input schema for %s required properties = %v, want %v", name, sortedStrings(schemaStringSlice(schema["required"])), sortedStrings(expectedRequired[name]))
+		}
+	}
+	return nil
+}
 
-		wantProps := append([]string{}, props...)
-		sort.Strings(wantProps)
-		if strings.Join(gotProps, "\n") != strings.Join(wantProps, "\n") {
-			t.Fatalf("output schema for %s properties mismatch\n got: %v\nwant: %v", name, gotProps, wantProps)
+func outputSchemasMatch(tools []*sdkmcp.Tool, expected map[string][]string) error {
+	toolByName := toolSchemaIndex(tools)
+	for _, tool := range tools {
+		if tool.OutputSchema == nil {
+			return fmt.Errorf("output schema for %s should be present", tool.Name)
+		}
+		if _, ok := expected[tool.Name]; !ok {
+			return fmt.Errorf("output schema contract missing expected tool %s", tool.Name)
+		}
+	}
+	for name, props := range expected {
+		tool, ok := toolByName[name]
+		if !ok {
+			return fmt.Errorf("output schema contract missing listed tool %s", name)
+		}
+		schema, err := decodeToolSchemaValue("output", tool.Name, tool.OutputSchema)
+		if err != nil {
+			return err
+		}
+		if err := rootSchemaHasNoCombinators("output", name, schema); err != nil {
+			return err
+		}
+		properties := schemaProperties(schema)
+		gotProps := make([]string, 0, len(properties))
+		for prop, property := range properties {
+			gotProps = append(gotProps, prop)
+			if err := schemaPropertyHasType("output", name, prop, property); err != nil {
+				return err
+			}
+		}
+		if err := schemaPropertyOrderSorted("output", name, schema); err != nil {
+			return err
+		}
+		if !sameStringSet(gotProps, props) {
+			return fmt.Errorf("output schema for %s properties = %v, want %v", name, sortedStrings(gotProps), sortedStrings(props))
 		}
 		requiredProps := outputRequiredProperties(props, toolOutputOptionalProperties[name])
-		assertStringSet(t, "output schema required for "+name, schemaStringSlice(schema["required"]), requiredProps)
+		if !sameStringSet(schemaStringSlice(schema["required"]), requiredProps) {
+			return fmt.Errorf("output schema for %s required properties = %v, want %v", name, sortedStrings(schemaStringSlice(schema["required"])), sortedStrings(requiredProps))
+		}
 	}
+	return nil
 }
 
 func outputRequiredProperties(props, optional []string) []string {
@@ -4756,37 +4162,31 @@ func outputRequiredProperties(props, optional []string) []string {
 	return required
 }
 
-func findTool(t testing.TB, tools []*sdkmcp.Tool, name string) *sdkmcp.Tool {
-	t.Helper()
-
+func toolSchemaIndex(tools []*sdkmcp.Tool) map[string]*sdkmcp.Tool {
+	toolByName := make(map[string]*sdkmcp.Tool, len(tools))
 	for _, tool := range tools {
-		if tool.Name == name {
-			return tool
-		}
+		toolByName[tool.Name] = tool
 	}
-	t.Fatalf("tool %q not found", name)
-	return nil
+	return toolByName
 }
 
-func decodeToolSchema(t testing.TB, kind, name string, schemaValue any) map[string]any {
-	t.Helper()
-
+func decodeToolSchemaValue(kind, name string, schemaValue any) (map[string]any, error) {
 	raw, err := json.Marshal(schemaValue)
 	if err != nil {
-		t.Fatalf("marshal %s schema for %s: %v", kind, name, err)
+		return nil, fmt.Errorf("%s schema for %s should marshal: %w", kind, name, err)
 	}
 	var schema map[string]any
 	if err := json.Unmarshal(raw, &schema); err != nil {
-		t.Fatalf("decode %s schema for %s: %v: %s", kind, name, err, raw)
+		return nil, fmt.Errorf("%s schema for %s should decode: %w", kind, name, err)
 	}
 	if schema["type"] != "object" {
-		t.Fatalf("%s schema for %s type = %v, want object: %#v", kind, name, schema["type"], schema)
+		return nil, fmt.Errorf("%s schema for %s should be an object schema", kind, name)
 	}
-	return schema
+	return schema, nil
 }
 
-func schemaProperties(t testing.TB, kind, name string, schema map[string]any) map[string]any {
-	t.Helper()
+func schemaProperties(schema map[string]any) map[string]any {
+	GinkgoHelper()
 
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
@@ -4795,112 +4195,107 @@ func schemaProperties(t testing.TB, kind, name string, schema map[string]any) ma
 	return properties
 }
 
-func assertSchemaPropertyOrderSorted(t testing.TB, kind, name string, schema map[string]any) {
-	t.Helper()
-
+func schemaPropertyOrderSorted(kind, name string, schema map[string]any) error {
 	order := schemaStringSlice(schema["propertyOrder"])
 	if len(order) == 0 {
-		return
+		return nil
 	}
 	sortedOrder := append([]string{}, order...)
 	sort.Strings(sortedOrder)
-	if !reflect.DeepEqual(order, sortedOrder) {
-		t.Fatalf("%s schema for %s propertyOrder = %v, want deterministic sorted order %v", kind, name, order, sortedOrder)
+	if !stringSlicesEqual(order, sortedOrder) {
+		return fmt.Errorf("%s schema for %s propertyOrder should be deterministic", kind, name)
 	}
+	return nil
 }
 
-func assertSchemaPropertyHasType(t testing.TB, kind, toolName, prop string, property any) {
-	t.Helper()
-
+func schemaPropertyHasType(kind, toolName, prop string, property any) error {
 	schema, ok := property.(map[string]any)
 	if !ok {
-		t.Fatalf("%s schema for %s.%s is not an object: %#v", kind, toolName, prop, property)
+		return fmt.Errorf("%s schema for %s.%s should be an object", kind, toolName, prop)
 	}
 	if _, ok := schema["type"]; ok {
-		return
+		return nil
 	}
 	for _, key := range []string{"$ref", "anyOf", "oneOf", "allOf"} {
 		if _, ok := schema[key]; ok {
-			return
+			return nil
 		}
 	}
-	t.Fatalf("%s schema for %s.%s has no type/ref/union: %#v", kind, toolName, prop, schema)
+	return fmt.Errorf("%s schema for %s.%s should declare a type or combinator", kind, toolName, prop)
 }
 
-func assertNoRootSchemaCombinators(t testing.TB, kind, name string, schema map[string]any) {
-	t.Helper()
-
+func rootSchemaHasNoCombinators(kind, name string, schema map[string]any) error {
 	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
 		if _, ok := schema[key]; ok {
-			t.Fatalf("%s schema for %s has root-level %s: %#v", kind, name, key, schema)
+			return fmt.Errorf("%s schema for %s should not use root-level combinator %s", kind, name, key)
 		}
 	}
+	return nil
 }
 
-func assertPreciseInputPropertySchemas(t testing.TB, toolName string, properties map[string]any) {
-	t.Helper()
-
+func preciseInputPropertySchemas(toolName string, properties map[string]any) error {
 	switch toolName {
 	case "wiki_update_page_metadata":
 		for _, prop := range []string{"setTags", "addTags", "removeTags", "removeProperties"} {
-			assertStringArrayPropertySchema(t, toolName, prop, properties[prop])
+			if err := stringArrayPropertySchema(toolName, prop, properties[prop]); err != nil {
+				return err
+			}
 		}
-		assertStringMapPropertySchema(t, toolName, "setProperties", properties["setProperties"])
+		if err := stringMapPropertySchema(toolName, "setProperties", properties["setProperties"]); err != nil {
+			return err
+		}
 	case "wiki_replace_page_section":
-		assertStringArrayPropertySchema(t, toolName, "headingPath", properties["headingPath"])
+		if err := stringArrayPropertySchema(toolName, "headingPath", properties["headingPath"]); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func assertStringArrayPropertySchema(t testing.TB, toolName, prop string, raw any) {
-	t.Helper()
-
+func stringArrayPropertySchema(toolName, prop string, raw any) error {
 	schema, ok := raw.(map[string]any)
 	if !ok {
-		t.Fatalf("input schema for %s.%s is not an object: %#v", toolName, prop, raw)
+		return fmt.Errorf("input schema for %s.%s should be an object", toolName, prop)
 	}
 	if schema["type"] != "array" {
-		t.Fatalf("input schema for %s.%s type = %#v, want array", toolName, prop, schema["type"])
+		return fmt.Errorf("input schema for %s.%s should be an array", toolName, prop)
 	}
 	items, ok := schema["items"].(map[string]any)
 	if !ok {
-		t.Fatalf("input schema for %s.%s missing string items schema: %#v", toolName, prop, schema)
+		return fmt.Errorf("input schema for %s.%s should declare item schema", toolName, prop)
 	}
 	if items["type"] != "string" {
-		t.Fatalf("input schema for %s.%s items type = %#v, want string", toolName, prop, items["type"])
+		return fmt.Errorf("input schema for %s.%s should contain string items", toolName, prop)
 	}
+	return nil
 }
 
-func assertStringMapPropertySchema(t testing.TB, toolName, prop string, raw any) {
-	t.Helper()
-
+func stringMapPropertySchema(toolName, prop string, raw any) error {
 	schema, ok := raw.(map[string]any)
 	if !ok {
-		t.Fatalf("input schema for %s.%s is not an object: %#v", toolName, prop, raw)
+		return fmt.Errorf("input schema for %s.%s should be an object", toolName, prop)
 	}
 	if schema["type"] != "object" {
-		t.Fatalf("input schema for %s.%s type = %#v, want object", toolName, prop, schema["type"])
+		return fmt.Errorf("input schema for %s.%s should be an object map", toolName, prop)
 	}
 	additional, ok := schema["additionalProperties"].(map[string]any)
 	if !ok {
-		t.Fatalf("input schema for %s.%s missing string additionalProperties schema: %#v", toolName, prop, schema)
+		return fmt.Errorf("input schema for %s.%s should declare additional properties", toolName, prop)
 	}
 	if additional["type"] != "string" {
-		t.Fatalf("input schema for %s.%s additionalProperties type = %#v, want string", toolName, prop, additional["type"])
+		return fmt.Errorf("input schema for %s.%s should contain string values", toolName, prop)
 	}
+	return nil
 }
 
-func assertContextHistoryOpaque(t testing.TB, contextOut map[string]any) {
-	t.Helper()
+func assertContextHistoryOpaque(contextOut map[string]any) {
+	GinkgoHelper()
 
-	for _, raw := range arrayField(t, contextOut, "contextHistory") {
-		entry, ok := raw.(map[string]any)
-		if !ok {
-			t.Fatalf("contextHistory entry has type %T: %#v", raw, raw)
-		}
+	for _, raw := range arrayField(contextOut, "contextHistory") {
+		Expect(raw).To(BeAssignableToTypeOf(map[string]any{}))
+		entry := raw.(map[string]any)
 		for _, internal := range []string{"commitHash", "validationHash"} {
-			if _, exists := entry[internal]; exists {
-				t.Fatalf("contextHistory entry leaks %s: %#v", internal, entry)
-			}
+			Expect(entry).NotTo(HaveKey(internal))
 		}
 	}
 }
@@ -4920,16 +4315,38 @@ func schemaStringSlice(value any) []string {
 	return items
 }
 
-func assertStringSet(t testing.TB, label string, got, want []string) {
-	t.Helper()
+func matchStringSet(want []string) types.GomegaMatcher {
+	GinkgoHelper()
 
-	got = append([]string{}, got...)
 	want = append([]string{}, want...)
-	sort.Strings(got)
 	sort.Strings(want)
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("%s mismatch\n got: %v\nwant: %v", label, got, want)
+	return WithTransform(func(got []string) []string {
+		sorted := append([]string{}, got...)
+		sort.Strings(sorted)
+		return sorted
+	}, Equal(want))
+}
+
+func sameStringSet(got, want []string) bool {
+	return stringSlicesEqual(sortedStrings(got), sortedStrings(want))
+}
+
+func sortedStrings(values []string) []string {
+	out := append([]string{}, values...)
+	sort.Strings(out)
+	return out
+}
+
+func stringSlicesEqual(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
 	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func copyToolInputProperties(src map[string][]string) map[string][]string {
@@ -4940,14 +4357,21 @@ func copyToolInputProperties(src map[string][]string) map[string][]string {
 	return out
 }
 
-func assertToolNames(t testing.TB, got []string, want []string) {
-	t.Helper()
+func matchToolNames(want []string) types.GomegaMatcher {
+	GinkgoHelper()
 
 	sortedWant := append([]string{}, want...)
 	sort.Strings(sortedWant)
-	if strings.Join(got, "\n") != strings.Join(sortedWant, "\n") {
-		t.Fatalf("tool names mismatch\n got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(sortedWant, "\n"))
-	}
+	return Equal(sortedWant)
+}
+
+func matchJSONRPCErrorCode(code int64) types.GomegaMatcher {
+	GinkgoHelper()
+
+	return Satisfy(func(err error) bool {
+		var rpcErr *jsonrpc.Error
+		return errors.As(err, &rpcErr) && rpcErr.Code == code
+	})
 }
 
 func contains(values []string, want string) bool {
@@ -4968,30 +4392,35 @@ func containsToolProtocolName(values []string, want wikimcp.ToolProtocolName) bo
 	return false
 }
 
-func callToolStructured(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) map[string]any {
-	t.Helper()
+func callToolStructured(session *sdkmcp.ClientSession, name string, args map[string]any) map[string]any {
+	GinkgoHelper()
 
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
 		Name:      name,
 		Arguments: args,
 	})
-	if err != nil {
-		t.Fatalf("CallTool %s failed: %v", name, err)
-	}
-	if result.IsError {
-		t.Fatalf("CallTool %s returned tool error: %#v", name, result.Content)
-	}
+	Expect(err).NotTo(HaveOccurred(), "CallTool %s should return a result", name)
+	Expect(result).To(matchSuccessfulToolResultWithStructuredContent(BeAssignableToTypeOf(map[string]any{})), "CallTool %s should return structured content, got error content %#v and structured content %T: %#v", name, result.Content, result.StructuredContent, result.StructuredContent)
+	return result.StructuredContent.(map[string]any)
+}
 
-	structured, ok := result.StructuredContent.(map[string]any)
-	if !ok {
-		t.Fatalf("CallTool %s structured content has type %T: %#v", name, result.StructuredContent, result.StructuredContent)
-	}
-	return structured
+type toolMessageOutput struct {
+	MessageID wikimcp.ToolMessageID `json:"messageId"`
+	Message   string                `json:"message"`
+}
+
+func messageOutputFromStructuredContent(value map[string]any) toolMessageOutput {
+	GinkgoHelper()
+
+	raw, err := json.Marshal(value)
+	Expect(err).NotTo(HaveOccurred(), "message output should marshal")
+	var out toolMessageOutput
+	Expect(json.Unmarshal(raw, &out)).To(Succeed(), "message output should decode")
+	return out
 }
 
 type mcpToolErrorResult struct {
 	Text      string
-	CodeText  string
 	Code      sharederrors.ErrorCode
 	MessageID sharederrors.MessageID
 	Message   string
@@ -5005,27 +4434,14 @@ type mcpToolErrorPayloadWire struct {
 	Args      []string               `json:"args"`
 }
 
-type mcpToolErrorPayloadRawWire struct {
-	Code string `json:"code"`
-}
-
-func mcpToolErrorPayloadFromWire(t testing.TB, name string, payload map[string]any) mcpToolErrorResult {
-	t.Helper()
+func mcpToolErrorPayloadFromWire(name any, payload map[string]any) mcpToolErrorResult {
+	GinkgoHelper()
 
 	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("CallTool %s structured error marshal failed: %v payload=%#v", name, err, payload)
-	}
+	Expect(err).NotTo(HaveOccurred(), "CallTool %s structured error should marshal", name)
 	var typed mcpToolErrorPayloadWire
-	if err := json.Unmarshal(raw, &typed); err != nil {
-		t.Fatalf("CallTool %s structured error decode failed: %v payload=%#v", name, err, payload)
-	}
-	var rawFields mcpToolErrorPayloadRawWire
-	if err := json.Unmarshal(raw, &rawFields); err != nil {
-		t.Fatalf("CallTool %s structured error raw decode failed: %v payload=%#v", name, err, payload)
-	}
+	Expect(json.Unmarshal(raw, &typed)).To(Succeed(), "CallTool %s structured error should decode", name)
 	return mcpToolErrorResult{
-		CodeText:  rawFields.Code,
 		Code:      typed.Code,
 		MessageID: typed.MessageID,
 		Message:   typed.Message,
@@ -5033,52 +4449,57 @@ func mcpToolErrorPayloadFromWire(t testing.TB, name string, payload map[string]a
 	}
 }
 
-func callToolError(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) string {
-	t.Helper()
+func callToolStructuredError(session *sdkmcp.ClientSession, name any, args map[string]any) mcpToolErrorResult {
+	GinkgoHelper()
 
-	return callToolErrorResult(t, session, name, args).Text
+	return callToolErrorResult(session, name, args)
 }
 
-func callToolStructuredError(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) mcpToolErrorResult {
-	t.Helper()
+func matchMCPStructuredError(code sharederrors.ErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	GinkgoHelper()
 
-	result := callToolErrorResult(t, session, name, args)
-	if result.Code == "" || result.MessageID == "" || result.Message == "" {
-		t.Fatalf("CallTool %s structured error = %#v, want code/messageId/message", name, result)
-	}
-	return result
+	return testmatchers.HaveMCPStructuredError(code, messageID)
 }
 
-func assertMCPStructuredError(t testing.TB, label string, result mcpToolErrorResult, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
-	t.Helper()
+func callToolErrorResult(session *sdkmcp.ClientSession, name any, args map[string]any) mcpToolErrorResult {
+	GinkgoHelper()
 
-	if result.Code != code {
-		t.Fatalf("%s code = %q, want %q; text=%q", label, result.Code, code, result.Text)
-	}
-	if result.MessageID != messageID {
-		t.Fatalf("%s messageId = %q, want %q; text=%q", label, result.MessageID, messageID, result.Text)
-	}
-	if result.Message == "" {
-		t.Fatalf("%s message is empty; text=%q", label, result.Text)
-	}
-	if result.Text == "" {
-		t.Fatalf("%s text is empty", label)
+	switch typed := name.(type) {
+	case wikimcp.ToolID:
+		return callToolErrorResultByToolID(session, typed, args)
+	case string:
+		result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+			Name:      typed,
+			Arguments: args,
+		})
+		Expect(err).NotTo(HaveOccurred(), "CallTool %s should return a tool result", name)
+		return toolErrorResultFromCallResult(name, result)
+	default:
+		result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+			Name:      fmt.Sprint(typed),
+			Arguments: args,
+		})
+		Expect(err).NotTo(HaveOccurred(), "CallTool %s should return a tool result", name)
+		return toolErrorResultFromCallResult(name, result)
 	}
 }
 
-func callToolErrorResult(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) mcpToolErrorResult {
-	t.Helper()
+func callToolErrorResultByToolID(session *sdkmcp.ClientSession, name wikimcp.ToolID, args map[string]any) mcpToolErrorResult {
+	GinkgoHelper()
 
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      name,
+		Name:      name.String(),
 		Arguments: args,
 	})
-	if err != nil {
-		t.Fatalf("CallTool %s failed: %v", name, err)
-	}
-	if !result.IsError {
-		t.Fatalf("CallTool %s succeeded, want tool error: %#v", name, result.StructuredContent)
-	}
+	Expect(err).NotTo(HaveOccurred(), "CallTool %s should return a tool result", name)
+	return toolErrorResultFromCallResult(name, result)
+}
+
+func toolErrorResultFromCallResult(name any, result *sdkmcp.CallToolResult) mcpToolErrorResult {
+	GinkgoHelper()
+
+	Expect(result).NotTo(BeNil(), "CallTool %s should return a tool result", name)
+
 	out := mcpToolErrorResult{}
 	for _, content := range result.Content {
 		if text, ok := content.(*sdkmcp.TextContent); ok {
@@ -5086,95 +4507,94 @@ func callToolErrorResult(t testing.TB, session *sdkmcp.ClientSession, name strin
 			break
 		}
 	}
-	if out.Text == "" {
-		t.Fatalf("CallTool %s returned error without text content: %#v", name, result.Content)
-	}
-	if errorPayload, ok := result.Meta["error"].(map[string]any); ok {
-		decoded := mcpToolErrorPayloadFromWire(t, name, errorPayload)
-		out.CodeText = decoded.CodeText
-		out.Code = decoded.Code
-		out.MessageID = decoded.MessageID
-		out.Message = decoded.Message
-		out.Args = decoded.Args
-	}
+	Expect(out.Text).NotTo(BeEmpty(), "CallTool %s should return text error content", name)
+	errorPayload, err := structuredToolErrorPayload(result)
+	Expect(err).To(Succeed(), "CallTool %s should expose a structured error payload", name)
+	decoded := mcpToolErrorPayloadFromWire(name, errorPayload)
+	out.Code = decoded.Code
+	out.MessageID = decoded.MessageID
+	out.Message = decoded.Message
+	out.Args = decoded.Args
 	return out
 }
 
-func callToolProtocolError(t testing.TB, session *sdkmcp.ClientSession, name string, args map[string]any) string {
-	t.Helper()
+func structuredToolErrorPayload(result *sdkmcp.CallToolResult) (map[string]any, error) {
+	GinkgoHelper()
 
-	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+	if result == nil {
+		return nil, fmt.Errorf("missing tool result")
+	}
+	if payload, ok := result.Meta["error"].(map[string]any); ok {
+		return payload, nil
+	}
+	if payload, ok := result.StructuredContent.(map[string]any); ok {
+		if errorPayload, ok := payload["error"].(map[string]any); ok {
+			return errorPayload, nil
+		}
+		return payload, nil
+	}
+	return nil, fmt.Errorf("missing structured tool error payload")
+}
+
+func callToolProtocolError(session *sdkmcp.ClientSession, name string, args map[string]any) error {
+	GinkgoHelper()
+
+	_, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
 		Name:      name,
 		Arguments: args,
 	})
-	if err == nil {
-		t.Fatalf("CallTool %s result = %#v, want protocol error", name, result)
-	}
-	return err.Error()
+	return err
 }
 
-func getHTTPPageByPath(t testing.TB, router http.Handler, path string) map[string]any {
-	t.Helper()
+func getHTTPPageByPath(router http.Handler, path string) map[string]any {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path="+path, nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET page by path %q = %d: %s", path, rec.Code, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode HTTP page by path %q: %v", path, err)
-	}
+	Expect(json.Unmarshal(rec.Body.Bytes(), &out)).To(Succeed(), "decode HTTP page by path %q", path)
 	return out
 }
 
-func getHTTPPageByID(t testing.TB, router http.Handler, pageID string) map[string]any {
-	t.Helper()
+func getHTTPPageByID(router http.Handler, pageID string) map[string]any {
+	GinkgoHelper()
 
-	return getHTTPMap(t, router, "/api/pages/"+pageID)
+	return getHTTPMap(router, "/api/pages/"+pageID)
 }
 
-func getHTTPValue(t testing.TB, router http.Handler, path string) any {
-	t.Helper()
+func getHTTPValue(router http.Handler, path string) any {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
-	}
-	return decodeJSONValue(t, "GET "+path, rec.Body.Bytes())
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+	return decodeJSONValue("GET "+path, rec.Body.Bytes())
 }
 
-func getHTTPStatus(t testing.TB, router http.Handler, path string, wantStatus int) string {
-	t.Helper()
+func getHTTPStatus(router http.Handler, path string, wantStatus int) string {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-	if rec.Code != wantStatus {
-		t.Fatalf("GET %s = %d, want %d: %s", path, rec.Code, wantStatus, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(wantStatus), rec.Body.String())
 	return rec.Body.String()
 }
 
-func getHTTPMap(t testing.TB, router http.Handler, path string) map[string]any {
-	t.Helper()
+func getHTTPMap(router http.Handler, path string) map[string]any {
+	GinkgoHelper()
 
-	value := getHTTPValue(t, router, path)
-	out, ok := value.(map[string]any)
-	if !ok {
-		t.Fatalf("GET %s decoded as %T: %#v, want object", path, value, value)
-	}
-	return out
+	value := getHTTPValue(router, path)
+	Expect(value).To(BeAssignableToTypeOf(map[string]any{}), "GET %s should decode as object", path)
+	return value.(map[string]any)
 }
 
-func updateHTTPPage(t testing.TB, router http.Handler, pageID string, payload map[string]any) map[string]any {
-	t.Helper()
+func updateHTTPPage(router http.Handler, pageID string, payload map[string]any) map[string]any {
+	GinkgoHelper()
 
 	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal HTTP page update: %v", err)
-	}
-	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
+	Expect(err).NotTo(HaveOccurred())
+	csrfToken, csrfCookies := issueHTTPCSRF(router)
 	req := httptest.NewRequest(http.MethodPut, "/api/pages/"+pageID, strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrfToken)
@@ -5183,64 +4603,56 @@ func updateHTTPPage(t testing.TB, router http.Handler, pageID string, payload ma
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT page %q = %d: %s", pageID, rec.Code, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode HTTP page update %q: %v", pageID, err)
-	}
+	Expect(json.Unmarshal(rec.Body.Bytes(), &out)).To(Succeed(), "decode HTTP page update %q", pageID)
 	return out
 }
 
-func putHTTPJSON(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
-	t.Helper()
+func putHTTPJSON(router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
+	GinkgoHelper()
 
-	return requestHTTPJSON(t, router, http.MethodPut, path, payload, wantStatus)
+	return requestHTTPJSON(router, http.MethodPut, path, payload, wantStatus)
 }
 
-func putHTTPJSONBody(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) string {
-	t.Helper()
+func putHTTPJSONBody(router http.Handler, path string, payload map[string]any, wantStatus int) string {
+	GinkgoHelper()
 
-	return requestHTTPJSONBody(t, router, http.MethodPut, path, payload, wantStatus)
+	return requestHTTPJSONBody(router, http.MethodPut, path, payload, wantStatus)
 }
 
-func postHTTPJSON(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
-	t.Helper()
+func postHTTPJSON(router http.Handler, path string, payload map[string]any, wantStatus int) map[string]any {
+	GinkgoHelper()
 
-	return requestHTTPJSON(t, router, http.MethodPost, path, payload, wantStatus)
+	return requestHTTPJSON(router, http.MethodPost, path, payload, wantStatus)
 }
 
-func postHTTPJSONBody(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) string {
-	t.Helper()
+func postHTTPJSONBody(router http.Handler, path string, payload map[string]any, wantStatus int) string {
+	GinkgoHelper()
 
-	return requestHTTPJSONBody(t, router, http.MethodPost, path, payload, wantStatus)
+	return requestHTTPJSONBody(router, http.MethodPost, path, payload, wantStatus)
 }
 
-func postHTTPJSONNoContent(t testing.TB, router http.Handler, path string, payload map[string]any, wantStatus int) {
-	t.Helper()
+func postHTTPJSONNoContent(router http.Handler, path string, payload map[string]any, wantStatus int) {
+	GinkgoHelper()
 
-	body := postHTTPJSONBody(t, router, path, payload, wantStatus)
-	if strings.TrimSpace(body) != "" {
-		t.Fatalf("POST %s body = %q, want empty body", path, body)
-	}
+	body := postHTTPJSONBody(router, path, payload, wantStatus)
+	Expect(strings.TrimSpace(body)).To(BeEmpty())
 }
 
-func requestHTTPJSON(t testing.TB, router http.Handler, method, path string, payload map[string]any, wantStatus int) map[string]any {
-	t.Helper()
+func requestHTTPJSON(router http.Handler, method, path string, payload map[string]any, wantStatus int) map[string]any {
+	GinkgoHelper()
 
-	raw := requestHTTPJSONBody(t, router, method, path, payload, wantStatus)
-	return decodeJSONMap(t, method+" "+path, []byte(raw))
+	raw := requestHTTPJSONBody(router, method, path, payload, wantStatus)
+	return decodeJSONMap(method+" "+path, []byte(raw))
 }
 
-func requestHTTPJSONBody(t testing.TB, router http.Handler, method, path string, payload map[string]any, wantStatus int) string {
-	t.Helper()
+func requestHTTPJSONBody(router http.Handler, method, path string, payload map[string]any, wantStatus int) string {
+	GinkgoHelper()
 
 	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal %s %s payload: %v", method, path, err)
-	}
-	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
+	Expect(err).NotTo(HaveOccurred())
+	csrfToken, csrfCookies := issueHTTPCSRF(router)
 	req := httptest.NewRequest(method, path, strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrfToken)
@@ -5249,27 +4661,22 @@ func requestHTTPJSONBody(t testing.TB, router http.Handler, method, path string,
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != wantStatus {
-		t.Fatalf("%s %s = %d, want %d: %s", method, path, rec.Code, wantStatus, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(wantStatus), rec.Body.String())
 	return rec.Body.String()
 }
 
-func decodeJSONMap(t testing.TB, label string, raw []byte) map[string]any {
-	t.Helper()
+func decodeJSONMap(label string, raw []byte) map[string]any {
+	GinkgoHelper()
 
-	value := decodeJSONValue(t, label, raw)
-	out, ok := value.(map[string]any)
-	if !ok {
-		t.Fatalf("%s decoded as %T: %#v, want object", label, value, value)
-	}
-	return out
+	value := decodeJSONValue(label, raw)
+	Expect(value).To(BeAssignableToTypeOf(map[string]any{}), "%s should decode to a JSON object", label)
+	return value.(map[string]any)
 }
 
-func deleteHTTPStatus(t testing.TB, router http.Handler, path string, wantStatus int) string {
-	t.Helper()
+func deleteHTTPStatus(router http.Handler, path string, wantStatus int) string {
+	GinkgoHelper()
 
-	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
+	csrfToken, csrfCookies := issueHTTPCSRF(router)
 	req := httptest.NewRequest(http.MethodDelete, path, nil)
 	req.Header.Set("X-CSRF-Token", csrfToken)
 	for _, cookie := range csrfCookies {
@@ -5277,44 +4684,31 @@ func deleteHTTPStatus(t testing.TB, router http.Handler, path string, wantStatus
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != wantStatus {
-		t.Fatalf("DELETE %s = %d, want %d: %s", path, rec.Code, wantStatus, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(wantStatus), rec.Body.String())
 	return rec.Body.String()
 }
 
-func getHTTPSearch(t testing.TB, router http.Handler, values url.Values) map[string]any {
-	t.Helper()
+func getHTTPSearch(router http.Handler, values url.Values) map[string]any {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/search?"+values.Encode(), nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/search = %d: %s", rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode HTTP search: %v", err)
-	}
-	return out
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+	return decodeJSONMap("GET /api/search", rec.Body.Bytes())
 }
 
-func uploadHTTPAsset(t testing.TB, router http.Handler, pageID, filename string, content []byte, wantStatus int) map[string]any {
-	t.Helper()
+func uploadHTTPAsset(router http.Handler, pageID, filename string, content []byte, wantStatus int) map[string]any {
+	GinkgoHelper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("create multipart file %q: %v", filename, err)
-	}
-	if _, err := part.Write(content); err != nil {
-		t.Fatalf("write multipart file %q: %v", filename, err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
+	_, err = part.Write(content)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(writer.Close()).To(Succeed())
 
-	csrfToken, csrfCookies := issueHTTPCSRF(t, router)
+	csrfToken, csrfCookies := issueHTTPCSRF(router)
 	req := httptest.NewRequest(http.MethodPost, "/api/pages/"+pageID+"/assets", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-CSRF-Token", csrfToken)
@@ -5323,159 +4717,273 @@ func uploadHTTPAsset(t testing.TB, router http.Handler, pageID, filename string,
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != wantStatus {
-		t.Fatalf("POST asset %s/%s = %d, want %d: %s", pageID, filename, rec.Code, wantStatus, rec.Body.String())
-	}
-	return decodeJSONMap(t, "POST asset "+pageID+"/"+filename, rec.Body.Bytes())
+	Expect(rec).To(HaveHTTPStatus(wantStatus), rec.Body.String())
+	return decodeJSONMap("POST asset "+pageID+"/"+filename, rec.Body.Bytes())
 }
 
-func getHTTPAssets(t testing.TB, router http.Handler, pageID string) map[string]any {
-	t.Helper()
+func getHTTPAssets(router http.Handler, pageID string) map[string]any {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID+"/assets", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET asset list for page %q = %d: %s", pageID, rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode HTTP asset list for page %q: %v", pageID, err)
-	}
-	return out
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+	return decodeJSONMap("GET asset list for page "+pageID, rec.Body.Bytes())
 }
 
-func getHTTPAsset(t testing.TB, router http.Handler, pageID, filename string) string {
-	t.Helper()
+func getHTTPAsset(router http.Handler, pageID, filename string) string {
+	GinkgoHelper()
 
-	body, _ := getHTTPAssetWithContentType(t, router, pageID, filename)
+	body, _ := getHTTPAssetWithContentType(router, pageID, filename)
 	return body
 }
 
-func getHTTPAssetWithContentType(t testing.TB, router http.Handler, pageID, filename string) (string, string) {
-	t.Helper()
+func getHTTPAssetWithContentType(router http.Handler, pageID, filename string) (string, string) {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/"+pageID+"/"+url.PathEscape(filename), nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET asset %s/%s = %d: %s", pageID, filename, rec.Code, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	return rec.Body.String(), rec.Header().Get("Content-Type")
 }
 
-func getHTTPLatestRevision(t testing.TB, router http.Handler, pageID string) map[string]any {
-	t.Helper()
+func getHTTPLatestRevision(router http.Handler, pageID string) map[string]any {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID+"/revisions/latest", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET latest revision for page %q = %d: %s", pageID, rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode HTTP latest revision for page %q: %v", pageID, err)
-	}
-	return out
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+	return decodeJSONMap("GET latest revision for page "+pageID, rec.Body.Bytes())
 }
 
-func getHTTPRevision(t testing.TB, router http.Handler, pageID, revisionID string) map[string]any {
-	t.Helper()
+func getHTTPRevision(router http.Handler, pageID, revisionID string) map[string]any {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID+"/revisions/"+revisionID, nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET revision %s/%s = %d: %s", pageID, revisionID, rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode HTTP revision %s/%s: %v", pageID, revisionID, err)
-	}
-	return out
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+	return decodeJSONMap("GET revision "+pageID+"/"+revisionID, rec.Body.Bytes())
 }
 
-func assertSearchResultsMatch(t testing.TB, mcpSearch, httpSearch map[string]any) {
-	t.Helper()
+func matchSearchResults(httpSearch map[string]any) types.GomegaMatcher {
+	GinkgoHelper()
 
-	for _, field := range []string{"count", "offset", "limit"} {
-		if mcpSearch[field] != httpSearch[field] {
-			t.Fatalf("search %s mismatch: MCP=%v HTTP=%v", field, mcpSearch[field], httpSearch[field])
+	return gcustom.MakeMatcher(func(mcpSearch map[string]any) (bool, error) {
+		for _, field := range []string{"count", "offset", "limit"} {
+			if !jsonValuesEqual(mcpSearch[field], httpSearch[field]) {
+				return false, nil
+			}
 		}
-	}
-	mcpItems, ok := mcpSearch["items"].([]any)
-	if !ok {
-		t.Fatalf("MCP search items has type %T: %#v", mcpSearch["items"], mcpSearch["items"])
-	}
-	httpItems, ok := httpSearch["items"].([]any)
-	if !ok {
-		t.Fatalf("HTTP search items has type %T: %#v", httpSearch["items"], httpSearch["items"])
-	}
-	if len(mcpItems) != len(httpItems) {
-		t.Fatalf("search item count mismatch: MCP=%d HTTP=%d", len(mcpItems), len(httpItems))
-	}
-	assertJSONEqual(t, "search items", mcpItems, httpItems)
-	assertJSONEqual(t, "search tagFacets", mcpSearch["tagFacets"], httpSearch["tag_facets"])
-
-	count, ok := httpSearch["count"].(float64)
-	if !ok {
-		t.Fatalf("HTTP search count has type %T: %#v", httpSearch["count"], httpSearch["count"])
-	}
-	offset, ok := httpSearch["offset"].(float64)
-	if !ok {
-		t.Fatalf("HTTP search offset has type %T: %#v", httpSearch["offset"], httpSearch["offset"])
-	}
-	wantHasMore := int(offset)+len(httpItems) < int(count)
-	if mcpSearch["hasMore"] != wantHasMore {
-		t.Fatalf("search hasMore mismatch: MCP=%v HTTP-derived=%v", mcpSearch["hasMore"], wantHasMore)
-	}
-}
-
-func assertMapFieldsEqual(t testing.TB, label string, got, want map[string]any, fields []string) {
-	t.Helper()
-
-	for _, field := range fields {
-		if !reflect.DeepEqual(normalizeJSON(t, got[field]), normalizeJSON(t, want[field])) {
-			t.Fatalf("%s field %s mismatch:\n got: %#v\nwant: %#v", label, field, got[field], want[field])
+		if !jsonValuesEqual(arrayFieldFromMap(mcpSearch, "items"), arrayFieldFromMap(httpSearch, "items")) {
+			return false, nil
 		}
-	}
+		if !jsonValuesEqual(mcpSearch["tagFacets"], httpSearch["tag_facets"]) {
+			return false, nil
+		}
+		count, countOK := httpSearch["count"].(float64)
+		offset, offsetOK := httpSearch["offset"].(float64)
+		if !countOK || !offsetOK {
+			return false, fmt.Errorf("HTTP search response should expose numeric count and offset")
+		}
+		wantHasMore := int(offset)+len(arrayFieldFromMap(httpSearch, "items")) < int(count)
+		return mcpSearch["hasMore"] == wantHasMore, nil
+	}).WithMessage("match HTTP search result semantics")
 }
 
-func assertRestoredMetadata(t testing.TB, label string, page map[string]any) {
-	t.Helper()
+func matchMapFields(want map[string]any, fields []string) types.GomegaMatcher {
+	GinkgoHelper()
 
-	if got := page["content"]; got != "metadata revision\n" {
-		t.Fatalf("%s content = %v, want restored metadata revision content", label, got)
-	}
-	if got := strings.Join(stringSliceField(t, page, "tags"), ","); got != "restore,metadata" {
-		t.Fatalf("%s tags = %v, want restore,metadata", label, got)
-	}
-	props := nestedMap(t, page, "properties")
-	if got := props["status"]; got != "archived" {
-		t.Fatalf("%s properties.status = %v, want archived", label, got)
-	}
+	return gcustom.MakeMatcher(func(got map[string]any) (bool, error) {
+		for _, field := range fields {
+			if !jsonValuesEqual(got[field], want[field]) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}).WithMessage("match selected map fields").WithTemplateData(fields)
 }
 
-func assertPageVersionConflictParity(t testing.TB, label string, mcpErr mcpToolErrorResult, httpBody string) {
-	t.Helper()
+func matchRestoredMetadata() types.GomegaMatcher {
+	GinkgoHelper()
 
-	messageID := sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict)
-	assertMCPPageError(t, label+" MCP", mcpErr, wikipages.ErrCodePageVersionConflict, messageID)
-	assertHTTPPageError(t, label+" HTTP", httpBody, wikipages.ErrCodePageVersionConflict, messageID)
+	return SatisfyAll(
+		HaveKeyWithValue("content", "metadata revision\n"),
+		WithTransform(func(page map[string]any) []string {
+			return stringSliceField(page, "tags")
+		}, matchStringSet([]string{"restore", "metadata"})),
+		HaveKeyWithValue("properties", HaveKeyWithValue("status", "archived")),
+	)
 }
 
-func assertMCPPageError(t testing.TB, label string, errResult mcpToolErrorResult, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
-	t.Helper()
+func matchMCPPageError(code sharederrors.ErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	GinkgoHelper()
 
-	if errResult.Code != code {
-		t.Fatalf("%s structured error.code = %q, want %q", label, errResult.Code, code)
+	return SatisfyAll(
+		testmatchers.HaveMCPStructuredError(code, messageID),
+		HaveField("Message", Not(BeEmpty())),
+	)
+}
+
+func matchHTTPPageError(code sharederrors.ErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	GinkgoHelper()
+
+	return WithTransform(func(body string) httpPageErrorPayloadWire {
+		payload := decodeJSONMap("HTTP page error", []byte(body))
+		errPayload := nestedMap(payload, "error")
+		return httpPageErrorPayloadFromWire("HTTP page error", errPayload)
+	}, SatisfyAll(
+		testmatchers.HaveStructuredError(code, messageID),
+		HaveField("Message", Not(BeEmpty())),
+		HaveField("Template", Not(BeEmpty())),
+	))
+}
+
+func matchMCPPageVersionConflict() types.GomegaMatcher {
+	GinkgoHelper()
+
+	return matchMCPPageError(wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
+}
+
+func matchHTTPPageVersionConflict() types.GomegaMatcher {
+	GinkgoHelper()
+
+	return matchHTTPPageError(wikipages.ErrCodePageVersionConflict, sharederrors.MessageIDForCode(wikipages.ErrCodePageVersionConflict))
+}
+
+func matchRestoreVolatileFields() types.GomegaMatcher {
+	GinkgoHelper()
+
+	return gcustom.MakeMatcher(func(page map[string]any) (bool, error) {
+		if stringField(page, "version") == "" {
+			return false, nil
+		}
+		updatedAt := stringField(nestedMap(page, "metadata"), "updatedAt")
+		if _, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+			return false, err
+		}
+		return true, nil
+	}).WithMessage("expose restore volatile fields")
+}
+
+func matchPageState(id, title, slug, pathValue, kind, parentID string) types.GomegaMatcher {
+	GinkgoHelper()
+
+	return SatisfyAll(
+		HaveKeyWithValue("id", id),
+		HaveKeyWithValue("title", title),
+		HaveKeyWithValue("slug", slug),
+		HaveKeyWithValue("path", pathValue),
+		HaveKeyWithValue("kind", kind),
+		WithTransform(func(page map[string]any) string {
+			return stringValue(page["parentId"])
+		}, Equal(parentID)),
+	)
+}
+
+func matchChildOrder(childIDs ...string) types.GomegaMatcher {
+	GinkgoHelper()
+
+	return HaveKeyWithValue("children", HaveExactElements(childIDMatchers(childIDs)...))
+}
+
+func matchChildrenExcludingIDs(childIDs ...string) types.GomegaMatcher {
+	GinkgoHelper()
+
+	disallowed := map[string]struct{}{}
+	for _, id := range childIDs {
+		disallowed[id] = struct{}{}
 	}
-	if errResult.MessageID != messageID {
-		t.Fatalf("%s structured error.messageId = %q, want %q", label, errResult.MessageID, messageID)
+	return gcustom.MakeMatcher(func(page map[string]any) (bool, error) {
+		for _, raw := range arrayFieldFromMap(page, "children") {
+			child, ok := raw.(map[string]any)
+			if !ok {
+				return false, fmt.Errorf("child should be an object")
+			}
+			if _, denied := disallowed[stringValue(child["id"])]; denied {
+				return false, nil
+			}
+		}
+		return true, nil
+	}).WithMessage("exclude moved child pages").WithTemplateData(childIDs)
+}
+
+func childIDMatchers(childIDs []string) []any {
+	matchers := make([]any, 0, len(childIDs))
+	for _, id := range childIDs {
+		matchers = append(matchers, HaveKeyWithValue("id", id))
 	}
-	if errResult.Message == "" {
-		t.Fatalf("%s structured error.message is empty", label)
-	}
-	if !strings.Contains(errResult.Text, errResult.CodeText) {
-		t.Fatalf("%s error text = %q, want code %q", label, errResult.Text, code)
-	}
+	return matchers
+}
+
+func canonicalPageMarkdown(label, raw string) markdown.PageDocument {
+	GinkgoHelper()
+
+	Expect(raw).To(HavePrefix("<!-- leafwiki\n"), "%s should start with canonical LeafWiki metadata", label)
+	Expect(raw).NotTo(HavePrefix("---\n"), "%s should not start with legacy YAML frontmatter", label)
+	doc, _, err := markdown.ParsePageDocument(raw)
+	Expect(err).NotTo(HaveOccurred(), "%s should parse with ParsePageDocument", label)
+	return doc
+}
+
+func matchAssetURLResult(field, pageID string) types.GomegaMatcher {
+	GinkgoHelper()
+
+	prefix := "/assets/" + pageID + "/"
+	return SatisfyAll(
+		HaveKeyWithValue(field, SatisfyAll(HavePrefix(prefix), Not(Equal(prefix)))),
+		HaveLen(1),
+	)
+}
+
+func matchScopedSuccessPayload(httpPayload map[string]any, mcpMessageID, httpMessageID string) types.GomegaMatcher {
+	GinkgoHelper()
+
+	httpComparable := mapWithoutField(httpPayload, "messageId")
+	return gcustom.MakeMatcher(func(mcpPayload map[string]any) (bool, error) {
+		if !jsonValuesEqual(mcpPayload["messageId"], mcpMessageID) {
+			return false, nil
+		}
+		if !jsonValuesEqual(httpPayload["messageId"], httpMessageID) {
+			return false, nil
+		}
+		return jsonValuesEqual(mapWithoutField(mcpPayload, "messageId"), httpComparable), nil
+	}).WithMessage("match scoped MCP and HTTP success payloads")
+}
+
+func matchLookupFinalID(wantID string, wantKind string) types.GomegaMatcher {
+	GinkgoHelper()
+
+	return gcustom.MakeMatcher(func(lookup map[string]any) (bool, error) {
+		segments := arrayFieldFromMap(lookup, "segments")
+		if len(segments) == 0 {
+			return false, nil
+		}
+		final, ok := segments[len(segments)-1].(map[string]any)
+		if !ok {
+			return false, fmt.Errorf("final lookup segment should be an object")
+		}
+		return stringValue(final["id"]) == wantID && stringValue(final["kind"]) == wantKind, nil
+	}).WithMessage("end at the requested lookup segment")
+}
+
+func matchValidationIssueCodes(wantCodes []wikivalidation.IssueCode) types.GomegaMatcher {
+	GinkgoHelper()
+
+	return gcustom.MakeMatcher(func(output map[string]any) (bool, error) {
+		codes, err := validationIssueCodes(output)
+		if err != nil {
+			return false, err
+		}
+		for _, want := range wantCodes {
+			if !containsIssueCode(codes, want) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}).WithMessage("contain validation issue codes").WithTemplateData(wantCodes)
+}
+
+func jsonValuesEqual(got, want any) bool {
+	return reflect.DeepEqual(normalizeJSON(got), normalizeJSON(want))
 }
 
 type httpPageErrorPayloadWire struct {
@@ -5485,67 +4993,22 @@ type httpPageErrorPayloadWire struct {
 	Template  string                 `json:"template"`
 }
 
-func assertHTTPPageError(t testing.TB, label, body string, code sharederrors.ErrorCode, messageID sharederrors.MessageID) {
-	t.Helper()
-
-	payload := decodeJSONMap(t, label, []byte(body))
-	errPayload := nestedMap(t, payload, "error")
-	got := httpPageErrorPayloadFromWire(t, label, errPayload)
-	if got.Code != code {
-		t.Fatalf("%s error.code = %v, want %q; body=%s", label, got, code, body)
-	}
-	if got.MessageID != messageID {
-		t.Fatalf("%s error.messageId = %v, want %q; body=%s", label, got, messageID, body)
-	}
-	if got.Message == "" {
-		t.Fatalf("%s error.message is empty; body=%s", label, body)
-	}
-	if got.Template == "" {
-		t.Fatalf("%s error.template is empty; body=%s", label, body)
-	}
-}
-
-func httpPageErrorPayloadFromWire(t testing.TB, label string, payload map[string]any) httpPageErrorPayloadWire {
-	t.Helper()
+func httpPageErrorPayloadFromWire(label string, payload map[string]any) httpPageErrorPayloadWire {
+	GinkgoHelper()
 
 	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("%s error payload marshal failed: %v payload=%#v", label, err, payload)
-	}
+	Expect(err).NotTo(HaveOccurred(), "%s error payload should marshal", label)
 	var decoded httpPageErrorPayloadWire
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("%s error payload decode failed: %v payload=%#v", label, err, payload)
-	}
+	Expect(json.Unmarshal(raw, &decoded)).To(Succeed(), "%s error payload should decode", label)
 	return decoded
 }
 
-func assertRestorePayloadsMatch(t testing.TB, mcpRestored, httpRestored map[string]any) {
-	t.Helper()
+func normalizeRestorePayload(page map[string]any) map[string]any {
+	GinkgoHelper()
 
-	assertRestoreVolatileFieldsPresent(t, "MCP wiki_restore_revision", mcpRestored)
-	assertRestoreVolatileFieldsPresent(t, "HTTP wiki_restore_revision", httpRestored)
-	assertJSONEqual(t, "wiki_restore_revision response payload", normalizeRestorePayload(t, mcpRestored), normalizeRestorePayload(t, httpRestored))
-}
-
-func assertRestoreVolatileFieldsPresent(t testing.TB, label string, page map[string]any) {
-	t.Helper()
-
-	_ = stringField(t, page, "version")
-	metadata := nestedMap(t, page, "metadata")
-	updatedAt := stringField(t, metadata, "updatedAt")
-	if _, err := time.Parse(time.RFC3339, updatedAt); err != nil {
-		t.Fatalf("%s metadata.updatedAt = %q, want RFC3339 timestamp: %v", label, updatedAt, err)
-	}
-}
-
-func normalizeRestorePayload(t testing.TB, page map[string]any) map[string]any {
-	t.Helper()
-
-	normalizedValue := normalizeJSON(t, page)
-	normalized, ok := normalizedValue.(map[string]any)
-	if !ok {
-		t.Fatalf("restore payload normalized to %T, want object", normalizedValue)
-	}
+	normalizedValue := normalizeJSON(page)
+	Expect(normalizedValue).To(BeAssignableToTypeOf(map[string]any{}), "restore payload should normalize to object")
+	normalized := normalizedValue.(map[string]any)
 	delete(normalized, "version")
 	if metadata, ok := normalized["metadata"].(map[string]any); ok {
 		delete(metadata, "updatedAt")
@@ -5553,173 +5016,13 @@ func normalizeRestorePayload(t testing.TB, page map[string]any) map[string]any {
 	return normalized
 }
 
-func assertPageState(t testing.TB, label string, page map[string]any, id, title, slug, pathValue, kind, parentID string) {
-	t.Helper()
-
-	want := map[string]string{
-		"id":    id,
-		"title": title,
-		"slug":  slug,
-		"path":  pathValue,
-		"kind":  kind,
-	}
-	for field, expected := range want {
-		if got := stringValue(page[field]); got != expected {
-			t.Fatalf("%s field %s = %q, want %q; page=%#v", label, field, got, expected, page)
-		}
-	}
-	if parentID == "" {
-		if got := stringValue(page["parentId"]); got != "" {
-			t.Fatalf("%s parentId = %q, want root parent; page=%#v", label, got, page)
-		}
-		return
-	}
-	if got := stringValue(page["parentId"]); got != parentID {
-		t.Fatalf("%s parentId = %q, want %q; page=%#v", label, got, parentID, page)
-	}
-}
-
-func assertChildrenDoNotContain(t testing.TB, label string, page map[string]any, childIDs ...string) {
-	t.Helper()
-
-	disallowed := map[string]struct{}{}
-	for _, id := range childIDs {
-		disallowed[id] = struct{}{}
-	}
-	children, _ := page["children"].([]any)
-	for _, raw := range children {
-		child, ok := raw.(map[string]any)
-		if !ok {
-			t.Fatalf("%s child has type %T: %#v", label, raw, raw)
-		}
-		id := stringValue(child["id"])
-		if _, exists := disallowed[id]; exists {
-			t.Fatalf("%s contains moved child %q: %#v", label, id, page["children"])
-		}
-	}
-}
-
-func assertChildOrder(t testing.TB, label string, page map[string]any, childIDs ...string) {
-	t.Helper()
-
-	children, ok := page["children"].([]any)
-	if !ok {
-		t.Fatalf("%s children has type %T: %#v", label, page["children"], page["children"])
-	}
-	if len(children) != len(childIDs) {
-		t.Fatalf("%s child count = %d, want %d: %#v", label, len(children), len(childIDs), page["children"])
-	}
-	for i, wantID := range childIDs {
-		child, ok := children[i].(map[string]any)
-		if !ok {
-			t.Fatalf("%s child %d has type %T: %#v", label, i, children[i], children[i])
-		}
-		if got := stringValue(child["id"]); got != wantID {
-			t.Fatalf("%s child %d id = %q, want %q: %#v", label, i, got, wantID, page["children"])
-		}
-	}
-}
-
-func readPageMarkdownByRoutePath(t testing.TB, rootDir, routePath string) string {
-	t.Helper()
+func readPageMarkdownByRoutePath(rootDir, routePath string) string {
+	GinkgoHelper()
 
 	path := filepath.Join(append([]string{rootDir}, strings.Split(routePath, "/")...)...) + ".md"
 	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read markdown page %s: %v", path, err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "read markdown page %s", path)
 	return string(raw)
-}
-
-func assertCanonicalPageMarkdown(t testing.TB, label, raw string) markdown.PageDocument {
-	t.Helper()
-
-	if !strings.HasPrefix(raw, "<!-- leafwiki\n") {
-		t.Fatalf("%s should start with canonical LeafWiki metadata, got:\n%s", label, raw)
-	}
-	if strings.HasPrefix(raw, "---\n") {
-		t.Fatalf("%s should not start with legacy YAML frontmatter, got:\n%s", label, raw)
-	}
-	doc, _, err := markdown.ParsePageDocument(raw)
-	if err != nil {
-		t.Fatalf("%s should parse with ParsePageDocument: %v\n%s", label, err, raw)
-	}
-	return doc
-}
-
-func assertMCPToolErrorContains(t testing.TB, session *sdkmcp.ClientSession, name wikimcp.ToolID, args map[string]any, want string) {
-	t.Helper()
-
-	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      name.String(),
-		Arguments: args,
-	})
-	if err != nil {
-		t.Fatalf("CallTool %s failed: %v", name, err)
-	}
-	if !result.IsError {
-		t.Fatalf("CallTool %s succeeded, want tool error: %#v", name, result.StructuredContent)
-	}
-	errText := ""
-	for _, content := range result.Content {
-		if text, ok := content.(*sdkmcp.TextContent); ok {
-			errText = text.Text
-			break
-		}
-	}
-	if errText == "" {
-		t.Fatalf("CallTool %s returned error without text content: %#v", name, result.Content)
-	}
-	if !strings.Contains(strings.ToLower(errText), strings.ToLower(want)) {
-		t.Fatalf("%s error = %q, want detail containing %q", name, errText, want)
-	}
-}
-
-func assertErrorContainsAny(t testing.TB, label, errText string, wants ...string) {
-	t.Helper()
-
-	lower := strings.ToLower(errText)
-	for _, want := range wants {
-		if strings.Contains(lower, strings.ToLower(want)) {
-			return
-		}
-	}
-	t.Fatalf("%s error = %q, want one of %q", label, errText, wants)
-}
-
-func assertGenericToolErrorArgContainsAny(t testing.TB, label string, result mcpToolErrorResult, wants ...string) {
-	t.Helper()
-
-	assertMCPStructuredError(t, label, result, wikimcp.ErrCodeMCPToolError, sharederrors.MessageIDForCode(wikimcp.ErrCodeMCPToolError))
-	joinedArgs := strings.Join(result.Args, "\n")
-	lower := strings.ToLower(joinedArgs)
-	for _, want := range wants {
-		if strings.Contains(lower, strings.ToLower(want)) {
-			return
-		}
-	}
-	t.Fatalf("%s args = %#v, want one of %q", label, result.Args, wants)
-}
-
-func assertErrorContainsAll(t testing.TB, label, errText string, wants []string) {
-	t.Helper()
-
-	for _, want := range wants {
-		if !strings.Contains(errText, want) {
-			t.Fatalf("%s error = %q, missing %q", label, errText, want)
-		}
-	}
-}
-
-func assertErrorDoesNotContainAny(t testing.TB, label, errText string, rejects ...string) {
-	t.Helper()
-
-	lower := strings.ToLower(errText)
-	for _, reject := range rejects {
-		if strings.Contains(lower, strings.ToLower(reject)) {
-			t.Fatalf("%s error = %q, did not want detail containing %q", label, errText, reject)
-		}
-	}
 }
 
 func stringValue(v any) string {
@@ -5732,54 +5035,13 @@ func stringValue(v any) string {
 	return strings.TrimSpace(fmt.Sprint(v))
 }
 
-func assertAssetURLResult(t testing.TB, label string, result map[string]any, field, pageID string) {
-	t.Helper()
+func matchJSONEqual(want any) types.GomegaMatcher {
+	GinkgoHelper()
 
-	raw, ok := result[field].(string)
-	if !ok {
-		t.Fatalf("%s %s has type %T: %#v, want string", label, field, result[field], result[field])
-	}
-	prefix := "/assets/" + pageID + "/"
-	if !strings.HasPrefix(raw, prefix) || len(raw) <= len(prefix) {
-		t.Fatalf("%s %s = %q, want asset URL under %s", label, field, raw, prefix)
-	}
-	if len(result) != 1 {
-		t.Fatalf("%s result = %#v, want only %q field", label, result, field)
-	}
-}
-
-func assertJSONEqual(t testing.TB, label string, got, want any) {
-	t.Helper()
-
-	normalizedGot := normalizeJSON(t, got)
-	normalizedWant := normalizeJSON(t, want)
-	if !reflect.DeepEqual(normalizedGot, normalizedWant) {
-		gotJSON, _ := json.MarshalIndent(normalizedGot, "", "  ")
-		wantJSON, _ := json.MarshalIndent(normalizedWant, "", "  ")
-		t.Fatalf("%s mismatch:\n got: %s\nwant: %s", label, gotJSON, wantJSON)
-	}
-}
-
-func assertScopedSuccessPayloadsEqual(t testing.TB, label string, mcpPayload, httpPayload map[string]any, mcpMessageID, httpMessageID string) {
-	t.Helper()
-
-	assertMapStringField(t, label+" MCP", mcpPayload, "messageId", mcpMessageID)
-	assertMapStringField(t, label+" HTTP", httpPayload, "messageId", httpMessageID)
-	mcpComparable := mapWithoutField(mcpPayload, "messageId")
-	httpComparable := mapWithoutField(httpPayload, "messageId")
-	assertJSONEqual(t, label, mcpComparable, httpComparable)
-}
-
-func assertMapStringField(t testing.TB, label string, payload map[string]any, field string, want string) {
-	t.Helper()
-
-	got, ok := payload[field].(string)
-	if !ok {
-		t.Fatalf("%s %s has type %T: %#v, want string %q", label, field, payload[field], payload[field], want)
-	}
-	if got != want {
-		t.Fatalf("%s %s = %q, want %q", label, field, got, want)
-	}
+	normalizedWant := normalizeJSON(want)
+	return WithTransform(func(got any) any {
+		return normalizeJSON(got)
+	}, Equal(normalizedWant))
 }
 
 func mapWithoutField(payload map[string]any, field string) map[string]any {
@@ -5793,34 +5055,28 @@ func mapWithoutField(payload map[string]any, field string) map[string]any {
 	return out
 }
 
-func normalizeJSON(t testing.TB, value any) any {
-	t.Helper()
+func normalizeJSON(value any) any {
+	GinkgoHelper()
 
 	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal JSON value %T: %v", value, err)
-	}
-	return decodeJSONValue(t, "normalize JSON", raw)
+	Expect(err).NotTo(HaveOccurred())
+	return decodeJSONValue("normalize JSON", raw)
 }
 
-func decodeJSONValue(t testing.TB, label string, raw []byte) any {
-	t.Helper()
+func decodeJSONValue(label string, raw []byte) any {
+	GinkgoHelper()
 
 	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatalf("decode %s: %v: %s", label, err, raw)
-	}
+	Expect(json.Unmarshal(raw, &out)).To(Succeed(), "decode %s", label)
 	return out
 }
 
-func issueHTTPCSRF(t testing.TB, router http.Handler) (string, []*http.Cookie) {
-	t.Helper()
+func issueHTTPCSRF(router http.Handler) (string, []*http.Cookie) {
+	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/config", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/config for CSRF = %d: %s", rec.Code, rec.Body.String())
-	}
+	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	token := rec.Header().Get("X-CSRF-Token")
 	result := rec.Result()
 	defer result.Body.Close()
@@ -5832,81 +5088,45 @@ func issueHTTPCSRF(t testing.TB, router http.Handler) (string, []*http.Cookie) {
 			}
 		}
 	}
-	if token == "" {
-		t.Fatalf("GET /api/config did not issue CSRF token")
-	}
+	Expect(token).NotTo(BeEmpty())
 	return token, result.Cookies()
 }
 
-func nestedMap(t testing.TB, value map[string]any, key string) map[string]any {
-	t.Helper()
+func nestedMap(value map[string]any, key string) map[string]any {
+	GinkgoHelper()
 
-	nested, ok := value[key].(map[string]any)
-	if !ok {
-		t.Fatalf("%q has type %T: %#v", key, value[key], value[key])
-	}
-	return nested
+	Expect(value).To(HaveKeyWithValue(key, BeAssignableToTypeOf(map[string]any{})))
+	return value[key].(map[string]any)
 }
 
-func stringField(t testing.TB, value map[string]any, key string) string {
-	t.Helper()
+func stringField(value map[string]any, key string) string {
+	GinkgoHelper()
 
-	s, ok := value[key].(string)
-	if !ok || s == "" {
-		t.Fatalf("%q has type %T and value %#v, want non-empty string", key, value[key], value[key])
-	}
-	return s
+	Expect(value).To(HaveKeyWithValue(key, SatisfyAll(BeAssignableToTypeOf(""), Not(BeEmpty()))))
+	return value[key].(string)
 }
 
-func assertLookupFinalID(t testing.TB, label string, lookup map[string]any, wantID string, wantKind string) {
-	t.Helper()
+func arrayField(value map[string]any, key string) []any {
+	GinkgoHelper()
 
-	segmentsRaw, ok := lookup["segments"].([]any)
-	if !ok || len(segmentsRaw) == 0 {
-		t.Fatalf("%s segments = %#v, want non-empty list", label, lookup["segments"])
-	}
-	final, ok := segmentsRaw[len(segmentsRaw)-1].(map[string]any)
-	if !ok {
-		t.Fatalf("%s final segment = %#v, want object", label, segmentsRaw[len(segmentsRaw)-1])
-	}
-	if got := final["id"]; got != wantID {
-		t.Fatalf("%s final id = %v, want %q", label, got, wantID)
-	}
-	if got := final["kind"]; got != wantKind {
-		t.Fatalf("%s final kind = %v, want %q", label, got, wantKind)
-	}
+	return arrayFieldFromMap(value, key)
 }
 
-func arrayField(t testing.TB, value map[string]any, key string) []any {
-	t.Helper()
+func arrayFieldFromMap(value map[string]any, key string) []any {
+	GinkgoHelper()
 
-	return arrayFieldFromMap(t, value, key)
+	Expect(value).To(HaveKeyWithValue(key, BeAssignableToTypeOf([]any{})))
+	return value[key].([]any)
 }
 
-func arrayFieldFromMap(t testing.TB, value map[string]any, key string) []any {
-	t.Helper()
+func stringSliceField(value map[string]any, key string) []string {
+	GinkgoHelper()
 
-	raw, ok := value[key].([]any)
-	if !ok {
-		t.Fatalf("%q has type %T: %#v", key, value[key], value[key])
-	}
-	return raw
-}
-
-func stringSliceField(t testing.TB, value map[string]any, key string) []string {
-	t.Helper()
-
-	raw, ok := value[key].([]any)
-	if !ok {
-		t.Fatalf("%q has type %T: %#v", key, value[key], value[key])
-	}
+	raw := arrayField(value, key)
 	out := make([]string, 0, len(raw))
 	for _, item := range raw {
-		s, ok := item.(string)
-		if !ok {
-			t.Fatalf("%q item has type %T: %#v", key, item, item)
-		}
-		out = append(out, s)
+		Expect(item).To(BeAssignableToTypeOf(""))
+		out = append(out, item.(string))
 	}
 	return out
 }
@@ -5925,38 +5145,37 @@ func arrayContainsObjectField(value any, field string, want any) bool {
 	return false
 }
 
-func objectWithField(t testing.TB, value any, field string, want any) map[string]any {
-	t.Helper()
+func objectWithField(value any, field string, want any) map[string]any {
+	GinkgoHelper()
 
-	items, ok := value.([]any)
-	if !ok {
-		t.Fatalf("value = %T %#v, want array", value, value)
-	}
+	Expect(value).To(BeAssignableToTypeOf([]any{}), "value should be an array")
+	items := value.([]any)
 	for _, item := range items {
 		obj, ok := item.(map[string]any)
 		if ok && obj[field] == want {
 			return obj
 		}
 	}
-	t.Fatalf("array = %#v, want object with %s=%#v", value, field, want)
+	Expect(items).To(ContainElement(HaveKeyWithValue(field, want)), "array should include object with %s=%#v", field, want)
 	return nil
 }
 
-func changedPathsFromContext(t testing.TB, output map[string]any) map[string]bool {
-	t.Helper()
+func changedPathsFromContext(output map[string]any) map[string]bool {
+	GinkgoHelper()
+
+	return changedPathsFromChanges(arrayField(output, "changesSincePreviousContext"))
+}
+
+func changedPathsFromChanges(changes []any) map[string]bool {
+	GinkgoHelper()
 
 	paths := map[string]bool{}
-	for _, raw := range arrayField(t, output, "changesSincePreviousContext") {
-		change, ok := raw.(map[string]any)
-		if !ok {
-			t.Fatalf("change has type %T: %#v", raw, raw)
-		}
-		for _, value := range arrayFieldFromMap(t, change, "changedPaths") {
-			path, ok := value.(string)
-			if !ok {
-				t.Fatalf("changed path has type %T: %#v", value, value)
-			}
-			paths[path] = true
+	for _, raw := range changes {
+		Expect(raw).To(BeAssignableToTypeOf(map[string]any{}))
+		change := raw.(map[string]any)
+		for _, value := range arrayFieldFromMap(change, "changedPaths") {
+			Expect(value).To(BeAssignableToTypeOf(""))
+			paths[value.(string)] = true
 		}
 	}
 	return paths
@@ -5967,97 +5186,90 @@ type validationIssueWire struct {
 	Path string                   `json:"path"`
 }
 
-func validationIssueFromWire(t testing.TB, item map[string]any) validationIssueWire {
-	t.Helper()
+func validationIssueFromWire(item map[string]any) validationIssueWire {
+	GinkgoHelper()
 
 	raw, err := json.Marshal(item)
-	if err != nil {
-		t.Fatalf("validation issue marshal failed: %v issue=%#v", err, item)
-	}
+	Expect(err).NotTo(HaveOccurred(), "validation issue should marshal")
 	var decoded validationIssueWire
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("validation issue decode failed: %v issue=%#v", err, item)
-	}
+	Expect(json.Unmarshal(raw, &decoded)).To(Succeed(), "validation issue should decode")
 	return decoded
 }
 
-func assertValidationIssueCodes(t testing.TB, output map[string]any, wantCodes []wikivalidation.IssueCode) {
-	t.Helper()
+func validationIssueByCode(output map[string]any, wantCode wikivalidation.IssueCode) map[string]any {
+	GinkgoHelper()
 
-	issues, ok := output["issues"].([]any)
-	if !ok {
-		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
-	}
-	got := map[wikivalidation.IssueCode]struct{}{}
-	for _, issue := range issues {
+	issues := arrayField(output, "issues")
+	Expect(issues).To(ContainElement(Satisfy(func(issue any) bool {
 		item, ok := issue.(map[string]any)
-		if !ok {
-			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+		return ok && validationIssueFromWire(item).Code == wantCode
+	})))
+	matches := []map[string]any{}
+	for _, issue := range issues {
+		Expect(issue).To(BeAssignableToTypeOf(map[string]any{}))
+		item := issue.(map[string]any)
+		if validationIssueFromWire(item).Code == wantCode {
+			matches = append(matches, item)
 		}
-		got[validationIssueFromWire(t, item).Code] = struct{}{}
 	}
-	for _, want := range wantCodes {
-		if _, exists := got[want]; !exists {
-			t.Fatalf("validation issue codes = %#v, want %q in output %#v", got, want, output)
-		}
-	}
+	return matches[0]
 }
 
-func validationIssueByCode(t testing.TB, output map[string]any, wantCode wikivalidation.IssueCode) map[string]any {
-	t.Helper()
+func assertNoValidationIssuePath(output map[string]any, unwantedPath string) {
+	GinkgoHelper()
 
-	issues, ok := output["issues"].([]any)
-	if !ok {
-		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
-	}
+	issues := arrayField(output, "issues")
+	paths := []string{}
 	for _, issue := range issues {
-		item, ok := issue.(map[string]any)
-		if !ok {
-			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
-		}
-		if validationIssueFromWire(t, item).Code == wantCode {
-			return item
-		}
+		Expect(issue).To(BeAssignableToTypeOf(map[string]any{}))
+		paths = append(paths, validationIssueFromWire(issue.(map[string]any)).Path)
 	}
-	t.Fatalf("validation issues = %#v, want issue code %q", issues, wantCode)
-	return nil
+	Expect(paths).NotTo(ContainElement(unwantedPath))
 }
 
-func assertNoValidationIssuePath(t testing.TB, output map[string]any, unwantedPath string) {
-	t.Helper()
+func matchValidationIssueCodesAbsent(absentCodes []wikivalidation.IssueCode) types.GomegaMatcher {
+	GinkgoHelper()
 
-	issues, ok := output["issues"].([]any)
-	if !ok {
-		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
+	absent := make(map[wikivalidation.IssueCode]struct{}, len(absentCodes))
+	for _, code := range absentCodes {
+		absent[code] = struct{}{}
 	}
-	for _, issue := range issues {
-		item, ok := issue.(map[string]any)
-		if !ok {
-			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+	return gcustom.MakeMatcher(func(output map[string]any) (bool, error) {
+		codes, err := validationIssueCodes(output)
+		if err != nil {
+			return false, err
 		}
-		if item["path"] == unwantedPath {
-			t.Fatalf("validation issues = %#v, did not expect issue for hidden path %q", issues, unwantedPath)
+		for _, code := range codes {
+			if _, forbidden := absent[code]; forbidden {
+				return false, nil
+			}
 		}
-	}
+		return true, nil
+	}).WithMessage("exclude validation issue codes").WithTemplateData(absentCodes)
 }
 
-func assertValidationIssueCodesAbsent(t testing.TB, output map[string]any, absentCodes []wikivalidation.IssueCode) {
-	t.Helper()
-
-	issues, ok := output["issues"].([]any)
+func validationIssueCodes(output map[string]any) ([]wikivalidation.IssueCode, error) {
+	rawIssues, ok := output["issues"].([]any)
 	if !ok {
-		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
+		return nil, fmt.Errorf("validation output should expose issues as an array")
 	}
-	for _, issue := range issues {
-		item, ok := issue.(map[string]any)
+	codes := make([]wikivalidation.IssueCode, 0, len(rawIssues))
+	for _, rawIssue := range rawIssues {
+		issue, ok := rawIssue.(map[string]any)
 		if !ok {
-			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
+			return nil, fmt.Errorf("validation issue should be an object")
 		}
-		code := validationIssueFromWire(t, item).Code
-		if containsIssueCode(absentCodes, code) {
-			t.Fatalf("validation issue codes include forbidden %q in output %#v", code, output)
+		payload, err := json.Marshal(issue)
+		if err != nil {
+			return nil, fmt.Errorf("marshal validation issue: %w", err)
 		}
+		var decoded validationIssueWire
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return nil, fmt.Errorf("decode validation issue: %w", err)
+		}
+		codes = append(codes, decoded.Code)
 	}
+	return codes, nil
 }
 
 func containsIssueCode(codes []wikivalidation.IssueCode, want wikivalidation.IssueCode) bool {
@@ -6069,20 +5281,14 @@ func containsIssueCode(codes []wikivalidation.IssueCode, want wikivalidation.Iss
 	return false
 }
 
-func validationIssueCodeCount(t testing.TB, output map[string]any, wantCode wikivalidation.IssueCode, wantPath string) int {
-	t.Helper()
+func validationIssueCodeCount(output map[string]any, wantCode wikivalidation.IssueCode, wantPath string) int {
+	GinkgoHelper()
 
-	issues, ok := output["issues"].([]any)
-	if !ok {
-		t.Fatalf("validation issues = %T %#v, want array", output["issues"], output["issues"])
-	}
+	issues := arrayField(output, "issues")
 	count := 0
 	for _, issue := range issues {
-		item, ok := issue.(map[string]any)
-		if !ok {
-			t.Fatalf("validation issue = %T %#v, want object", issue, issue)
-		}
-		decoded := validationIssueFromWire(t, item)
+		Expect(issue).To(BeAssignableToTypeOf(map[string]any{}))
+		decoded := validationIssueFromWire(issue.(map[string]any))
 		if decoded.Code == wantCode && decoded.Path == wantPath {
 			count++
 		}
@@ -6090,21 +5296,10 @@ func validationIssueCodeCount(t testing.TB, output map[string]any, wantCode wiki
 	return count
 }
 
-func assertRecentChangesIncludePath(t testing.TB, output map[string]any, wantPath string) {
-	t.Helper()
+func assertRecentChangesIncludePath(output map[string]any, wantPath string) {
+	GinkgoHelper()
 
-	for _, rawChange := range arrayField(t, output, "recentChanges") {
-		change, ok := rawChange.(map[string]any)
-		if !ok {
-			t.Fatalf("recent change = %T %#v, want object", rawChange, rawChange)
-		}
-		for _, rawPath := range arrayFieldFromMap(t, change, "changedPaths") {
-			if rawPath == wantPath {
-				return
-			}
-		}
-	}
-	t.Fatalf("recentChanges = %#v, missing changed path %q", output["recentChanges"], wantPath)
+	Expect(changedPathsFromChanges(arrayField(output, "recentChanges"))).To(HaveKey(wantPath))
 }
 
 func arrayContainsString(value any, want string) bool {

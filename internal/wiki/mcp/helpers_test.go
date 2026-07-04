@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -22,7 +23,6 @@ import (
 
 var _ = Describe("actor/request helpers", func() {
 	It("rejects missing token info by default", func() {
-		t := GinkgoT()
 		routes := &Routes{}
 
 		for _, req := range []*sdkmcp.CallToolRequest{
@@ -30,16 +30,12 @@ var _ = Describe("actor/request helpers", func() {
 			{},
 			{Extra: &sdkmcp.RequestExtra{}},
 		} {
-			if user, err := routes.actorForRequest(req); err == nil {
-				t.Fatalf("actorForRequest(%#v) returned user %#v, want missing-token error", req, user)
-			} else {
-				Expect(err).To(matchLocalizedErrorCode(errCodeMCPTokenInfoMissing, sharederrors.MessageIDForCode(errCodeMCPTokenInfoMissing)))
-			}
+			_, err := routes.actorForRequest(req)
+			Expect(err).To(matchLocalizedErrorCode(errCodeMCPTokenInfoMissing, sharederrors.MessageIDForCode(errCodeMCPTokenInfoMissing)))
 		}
 	})
 
 	It("uses the private actor context header", func() {
-		t := GinkgoT()
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		encoded, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 			Version:     1,
@@ -72,15 +68,16 @@ var _ = Describe("actor/request helpers", func() {
 		user, err := routes.actorForRequest(req)
 
 		Expect(err).NotTo(HaveOccurred())
-		if user.ID != "editor-1" || user.Username != "editor" || user.Role != coreauth.RoleEditor {
-			t.Fatalf("actor = %#v, want private actor context user", user)
-		}
+		Expect(user).To(SatisfyAll(
+			HaveField("ID", Equal("editor-1")),
+			HaveField("Username", Equal("editor")),
+			HaveField("Role", Equal(coreauth.RoleEditor)),
+		))
 	})
 
 	It("uses a missing-token STDIO API key and reloads the current user", func() {
-		t := GinkgoT()
-		userService, apiKeyService, editor := newMCPAuthServices(t)
-		editorID := newFixtureUserID(editor.ID)
+		userService, apiKeyService, editor := newMCPAuthServices()
+		editorID := coreauth.UserIDFromString(editor.ID)
 		created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 		Expect(err).NotTo(HaveOccurred())
 		routes := &Routes{
@@ -90,9 +87,10 @@ var _ = Describe("actor/request helpers", func() {
 
 		user, err := routes.actorForRequest(nil)
 		Expect(err).NotTo(HaveOccurred())
-		if user.Username != "editor" || user.Role != coreauth.RoleEditor {
-			t.Fatalf("user = %#v, want editor role", user)
-		}
+		Expect(user).To(SatisfyAll(
+			HaveField("Username", Equal("editor")),
+			HaveField("Role", Equal(coreauth.RoleEditor)),
+		))
 
 		_, err = userService.UpdateUser(editorID, "editor", "editor@example.com", "", coreauth.RoleViewer)
 		Expect(err).NotTo(HaveOccurred())
@@ -101,15 +99,11 @@ var _ = Describe("actor/request helpers", func() {
 		Expect(user.Role).To(Equal(coreauth.RoleViewer))
 
 		Expect(apiKeyService.RevokeAPIKey(editorID, created.Key.ID)).To(Succeed())
-		if _, err := routes.actorForRequest(nil); err == nil {
-			t.Fatalf("actorForRequest after revoke succeeded, want authenticated user error")
-		} else {
-			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserNotFound, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserNotFound)))
-		}
+		_, err = routes.actorForRequest(nil)
+		Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserNotFound, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserNotFound)))
 	})
 
 	It("rejects viewer editor actors with a stable code", func() {
-		t := GinkgoT()
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		encoded, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 			Version:     1,
@@ -133,33 +127,27 @@ var _ = Describe("actor/request helpers", func() {
 		}
 		req := &sdkmcp.CallToolRequest{Extra: &sdkmcp.RequestExtra{Header: header}}
 
-		user, err := routes.editorActorForRequest(req)
+		_, err = routes.editorActorForRequest(req)
 
-		if err == nil {
-			t.Fatalf("editorActorForRequest returned user %#v, want role error", user)
-		}
 		Expect(err).To(matchLocalizedErrorCode(errCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(errCodeMCPEditorRoleRequired)))
 	})
 
 	It("preserves API key bearer verification storage errors", func() {
-		t := GinkgoT()
-		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
-		blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
-		DeferCleanup(blocker.rollback, t)
+		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture()
+		blocker := beginExclusiveMCPTestSQLiteTransaction(apiKeyDBPath)
+		DeferCleanup(blocker.rollback)
 		routes := &Routes{apiKeys: apiKeyService}
 
 		_, err := routes.verifyBearerToken(context.Background(), created.Secret, nil)
 
-		Expect(err).To(HaveOccurred())
 		Expect(err).NotTo(MatchError(sdkauth.ErrInvalidToken), "storage failure should not be classified as invalid-token")
 		Expect(err).To(MatchError(errMCPAPIKeyVerifierFailed))
 	})
 
 	It("preserves missing-token API key storage errors", func() {
-		t := GinkgoT()
-		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture(t)
-		blocker := beginExclusiveMCPTestSQLiteTransaction(t, apiKeyDBPath)
-		DeferCleanup(blocker.rollback, t)
+		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture()
+		blocker := beginExclusiveMCPTestSQLiteTransaction(apiKeyDBPath)
+		DeferCleanup(blocker.rollback)
 		routes := &Routes{
 			apiKeys:     apiKeyService,
 			stdioAPIKey: created.Secret,
@@ -167,17 +155,10 @@ var _ = Describe("actor/request helpers", func() {
 
 		_, err := routes.actorForRequest(nil)
 
-		Expect(err).To(HaveOccurred())
 		Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserLookupFailed, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserLookupFailed)))
 		Expect(err).To(matchSQLiteErrorCause())
 	})
 })
-
-type mcpHelperT interface {
-	Helper()
-	Fatalf(format string, args ...any)
-	TempDir() string
-}
 
 func matchLocalizedErrorCode(code sharederrors.ErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
 	GinkgoHelper()
@@ -192,46 +173,42 @@ func matchSQLiteErrorCause() types.GomegaMatcher {
 	})
 }
 
-func newMCPAuthServices(t mcpHelperT) (*coreauth.UserService, *coreauth.APIKeyService, *coreauth.User) {
-	t.Helper()
-	userService, apiKeyService, editor, _, _ := newMCPAPIKeyAuthFixture(t)
+func mcpTestTempDir() string {
+	GinkgoHelper()
+	dir, err := os.MkdirTemp("", "leafwiki-mcp-test-*")
+	Expect(err).To(Succeed())
+	DeferCleanup(os.RemoveAll, dir)
+	return dir
+}
+
+func newMCPAuthServices() (*coreauth.UserService, *coreauth.APIKeyService, *coreauth.User) {
+	GinkgoHelper()
+	userService, apiKeyService, editor, _, _ := newMCPAPIKeyAuthFixture()
 	return userService, apiKeyService, editor
 }
 
-func newMCPAPIKeyAuthFixture(t mcpHelperT) (*coreauth.UserService, *coreauth.APIKeyService, *coreauth.User, *coreauth.APIKeyCreateResult, string) {
-	t.Helper()
+func newMCPAPIKeyAuthFixture() (*coreauth.UserService, *coreauth.APIKeyService, *coreauth.User, *coreauth.APIKeyCreateResult, string) {
+	GinkgoHelper()
 
-	store, err := coreauth.NewUserStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewUserStore failed: %v", err)
-	}
+	store, err := coreauth.NewUserStore(mcpTestTempDir())
+	Expect(err).To(Succeed())
 	DeferCleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close user store: %v", err)
-		}
+		Expect(store.Close()).To(Succeed())
 	})
 	userService := coreauth.NewUserService(store)
 	editor, err := userService.CreateUser("editor", "editor@example.com", "password", coreauth.RoleEditor)
-	if err != nil {
-		t.Fatalf("CreateUser editor failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 
-	apiKeyDir := t.TempDir()
+	apiKeyDir := mcpTestTempDir()
 	apiKeyStore, err := coreauth.NewAPIKeyStore(apiKeyDir)
-	if err != nil {
-		t.Fatalf("NewAPIKeyStore failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 	apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
 	DeferCleanup(func() {
-		if err := apiKeyService.Close(); err != nil {
-			t.Fatalf("close api key service: %v", err)
-		}
+		Expect(apiKeyService.Close()).To(Succeed())
 	})
-	editorID := newFixtureUserID(editor.ID)
+	editorID := coreauth.UserIDFromString(editor.ID)
 	created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
-	if err != nil {
-		t.Fatalf("CreateAPIKey failed: %v", err)
-	}
+	Expect(err).To(Succeed())
 	return userService, apiKeyService, editor, created, filepath.Join(apiKeyDir, "api_keys.db")
 }
 
@@ -239,25 +216,21 @@ type mcpTestSQLiteBlocker struct {
 	db *sql.DB
 }
 
-func beginExclusiveMCPTestSQLiteTransaction(t mcpHelperT, path string) mcpTestSQLiteBlocker {
-	t.Helper()
+func beginExclusiveMCPTestSQLiteTransaction(path string) mcpTestSQLiteBlocker {
+	GinkgoHelper()
 	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open blocking connection: %v", err)
-	}
+	Expect(err).To(Succeed())
 	DeferCleanup(func() {
 		_, _ = db.Exec("ROLLBACK")
 		_ = db.Close()
 	})
-	if _, err := db.Exec("BEGIN EXCLUSIVE"); err != nil {
-		t.Fatalf("begin blocking transaction: %v", err)
-	}
+	_, err = db.Exec("BEGIN EXCLUSIVE")
+	Expect(err).To(Succeed())
 	return mcpTestSQLiteBlocker{db: db}
 }
 
-func (b mcpTestSQLiteBlocker) rollback(t mcpHelperT) {
-	t.Helper()
-	if _, err := b.db.Exec("ROLLBACK"); err != nil {
-		t.Fatalf("rollback blocking transaction: %v", err)
-	}
+func (b mcpTestSQLiteBlocker) rollback() {
+	GinkgoHelper()
+	_, err := b.db.Exec("ROLLBACK")
+	Expect(err).To(Succeed())
 }
