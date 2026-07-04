@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -17,14 +18,6 @@ import (
 
 const (
 	wikidStoreSchemaVersionJSON             = `"schemaVersion"`
-	wikidStoreLoadRegistryContext           = "load registry"
-	wikidStoreEncodeStdoutJSONContext       = "encode stdout JSON"
-	wikidStoreReadStdinContext              = "read stdin"
-	wikidStoreDecodeStdinJSONContext        = "decode stdin JSON"
-	wikidStoreRegisterWorkspaceContext      = "register workspace"
-	wikidStoreUpsertGrantFrontdHomeContext  = "upsert grant frontd home"
-	wikidStoreSubjectRequiredErrorFragment  = "--subject is required"
-	wikidStoreReplaceGrantsFrontdContext    = "replace grants for frontd"
 	wikidStoreFixtureDisplayName            = "Docs"
 	wikidStoreFixtureMarkdownLinkRootPrefix = "/docs"
 )
@@ -69,7 +62,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 		Expect(func() { main() }).To(PanicWith("exit"))
 
 		Expect(exitCode).To(BeZero(), stderr.String())
-		Expect(stdout.String()).To(ContainSubstring(wikidStoreSchemaVersionJSON))
+		Expect(stdout.String()).To(haveWikidStoreSchemaVersionJSON())
 	})
 
 	ginkgo.DescribeTable("reads the registry and reports registry or output errors",
@@ -77,40 +70,41 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			restore := restoreWikidStoreSeams()
 			ginkgo.DeferCleanup(restore)
 			var stderr bytes.Buffer
+			store := tc.store()
 			stdout := tc.stdout()
 			stdoutBuffer, _ := stdout.(*bytes.Buffer)
 			newRegistryStore = func(string) registryStore {
-				return tc.store()
+				return store
 			}
 
 			code := runWikidStore([]string{"read-registry", "--global-data-dir", "/tmp/global"}, strings.NewReader(""), stdout, &stderr)
 
 			Expect(code).To(Equal(tc.wantCode))
-			if tc.wantStdout != "" {
+			Expect(store).To(haveWikidStoreRegistryLoadAttempts(1))
+			if tc.wantStdout != nil {
 				Expect(stdoutBuffer).NotTo(BeNil())
-				Expect(stdoutBuffer.String()).To(ContainSubstring(tc.wantStdout))
+				Expect(stdoutBuffer.String()).To(tc.wantStdout)
 			}
-			if tc.wantStderr != nil {
-				Expect(stderr.String()).To(tc.wantStderr)
+			if tc.wantWriter != nil {
+				Expect(stdout).To(tc.wantWriter)
 			}
 		},
 		ginkgo.Entry("success", wikidStoreReadRegistryCase{
-			store:      func() registryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
+			store:      func() *fakeRegistryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
 			stdout:     func() io.Writer { return &bytes.Buffer{} },
 			wantCode:   0,
-			wantStdout: wikidStoreSchemaVersionJSON,
+			wantStdout: haveWikidStoreSchemaVersionJSON(),
 		}),
 		ginkgo.Entry("load error", wikidStoreReadRegistryCase{
-			store:      func() registryStore { return &fakeRegistryStore{err: errWikidStoreLoadFailed} },
-			stdout:     func() io.Writer { return &bytes.Buffer{} },
-			wantCode:   1,
-			wantStderr: haveWikidStoreStderr(wikidStoreLoadRegistryContext, errWikidStoreLoadFailed),
+			store:    func() *fakeRegistryStore { return &fakeRegistryStore{err: errWikidStoreLoadFailed} },
+			stdout:   func() io.Writer { return &bytes.Buffer{} },
+			wantCode: 1,
 		}),
 		ginkgo.Entry("write error", wikidStoreReadRegistryCase{
-			store:      func() registryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
-			stdout:     func() io.Writer { return errorWriter{err: errWikidStoreWriteFailed} },
+			store:      func() *fakeRegistryStore { return &fakeRegistryStore{doc: wikid.NewRegistryDocument()} },
+			stdout:     func() io.Writer { return &errorWriter{err: errWikidStoreWriteFailed} },
 			wantCode:   1,
-			wantStderr: haveWikidStoreStderr(wikidStoreEncodeStdoutJSONContext, errWikidStoreWriteFailed),
+			wantWriter: haveWikidStoreWriteAttempts(1),
 		}),
 	)
 
@@ -121,23 +115,22 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			var stderr bytes.Buffer
 			var servicePath string
 			service := tc.service()
+			stdout := tc.stdout()
 			newRegistryService = func(path string, layout wikid.Layout) registryService {
 				servicePath = path
 				return service
 			}
 
-			code := runWikidStore([]string{"register-workspace", "--global-data-dir", "/tmp/global"}, tc.stdin(), tc.stdout(), &stderr)
+			code := runWikidStore([]string{"register-workspace", "--global-data-dir", "/tmp/global"}, tc.stdin(), stdout, &stderr)
 
 			Expect(code).To(Equal(tc.wantCode))
-			if tc.wantCode == 0 {
-				Expect(servicePath).To(Equal(wikid.GlobalLayout("/tmp/global").DBPath))
-				Expect(service.request).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-					"DisplayName":            Equal(wikidStoreFixtureDisplayName),
-					"MarkdownLinkRootPrefix": Equal(wikidStoreFixtureMarkdownLinkRootPrefix),
-				}))
-			}
-			if tc.wantStderr != nil {
-				Expect(stderr.String()).To(tc.wantStderr)
+			Expect(wikidStoreRegistryServiceSnapshot{
+				Path:          servicePath,
+				RegisterCalls: service.registerCalls,
+				Request:       service.request,
+			}).To(tc.wantService)
+			if tc.wantWriter != nil {
+				Expect(stdout).To(tc.wantWriter)
 			}
 		},
 		ginkgo.Entry("success", wikidStoreRegisterWorkspaceCase{
@@ -147,34 +140,44 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			service:  func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
 			stdout:   func() io.Writer { return &bytes.Buffer{} },
 			wantCode: 0,
+			wantService: haveWikidStoreRegistryServiceRequest(
+				matchWikidStoreRegisterWorkspaceRequest(wikidStoreFixtureMarkdownLinkRootPrefix),
+			),
 		}),
 		ginkgo.Entry("read error", wikidStoreRegisterWorkspaceCase{
-			stdin:      func() io.Reader { return errorReader{err: errWikidStoreReadFailed} },
-			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
-			stdout:     func() io.Writer { return &bytes.Buffer{} },
-			wantCode:   1,
-			wantStderr: haveWikidStoreStderr(wikidStoreReadStdinContext, errWikidStoreReadFailed),
+			stdin:       func() io.Reader { return errorReader{err: errWikidStoreReadFailed} },
+			service:     func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
+			stdout:      func() io.Writer { return &bytes.Buffer{} },
+			wantCode:    1,
+			wantService: haveNoWikidStoreRegistryServiceRequest(),
 		}),
 		ginkgo.Entry("decode error", wikidStoreRegisterWorkspaceCase{
-			stdin:      func() io.Reader { return strings.NewReader("{") },
-			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
-			stdout:     func() io.Writer { return &bytes.Buffer{} },
-			wantCode:   1,
-			wantStderr: ContainSubstring(wikidStoreDecodeStdinJSONContext),
+			stdin:       func() io.Reader { return strings.NewReader("{") },
+			service:     func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
+			stdout:      func() io.Writer { return &bytes.Buffer{} },
+			wantCode:    1,
+			wantService: haveNoWikidStoreRegistryServiceRequest(),
 		}),
 		ginkgo.Entry("service error", wikidStoreRegisterWorkspaceCase{
-			stdin:      func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
-			service:    func() *fakeRegistryService { return &fakeRegistryService{err: errWikidStoreRegisterFailed} },
-			stdout:     func() io.Writer { return &bytes.Buffer{} },
-			wantCode:   1,
-			wantStderr: haveWikidStoreStderr(wikidStoreRegisterWorkspaceContext, errWikidStoreRegisterFailed),
+			stdin:    func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
+			service:  func() *fakeRegistryService { return &fakeRegistryService{err: errWikidStoreRegisterFailed} },
+			stdout:   func() io.Writer { return &bytes.Buffer{} },
+			wantCode: 1,
+			wantService: haveWikidStoreRegistryServiceRequest(
+				matchWikidStoreRegisterWorkspaceRequest(""),
+			),
 		}),
 		ginkgo.Entry("write error", wikidStoreRegisterWorkspaceCase{
-			stdin:      func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
-			service:    func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
-			stdout:     func() io.Writer { return errorWriter{err: errWikidStoreWriteFailed} },
-			wantCode:   1,
-			wantStderr: haveWikidStoreStderr(wikidStoreEncodeStdoutJSONContext, errWikidStoreWriteFailed),
+			stdin:   func() io.Reader { return strings.NewReader(`{"displayName":"Docs"}`) },
+			service: func() *fakeRegistryService { return &fakeRegistryService{workspace: fakeWorkspaceRecord()} },
+			stdout: func() io.Writer {
+				return &errorWriter{err: errWikidStoreWriteFailed}
+			},
+			wantCode: 1,
+			wantService: haveWikidStoreRegistryServiceRequest(
+				matchWikidStoreRegisterWorkspaceRequest(""),
+			),
+			wantWriter: haveWikidStoreWriteAttempts(1),
 		}),
 	)
 
@@ -195,11 +198,18 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 		)
 
 		Expect(code).To(BeZero(), stderr.String())
-		Expect(store.upserts).To(Equal([]wikid.Grant{{
-			Subject:     "frontd",
-			WorkspaceID: workspaceid.WorkspaceID("home"),
-			Role:        wikid.GrantRoleAdmin,
-		}}))
+		Expect(store).To(haveWikidStoreGrantUpserts(
+			Equal([]wikid.Grant{{
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}}),
+			Equal([]wikid.Grant{{
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}}),
+		))
 
 		store.upsertErr = errWikidStoreUpsertFailed
 		stderr.Reset()
@@ -210,7 +220,22 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(haveWikidStoreStderr(wikidStoreUpsertGrantFrontdHomeContext, errWikidStoreUpsertFailed))
+		Expect(store).To(haveWikidStoreGrantUpserts(
+			Equal([]wikid.Grant{{
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}, {
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}}),
+			Equal([]wikid.Grant{{
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}}),
+		))
 
 		stderr.Reset()
 		code = runWikidStore(
@@ -220,7 +245,22 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring(wikidStoreDecodeStdinJSONContext))
+		Expect(store).To(haveWikidStoreGrantUpserts(
+			Equal([]wikid.Grant{{
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}, {
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}}),
+			Equal([]wikid.Grant{{
+				Subject:     "frontd",
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}}),
+		))
 	})
 
 	ginkgo.It("replaces subject grants and reports missing subjects or store errors", func() {
@@ -239,7 +279,8 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring(wikidStoreSubjectRequiredErrorFragment))
+		Expect(store).To(haveRecordedWikidStoreReplace("", BeNil()))
+		Expect(store).To(haveWikidStoreReplaceAttempts(BeEmpty()))
 
 		stderr.Reset()
 		code = runWikidStore(
@@ -250,6 +291,13 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 		)
 		Expect(code).To(BeZero(), stderr.String())
 		Expect(store).To(haveRecordedWikidStoreReplace("frontd", HaveLen(1)))
+		Expect(store).To(haveWikidStoreReplaceAttempts(Equal([]wikidStoreReplaceSnapshot{{
+			Subject: "frontd",
+			Grants: []wikid.Grant{{
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}},
+		}})))
 
 		stderr.Reset()
 		code = runWikidStore(
@@ -259,7 +307,14 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(ContainSubstring(wikidStoreDecodeStdinJSONContext))
+		Expect(store).To(haveRecordedWikidStoreReplace("frontd", HaveLen(1)))
+		Expect(store).To(haveWikidStoreReplaceAttempts(Equal([]wikidStoreReplaceSnapshot{{
+			Subject: "frontd",
+			Grants: []wikid.Grant{{
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}},
+		}})))
 
 		store.replaceErr = errWikidStoreReplaceFailed
 		stderr.Reset()
@@ -270,39 +325,49 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			&stderr,
 		)
 		Expect(code).To(Equal(1))
-		Expect(stderr.String()).To(haveWikidStoreStderr(wikidStoreReplaceGrantsFrontdContext, errWikidStoreReplaceFailed))
+		Expect(store).To(haveRecordedWikidStoreReplace("frontd", HaveLen(1)))
+		Expect(store).To(haveWikidStoreReplaceAttempts(Equal([]wikidStoreReplaceSnapshot{{
+			Subject: "frontd",
+			Grants: []wikid.Grant{{
+				WorkspaceID: workspaceid.WorkspaceID("home"),
+				Role:        wikid.GrantRoleAdmin,
+			}},
+		}, {
+			Subject: "frontd",
+			Grants:  nil,
+		}})))
 	})
 
-	ginkgo.DescribeTable("reports command line validation errors",
-		func(args []string, wantErr string) {
+	ginkgo.DescribeTable("rejects invalid command lines with a failure status",
+		func(args []string) {
 			var stderr bytes.Buffer
 
 			code := runWikidStore(args, strings.NewReader(""), io.Discard, &stderr)
 
 			Expect(code).To(Equal(1))
-			Expect(stderr.String()).To(ContainSubstring(wantErr))
 		},
-		ginkgo.Entry("usage", nil, "usage: wikid-store"),
-		ginkgo.Entry("rejects unknown read-registry flags", []string{"read-registry", "--unknown"}, "parse flags:"),
-		ginkgo.Entry("global data dir", []string{"read-registry"}, "--global-data-dir is required"),
-		ginkgo.Entry("unknown command", []string{"nope", "--global-data-dir", "/tmp/global"}, `unknown command "nope"`),
+		ginkgo.Entry("requires a command", nil),
+		ginkgo.Entry("rejects unknown read-registry flags", []string{"read-registry", "--unknown"}),
+		ginkgo.Entry("requires the global data directory", []string{"read-registry"}),
+		ginkgo.Entry("rejects unknown commands", []string{"nope", "--global-data-dir", "/tmp/global"}),
 	)
 })
 
 type wikidStoreReadRegistryCase struct {
-	store      func() registryStore
+	store      func() *fakeRegistryStore
 	stdout     func() io.Writer
 	wantCode   int
-	wantStdout string
-	wantStderr types.GomegaMatcher
+	wantStdout types.GomegaMatcher
+	wantWriter types.GomegaMatcher
 }
 
 type wikidStoreRegisterWorkspaceCase struct {
-	stdin      func() io.Reader
-	service    func() *fakeRegistryService
-	stdout     func() io.Writer
-	wantCode   int
-	wantStderr types.GomegaMatcher
+	stdin       func() io.Reader
+	service     func() *fakeRegistryService
+	stdout      func() io.Writer
+	wantCode    int
+	wantService types.GomegaMatcher
+	wantWriter  types.GomegaMatcher
 }
 
 type wikidStoreReplaceSnapshot struct {
@@ -310,12 +375,78 @@ type wikidStoreReplaceSnapshot struct {
 	Grants  []wikid.Grant
 }
 
-func haveWikidStoreStderr(context string, cause error) types.GomegaMatcher {
+type wikidStoreRegistryServiceSnapshot struct {
+	Path          string
+	RegisterCalls int
+	Request       wikid.RegisterWorkspaceRequest
+}
+
+type wikidStoreGrantUpsertSnapshot struct {
+	Attempts []wikid.Grant
+	Stored   []wikid.Grant
+}
+
+func haveWikidStoreSchemaVersionJSON() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return SatisfyAll(
-		ContainSubstring(context),
-		ContainSubstring(cause.Error()),
-	)
+	return WithTransform(func(raw string) map[string]any {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return nil
+		}
+		return payload
+	}, HaveKey("schemaVersion"))
+}
+
+func haveWikidStoreRegistryLoadAttempts(count int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(store *fakeRegistryStore) int {
+		return store.loadCalls
+	}, Equal(count))
+}
+
+func haveWikidStoreWriteAttempts(count int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(writer *errorWriter) int {
+		return writer.writeCalls
+	}, Equal(count))
+}
+
+func haveNoWikidStoreRegistryServiceRequest() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Path":          BeEmpty(),
+		"RegisterCalls": BeZero(),
+	})
+}
+
+func haveWikidStoreRegistryServiceRequest(request types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Path":          Equal(wikid.GlobalLayout("/tmp/global").DBPath),
+		"RegisterCalls": Equal(1),
+		"Request":       request,
+	})
+}
+
+func matchWikidStoreRegisterWorkspaceRequest(markdownLinkRootPrefix string) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"DisplayName":            Equal(wikidStoreFixtureDisplayName),
+		"MarkdownLinkRootPrefix": Equal(markdownLinkRootPrefix),
+	})
+}
+
+func haveWikidStoreGrantUpserts(attempts types.GomegaMatcher, stored types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(store *fakeWikidGrantStore) wikidStoreGrantUpsertSnapshot {
+		return wikidStoreGrantUpsertSnapshot{
+			Attempts: store.upsertAttempts,
+			Stored:   store.upserts,
+		}
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Attempts": attempts,
+		"Stored":   stored,
+	}))
 }
 
 func haveRecordedWikidStoreReplace(subject string, grants types.GomegaMatcher) types.GomegaMatcher {
@@ -331,16 +462,25 @@ func haveRecordedWikidStoreReplace(subject string, grants types.GomegaMatcher) t
 	}))
 }
 
+func haveWikidStoreReplaceAttempts(attempts types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(store *fakeWikidGrantStore) []wikidStoreReplaceSnapshot {
+		return store.replaceAttempts
+	}, attempts)
+}
+
 func fakeWorkspaceRecord() wikid.WorkspaceRecord {
 	return wikid.WorkspaceRecord{ID: workspaceid.WorkspaceID("home"), DisplayName: "Home", DataDir: "/data", RootDir: "/root"}
 }
 
 type fakeRegistryStore struct {
-	doc wikid.RegistryDocument
-	err error
+	doc       wikid.RegistryDocument
+	err       error
+	loadCalls int
 }
 
 func (s *fakeRegistryStore) Load() (wikid.RegistryDocument, error) {
+	s.loadCalls++
 	if s.err != nil {
 		return wikid.RegistryDocument{}, s.err
 	}
@@ -348,12 +488,14 @@ func (s *fakeRegistryStore) Load() (wikid.RegistryDocument, error) {
 }
 
 type fakeRegistryService struct {
-	workspace wikid.WorkspaceRecord
-	request   wikid.RegisterWorkspaceRequest
-	err       error
+	workspace     wikid.WorkspaceRecord
+	request       wikid.RegisterWorkspaceRequest
+	err           error
+	registerCalls int
 }
 
 func (s *fakeRegistryService) RegisterWorkspace(req wikid.RegisterWorkspaceRequest) (wikid.WorkspaceRecord, error) {
+	s.registerCalls++
 	s.request = req
 	if s.err != nil {
 		return wikid.WorkspaceRecord{}, s.err
@@ -362,14 +504,17 @@ func (s *fakeRegistryService) RegisterWorkspace(req wikid.RegisterWorkspaceReque
 }
 
 type fakeWikidGrantStore struct {
-	upserts        []wikid.Grant
-	upsertErr      error
-	replaceSubject string
-	replaceGrants  []wikid.Grant
-	replaceErr     error
+	upsertAttempts  []wikid.Grant
+	upserts         []wikid.Grant
+	upsertErr       error
+	replaceSubject  string
+	replaceGrants   []wikid.Grant
+	replaceAttempts []wikidStoreReplaceSnapshot
+	replaceErr      error
 }
 
 func (s *fakeWikidGrantStore) Upsert(grant wikid.Grant) error {
+	s.upsertAttempts = append(s.upsertAttempts, grant)
 	if s.upsertErr != nil {
 		return s.upsertErr
 	}
@@ -378,6 +523,10 @@ func (s *fakeWikidGrantStore) Upsert(grant wikid.Grant) error {
 }
 
 func (s *fakeWikidGrantStore) ReplaceSubjectGrants(subject string, grants []wikid.Grant) error {
+	s.replaceAttempts = append(s.replaceAttempts, wikidStoreReplaceSnapshot{
+		Subject: subject,
+		Grants:  append([]wikid.Grant(nil), grants...),
+	})
 	if s.replaceErr != nil {
 		return s.replaceErr
 	}
@@ -395,10 +544,12 @@ func (r errorReader) Read([]byte) (int, error) {
 }
 
 type errorWriter struct {
-	err error
+	err        error
+	writeCalls int
 }
 
-func (w errorWriter) Write([]byte) (int, error) {
+func (w *errorWriter) Write([]byte) (int, error) {
+	w.writeCalls++
 	return 0, w.err
 }
 
