@@ -24,7 +24,7 @@ import (
 )
 
 var _ = ginkgo.Describe("OAuth routes and responses", ginkgo.Label("integration"), func() {
-	ginkgo.It("RegisterRoutes exposes metadata endpoints only when local MCP OAuth is enabled", func() {
+	ginkgo.It("exposes metadata endpoints only when local MCP OAuth routing is active", func() {
 		gin.SetMode(gin.TestMode)
 
 		inactiveRouter := httpinternal.NewRouter(
