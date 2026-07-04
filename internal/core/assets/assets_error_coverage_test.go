@@ -2,14 +2,18 @@ package assets
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/tree"
 )
@@ -18,17 +22,24 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 	It("panics when storage or assets directories cannot be created", func() {
 		storageBlocker := filepath.Join(tempAssetDir(), "storage-blocker")
 		Expect(os.WriteFile(storageBlocker, []byte("not a directory"), 0o600)).To(Succeed())
+		Expect(storageBlocker).To(BeARegularFile())
 
 		Expect(func() {
 			NewAssetService(filepath.Join(storageBlocker, "child"), tree.NewSlugService())
-		}).To(PanicWith(ContainSubstring("could not create storage directory")))
+		}).To(Panic())
+		Expect(storageBlocker).To(BeARegularFile())
+		Expect(os.Stat(filepath.Join(storageBlocker, "child"))).Error().To(MatchError(syscall.ENOTDIR))
 
 		storageDir := tempAssetDir()
-		Expect(os.WriteFile(filepath.Join(storageDir, "assets"), []byte("not a directory"), 0o600)).To(Succeed())
+		assetsPath := filepath.Join(storageDir, "assets")
+		Expect(os.WriteFile(assetsPath, []byte("not a directory"), 0o600)).To(Succeed())
+		Expect(assetsPath).To(BeARegularFile())
 
 		Expect(func() {
 			NewAssetService(storageDir, tree.NewSlugService())
-		}).To(PanicWith(ContainSubstring("could not create assets directory")))
+		}).To(Panic())
+		Expect(storageDir).To(BeADirectory())
+		Expect(assetsPath).To(BeARegularFile())
 	})
 
 	It("returns localized upload failures for blocked page paths and stream errors", func() {
@@ -148,16 +159,66 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 	})
 
 	It("logs asset copy close failures", func() {
-		var logOutput bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&logOutput, nil))
+		records := &assetFileCloseLogRecords{}
+		logger := slog.New(records)
+		closeErr := errors.New("close failed")
 
-		logAssetFileClose(logger, "failed to close source file", "/tmp/source.txt", closeErrorAssetFile{err: errors.New("close failed")})
+		logAssetFileClose(logger, "failed to close source file", "/tmp/source.txt", closeErrorAssetFile{err: closeErr})
 
-		Expect(logOutput.String()).To(ContainSubstring("failed to close source file"))
-		Expect(logOutput.String()).To(ContainSubstring("/tmp/source.txt"))
-		Expect(logOutput.String()).To(ContainSubstring("close failed"))
+		Expect(records.Events).To(ConsistOf(matchAssetFileCloseWarning(
+			"failed to close source file",
+			"/tmp/source.txt",
+			closeErr,
+		)))
 	})
 })
+
+type assetFileCloseLogEvent struct {
+	Level   slog.Level
+	Message string
+	Attrs   map[string]any
+}
+
+type assetFileCloseLogRecords struct {
+	Events []assetFileCloseLogEvent
+}
+
+func (r *assetFileCloseLogRecords) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (r *assetFileCloseLogRecords) Handle(_ context.Context, record slog.Record) error {
+	event := assetFileCloseLogEvent{
+		Level:   record.Level,
+		Message: record.Message,
+		Attrs:   map[string]any{},
+	}
+	record.Attrs(func(attr slog.Attr) bool {
+		event.Attrs[attr.Key] = attr.Value.Any()
+		return true
+	})
+	r.Events = append(r.Events, event)
+	return nil
+}
+
+func (r *assetFileCloseLogRecords) WithAttrs([]slog.Attr) slog.Handler {
+	return r
+}
+
+func (r *assetFileCloseLogRecords) WithGroup(string) slog.Handler {
+	return r
+}
+
+func matchAssetFileCloseWarning(message, filePath string, closeErr error) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Level":   Equal(slog.LevelWarn),
+		"Message": Equal(message),
+		"Attrs": SatisfyAll(
+			HaveKeyWithValue("file", filePath),
+			HaveKeyWithValue("error", BeIdenticalTo(closeErr)),
+		),
+	})
+}
 
 type failingMultipartFile struct {
 	*bytes.Reader
