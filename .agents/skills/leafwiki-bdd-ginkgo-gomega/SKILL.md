@@ -188,13 +188,20 @@ Reject changes that:
 
 ## Acceptance
 
-Before claiming a LeafWiki Ginkgo/Gomega cleanup is done, run:
+Before claiming a LeafWiki Ginkgo/Gomega cleanup is done, run the unified
+static source-policy gate plus the relevant runtime tests:
 
 ```sh
-rtk bash scripts/check-semantic-hygiene.sh
-rtk go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run --config=.golangci.ginkgolinter.yml --timeout=5m --output.text.colors=false --max-issues-per-linter=0 --max-same-issues=0
+rtk bash scripts/golangci-lint.sh --output.text.colors=false --max-issues-per-linter=0 --max-same-issues=0
 rtk go test ./...
 rtk git diff --check
 ```
 
-The semantic gate may be red only when the supervising thread explicitly accepts the remaining rule counts as follow-up scope.
+`ginkgolinter` runs through `.golangci.leafwiki.yml` together with LeafWiki's
+semantic hygiene and i18n analyzers. Do not run or require a standalone
+ginkgolinter gate unless the supervisor is explicitly debugging that linter.
+
+For an in-progress package slice, the supervisor may use the same config against
+the assigned package path, plus the package's focused `go test`, taxonomy report,
+and `git diff --check`. The unified gate may be red only when the supervising
+thread explicitly accepts the remaining rule counts as follow-up scope.
