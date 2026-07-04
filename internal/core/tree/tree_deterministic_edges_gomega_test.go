@@ -97,7 +97,7 @@ var _ = Describe("deterministic tree edge behavior", func() {
 		notDirIndex, exists, err := store.sectionIndexPathInDir(notDir)
 		notDirLookup := sectionIndexPathLookup{Path: notDirIndex, Exists: exists}
 		Expect(notDirLookup).To(matchSectionIndexPath(filepath.Join(notDir, "index.md"), false))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchPathError())
 
 		readmeDir := filepath.Join(rootDir, "readme")
 		Expect(os.MkdirAll(readmeDir, 0o755)).To(Succeed())
@@ -131,7 +131,7 @@ var _ = Describe("deterministic tree edge behavior", func() {
 		_, err = store.ensureSectionIndexAtPath(&PageNode{Kind: NodeKindPage}, filepath.Join(store.rootDir, "docs", "index.md"))
 		Expect(err).To(matchInvalidOp("ensureSectionIndexAtPath"))
 		_, err = store.ensureSectionIndexAtPath(&PageNode{Kind: NodeKindSection}, filepath.Join(filepath.Dir(store.rootDir), "outside.md"))
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchInvalidOp("ensureSectionIndexAtPath"))
 	})
 
 	It("route, slug, and version validation reject invalid semantic values", func() {
@@ -253,20 +253,20 @@ var _ = Describe("deterministic tree edge behavior", func() {
 		corruptDir := tempTreeDir()
 		Expect(os.WriteFile(filepath.Join(corruptDir, "schema.json"), []byte("{invalid"), 0o644)).To(Succeed())
 		_, err = loadSchema(corruptDir)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchJSONSyntaxError())
 
 		if runtime.GOOS != "windows" {
 			loopDir := tempTreeDir()
 			Expect(os.Symlink("schema.json", filepath.Join(loopDir, "schema.json"))).To(Succeed())
 			_, err = loadSchema(loopDir)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchSymlinkLoopError())
 		}
 
 		_, err = loadSchema(filepath.Join(tmp, "missing-parent"))
 		Expect(err).NotTo(HaveOccurred())
 
 		err = saveSchema(filepath.Join(tmp, "missing-parent"), CurrentSchemaVersion)
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchPathError())
 	})
 
 	It("converts flat page files to section folders and folds empty folders back", func() {

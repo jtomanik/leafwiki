@@ -150,14 +150,10 @@ leafwiki_title: Introduction
 # Intro
 `, 0o644)
 
-		resolvedIndexPath, hasIndex, err := store.sectionIndexPathInDir(sectionDir)
+		resolvedIndexPath, err := sectionIndexPathInDirResult(store, sectionDir)
 		Expect(err).To(Succeed(), "sectionIndexPathInDir: %v",
 
 			err)
-		Expect(hasIndex).To(
-			BeTrue(),
-			"sectionIndexPathInDir did not find INDEX.MD",
-		)
 		Expect(filepath.Base(resolvedIndexPath)).To(Equal("INDEX.MD"),
 			"sectionIndexPathInDir path = %q, want INDEX.MD",
 
@@ -491,11 +487,8 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 
 			err)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter in materialized index")
+		frontmatter, body, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(matchManagedFrontmatter(sec.ID, sec.Title),
 			"unexpected frontmatter in materialized index: %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(BeEmpty(),
@@ -662,7 +655,6 @@ leafwiki_title: B
 # B`, 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		Expect(err).To(HaveOccurred(), "expected duplicate ID error")
 		Expect(err).To(MatchError(ErrDuplicateLeafwikiID), "expected duplicate ID error, got: %v",
 
 			err)
@@ -690,7 +682,6 @@ leafwiki_title: B
 # B`, 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		Expect(err).To(HaveOccurred(), "expected duplicate ID error")
 		Expect(err).To(MatchError(ErrDuplicateLeafwikiID), "expected duplicate ID error, got: %v",
 
 			err)
@@ -710,7 +701,6 @@ var _ = ginkgo.DescribeTable("node store filesystem reconstruction returns an er
 		writeTreeFile(filepath.Join(tmp, tt.path), tt.raw, 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		Expect(err).To(HaveOccurred(), "expected reconstruct error")
 		Expect(err).To(MatchError(markdown.
 			ErrMetadataParse,
 		),
@@ -772,7 +762,6 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 		}
 
 		_, err = store.ReconstructTreeFromFS()
-		Expect(err).To(HaveOccurred(), "expected duplicate slug error")
 		Expect(err).To(MatchError(ErrDuplicateReconstructedSlug), "expected duplicate slug error, got: %v",
 
 			err)
@@ -894,7 +883,6 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 		writeTreeFile(filepath.Join(tmp, "root", "plans", "foo-bar.md"), "# Foo Bar Duplicate", 0o644)
 
 		_, err := store.ReconstructTreeFromFS()
-		Expect(err).To(HaveOccurred(), "expected duplicate normalized slug error")
 		Expect(err).To(MatchError(ErrDuplicateReconstructedSlug), "expected duplicate page slug error, got: %v",
 
 			err)
@@ -945,15 +933,6 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 		// Get the page and section nodes
 		page := findChildBySlug(tree, "no-id")
 		section := findChildBySlug(tree, "section")
-		Expect(page.ID).NotTo(BeEmpty(),
-
-			"expected page to have generated ID, got empty")
-		Expect(section.ID).NotTo(BeEmpty(),
-
-			"expected section to have generated ID, got empty",
-		)
-
-		// Verify that IDs were generated
 
 		// Now reload the files and check that IDs were written back
 		pageMd, err := markdown.LoadMarkdownFile(filepath.Join(tmp, "root", "no-id.md"))

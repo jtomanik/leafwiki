@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/treemigration"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -330,7 +329,6 @@ leafwiki_title: Current
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when current-schema content remains in default root")
 		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
 
 			err)
@@ -374,7 +372,6 @@ leafwiki_title: Legacy
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when legacy content remains in the default root")
 		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
 
 			err)
@@ -412,7 +409,6 @@ leafwiki_title: Legacy
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when corrupt legacy tree has default-root content")
 		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
 
 			err)
@@ -457,7 +453,6 @@ leafwiki_title: Legacy
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when configured root lacks legacy markdown")
 		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
 
 			err)
@@ -512,7 +507,6 @@ leafwiki_title: Orphan
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when legacy default root has extra content")
 		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
 
 			err)
@@ -563,7 +557,6 @@ leafwiki_title: Other
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when configured root has mismatched legacy markdown")
 		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
 
 			err)
@@ -616,7 +609,6 @@ old content`, 0o644)
 
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		err := svc.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected LoadTree to fail safely when configured root has stale legacy markdown")
 		Expect(err).To(MatchError(ErrLegacyContentRemains), "expected legacy content remains error, got: %v",
 
 			err)
@@ -918,7 +910,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		createTreeDirectory(filepath.Join(tmpDir, "root", "docs", ".order.json"))
 
 		childID, err := svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
-		Expect(err).To(HaveOccurred(), "expected CreateNode child to fail when child order save fails")
 		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
 			err)
@@ -952,7 +943,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
 		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
-		Expect(err).To(HaveOccurred(), "expected CreateNode to fail when order file write fails")
 		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
 			err)
@@ -990,7 +980,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
 		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
-		Expect(err).To(HaveOccurred(), "expected CreateNode to fail when order file write fails")
 		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
 			err)
@@ -1038,11 +1027,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err,
 		)
 
-		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter to exist")
+		frontmatter, _, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
 		Expect(newFixturePageID(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
 		Expect(frontmatter).To(SatisfyAll(
@@ -1185,7 +1171,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		svc, dataDir := newLoadedService()
 
 		_, err := svc.CreateNode("system", nil, "Outside", "../outside", ptrKind(NodeKindPage))
-		Expect(err).To(HaveOccurred(), "expected CreateNode to reject traversal slug")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err,
@@ -1232,11 +1217,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err,
 		)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter to exist")
+		frontmatter, body, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
 		Expect(newFixturePageID(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
 		Expect(frontmatter.LeafWikiTitle).To(
@@ -1329,11 +1311,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err,
 		)
 
-		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter")
+		frontmatter, _, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter.LeafWikiTitle).To(
 			Equal(
 				"Documentation"),
@@ -1451,7 +1430,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err)
 
 		err = svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", Slug("../outside"), nil, pageVersionUnchecked, false)
-		Expect(err).To(HaveOccurred(), "expected UpdateNode to reject traversal slug")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err,
@@ -1491,7 +1469,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		_, _ = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
 
 		err := svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
-		Expect(err).To(HaveOccurred(), "expected error")
 		Expect(err).To(MatchError(ErrPageHasChildren), "expected ErrPageHasChildren, got: %v",
 
 			err,
@@ -1668,7 +1645,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err)
 
 		err = svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
-		Expect(err).To(HaveOccurred(), "expected error deleting page with children without recursive")
 		Expect(err).To(MatchError(ErrPageHasChildren), "expected ErrPageHasChildren, got: %v",
 
 			err,
@@ -1733,7 +1709,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		svc, _ := newLoadedService()
 
 		err := svc.DeleteNode("system", "does-not-exist", false, pageVersionUnchecked)
-		Expect(err).To(HaveOccurred(), "expected error")
 		Expect(err).To(MatchError(ErrPageNotFound),
 			"expected ErrPageNotFound, got: %v",
 
@@ -1765,7 +1740,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 		// Now delete node - should error (drift)
 		err = svc.DeleteNode("system", *id, false, pageVersionUnchecked)
-		Expect(err).To(HaveOccurred(), "expected drift error")
 
 		// If you have a concrete DriftError type, you can assert with errors.As.
 		var dErr *DriftError
@@ -1918,11 +1892,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err)
 
-		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter on moved page")
+		frontmatter, _, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiLastAuthorID", Equal("alice")),
 			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
@@ -1995,7 +1966,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		createTreeDirectory(filepath.Join(tmpDir, "root", "dest", ".order.json"))
 
 		err = svc.MoveNode("system", *moveID, *destID, pageVersionUnchecked)
-		Expect(err).To(HaveOccurred(), "expected MoveNode to fail when child order persistence fails")
 		Expect(err).To(MatchError(ErrPersistSourceChildOrder), "expected source child order persistence error, got: %v",
 
 			err)
@@ -2036,7 +2006,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 		// Try move A under B (A -> ... -> B). Should error with circular reference.
 		err := svc.MoveNode("system", *aID, *bID, pageVersionUnchecked)
-		Expect(err).To(HaveOccurred(), "expected error moving node under its descendant")
 		Expect(err).To(MatchError(ErrMovePageCircularReference), "expected ErrMovePageCircularReference, got: %v",
 
 			err)
@@ -2051,7 +2020,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		aID, _ := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
 
 		err := svc.MoveNode("system", *aID, *aID, pageVersionUnchecked)
-		Expect(err).To(HaveOccurred(), "expected error moving node into itself")
 		Expect(err).To(MatchError(ErrPageCannotBeMovedToItself), "expected ErrPageCannotBeMovedToItself, got: %v",
 
 			err)
@@ -2206,7 +2174,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
 		err = svc.SortPages("root", testPageIDs(*idC, *idA, *idB))
-		Expect(err).To(HaveOccurred(), "expected SortPages to fail when order persistence fails")
 		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
 			err)
@@ -2233,7 +2200,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		_, _ = svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 
 		err := svc.SortPages("root", testPageIDs(PageID("only-one")))
-		Expect(err).To(HaveOccurred(), "expected error for invalid length")
 		Expect(err).To(MatchError(ErrInvalidSortOrder), "expected ErrInvalidSortOrder, got: %v",
 
 			err,
@@ -2250,7 +2216,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		idB, _ := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
 
 		err := svc.SortPages("root", testPageIDs(*idA, *idA, *idB))
-		Expect(err).To(HaveOccurred(), "expected error for duplicate IDs")
+		Expect(err).To(MatchError(ErrInvalidSortOrder), "expected duplicate sort IDs to return invalid sort order, got %v", err)
 
 	})
 })
@@ -2286,7 +2252,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		{
 
 			_, err := os.Stat(indexPath)
-			Expect(err).To(HaveOccurred(), "expected GetPage to avoid materializing index.md")
+			Expect(err).To(MatchError(os.ErrNotExist), "expected GetPage to avoid materializing index.md")
 		}
 
 	})
@@ -2324,11 +2290,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after conversion")
+		frontmatter, body, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", WithTransform(func(raw string) PageID {
 				return newFixturePageID(raw)
@@ -3150,11 +3113,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err,
 		)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+		frontmatter, body, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			matchManagedFrontmatter(*id, "Docs"),
 			matchFrontmatterTimestamps("2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z"),
@@ -3282,11 +3242,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err,
 		)
 
-		frontmatter, _, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after resumed migration")
+		frontmatter, _, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(matchFrontmatterTimestamps(
 			originalModTime.Format(time.RFC3339),
 			originalModTime.Format(time.RFC3339),
@@ -3368,11 +3325,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err)
 
-		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+		frontmatter, migratedBody, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			matchFrontmatterTimestamps("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z"),
 			matchFrontmatterAuthors(newFixtureUserID("alice"), newFixtureUserID("bob")),
@@ -3454,14 +3408,8 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 			err)
 
-		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after migration, got:\n%s",
-
-			string(
-				raw))
+		frontmatter, migratedBody, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
 		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(strings.TrimSpace(frontmatter.
@@ -3561,15 +3509,8 @@ Hello World
 
 			migrated)
 
-		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), `expected frontmatter after migration, got:
-%s`,
-
-			migrated,
-		)
+		frontmatter, migratedBody, err := parseRequiredFrontmatter(migrated)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
 		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(strings.TrimSpace(frontmatter.
@@ -3657,11 +3598,8 @@ Hello World
 
 			err)
 
-		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+		frontmatter, migratedBody, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
 		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(frontmatter.LeafWikiTitle).To(
@@ -3766,11 +3704,8 @@ Hello World
 
 			migrated)
 
-		frontmatter, migratedBody, has, err := markdown.ParseFrontmatter(migrated)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after migration")
+		frontmatter, migratedBody, err := parseRequiredFrontmatter(migrated)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
 		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(frontmatter.LeafWikiTitle).To(
@@ -4331,7 +4266,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 		loaded := NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected migration error when order file cannot be written")
 		Expect(err).To(MatchError(treemigration.
 			ErrPersistChildOrder,
 		), "expected migration child order persistence error, got: %v",
@@ -4414,7 +4348,6 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 		loaded := NewTreeService(tmpDir)
 		err = loaded.LoadTree()
-		Expect(err).To(HaveOccurred(), "expected migration error when section index cannot be written")
 		Expect(err).To(MatchError(treemigration.
 			ErrMaterializeSectionIndex,
 		), "expected migration section index materialization error, got: %v",

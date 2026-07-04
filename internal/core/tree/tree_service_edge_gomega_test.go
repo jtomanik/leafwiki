@@ -182,48 +182,28 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", func
 		Expect(os.MkdirAll(sourceDir, 0o755)).To(Succeed())
 		Expect(os.MkdirAll(targetDir, 0o755)).To(Succeed())
 
-		matches, err := directoryFileContentMatches(sourceDir, targetDir)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(matches).To(BeFalse())
+		Expect(directoryFileContentsDiffer(sourceDir, targetDir)).To(Succeed())
 
 		Expect(os.WriteFile(filepath.Join(sourceDir, "same.md"), []byte("# Same"), 0o644)).To(Succeed())
-		matches, err = directoryFileContentMatches(sourceDir, targetDir)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(matches).To(BeFalse())
+		Expect(directoryFileContentsDiffer(sourceDir, targetDir)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(targetDir, "same.md"), []byte("# Same"), 0o644)).To(Succeed())
-		matches, err = directoryFileContentMatches(sourceDir, targetDir)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(matches).To(BeTrue())
+		Expect(directoryFileContentsMatch(sourceDir, targetDir)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(targetDir, "same.md"), []byte("# Different"), 0o644)).To(Succeed())
-		matches, err = directoryFileContentMatches(sourceDir, targetDir)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(matches).To(BeFalse())
+		Expect(directoryFileContentsDiffer(sourceDir, targetDir)).To(Succeed())
 
-		_, err = collectRelativeFiles(filepath.Join(base, "missing"))
+		_, err := collectRelativeFiles(filepath.Join(base, "missing"))
 		Expect(err).To(MatchError(ErrCollectLegacyContentFiles))
-		matches, err = filesHaveSameContent(filepath.Join(base, "missing.md"), filepath.Join(targetDir, "same.md"))
-		Expect(contentMatchResult{Matches: matches, Err: err}).To(matchContentComparison(
-			BeFalse(),
-			MatchError(ErrReadLegacyContentPath),
-		))
+		Expect(filesHaveDifferentContent(filepath.Join(base, "missing.md"), filepath.Join(targetDir, "same.md"))).To(MatchError(ErrReadLegacyContentPath))
 
 		if runtime.GOOS != "windows" {
 			loop := filepath.Join(base, "loop")
 			Expect(os.Symlink("loop", loop)).To(Succeed())
-			hasEntries, err := directoryHasEntries(loop)
-			Expect(directoryEntriesResult{HasEntries: hasEntries, Err: err}).To(matchDirectoryEntries(
-				BeFalse(),
-				MatchError(ErrReadDirectory),
-			))
-			matches, err = filesHaveSameContent(filepath.Join(sourceDir, "same.md"), loop)
-			Expect(contentMatchResult{Matches: matches, Err: err}).To(matchContentComparison(
-				BeFalse(),
-				MatchError(ErrReadConfiguredLegacyContentPath),
-			))
+			Expect(directoryHasNoEntriesResult(loop)).To(MatchError(ErrReadDirectory))
+			Expect(filesHaveDifferentContent(filepath.Join(sourceDir, "same.md"), loop)).To(MatchError(ErrReadConfiguredLegacyContentPath))
 		}
 
-		Expect(sameCleanPath(filepath.Join(base, "a", "..", "source"), sourceDir)).To(BeTrue())
-		Expect(sameCleanPath(sourceDir, targetDir)).To(BeFalse())
+		Expect(cleanPathsMatch(filepath.Join(base, "a", "..", "source"), sourceDir)).To(Succeed())
+		Expect(cleanPathsDiffer(sourceDir, targetDir)).To(Succeed())
 	})
 
 	It("legacy content path comparison reports stable expectations", func() {
@@ -235,9 +215,7 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", func
 		Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 
-		missing, err := svc.configuredRootMissingLegacyContent(nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(missing).To(BeTrue())
+		Expect(configuredRootMissingLegacyContentResult(svc, nil)).To(Succeed())
 
 		legacy := &PageNode{ID: RootPageID, Slug: "root", Kind: NodeKindSection, Children: []*PageNode{
 			{ID: "page", Slug: "page", Title: "Page", Kind: NodeKindPage},
@@ -253,42 +231,28 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", func
 		_, err = svc.expectedLegacyContentPaths(&PageNode{ID: "bad", Slug: "bad", Kind: NodeKind("unknown")})
 		Expect(err).To(MatchError(ErrLegacyUnknownKind))
 
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(missing).To(BeTrue())
+		Expect(configuredRootMissingLegacyContentResult(svc, legacy)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "marker.md"), []byte("# Marker"), 0o644)).To(Succeed())
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(missing).To(BeFalse())
+		Expect(configuredRootHasLegacyContentResult(svc, legacy)).To(Succeed())
 		Expect(os.Remove(filepath.Join(rootDir, "marker.md"))).To(Succeed())
 
 		sourcePage := filepath.Join(defaultRoot, "page.md")
 		Expect(os.WriteFile(sourcePage, []byte("# Page"), 0o644)).To(Succeed())
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(missing).To(BeTrue())
+		Expect(configuredRootMissingLegacyContentResult(svc, legacy)).To(Succeed())
 
 		targetPage := filepath.Join(rootDir, "page.md")
 		Expect(os.MkdirAll(filepath.Dir(targetPage), 0o755)).To(Succeed())
 		Expect(os.Mkdir(targetPage, 0o755)).To(Succeed())
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(missing).To(BeTrue())
+		Expect(configuredRootMissingLegacyContentResult(svc, legacy)).To(Succeed())
 
 		Expect(os.Remove(targetPage)).To(Succeed())
 		mdFile := markdown.NewMarkdownFile(targetPage, "# Page", markdown.Frontmatter{LeafWikiID: "page", LeafWikiTitle: "Page"})
 		Expect(mdFile.WriteToFile()).To(Succeed())
 		Expect(os.WriteFile(sourcePage, []byte(mustReadString(targetPage)), 0o644)).To(Succeed())
-		matches, err := legacyTargetMatchesNode(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: "page", nodeTitle: "Page"})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(matches).To(BeTrue())
+		Expect(legacyTargetMatchesNodeResult(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: "page", nodeTitle: "Page"})).To(Succeed())
 
-		matches, err = legacyTargetMatchesNode(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: "other", nodeTitle: "Page"})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(matches).To(BeFalse())
+		Expect(legacyTargetDiffersFromNodeResult(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: "other", nodeTitle: "Page"})).To(Succeed())
 
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(missing).To(BeFalse())
+		Expect(configuredRootHasLegacyContentResult(svc, legacy)).To(Succeed())
 	})
 })

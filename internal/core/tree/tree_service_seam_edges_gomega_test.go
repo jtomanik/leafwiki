@@ -174,16 +174,12 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 			}
 			return []byte("# Source"), nil
 		})
-		matches, err := filesHaveSameContent("/legacy/source.md", "/configured/target.md")
-		Expect(contentMatchResult{Matches: matches, Err: err}).To(matchContentComparison(
-			BeFalse(),
-			MatchError(ErrReadConfiguredLegacyContentPath),
-		))
+		Expect(filesHaveDifferentContent("/legacy/source.md", "/configured/target.md")).To(MatchError(ErrReadConfiguredLegacyContentPath))
 
 		swapTreeSeam(&treeFilepathAbs, func(string) (string, error) {
 			return "", errors.New("abs failed")
 		})
-		Expect(sameCleanPath("/a/../b", "/other")).To(BeFalse())
+		Expect(cleanPathsDiffer("/a/../b", "/other")).To(Succeed())
 	})
 
 	It("configured legacy content comparison reports mismatches", func() {
@@ -205,11 +201,7 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return nil, errors.New("configured read failed")
 		})
-		missing, err := svc.configuredRootMissingLegacyContent(legacy)
-		Expect(legacyContentMissingResult{Missing: missing, Err: err}).To(matchLegacyContentMissing(
-			BeFalse(),
-			MatchError(ErrReadDirectory),
-		))
+		Expect(configuredRootHasLegacyContentResult(svc, legacy)).To(MatchError(ErrReadDirectory))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch path {
@@ -221,11 +213,7 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 				return nil, os.ErrNotExist
 			}
 		})
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(legacyContentMissingResult{Missing: missing, Err: err}).To(matchLegacyContentMissing(
-			BeFalse(),
-			MatchError(ErrStatConfiguredLegacyContentPath),
-		))
+		Expect(configuredRootHasLegacyContentResult(svc, legacy)).To(MatchError(ErrStatConfiguredLegacyContentPath))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch path {
@@ -237,11 +225,7 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 				return nil, os.ErrNotExist
 			}
 		})
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(legacyContentMissingResult{Missing: missing, Err: err}).To(matchLegacyContentMissing(
-			BeTrue(),
-			Succeed(),
-		))
+		Expect(configuredRootMissingLegacyContentResult(svc, legacy)).To(Succeed())
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			switch path {
@@ -257,9 +241,7 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 			}
 			return []byte("# Page"), nil
 		})
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(missing).To(BeTrue())
+		Expect(configuredRootMissingLegacyContentResult(svc, legacy)).To(Succeed())
 
 		swapTreeSeam(&treeOSReadFile, func(string) ([]byte, error) {
 			return []byte("# Page"), nil
@@ -267,15 +249,11 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 		swapTreeSeam(&treeLoadMarkdownFile, func(string) (*markdown.MarkdownFile, error) {
 			return nil, errors.New("load target failed")
 		})
-		missing, err = svc.configuredRootMissingLegacyContent(legacy)
-		Expect(legacyContentMissingResult{Missing: missing, Err: err}).To(matchLegacyContentMissing(
-			BeFalse(),
-			MatchError(ErrLoadConfiguredLegacyContentPath),
-		))
+		Expect(configuredRootHasLegacyContentResult(svc, legacy)).To(MatchError(ErrLoadConfiguredLegacyContentPath))
 
 		badParent := edgeSectionNode(RootPageID, "root", "Root", nil)
 		badParent.Children = []*PageNode{edgePageNode("bad", "", "Bad", badParent)}
-		_, err = svc.expectedLegacyContentPaths(badParent)
+		_, err := svc.expectedLegacyContentPaths(badParent)
 		Expect(err).To(MatchError(ErrSlugEmpty))
 	})
 
@@ -323,11 +301,7 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 		})
 		pageLegacy := edgeSectionNode(RootPageID, "root", "Root", nil)
 		pageLegacy.Children = []*PageNode{edgePageNode("page", "page", "Page", pageLegacy)}
-		missing, err := svc.configuredRootMissingLegacyContent(pageLegacy)
-		Expect(legacyContentMissingResult{Missing: missing, Err: err}).To(matchLegacyContentMissing(
-			BeFalse(),
-			MatchError(ErrStatLegacyContentPath),
-		))
+		Expect(configuredRootHasLegacyContentResult(svc, pageLegacy)).To(MatchError(ErrStatLegacyContentPath))
 	})
 
 	It("create and restore operations roll back on store seam errors", func() {
@@ -830,9 +804,8 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 			}
 			return []byte("# Page"), nil
 		})
-		matches, err := directoryFileContentMatches(defaultRoot, rootDir)
+		err := directoryFileContentsDiffer(defaultRoot, rootDir)
 		Expect(err).To(MatchError(ErrReadConfiguredLegacyContentPath))
-		Expect(matches).To(BeFalse())
 
 		swapTreeSeam(&treeFilepathWalkDir, func(dir string, fn fs.WalkDirFunc) error {
 			return fn(filepath.Join(dir, "link.md"), fakeTreeDirEntry{name: "link.md", mode: fs.ModeSymlink}, nil)
@@ -841,29 +814,17 @@ var _ = Describe("tree service migration and store seam failure behavior", func(
 		Expect(err).NotTo(HaveOccurred())
 		Expect(files).To(BeEmpty())
 
-		missing, err := svc.configuredRootMissingLegacyContent(&PageNode{ID: "bad", Slug: "", Kind: NodeKindPage})
-		Expect(legacyContentMissingResult{Missing: missing, Err: err}).To(matchLegacyContentMissing(
-			BeFalse(),
-			MatchError(ErrSlugEmpty),
-		))
+		Expect(configuredRootHasLegacyContentResult(svc, &PageNode{ID: "bad", Slug: "", Kind: NodeKindPage})).To(MatchError(ErrSlugEmpty))
 
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return nil, errors.New("configured read failed")
 		})
-		missing, err = svc.configuredRootMissingLegacyContent(nil)
-		Expect(legacyContentMissingResult{Missing: missing, Err: err}).To(matchLegacyContentMissing(
-			BeFalse(),
-			MatchError(ErrReadDirectory),
-		))
+		Expect(configuredRootHasLegacyContentResult(svc, nil)).To(MatchError(ErrReadDirectory))
 
 		swapTreeSeam(&treeOSReadFile, func(string) ([]byte, error) {
 			return nil, errors.New("source read failed")
 		})
-		matches, err = legacyTargetMatchesNode(legacyContentPath{sourceFile: "source.md", targetFile: "target.md"})
-		Expect(contentMatchResult{Matches: matches, Err: err}).To(matchContentComparison(
-			BeFalse(),
-			MatchError(ErrReadLegacyContentPath),
-		))
+		Expect(legacyTargetDiffersFromNodeResult(legacyContentPath{sourceFile: "source.md", targetFile: "target.md"})).To(MatchError(ErrReadLegacyContentPath))
 
 		rollbackSvc := newInMemoryService()
 		rollbackParent := edgeSectionNode("rollback-parent", "rollback-parent", "Rollback Parent", rollbackSvc.tree)

@@ -107,7 +107,6 @@ var _ = ginkgo.Describe("workspace markdown route mapping", func() {
 		root := tempTreeDir()
 
 		_, err := MapWorkspaceMarkdownRoute(root, "plans/!!!.md", false)
-		Expect(err).To(HaveOccurred(), "expected error")
 		Expect(err).To(MatchError(ErrSlugEmpty), "expected invalid slug segment error, got %v",
 			err)
 

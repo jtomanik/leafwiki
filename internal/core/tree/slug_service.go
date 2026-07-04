@@ -1,7 +1,6 @@
 package tree
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -65,11 +64,11 @@ func (s *SlugService) IsValidSlug(slug string) error {
 	// Check for reserved slugs (case-insensitive)
 	lowerSlug := strings.ToLower(slug)
 	if reservedSlugs[lowerSlug] {
-		return fmt.Errorf("slug '%s' is reserved", slug)
+		return fmt.Errorf("slug '%s' is reserved: %w", slug, ErrSlugReserved)
 	}
 
 	if !slugPattern.MatchString(slug) {
-		return errors.New("slug must contain only letters, numbers and hyphens")
+		return fmt.Errorf("slug must contain only letters, numbers and hyphens: %w", ErrSlugInvalid)
 	}
 
 	return nil

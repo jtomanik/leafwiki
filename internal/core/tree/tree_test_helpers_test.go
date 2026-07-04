@@ -1,13 +1,16 @@
 package tree
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
+	"syscall"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
+	"github.com/perber/wiki/internal/core/markdown"
 )
 
 type sectionIndexPathLookup struct {
@@ -41,6 +44,177 @@ type pageLookupResult struct {
 	Err  error
 }
 
+var errExpectedFrontmatter = errors.New("expected frontmatter")
+var errExpectedSectionIndex = errors.New("expected section index")
+var errExpectedContentMatch = errors.New("expected content match")
+var errExpectedContentDifference = errors.New("expected content difference")
+var errExpectedLegacyContentMissing = errors.New("expected legacy content missing")
+var errExpectedLegacyContentPresent = errors.New("expected legacy content present")
+var errExpectedDirectoryEntries = errors.New("expected directory entries")
+var errExpectedDirectoryEmpty = errors.New("expected directory to be empty")
+var errExpectedCleanPathMatch = errors.New("expected clean paths to match")
+var errExpectedCleanPathDifference = errors.New("expected clean paths to differ")
+
+func parseRequiredFrontmatter(raw string) (markdown.Frontmatter, string, error) {
+	ginkgo.GinkgoHelper()
+	frontmatter, body, hasFrontmatter, err := markdown.ParseFrontmatter(raw)
+	if err != nil {
+		return markdown.Frontmatter{}, body, err
+	}
+	if !hasFrontmatter {
+		return markdown.Frontmatter{}, body, errExpectedFrontmatter
+	}
+	return frontmatter, body, nil
+}
+
+func sectionIndexPathInDirResult(store *NodeStore, dirPath string) (string, error) {
+	ginkgo.GinkgoHelper()
+	path, exists, err := store.sectionIndexPathInDir(dirPath)
+	if err != nil {
+		return path, err
+	}
+	if !exists {
+		return path, errExpectedSectionIndex
+	}
+	return path, nil
+}
+
+func directoryFileContentsMatch(sourceDir string, targetDir string) error {
+	ginkgo.GinkgoHelper()
+	matches, err := directoryFileContentMatches(sourceDir, targetDir)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return errExpectedContentMatch
+	}
+	return nil
+}
+
+func directoryFileContentsDiffer(sourceDir string, targetDir string) error {
+	ginkgo.GinkgoHelper()
+	matches, err := directoryFileContentMatches(sourceDir, targetDir)
+	if err != nil {
+		return err
+	}
+	if matches {
+		return errExpectedContentDifference
+	}
+	return nil
+}
+
+func filesHaveMatchingContent(sourceFile string, targetFile string) error {
+	ginkgo.GinkgoHelper()
+	matches, err := filesHaveSameContent(sourceFile, targetFile)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return errExpectedContentMatch
+	}
+	return nil
+}
+
+func filesHaveDifferentContent(sourceFile string, targetFile string) error {
+	ginkgo.GinkgoHelper()
+	matches, err := filesHaveSameContent(sourceFile, targetFile)
+	if err != nil {
+		return err
+	}
+	if matches {
+		return errExpectedContentDifference
+	}
+	return nil
+}
+
+func directoryHasEntriesResult(path string) error {
+	ginkgo.GinkgoHelper()
+	hasEntries, err := directoryHasEntries(path)
+	if err != nil {
+		return err
+	}
+	if !hasEntries {
+		return errExpectedDirectoryEntries
+	}
+	return nil
+}
+
+func directoryHasNoEntriesResult(path string) error {
+	ginkgo.GinkgoHelper()
+	hasEntries, err := directoryHasEntries(path)
+	if err != nil {
+		return err
+	}
+	if hasEntries {
+		return errExpectedDirectoryEmpty
+	}
+	return nil
+}
+
+func configuredRootMissingLegacyContentResult(svc *TreeService, legacy *PageNode) error {
+	ginkgo.GinkgoHelper()
+	missing, err := svc.configuredRootMissingLegacyContent(legacy)
+	if err != nil {
+		return err
+	}
+	if !missing {
+		return errExpectedLegacyContentMissing
+	}
+	return nil
+}
+
+func configuredRootHasLegacyContentResult(svc *TreeService, legacy *PageNode) error {
+	ginkgo.GinkgoHelper()
+	missing, err := svc.configuredRootMissingLegacyContent(legacy)
+	if err != nil {
+		return err
+	}
+	if missing {
+		return errExpectedLegacyContentPresent
+	}
+	return nil
+}
+
+func legacyTargetMatchesNodeResult(path legacyContentPath) error {
+	ginkgo.GinkgoHelper()
+	matches, err := legacyTargetMatchesNode(path)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return errExpectedContentMatch
+	}
+	return nil
+}
+
+func legacyTargetDiffersFromNodeResult(path legacyContentPath) error {
+	ginkgo.GinkgoHelper()
+	matches, err := legacyTargetMatchesNode(path)
+	if err != nil {
+		return err
+	}
+	if matches {
+		return errExpectedContentDifference
+	}
+	return nil
+}
+
+func cleanPathsMatch(pathA string, pathB string) error {
+	ginkgo.GinkgoHelper()
+	if !sameCleanPath(pathA, pathB) {
+		return errExpectedCleanPathMatch
+	}
+	return nil
+}
+
+func cleanPathsDiffer(pathA string, pathB string) error {
+	ginkgo.GinkgoHelper()
+	if sameCleanPath(pathA, pathB) {
+		return errExpectedCleanPathDifference
+	}
+	return nil
+}
+
 func pointToValue[T any](matcher types.GomegaMatcher) types.GomegaMatcher {
 	return SatisfyAll(
 		Not(BeNil()),
@@ -64,6 +238,18 @@ func matchErrorIs(target error) types.GomegaMatcher {
 	return WithTransform(func(err error) bool {
 		return errors.Is(err, target)
 	}, BeTrue())
+}
+
+func matchPathError() types.GomegaMatcher {
+	return matchErrorAs(new(*os.PathError))
+}
+
+func matchJSONSyntaxError() types.GomegaMatcher {
+	return matchErrorAs(new(*json.SyntaxError))
+}
+
+func matchSymlinkLoopError() types.GomegaMatcher {
+	return matchErrorIs(syscall.ELOOP)
 }
 
 func matchSectionIndexPath(path string, exists bool) types.GomegaMatcher {

@@ -106,7 +106,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		entry := &PageNode{ID: "outside", Slug: "../outside", Title: "Outside", Kind: NodeKindPage, Parent: parent}
 
 		err := store.CreatePage(parent, entry)
-		Expect(err).To(HaveOccurred(), "expected CreatePage to reject traversal slug")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err)
@@ -131,7 +130,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		}
 
 		err := store.RenameNode(entry, "../outside")
-		Expect(err).To(HaveOccurred(), "expected RenameNode to reject traversal slug")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err)
@@ -150,7 +148,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		entry := &PageNode{ID: "loose", Slug: "loose", Title: "Loose", Kind: NodeKindPage}
 
 		err := store.UpsertContent(entry, "# Loose")
-		Expect(err).To(HaveOccurred(), "expected UpsertContent to reject parentless non-root page")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err)
@@ -196,7 +193,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		child := &PageNode{ID: "child", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: docs}
 
 		err := store.CreatePage(docs, child)
-		Expect(err).To(HaveOccurred(), "expected CreatePage to reject symlinked parent outside root")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err)
@@ -242,7 +238,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		child := &PageNode{ID: "child", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: docs}
 
 		err := store.UpsertContent(child, "# Child")
-		Expect(err).To(HaveOccurred(), "expected UpsertContent to reject symlinked parent outside root")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err)
@@ -295,7 +290,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		page := &PageNode{ID: "page1", Slug: "docs", Title: "Docs", Kind: NodeKindPage, Parent: root}
 
 		err := store.SaveChildOrder(page)
-		Expect(err).To(HaveOccurred(), "expected SaveChildOrder to reject page nodes")
 
 		var opErr *InvalidOpError
 		Expect(err).To(matchErrorAs(&opErr),
@@ -348,11 +342,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		index := filepath.Join(directory, "index.md")
 		raw := string(readTreeFile(index))
 		Expect(raw).To(haveCanonicalNodeStoreRawStorage())
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter in section index")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("sec1"), "Docs"),
 			"unexpected section frontmatter: %#v", frontmatter)
 		Expect(frontmatter).To(matchFrontmatterTimestamps("2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z"),
@@ -378,14 +369,14 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		{
 
 			err := store.CreateSection(rootPageWrong, sec)
-			Expect(err).To(HaveOccurred(), "expected error when parent is not a section")
+			Expect(err).To(MatchError(ErrInvalidOperation), "expected parent section validation error, got %v", err)
 		}
 
 		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
 		pageWrong := &PageNode{ID: "x", Slug: "x", Title: "X", Kind: NodeKindPage}
 		{
 			err := store.CreateSection(root, pageWrong)
-			Expect(err).To(HaveOccurred(), "expected error when new entry is not a section")
+			Expect(err).To(MatchError(ErrInvalidOperation), "expected section entry validation error, got %v", err)
 		}
 
 	})
@@ -414,11 +405,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		Expect(string(raw)).To(haveCanonicalNodeStoreRawStorage())
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter")
+		frontmatter, body, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(strings.TrimSpace(frontmatter.
 			LeafWikiID)).To(
 			Equal("p1"),
@@ -454,11 +442,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		}
 
 		raw := string(readTreeFile(filepath.Join(tmp, "root", "hello.md")))
-		frontmatter, _, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter")
+		frontmatter, _, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", Equal("p1")),
 			HaveField("LeafWikiTitle", Equal("Hello World")),
@@ -478,7 +463,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		page := &PageNode{ID: "p1", Slug: "dup", Title: "Dup", Kind: NodeKindPage, Parent: root}
 		{
 			err := store.CreatePage(root, page)
-			Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError for existing file")
+			var existsErr *PageAlreadyExistsError
+			Expect(err).To(matchErrorAs(&existsErr), "expected PageAlreadyExistsError, got %T: %v", err, err)
 		}
 
 		createTreeDirectory(filepath.Join(tmp, "root", "sync"))
@@ -520,7 +506,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		section := &PageNode{ID: "s1", Slug: "dup", Title: "Dup", Kind: NodeKindSection, Parent: root}
 		{
 			err := store.CreateSection(root, section)
-			Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError for existing section directory")
+			var existsErr *PageAlreadyExistsError
+			Expect(err).To(matchErrorAs(&existsErr), "expected PageAlreadyExistsError, got %T: %v", err, err)
 		}
 
 		writeTreeFile(filepath.Join(tmp, "root", "sync.md"), "# Page", 0o644)
@@ -585,11 +572,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		raw, _ := os.ReadFile(path)
 		Expect(string(raw)).To(haveCanonicalNodeStoreRawStorage())
-		frontmatter, body, has, err := markdown.ParseFrontmatter(string(raw))
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected FM to exist")
+		frontmatter, body, err := parseRequiredFrontmatter(string(raw))
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", Equal("p1")),
 			HaveField("LeafWikiTitle", Equal("My Page")),
@@ -640,11 +624,8 @@ leafwiki_title: Old Title
 
 			raw)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected FM to exist")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", Equal("p1")),
 			HaveField("LeafWikiTitle", Equal("My Page")),
@@ -683,11 +664,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		path := filepath.Join(tmp, "root", "p.md")
 		raw := string(readTreeFile(path))
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected system frontmatter in written file")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(body).
 			To(ContainSubstring("custom_key: keep-me"),
 
@@ -743,11 +721,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		path := filepath.Join(tmp, "root", "p.md")
 		raw := string(readTreeFile(path))
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected system frontmatter in written file")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", Equal("p1")),
 			HaveField("ExtraFields", Not(SatisfyAny(HaveKey("custom"), HaveKey("title")))),
@@ -810,11 +785,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			raw)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter in written file")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(body).To(Equal("\n# Imported Title\nBody"), "unexpected body: %q",
 
 			body,
@@ -968,7 +940,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: sec}
 
 		err := store.MoveNode(page, root)
-		Expect(err).To(HaveOccurred(), "expected DriftError, got nil")
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
@@ -1048,7 +1019,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		// delete again -> drift
 		err := store.DeletePage(page)
-		Expect(err).To(HaveOccurred(), "expected DriftError")
+		var de *DriftError
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v", err, err)
 
 	})
 })
@@ -1123,7 +1095,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		}
 
 		err := store.DeleteSection(sec)
-		Expect(err).To(HaveOccurred(), "expected DriftError")
+		var de *DriftError
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v", err, err)
 
 	})
 })
@@ -1275,12 +1248,12 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		{
 
 			err := store.RenameNode(page, "   ")
-			Expect(err).To(HaveOccurred(), "expected empty slug to be rejected")
+			Expect(err).To(MatchError(ErrInvalidOperation), "expected empty slug validation error, got %v", err)
 		}
 		{
 
 			err := store.RenameNode(root, "new-root")
-			Expect(err).To(HaveOccurred(), "expected root rename to be rejected")
+			Expect(err).To(MatchError(ErrInvalidOperation), "expected root rename validation error, got %v", err)
 		}
 
 	})
@@ -1325,7 +1298,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		writeTreeFile(filepath.Join(tmp, "root", "new.md"), "# y", 0o644)
 
 		err := store.RenameNode(page, "new")
-		Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError")
 
 		var existsErr *PageAlreadyExistsError
 		Expect(err).To(matchErrorAs(&existsErr), "expected PageAlreadyExistsError, got %T: %v",
@@ -1345,7 +1317,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		createTreeDirectory(filepath.Join(tmp, "root", "old.md"))
 
 		err := store.RenameNode(page, "new")
-		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
@@ -1366,7 +1337,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		writeTreeFile(filepath.Join(tmp, "root", "docs"), "not a directory", 0o644)
 
 		err := store.RenameNode(sec, "docs2")
-		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
@@ -1386,7 +1356,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		entry := &PageNode{ID: "x1", Slug: "weird", Title: "Weird", Kind: NodeKind("mystery"), Parent: root}
 
 		err := store.RenameNode(entry, "other")
-		Expect(err).To(HaveOccurred(), "expected InvalidOpError")
 
 		var opErr *InvalidOpError
 		Expect(err).To(matchErrorAs(&opErr),
@@ -1421,7 +1390,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		{
 
 			_, err := os.Stat(filepath.Join(tmp, "root", "docs", "index.md"))
-			Expect(err).To(HaveOccurred(), "expected no index.md side effect on read")
+			Expect(err).To(MatchError(os.ErrNotExist), "expected no index.md side effect on read")
 		}
 
 	})
@@ -1436,7 +1405,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
 
 		_, err := store.ReadPageRaw(page)
-		Expect(err).To(HaveOccurred(), "expected DriftError")
+		var de *DriftError
+		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v", err, err)
 
 	})
 })
@@ -1490,7 +1460,7 @@ Hello
 		writeTreeFile(path, raw, 0o644)
 
 		content, err := store.ReadPageContent(page)
-		Expect(err).To(HaveOccurred(), "expected parse error for invalid frontmatter")
+		Expect(err).To(MatchError(markdown.ErrFrontmatterParse), "expected frontmatter parse error, got %v", err)
 		Expect(content).To(Equal(raw),
 			"expected raw content fallback on parse error, got %q",
 
@@ -1533,11 +1503,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 		raw := string(readTreeFile(path))
 		Expect(raw).To(haveCanonicalNodeStoreRawStorage())
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after sync")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("p1"), "Title A"),
 			"unexpected frontmatter: %#v", frontmatter)
 		Expect(frontmatter).To(matchFrontmatterTimestamps("2026-03-21T10:15:30Z", "2026-03-21T11:16:31Z"),
@@ -1562,11 +1529,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		}
 
 		raw2 := string(readTreeFile(path))
-		fm2, body2, has2, err := markdown.ParseFrontmatter(raw2)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has2).To(BeTrue(), "expected frontmatter after update")
+		fm2, body2, err := parseRequiredFrontmatter(raw2)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(fm2).To(matchManagedFrontmatter(newFixturePageID("p1b"), "Title B"),
 			"expected updated frontmatter, got %#v", fm2)
 		Expect(fm2).To(matchFrontmatterTimestamps("2026-03-21T10:15:30Z", "2026-03-21T12:17:32Z"),
@@ -1621,11 +1585,8 @@ Hello
 
 			raw)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected FM to exist")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("p1"), "Title A"),
 			"unexpected frontmatter: %#v", frontmatter)
 		Expect(strings.TrimSpace(body)).To(Equal(`# Body
@@ -1655,7 +1616,7 @@ var _ = ginkgo.Describe("node store persistence", func() {
 
 			// Ensure no folder created implicitly
 			_, err := os.Stat(filepath.Join(tmp, "root", "docs"))
-			Expect(err).To(HaveOccurred(), "expected no side effects (folder created), but folder exists")
+			Expect(err).To(MatchError(os.ErrNotExist), "expected no side effects (folder created), but folder exists")
 		}
 
 	})
@@ -1788,11 +1749,8 @@ leafwiki_title: Legacy Title
 
 				raw)
 
-		frontmatter, body, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after conversion")
+		frontmatter, body, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("p1"), "Section Title"),
 			"expected managed frontmatter from tree metadata, got %#v", frontmatter)
 		Expect(frontmatter).To(matchFrontmatterTimestamps("2026-03-22T10:15:30Z", "2026-03-22T11:16:31Z"),
@@ -1820,7 +1778,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		writeTreeFile(filepath.Join(directory, "other.txt"), "nope", 0o644)
 
 		err := store.ConvertNode(entry, NodeKindPage)
-		Expect(err).To(HaveOccurred(), "expected ConvertNotAllowedError")
 
 		var cna *ConvertNotAllowedError
 		Expect(err).To(matchErrorAs(&cna), "expected ConvertNotAllowedError, got %T: %v",
@@ -1895,11 +1852,8 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		pageFile := filepath.Join(tmp, "root", "docs.md")
 		raw := string(readTreeFile(pageFile))
 		Expect(raw).To(haveCanonicalNodeStoreRawStorage())
-		frontmatter, _, has, err := markdown.ParseFrontmatter(raw)
-		Expect(err).To(Succeed(), "ParseFrontmatter: %v",
-
-			err)
-		Expect(has).To(BeTrue(), "expected frontmatter after conversion")
+		frontmatter, _, err := parseRequiredFrontmatter(raw)
+		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(matchManagedFrontmatter(newFixturePageID("s1"), "Docs"),
 			"unexpected frontmatter: %#v", frontmatter)
 		{
@@ -2010,7 +1964,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		createTreeDirectory(filepath.Join(tmp, "root", "s", "p.md"))
 
 		err := store.MoveNode(page, root)
-		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
@@ -2033,7 +1986,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		writeTreeFile(filepath.Join(tmp, "root", "s", "docs"), "not a directory", 0o644)
 
 		err := store.MoveNode(entry, root)
-		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
@@ -2060,7 +2012,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		writeTreeFile(dst, "# existing", 0o644)
 
 		err := store.MoveNode(page, secB)
-		Expect(err).To(HaveOccurred(), "expected PageAlreadyExistsError")
 
 		var existsErr *PageAlreadyExistsError
 		Expect(err).To(matchErrorAs(&existsErr), "expected PageAlreadyExistsError, got %T: %v",
@@ -2105,7 +2056,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		entry := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
 
 		err := store.ConvertNode(entry, NodeKind("weird"))
-		Expect(err).To(HaveOccurred(), "expected InvalidOpError")
 
 		var opErr *InvalidOpError
 		Expect(err).To(matchErrorAs(&opErr),
@@ -2128,7 +2078,6 @@ var _ = ginkgo.Describe("node store persistence", func() {
 		writeTreeFile(filepath.Join(tmp, "root", "docs"), "not a directory", 0o644)
 
 		err := store.ConvertNode(entry, NodeKindPage)
-		Expect(err).To(HaveOccurred(), "expected DriftError")
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",

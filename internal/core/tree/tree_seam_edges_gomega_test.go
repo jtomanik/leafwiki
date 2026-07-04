@@ -449,7 +449,8 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 
 		adapter := &migrationStoreAdapter{store: store}
 		_, err := adapter.ResolveNode(&migrationNodeAdapter{node: page})
-		Expect(err).To(HaveOccurred())
+		var notFound *NotFoundError
+		Expect(err).To(matchErrorAs(&notFound), "expected NotFoundError, got %T: %v", err, err)
 
 		svc := NewTreeService(tempTreeDir())
 		svc.tree = edgeSectionNode(RootPageID, "root", "Root", nil)
