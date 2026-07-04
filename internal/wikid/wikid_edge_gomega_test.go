@@ -70,7 +70,7 @@ func (matcher wikidErrorMatcher) NegatedFailureMessage(actual interface{}) strin
 
 var _ = ginkgo.Describe("wikid persistence and private route edge behavior", func() {
 	ginkgo.Describe("auth storage", func() {
-		ginkgo.It("joins legacy cleanup errors and propagates auth directory setup failures", func() {
+		ginkgo.It("joins legacy cleanup errors and propagates auth directory setup failures", ginkgo.Label("integration"), func() {
 			dataDir := wikidTestTempDir()
 			legacyUsersDB := filepath.Join(dataDir, "users.db")
 			Expect(os.Mkdir(legacyUsersDB, 0o755)).To(Succeed())
@@ -91,12 +91,12 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(OpenAuthStores(blockedOAuthDirData)).Error().To(MatchError(syscall.ENOTDIR))
 		})
 
-		ginkgo.It("treats nil auth store collections as already closed", func() {
+		ginkgo.It("treats nil auth store collections as already closed", ginkgo.Label("unit"), func() {
 			var stores *AuthStores
 			Expect(stores.Close()).To(Succeed())
 		})
 
-		ginkgo.It("propagates auth store constructor failures after directory setup succeeds", func() {
+		ginkgo.It("propagates auth store constructor failures after directory setup succeeds", ginkgo.Label("integration"), func() {
 			restore := captureWikidAuthSeams()
 			ginkgo.DeferCleanup(restore)
 
@@ -126,7 +126,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 		})
 	})
 
-	ginkgo.Describe("document validation", func() {
+	ginkgo.Describe("document validation", ginkgo.Label("unit"), func() {
 		ginkgo.It("reports registry document and workspace record validation failures", func() {
 			now := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
 			valid := WorkspaceRecord{
@@ -228,7 +228,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 	})
 
 	ginkgo.Describe("registry and grant stores", func() {
-		ginkgo.It("returns open errors before loading or mutating stores", func() {
+		ginkgo.It("returns open errors before loading or mutating stores", ginkgo.Label("integration"), func() {
 			badPath := wikidDBPathInsideFile()
 
 			Expect(NewRegistryStore(badPath).Load()).Error().To(MatchError(syscall.ENOTDIR))
@@ -238,7 +238,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(NewGrantStore(badPath).GrantsForSubject("user:1")).Error().To(MatchError(syscall.ENOTDIR))
 		})
 
-		ginkgo.It("deletes stale registry rows when saving an empty document", func() {
+		ginkgo.It("deletes stale registry rows when saving an empty document", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			_, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
@@ -255,7 +255,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(loaded.Workspaces).To(BeEmpty())
 		})
 
-		ginkgo.It("rejects invalid grant documents and subject replacement inputs", func() {
+		ginkgo.It("rejects invalid grant documents and subject replacement inputs", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := registry.BootstrapHome()
@@ -272,7 +272,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{WorkspaceID: home.ID, Role: GrantRole("owner")}})).To(MatchError(ErrUnknownGrantRole))
 		})
 
-		ginkgo.It("surfaces grant delete failures from SQLite triggers", func() {
+		ginkgo.It("surfaces grant delete failures from SQLite triggers", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := registry.BootstrapHome()
@@ -286,7 +286,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(store.ReplaceSubjectGrants("user:1", nil)).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 		})
 
-		ginkgo.It("reports invalid persisted grant rows while loading and listing grants", func() {
+		ginkgo.It("reports invalid persisted grant rows while loading and listing grants", ginkgo.Label("integration"), func() {
 			Expect(loadGrantDocument(context.Background(), closedSQLiteDB())).Error().To(MatchError(wikidClosedDatabaseError()))
 
 			scanDB := rawGrantDB()
@@ -326,7 +326,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(loadGrantRows(errRows{err: loadGrantRowsErr})).Error().To(MatchError(loadGrantRowsErr))
 		})
 
-		ginkgo.It("rolls back registry updates when callbacks or next documents fail", func() {
+		ginkgo.It("rolls back registry updates when callbacks or next documents fail", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			store := NewRegistryStore(layout.DBPath)
 			callbackErr := errors.New("callback failed")
@@ -342,7 +342,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(err).To(MatchError(ErrRegistrySchemaVersion))
 		})
 
-		ginkgo.It("uses store defaults and grant callbacks while registering workspaces", func() {
+		ginkgo.It("uses store defaults and grant callbacks while registering workspaces", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			store := NewRegistryStore(layout.DBPath)
 			result, err := store.RegisterWorkspaceWithResultAndGrants(
@@ -367,7 +367,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(grants).To(Equal([]Grant{{Subject: "user:1", WorkspaceID: result.Workspace.ID, Role: GrantRoleEditor}}))
 		})
 
-		ginkgo.It("returns grant callback and grant workspace validation errors", func() {
+		ginkgo.It("returns grant callback and grant workspace validation errors", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			store := NewRegistryStore(layout.DBPath)
 			workspace := WorkspaceRecord{
@@ -394,7 +394,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(err).To(matchWikidWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
 		})
 
-		ginkgo.It("normalizes replace helpers and workspace slugs", func() {
+		ginkgo.It("normalizes replace helpers and workspace slugs", ginkgo.Label("unit"), func() {
 			now := time.Now().UTC()
 			doc := replaceWorkspaceRecord(NewRegistryDocument(), WorkspaceRecord{
 				ID:          HomeWorkspaceID,
@@ -426,7 +426,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(workspaceID.StorageKey()).To(HavePrefix("docs-"))
 		})
 
-		ginkgo.It("reports invalid direct store registration inputs before opening a transaction", func() {
+		ginkgo.It("reports invalid direct store registration inputs before opening a transaction", ginkgo.Label("unit"), func() {
 			store := NewRegistryStore(filepath.Join(wikidTestTempDir(), "wikid.db"))
 
 			_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{ID: "bad/id"}, time.Now, nil)
@@ -441,7 +441,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(err).To(MatchError(ErrWorkspaceMarkdownLinkRootPrefixNotNormalized))
 		})
 
-		ginkgo.It("updates an existing home workspace and surfaces registry service load errors", func() {
+		ginkgo.It("updates an existing home workspace and surfaces registry service load errors", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := service.BootstrapHome()
@@ -466,7 +466,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			}, nil)).Error().To(MatchError(markdownlinks.ErrMarkdownLinkRootPrefixTraversal))
 		})
 
-		ginkgo.It("handles workspace request defaults, ordering ties, and path/prefix errors", func() {
+		ginkgo.It("handles workspace request defaults, ordering ties, and path/prefix errors", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			record, err := service.workspaceRecordForRequest(RegisterWorkspaceRequest{
@@ -497,7 +497,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(workspaces).To(haveHomeWorkspaceFirstAndEqualFoldTie())
 		})
 
-		ginkgo.It("reports invalid persisted registry rows while loading workspaces", func() {
+		ginkgo.It("reports invalid persisted registry rows while loading workspaces", ginkgo.Label("integration"), func() {
 			Expect(loadRegistryDocument(context.Background(), closedSQLiteDB())).Error().To(MatchError(wikidClosedDatabaseError()))
 
 			scanDB := rawRegistryDB()
@@ -520,7 +520,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(loadRegistryRows(errRows{err: registryRowsErr})).Error().To(MatchError(registryRowsErr))
 		})
 
-		ginkgo.It("surfaces low-level registry save and upsert errors", func() {
+		ginkgo.It("surfaces low-level registry save and upsert errors", ginkgo.Label("integration"), func() {
 			db := rawSQLiteDB()
 			conn, err := db.Conn(context.Background())
 			Expect(err).NotTo(HaveOccurred())
@@ -536,7 +536,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 		})
 
-		ginkgo.It("surfaces registry transaction load and upsert failures", func() {
+		ginkgo.It("surfaces registry transaction load and upsert failures", ginkgo.Label("integration"), func() {
 			badSchemaLayout := newWikidEdgeLayout()
 			badSchemaDB := rawSQLiteDBAt(badSchemaLayout.DBPath)
 			Expect(execRawSQL(badSchemaDB, `CREATE TABLE workspaces (id TEXT)`)).To(Succeed())
@@ -572,7 +572,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 	})
 
 	ginkgo.Describe("private workspace API", func() {
-		ginkgo.It("routes not-found and malformed workspace paths before authorization", func() {
+		ginkgo.It("routes not-found and malformed workspace paths before authorization", ginkgo.Label("integration"), func() {
 			api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{})
 
 			Expect(privateWorkspaceAPIStatus(api, http.MethodGet, "/elsewhere")).To(Equal(http.StatusNotFound))
@@ -580,7 +580,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(privateWorkspaceAPIStatus(api, http.MethodGet, PrivateWorkspacesPrefix+"/bad/id/status")).To(Equal(http.StatusNotFound))
 		})
 
-		ginkgo.It("validates subjects for list requests", func() {
+		ginkgo.It("validates subjects for list requests", ginkgo.Label("integration"), func() {
 			for _, tc := range []struct {
 				name    string
 				subject func(*http.Request) (WorkspaceSubject, error)
@@ -610,7 +610,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			}
 		})
 
-		ginkgo.It("reports registry and grant load failures separately", func() {
+		ginkgo.It("reports registry and grant load failures separately", ginkgo.Label("integration"), func() {
 			registryErrorAPI := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
 				Registry: NewRegistryService(NewRegistryStore(wikidDBPathInsideFile()), Layout{}),
 				Subject:  validWorkspaceSubject,
@@ -629,7 +629,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(grantsRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateGrantsLoadFailed, sharederrors.MessageIDForCode(errCodePrivateGrantsLoadFailed)))
 		})
 
-		ginkgo.It("handles status and default ensure branches without a supervisor", func() {
+		ginkgo.It("handles status and default ensure branches without a supervisor", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := registry.BootstrapHome()
@@ -655,7 +655,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			))
 		})
 
-		ginkgo.It("returns supervisor status from default ensure when available", func() {
+		ginkgo.It("returns supervisor status from default ensure when available", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := registry.BootstrapHome()
@@ -679,7 +679,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			))
 		})
 
-		ginkgo.It("reports authorization and ensure failures from workspace actions", func() {
+		ginkgo.It("reports authorization and ensure failures from workspace actions", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := registry.BootstrapHome()
@@ -728,7 +728,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(defaultRec).To(HaveHTTPStatus(http.StatusNotFound))
 		})
 
-		ginkgo.It("falls back to a structured encoding error when JSON encoding fails", func() {
+		ginkgo.It("falls back to a structured encoding error when JSON encoding fails", ginkgo.Label("unit"), func() {
 			rec := httptest.NewRecorder()
 
 			writeJSON(rec, map[string]any{"bad": make(chan int)})
@@ -737,7 +737,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 		})
 	})
 
-	ginkgo.Describe("private handler", func() {
+	ginkgo.Describe("private handler", ginkgo.Label("integration"), func() {
 		ginkgo.It("dispatches protected private routes only with the daemon token", func() {
 			token := "daemon-token"
 			called := map[string]int{}
@@ -845,7 +845,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 	})
 
 	ginkgo.Describe("sqlite helpers", func() {
-		ginkgo.It("returns open errors for invalid database paths", func() {
+		ginkgo.It("returns open errors for invalid database paths", ginkgo.Label("integration"), func() {
 			_, err := openWikidDB(wikidDBPathInsideFile())
 			Expect(err).To(MatchError(syscall.ENOTDIR))
 
@@ -855,7 +855,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(err).To(MatchError(syscall.EISDIR))
 		})
 
-		ginkgo.It("surfaces injected file, chmod, SQL open, and initialization failures", func() {
+		ginkgo.It("surfaces injected file, chmod, SQL open, and initialization failures", ginkgo.Label("integration"), func() {
 			restore := captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
 			closeErr := errors.New("close failed")
@@ -901,7 +901,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(initializeWikidDB(rawSQLiteDB())).To(MatchError(pragmaErr))
 		})
 
-		ginkgo.It("rolls back immediate transactions when callbacks fail", func() {
+		ginkgo.It("rolls back immediate transactions when callbacks fail", ginkgo.Label("integration"), func() {
 			path := filepath.Join(wikidTestTempDir(), "wikid.db")
 			callbackErr := errors.New("callback failed")
 
@@ -912,7 +912,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(err).To(MatchError(callbackErr))
 		})
 
-		ginkgo.It("surfaces connection, begin, and commit failures from immediate transactions", func() {
+		ginkgo.It("surfaces connection, begin, and commit failures from immediate transactions", ginkgo.Label("integration"), func() {
 			restore := captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
 			wikidOpenWikidDB = func(string) (*sql.DB, error) {
@@ -967,7 +967,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			})).To(MatchError(dbCloseErr))
 		})
 
-		ginkgo.It("returns context cancellation while retrying transient SQLite lock errors", func() {
+		ginkgo.It("returns context cancellation while retrying transient SQLite lock errors", ginkgo.Label("integration"), func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			execer := &lockErrorExecer{err: wikidSQLiteErrorWithCode(5)}
@@ -978,7 +978,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(execer.calls).To(Equal(1))
 		})
 
-		ginkgo.It("backs off and eventually succeeds after transient SQLite lock errors", func() {
+		ginkgo.It("backs off and eventually succeeds after transient SQLite lock errors", ginkgo.Label("integration"), func() {
 			execer := &lockErrorExecer{err: wikidSQLiteErrorWithCode(6), succeedAfter: 2}
 
 			_, err := execWikidSQLiteWithLockRetry(context.Background(), execer, "BEGIN IMMEDIATE")
@@ -987,7 +987,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(execer.calls).To(Equal(3))
 		})
 
-		ginkgo.It("parses wikid timestamps in UTC and returns parse errors", func() {
+		ginkgo.It("parses wikid timestamps in UTC and returns parse errors", ginkgo.Label("unit"), func() {
 			timestamp := time.Date(2026, 6, 27, 14, 30, 0, 123, time.FixedZone("CEST", 2*60*60))
 
 			parsed, err := parseWikidTime(wikidTimeString(timestamp))

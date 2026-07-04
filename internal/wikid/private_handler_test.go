@@ -27,7 +27,7 @@ func privateHandlerAcceptedDownstream() http.Handler {
 	})
 }
 
-var _ = ginkgo.Describe("private wikid handler", func() {
+var _ = ginkgo.Describe("private wikid handler", ginkgo.Label("integration"), func() {
 	ginkgo.It("rejects actor-context requests that omit the daemon token", func() {
 		handler := NewPrivateHandler(PrivateHandlerOptions{
 			DaemonToken:  "private-token",

@@ -42,7 +42,7 @@ func recordWorkspaceCrash(supervisor *WorkspaceSupervisor, workspaceID workspace
 	return workspaceCrashResult{Decision: workspaceRestartExhausted}
 }
 
-var _ = ginkgo.Describe("workspace process supervision", func() {
+var _ = ginkgo.Describe("workspace process supervision", ginkgo.Label("unit"), func() {
 	ginkgo.It("keeps other workspaces running while restarting and then crashing a failing workspace", func() {
 		now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 		supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{

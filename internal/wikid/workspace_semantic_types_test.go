@@ -33,7 +33,7 @@ func lookupRegistryWorkspace(doc RegistryDocument, workspaceID workspaceid.Works
 }
 
 var _ = ginkgo.Describe("wikid workspace semantic typing", func() {
-	ginkgo.It("preserves typed workspace identifiers across registry, grant, and supervisor models", func() {
+	ginkgo.It("preserves typed workspace identifiers across registry, grant, and supervisor models", ginkgo.Label("unit"), func() {
 		workspaceID := workspaceid.WorkspaceID("home")
 
 		doc := RegistryDocument{
@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("wikid workspace semantic typing", func() {
 		}))
 	})
 
-	ginkgo.It("rejects registry records whose workspace ID contains whitespace before normalization", func() {
+	ginkgo.It("rejects registry records whose workspace ID contains whitespace before normalization", ginkgo.Label("integration"), func() {
 		layout := GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
 		store := NewRegistryStore(layout.DBPath)
 		now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
@@ -78,7 +78,7 @@ var _ = ginkgo.Describe("wikid workspace semantic typing", func() {
 		Expect(doc.Workspaces).To(BeEmpty())
 	})
 
-	ginkgo.It("rolls back registry and grant writes when seeded grants contain whitespace workspace IDs", func() {
+	ginkgo.It("rolls back registry and grant writes when seeded grants contain whitespace workspace IDs", ginkgo.Label("integration"), func() {
 		layout := GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
 		store := NewRegistryStore(layout.DBPath)
 		now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }

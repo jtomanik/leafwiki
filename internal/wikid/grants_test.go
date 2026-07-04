@@ -40,7 +40,7 @@ func registeredWorkspace(registry *RegistryService, displayName string) Workspac
 	return workspace
 }
 
-var _ = ginkgo.Describe("grant store validation", func() {
+var _ = ginkgo.Describe("grant store validation", ginkgo.Label("integration"), func() {
 	ginkgo.It("rejects grants whose role is unknown", func() {
 		_, _, store := newBootstrappedGrantStore()
 
@@ -76,6 +76,7 @@ var _ = ginkgo.Describe("grant store validation", func() {
 })
 
 var _ = ginkgo.DescribeTable("grant role capabilities",
+	ginkgo.Label("unit"),
 	func(tt roleCapabilitiesCase) {
 		caps, err := CapabilitiesForRole(tt.role)
 		Expect(err).To(Succeed())
@@ -90,7 +91,7 @@ var _ = ginkgo.DescribeTable("grant role capabilities",
 	ginkgo.Entry("allows administrators to read, write, and manage grants", roleCapabilitiesCase{role: GrantRoleAdmin, wantRead: true, wantWrite: true, wantAdmin: true}),
 )
 
-var _ = ginkgo.Describe("grant persistence", func() {
+var _ = ginkgo.Describe("grant persistence", ginkgo.Label("integration"), func() {
 	ginkgo.It("upserts grants and lists only the requested subject in stable workspace order", func() {
 		layout, _, _ := newBootstrappedGrantStore()
 		registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)

@@ -57,7 +57,7 @@ func expectRegistryTableCount(dbPath string, table string, want int) {
 }
 
 var _ = ginkgo.Describe("wikid registry", func() {
-	ginkgo.It("bootstraps the home workspace into the secured registry database", func() {
+	ginkgo.It("bootstraps the home workspace into the secured registry database", ginkgo.Label("integration"), func() {
 		fixture := newRegistryServiceFixture()
 
 		home, err := fixture.service.BootstrapHome()
@@ -82,7 +82,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o600)))
 	})
 
-	ginkgo.It("keeps non-home workspace IDs stable across renamed registrations", func() {
+	ginkgo.It("keeps non-home workspace IDs stable across renamed registrations", ginkgo.Label("integration"), func() {
 		fixture := newRegistryServiceFixture()
 		rootDir := filepath.Join(wikidTestTempDir(), "Docs Root")
 		dataDir := filepath.Join(wikidTestTempDir(), "Docs Data")
@@ -108,7 +108,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		))
 	})
 
-	ginkgo.It("persists normalized markdown link root prefixes across workspace updates", func() {
+	ginkgo.It("persists normalized markdown link root prefixes across workspace updates", ginkgo.Label("integration"), func() {
 		fixture := newRegistryServiceFixture()
 		rootDir := filepath.Join(wikidTestTempDir(), "Docs Root")
 		dataDir := filepath.Join(wikidTestTempDir(), "Docs Data")
@@ -129,7 +129,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		})))
 	})
 
-	ginkgo.It("requires exact workspace ID matches when looking up registry records", func() {
+	ginkgo.It("requires exact workspace ID matches when looking up registry records", ginkgo.Label("unit"), func() {
 		doc := NewRegistryDocument()
 		doc.Workspaces = append(doc.Workspaces, WorkspaceRecord{
 			ID:          HomeWorkspaceID,
@@ -147,7 +147,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		))
 	})
 
-	ginkgo.It("rejects workspace registrations that reuse data or root directories", func() {
+	ginkgo.It("rejects workspace registrations that reuse data or root directories", ginkgo.Label("integration"), func() {
 		fixture := newRegistryServiceFixture()
 		rootDir := filepath.Join(wikidTestTempDir(), "Docs Root")
 		dataDir := filepath.Join(wikidTestTempDir(), "Docs Data")
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		Expect(sameDataErr).To(MatchError(ErrWorkspaceDataDirAlreadyInUse))
 	})
 
-	ginkgo.It("rejects registry documents with invalid workspace ID values", func() {
+	ginkgo.It("rejects registry documents with invalid workspace ID values", ginkgo.Label("integration"), func() {
 		path := filepath.Join(wikidTestTempDir(), "wikid.db")
 		now := time.Now().UTC()
 		doc := NewRegistryDocument()
@@ -186,7 +186,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 	})
 
-	ginkgo.It("serializes registry updates across store instances", func() {
+	ginkgo.It("serializes registry updates across store instances", ginkgo.Label("integration"), func() {
 		path := filepath.Join(wikidTestTempDir(), "wikid.db")
 		firstStore := NewRegistryStore(path)
 		secondStore := NewRegistryStore(path)
@@ -229,7 +229,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		))
 	})
 
-	ginkgo.It("rolls back workspace registration and seeded grants together", func() {
+	ginkgo.It("rolls back workspace registration and seeded grants together", ginkgo.Label("integration"), func() {
 		fixture := newRegistryServiceFixture()
 		store := NewRegistryStore(fixture.layout.DBPath)
 		service := NewRegistryService(store, fixture.layout)
@@ -255,7 +255,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		Expect(grants.Grants).To(BeEmpty())
 	})
 
-	ginkgo.It("uses the SQLite authority store for concurrent registrations across processes", func() {
+	ginkgo.It("uses the SQLite authority store for concurrent registrations across processes", ginkgo.Label("integration"), func() {
 		fixture := newRegistryServiceFixture()
 		dataDir := filepath.Join(wikidTestTempDir(), "shared-data")
 		rootDir := filepath.Join(wikidTestTempDir(), "shared-root")
@@ -290,7 +290,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		expectRegistryTableCount(fixture.layout.DBPath, "workspaces", 1)
 	})
 
-	ginkgo.It("lists workspaces with home first and named workspaces in slug order", func() {
+	ginkgo.It("lists workspaces with home first and named workspaces in slug order", ginkgo.Label("integration"), func() {
 		fixture := newRegistryServiceFixture()
 		fixture.registerWorkspace("Zulu", filepath.Join(wikidTestTempDir(), "z-data"), filepath.Join(wikidTestTempDir(), "z-root"), "")
 		_, err := fixture.service.BootstrapHome()

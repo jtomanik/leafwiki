@@ -105,7 +105,7 @@ func matchWorkspaceListItem(workspace WorkspaceRecord, role GrantRole, markdownL
 	})
 }
 
-var _ = ginkgo.Describe("private workspace API", func() {
+var _ = ginkgo.Describe("private workspace API", ginkgo.Label("integration"), func() {
 	ginkgo.It("lists only workspaces granted to the authenticated subject", func() {
 		fixture := newPrivateWorkspaceAPIFixture()
 		home := fixture.bootstrapHomeWorkspace()

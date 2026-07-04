@@ -9,7 +9,7 @@ import (
 )
 
 var _ = ginkgo.Describe("wikid auth storage", func() {
-	ginkgo.It("opens fresh stores under the wikid auth root and removes legacy root databases", func() {
+	ginkgo.It("opens fresh stores under the wikid auth root and removes legacy root databases", ginkgo.Label("integration"), func() {
 		dataDir := wikidTestTempDir()
 
 		stores, err := OpenAuthStores(dataDir)
@@ -29,7 +29,7 @@ var _ = ginkgo.Describe("wikid auth storage", func() {
 		}
 	})
 
-	ginkgo.It("uses the global wikid directory when the data root is the LeafWiki home", func() {
+	ginkgo.It("uses the global wikid directory when the data root is the LeafWiki home", ginkgo.Label("unit"), func() {
 		globalRoot := filepath.Join(wikidTestTempDir(), ".leafwiki")
 
 		paths := AuthStoragePaths(globalRoot)
@@ -40,7 +40,7 @@ var _ = ginkgo.Describe("wikid auth storage", func() {
 		))
 	})
 
-	ginkgo.It("deletes only legacy auth databases from the data root", func() {
+	ginkgo.It("deletes only legacy auth databases from the data root", ginkgo.Label("unit"), func() {
 		dataDir := wikidTestTempDir()
 		for _, name := range []string{"users.db", "sessions.db", "api_keys.db", "pages.db"} {
 			Expect(os.WriteFile(filepath.Join(dataDir, name), []byte(name), 0o600)).To(Succeed())

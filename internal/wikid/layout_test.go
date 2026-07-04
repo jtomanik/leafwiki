@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("global wikid layout", func() {
+var _ = ginkgo.Describe("global wikid layout", ginkgo.Label("unit"), func() {
 	ginkgo.It("derives registry, runtime, and home workspace paths under the LeafWiki home directory", func() {
 		homeDir := filepath.Join(wikidTestTempDir(), ".leafwiki")
 

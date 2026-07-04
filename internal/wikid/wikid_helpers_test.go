@@ -13,7 +13,7 @@ import (
 )
 
 var _ = ginkgo.Describe("wikid support stores and supervisors", func() {
-	ginkgo.It("replaces persisted grants when saving a complete grant document", func() {
+	ginkgo.It("replaces persisted grants when saving a complete grant document", ginkgo.Label("integration"), func() {
 		layout := GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
 		_, err := NewRegistryService(NewRegistryStore(layout.DBPath), layout).BootstrapHome()
 		Expect(err).To(Succeed())
@@ -32,7 +32,7 @@ var _ = ginkgo.Describe("wikid support stores and supervisors", func() {
 		Expect(doc.Grants).To(Equal([]Grant{{Subject: "user:new", WorkspaceID: HomeWorkspaceID, Role: GrantRoleAdmin}}))
 	})
 
-	ginkgo.It("returns marked daemon roles as an immutable runtime snapshot", func() {
+	ginkgo.It("returns marked daemon roles as an immutable runtime snapshot", ginkgo.Label("unit"), func() {
 		now := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
 		supervisor := NewSupervisor(SupervisorOptions{Now: func() time.Time { return now }})
 
@@ -52,7 +52,7 @@ var _ = ginkgo.Describe("wikid support stores and supervisors", func() {
 		))
 	})
 
-	ginkgo.It("returns workspace process states ordered by workspace identity", func() {
+	ginkgo.It("returns workspace process states ordered by workspace identity", ginkgo.Label("unit"), func() {
 		now := time.Date(2026, 6, 25, 11, 0, 0, 0, time.UTC)
 		supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{Now: func() time.Time { return now }})
 
@@ -75,6 +75,7 @@ var _ = ginkgo.Describe("wikid support stores and supervisors", func() {
 })
 
 var _ = ginkgo.DescribeTable("private control-plane base path joining",
+	ginkgo.Label("unit"),
 	func(basePath string, requestPath string, want string) {
 		Expect(joinBasePathForPrivateControlPlane(basePath, requestPath)).To(Equal(want))
 	},

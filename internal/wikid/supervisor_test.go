@@ -43,7 +43,7 @@ func recordDaemonCrash(supervisor *Supervisor, role projectdaemon.RoleName, mess
 	return daemonCrashResult{Decision: daemonRestartExhausted}
 }
 
-var _ = ginkgo.Describe("daemon role supervision", func() {
+var _ = ginkgo.Describe("daemon role supervision", ginkgo.Label("unit"), func() {
 	ginkgo.It("records crashes as bounded restarts and returns to ready after a successful restart", func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		supervisor := NewSupervisor(SupervisorOptions{
