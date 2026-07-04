@@ -55,7 +55,7 @@ func resolveWorkspaceMarkdownLinkResult(
 	return result, nil
 }
 
-var _ = ginkgo.Describe("semantic types", func() {
+var _ = ginkgo.Describe("semantic types", ginkgo.Label("unit"), func() {
 	ginkgo.It("keeps validation callbacks typed with semantic page IDs", func() {
 		opts := ContentValidationOptions{
 			ExistingPageID: newFixturePageID("page-1"),

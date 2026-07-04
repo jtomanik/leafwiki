@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("issue codes", func() {
+var _ = ginkgo.Describe("issue codes", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses typed fallback issue codes and error severity for workspace status", func() {
 		result := ValidateWorkspaceStatus([]WorkspaceStatusIssue{{Path: "workspace", Message: "sync failed"}}, true)
 

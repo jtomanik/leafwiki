@@ -18,7 +18,7 @@ func canonicalValidationMarkdown(id, title, body string) []byte {
 	return []byte("<!-- leafwiki\nversion: 1\npage:\n  id: " + id + "\n  title: " + title + "\n-->\n\n" + body)
 }
 
-var _ = ginkgo.Describe("use cases", func() {
+var _ = ginkgo.Describe("use cases", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolves section directory routes from workspace markdown links", func() {
 		rootDir := markdownValidationTempDir()
 		docsDir := filepath.Join(rootDir, "docs")

@@ -8,7 +8,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -20,38 +19,29 @@ import (
 type workspaceResolverResult struct {
 	PageID tree.PageID
 	Kind   tree.NodeKind
-	OK     bool
 	Code   IssueCode
 }
 
 func matchValidationSuccess() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result Result) (bool, error) {
-		return result.OK, nil
-	}).WithMessage("succeed validation")
+	return HaveField("Summary", HaveField("Errors", BeZero()))
 }
 
 func matchValidationSuccessWithIssues(issues types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result Result) (bool, error) {
-		if !result.OK {
-			return false, nil
-		}
-		return issues.Match(result.Issues)
-	}).WithMessage("succeed validation with expected issues")
+	return SatisfyAll(
+		matchValidationSuccess(),
+		HaveField("Issues", issues),
+	)
 }
 
 func matchValidationFailure() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result Result) (bool, error) {
-		return !result.OK, nil
-	}).WithMessage("fail validation")
+	return HaveField("Summary", HaveField("Errors", BeNumerically(">", 0)))
 }
 
 func matchValidationFailureWithIssues(issues types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result Result) (bool, error) {
-		if result.OK {
-			return false, nil
-		}
-		return issues.Match(result.Issues)
-	}).WithMessage("fail validation with expected issues")
+	return SatisfyAll(
+		matchValidationFailure(),
+		HaveField("Issues", issues),
+	)
 }
 
 func matchValidationSummary(errorCount int, warningCount int) types.GomegaMatcher {
@@ -79,30 +69,48 @@ func matchWorkspaceScanIssue(sourcePath tree.MarkdownPath) types.GomegaMatcher {
 func resolveWorkspaceMarkdownLink(
 	resolver func(string) (tree.PageID, tree.NodeKind, bool, IssueCode),
 	destination string,
-) workspaceResolverResult {
+) (workspaceResolverResult, error) {
 	pageID, kind, ok, code := resolver(destination)
-	return workspaceResolverResult{
+	result := workspaceResolverResult{
 		PageID: pageID,
 		Kind:   kind,
-		OK:     ok,
 		Code:   code,
 	}
+	if !ok {
+		return result, errWorkspaceMarkdownLinkUnresolved
+	}
+	return result, nil
 }
 
 func matchWorkspaceResolverResult(kind tree.NodeKind, code IssueCode) types.GomegaMatcher {
-	want := struct {
-		Kind tree.NodeKind
-		Code IssueCode
-	}{Kind: kind, Code: code}
-	return gcustom.MakeMatcher(func(result workspaceResolverResult) (bool, error) {
-		return result.PageID == "" &&
-			result.Kind == kind &&
-			!result.OK &&
-			result.Code == code, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be an unresolved workspace markdown link\n{{format .Data 1}}", want)
+	return gstruct.MatchAllFields(gstruct.Fields{
+		"PageID": BeEmpty(),
+		"Kind":   Equal(kind),
+		"Code":   Equal(code),
+	})
 }
 
-var _ = ginkgo.Describe("markdown validation edge behavior", func() {
+func extensionlessWikiDestinations(destinations ...string) []string {
+	accepted := []string{}
+	for _, destination := range destinations {
+		if isExtensionlessWikiDestination(destination) {
+			accepted = append(accepted, destination)
+		}
+	}
+	return accepted
+}
+
+func markdownFileDestinations(destinations ...string) []string {
+	accepted := []string{}
+	for _, destination := range destinations {
+		if isMarkdownFileDestination(destination) {
+			accepted = append(accepted, destination)
+		}
+	}
+	return accepted
+}
+
+var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ValidateMarkdownContent legacy wrapper returns OK for simple canonical content", func() {
 		result := ValidateMarkdownContent("docs/page", string(canonicalValidationMarkdown("page-1", "Page", "# Page\n")), "page-1")
 
@@ -258,11 +266,10 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 		Expect(stripMarkdownLinkRootPrefix("/docs/page.md", "docs")).To(Equal("/page.md"))
 		Expect(stripMarkdownLinkRootPrefix("/other/page.md", "docs")).To(Equal("/other/page.md"))
 
-		Expect(isExtensionlessWikiDestination("")).To(BeFalse())
-		Expect(isExtensionlessWikiDestination("section/")).To(BeFalse())
-		Expect(isExtensionlessWikiDestination("page")).To(BeTrue())
+		Expect(extensionlessWikiDestinations("", "section/", "page")).To(Equal([]string{"page"}))
 
-		resolverResult := resolveWorkspaceMarkdownLink(newWorkspaceMarkdownLinkResolver("source.md", nil, nil), "missing.md")
+		resolverResult, err := resolveWorkspaceMarkdownLink(newWorkspaceMarkdownLinkResolver("source.md", nil, nil), "missing.md")
+		Expect(err).To(MatchError(errWorkspaceMarkdownLinkUnresolved))
 		Expect(resolverResult).To(matchWorkspaceResolverResult("", IssueCodeBrokenLink))
 
 		index := markdownlinks.NewIndex([]markdownlinks.Entry{
@@ -270,10 +277,12 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 			{Kind: markdownlinks.EntryKindSection, RoutePath: "docs/section"},
 		})
 		resolver := newWorkspaceMarkdownLinkResolver("docs/source.md", index, map[workspaceValidationRouteKey]tree.PageID{})
-		resolverResult = resolveWorkspaceMarkdownLink(resolver, "/docs/page.md")
+		resolverResult, err = resolveWorkspaceMarkdownLink(resolver, "/docs/page.md")
+		Expect(err).To(MatchError(errWorkspaceMarkdownLinkUnresolved))
 		Expect(resolverResult).To(matchWorkspaceResolverResult(tree.NodeKindPage, IssueCodeBrokenLink))
 
-		resolverResult = resolveWorkspaceMarkdownLink(resolver, "/docs/section")
+		resolverResult, err = resolveWorkspaceMarkdownLink(resolver, "/docs/section")
+		Expect(err).To(MatchError(errWorkspaceMarkdownLinkUnresolved))
 		Expect(resolverResult).To(matchWorkspaceResolverResult(tree.NodeKindSection, IssueCodeBrokenLink))
 
 		Expect(resolveReferencePath(tree.RoutePath("docs/source"), "%zz")).To(BeEmpty())
@@ -281,10 +290,12 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 	})
 
 	ginkgo.It("recognizes only lowercase markdown file targets after removing query and fragment markers", func() {
-		Expect(isMarkdownFileDestination("page.md#intro")).To(BeTrue())
-		Expect(isMarkdownFileDestination("page.MARKDOWN?view=1")).To(BeFalse())
-		Expect(isMarkdownFileDestination("asset.png")).To(BeFalse())
-		Expect(isMarkdownFileDestination("#intro")).To(BeFalse())
+		Expect(markdownFileDestinations(
+			"page.md#intro",
+			"page.MARKDOWN?view=1",
+			"asset.png",
+			"#intro",
+		)).To(Equal([]string{"page.md#intro"}))
 	})
 
 	ginkgo.It("ValidateWorkspaceStatus filters warnings and preserves explicit message IDs", func() {
