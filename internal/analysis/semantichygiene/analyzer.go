@@ -2,6 +2,7 @@ package semantichygiene
 
 import (
 	"go/ast"
+	"reflect"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -10,11 +11,14 @@ import (
 
 const doc = "checks LeafWiki semantic value boundaries for primitive leaks"
 
+type analyzerResult struct{}
+
 var Analyzer = &analysis.Analyzer{
-	Name:     "semantichygiene",
-	Doc:      doc,
-	Requires: []*analysis.Analyzer{inspect.Analyzer},
-	Run:      run,
+	Name:       "semantichygiene",
+	Doc:        doc,
+	Requires:   []*analysis.Analyzer{inspect.Analyzer},
+	ResultType: reflect.TypeOf(analyzerResult{}),
+	Run:        run,
 }
 
 func run(pass *analysis.Pass) (any, error) {
@@ -72,5 +76,5 @@ func run(pass *analysis.Pass) (any, error) {
 	})
 	checkGinkgoMissingTaxonomyLabels(ctx)
 	ctx.finalizeDiagnostics()
-	return nil, nil
+	return analyzerResult{}, nil
 }

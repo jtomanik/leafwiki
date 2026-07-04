@@ -427,15 +427,6 @@ func (ctx *analysisContext) waiverMatchesEnclosingCall(waiver parsedWaiver, node
 	return false
 }
 
-func (ctx *analysisContext) enclosingCall(node ast.Node) *ast.CallExpr {
-	for current := node; current != nil; current = ctx.parent(current) {
-		if call, ok := current.(*ast.CallExpr); ok {
-			return call
-		}
-	}
-	return nil
-}
-
 func (ctx *analysisContext) enclosingDeclaration(node ast.Node) ast.Node {
 	for current := node; current != nil; current = ctx.parent(current) {
 		switch current.(type) {
