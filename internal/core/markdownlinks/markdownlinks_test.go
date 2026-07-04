@@ -8,7 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("markdown link resolution", func() {
+var _ = ginkgo.Describe("markdown link resolution", ginkgo.Label("unit"), func() {
 	ginkgo.When("links point at pages and sections", func() {
 		ginkgo.It("resolves relative page links from the source file directory", func() {
 			// Plantrace evidence: TestResolveCanonicalLink_UsesFilesystemRelativeSemanticsNotPageAsFolder.
@@ -334,7 +334,7 @@ var _ = ginkgo.Describe("markdown link resolution", func() {
 	})
 })
 
-var _ = ginkgo.Describe("markdown link rewriting", func() {
+var _ = ginkgo.Describe("markdown link rewriting", ginkgo.Label("unit"), func() {
 	ginkgo.When("rewriting inline and reference markdown destinations", func() {
 		ginkgo.It("preserves angle destinations, titles, query strings, and fragments", func() {
 			// Plantrace evidence: TestCanonicalizeMarkdownLinks_PreservesAngleDestinationsTitleQueryAndFragment.
@@ -480,7 +480,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 	})
 })
 
-var _ = ginkgo.Describe("markdown link destination scanning", func() {
+var _ = ginkgo.Describe("markdown link destination scanning", ginkgo.Label("unit"), func() {
 	ginkgo.It("skips image destinations by default and can include them when requested", func() {
 		content := "![Logo](/assets/logo.png) [Page](/docs/page)"
 

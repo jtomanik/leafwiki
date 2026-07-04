@@ -169,7 +169,7 @@ func markdownLinksTempDir() string {
 	return dir
 }
 
-var _ = ginkgo.Describe("markdown link parser internals", func() {
+var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), func() {
 	ginkgo.It("skips unsupported entries hidden paths and non-markdown files while building the link index", func() {
 		index := NewIndexWithOptions([]Entry{
 			{Kind: EntryKindPage},
