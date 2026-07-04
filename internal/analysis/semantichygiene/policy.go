@@ -48,6 +48,7 @@ const (
 	ruleGinkgoTestName                     ruleID = "ginkgo.test-name"
 	ruleGinkgoCoverageName                 ruleID = "ginkgo.coverage-name"
 	ruleGinkgoVagueName                    ruleID = "ginkgo.vague-name"
+	ruleGinkgoBooleanOutcomeName           ruleID = "ginkgo.boolean-outcome-name"
 	ruleGinkgoTestingTInSpec               ruleID = "ginkgo.testing-t-in-spec"
 	ruleGinkgoFailInSpec                   ruleID = "ginkgo.fail-in-spec"
 	ruleGinkgoLinterRawIgnore              ruleID = "ginkgo-linter.raw-ignore"
@@ -158,6 +159,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGinkgoTestName:                     hardRule(ruleGinkgoTestName),
 	ruleGinkgoCoverageName:                 hardRule(ruleGinkgoCoverageName),
 	ruleGinkgoVagueName:                    hardRule(ruleGinkgoVagueName),
+	ruleGinkgoBooleanOutcomeName:           hardRule(ruleGinkgoBooleanOutcomeName),
 	ruleGinkgoTestingTInSpec:               hardRule(ruleGinkgoTestingTInSpec),
 	ruleGinkgoFailInSpec:                   hardRule(ruleGinkgoFailInSpec),
 	ruleGinkgoLinterRawIgnore:              hardRule(ruleGinkgoLinterRawIgnore),

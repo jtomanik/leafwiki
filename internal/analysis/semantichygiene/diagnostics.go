@@ -385,6 +385,10 @@ func ginkgoVagueNameDiagnostic(name string) string {
 	return fmt.Sprintf("Ginkgo node name %q is too vague to document behavior; describe the observable outcome instead", name)
 }
 
+func ginkgoBooleanOutcomeNameDiagnostic(name string) string {
+	return fmt.Sprintf("Ginkgo node name %q describes a boolean return value; document the observable behavior instead", name)
+}
+
 func ginkgoTestingTInSpecDiagnostic(name string) string {
 	return fmt.Sprintf("avoid %s adapter inside Ginkgo specs; use Gomega expectations and Ginkgo helpers", name)
 }

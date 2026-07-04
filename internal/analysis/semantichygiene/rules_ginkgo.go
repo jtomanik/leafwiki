@@ -16,6 +16,7 @@ func checkGinkgoSpecQualityCall(ctx *analysisContext, call *ast.CallExpr) {
 	checkGinkgoTestName(ctx, call, name)
 	checkGinkgoCoverageName(ctx, call, name)
 	checkGinkgoVagueName(ctx, call, name)
+	checkGinkgoBooleanOutcomeName(ctx, call, name)
 	checkGinkgoTestingTInSpec(ctx, call, name)
 	checkGinkgoFailInSpec(ctx, call, name)
 	checkGinkgoTaxonomyLabels(ctx, call, name)
@@ -82,6 +83,18 @@ func checkGinkgoVagueName(ctx *analysisContext, call *ast.CallExpr, name string)
 	}
 }
 
+func checkGinkgoBooleanOutcomeName(ctx *analysisContext, call *ast.CallExpr, name string) {
+	if !isGinkgoNameCarrier(name) || !isGinkgoDSLCall(ctx, call) || len(call.Args) == 0 {
+		return
+	}
+	reportGinkgoBooleanOutcomeName(ctx, call.Args[0])
+	if isDescribeTableCall(name) {
+		for _, arg := range call.Args[1:] {
+			reportGinkgoTableEntryBooleanOutcomeName(ctx, arg)
+		}
+	}
+}
+
 func reportGinkgoTestName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoStaticDescription(expr)
 	if !ok || !ginkgoDescriptionLooksMigratedTestName(description) {
@@ -106,6 +119,14 @@ func reportGinkgoVagueName(ctx *analysisContext, expr ast.Expr) {
 	ctx.report(ruleGinkgoVagueName, expr, ginkgoVagueNameDiagnostic(description))
 }
 
+func reportGinkgoBooleanOutcomeName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoStaticDescription(expr)
+	if !ok || !ginkgoDescriptionUsesBooleanOutcome(description) {
+		return
+	}
+	ctx.report(ruleGinkgoBooleanOutcomeName, expr, ginkgoBooleanOutcomeNameDiagnostic(description))
+}
+
 func reportGinkgoTableEntryDescriptionName(ctx *analysisContext, expr ast.Expr) {
 	description, ok := ginkgoEntryDescriptionValue(expr)
 	if !ok || !ginkgoDescriptionLooksMigratedTestName(description) {
@@ -128,6 +149,14 @@ func reportGinkgoTableEntryVagueName(ctx *analysisContext, expr ast.Expr) {
 		return
 	}
 	ctx.report(ruleGinkgoVagueName, expr, ginkgoVagueNameDiagnostic(description))
+}
+
+func reportGinkgoTableEntryBooleanOutcomeName(ctx *analysisContext, expr ast.Expr) {
+	description, ok := ginkgoEntryDescriptionValue(expr)
+	if !ok || !ginkgoDescriptionUsesBooleanOutcome(description) {
+		return
+	}
+	ctx.report(ruleGinkgoBooleanOutcomeName, expr, ginkgoBooleanOutcomeNameDiagnostic(description))
 }
 
 func ginkgoDescriptionUsesCoverageBucket(description string) bool {
@@ -190,6 +219,19 @@ func ginkgoDescriptionIsVague(description string) bool {
 	default:
 		return false
 	}
+}
+
+func ginkgoDescriptionUsesBooleanOutcome(description string) bool {
+	fields := strings.FieldsFunc(strings.ToLower(description), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z')
+	})
+	if len(fields) < 2 {
+		return false
+	}
+	if fields[0] != "return" && fields[0] != "returns" {
+		return false
+	}
+	return fields[1] == "true" || fields[1] == "false"
 }
 
 func ginkgoDescriptionLooksMigratedTestName(description string) bool {
