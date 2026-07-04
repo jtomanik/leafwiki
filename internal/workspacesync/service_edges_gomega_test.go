@@ -145,14 +145,37 @@ var _ = Describe("workspace sync service edges", Label("unit"), func() {
 	It("recognizes README fallback sections when deriving revision paths", func() {
 		section := workspaceSyncEdgePage("section-1", "Docs", "docs", tree.NodeKindSection)
 
-		Expect(isRevisionReadmeFallbackSection("docs/README.md", section, "docs")).To(BeTrue())
-		Expect(isRevisionReadmeFallbackSection("docs/README.md", nil, "docs")).To(BeFalse())
-		Expect(isRevisionReadmeFallbackSection("docs/README.md", workspaceSyncEdgePage("page-1", "Docs", "docs", tree.NodeKindPage), "docs")).To(BeFalse())
-		Expect(isRevisionReadmeFallbackSection("docs/readme.md", section, "docs")).To(BeFalse())
+		Expect(revisionReadmeFallbackObservationFor("docs/README.md", section, "docs")).To(Equal(revisionReadmeFallbackObservation{
+			Outcome:       revisionReadmeFallbackAccepted,
+			RelPath:       tree.MarkdownPathFromString("docs/README.md"),
+			PageKind:      tree.NodeKindSection,
+			PageRoutePath: tree.RoutePathFromString("docs"),
+			Directory:     tree.RoutePathFromString("docs"),
+		}))
+		Expect(revisionReadmeFallbackObservationFor("docs/README.md", nil, "docs")).To(Equal(revisionReadmeFallbackObservation{
+			Outcome:   revisionReadmeFallbackRejected,
+			RelPath:   tree.MarkdownPathFromString("docs/README.md"),
+			Directory: tree.RoutePathFromString("docs"),
+		}))
+		Expect(revisionReadmeFallbackObservationFor("docs/README.md", workspaceSyncEdgePage("page-1", "Docs", "docs", tree.NodeKindPage), "docs")).To(Equal(revisionReadmeFallbackObservation{
+			Outcome:       revisionReadmeFallbackRejected,
+			RelPath:       tree.MarkdownPathFromString("docs/README.md"),
+			PageKind:      tree.NodeKindPage,
+			PageRoutePath: tree.RoutePathFromString("docs"),
+			Directory:     tree.RoutePathFromString("docs"),
+		}))
+		Expect(revisionReadmeFallbackObservationFor("docs/readme.md", section, "docs")).To(Equal(revisionReadmeFallbackObservation{
+			Outcome:       revisionReadmeFallbackRejected,
+			RelPath:       tree.MarkdownPathFromString("docs/readme.md"),
+			PageKind:      tree.NodeKindSection,
+			PageRoutePath: tree.RoutePathFromString("docs"),
+			Directory:     tree.RoutePathFromString("docs"),
+		}))
 
-		routePath, kind := revisionRoutePathAndKind("", "docs/README.md", section)
-		Expect(routePath.FilesystemPath()).To(Equal("docs"))
-		Expect(kind).To(Equal(tree.NodeKindSection))
+		Expect(revisionRouteObservationFor("", "docs/README.md", section)).To(Equal(revisionRouteObservation{
+			RoutePath: tree.RoutePathFromString("docs"),
+			Kind:      tree.NodeKindSection,
+		}))
 	})
 
 	It("extracts validation errors from generic sync errors", func() {
@@ -207,6 +230,55 @@ type historicalContentResult struct {
 	RelPath string
 }
 
+type revisionRouteObservation struct {
+	RoutePath tree.RoutePath
+	Kind      tree.NodeKind
+}
+
+type revisionReadmeFallbackOutcome uint8
+
+const (
+	revisionReadmeFallbackRejected revisionReadmeFallbackOutcome = iota
+	revisionReadmeFallbackAccepted
+)
+
+type revisionReadmeFallbackObservation struct {
+	Outcome       revisionReadmeFallbackOutcome
+	RelPath       tree.MarkdownPath
+	PageKind      tree.NodeKind
+	PageRoutePath tree.RoutePath
+	Directory     tree.RoutePath
+}
+
+func revisionReadmeFallbackObservationFor(relPath string, page *tree.Page, dir string) revisionReadmeFallbackObservation {
+	GinkgoHelper()
+
+	outcome := revisionReadmeFallbackRejected
+	if isRevisionReadmeFallbackSection(relPath, page, dir) {
+		outcome = revisionReadmeFallbackAccepted
+	}
+	observation := revisionReadmeFallbackObservation{
+		Outcome:   outcome,
+		RelPath:   tree.MarkdownPathFromString(relPath),
+		Directory: tree.RoutePathFromString(dir).Clean(),
+	}
+	if page != nil && page.PageNode != nil {
+		observation.PageKind = page.Kind
+		observation.PageRoutePath = tree.RoutePathFromString(strings.Trim(page.CalculatePath(), "/")).Clean()
+	}
+	return observation
+}
+
+func revisionRouteObservationFor(rootDir string, relPath string, page *tree.Page) revisionRouteObservation {
+	GinkgoHelper()
+
+	routePath, kind := revisionRoutePathAndKind(rootDir, relPath, page)
+	return revisionRouteObservation{
+		RoutePath: routePath,
+		Kind:      kind,
+	}
+}
+
 func contentForPageAtCommitResult(rootDir string, page *tree.Page, files map[string]string) (historicalContentResult, error) {
 	GinkgoHelper()
 
@@ -235,14 +307,4 @@ func workspaceSyncEdgeMarkdown(id tree.PageID, title string) string {
 	GinkgoHelper()
 
 	return "---\nleafwiki_id: " + id.MetadataValue() + "\nleafwiki_title: " + title + "\n---\n# " + title + "\n"
-}
-
-func validationErrorPaths(errors []ValidationError) []string {
-	GinkgoHelper()
-
-	paths := make([]string, 0, len(errors))
-	for _, validationError := range errors {
-		paths = append(paths, validationError.Path)
-	}
-	return paths
 }

@@ -1,7 +1,6 @@
 package workspacesync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -15,6 +14,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/markdownlinks"
@@ -1150,7 +1150,7 @@ page:
 
 var _ = Describe("workspace sync startup and snapshot listing", Label("integration"), func() {
 	It("logs each startup phase as it runs", func() {
-		var logs bytes.Buffer
+		logs := &workspaceSyncStartupLogRecords{}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
 			RootDir: workspaceSyncTempDir(),
@@ -1161,7 +1161,7 @@ var _ = Describe("workspace sync startup and snapshot listing", Label("integrati
 					ChangedMarkdownPaths: []string{"docs/a.md"},
 				},
 			},
-			Log: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			Log: slog.New(logs),
 		})
 		Expect(err).To(Succeed())
 
@@ -1172,15 +1172,12 @@ var _ = Describe("workspace sync startup and snapshot listing", Label("integrati
 		})
 		Expect(err).To(Succeed())
 
-		logText := logs.String()
-		Expect(logText).To(SatisfyAll(
-			ContainSubstring(`phase=capture_snapshot`),
-			ContainSubstring(`phase=reconstruct_tree`),
-			ContainSubstring(`phase=canonical_link_migration`),
-			ContainSubstring(`phase=capture_writebacks`),
-			ContainSubstring(`phase=validate_and_after_sync`),
-			ContainSubstring("workspace sync startup phase started"),
-			ContainSubstring("workspace sync startup phase completed"),
+		Expect(logs).To(reportStartupPhaseLifecycle(
+			"capture_snapshot",
+			"reconstruct_tree",
+			"canonical_link_migration",
+			"capture_writebacks",
+			"validate_and_after_sync",
 		))
 	})
 
@@ -3040,7 +3037,7 @@ func (f *fakeRevisionStore) Capture(_ context.Context, req gitrevisions.CommitRe
 		return nil, f.captureErr
 	}
 	if f.capture == nil {
-		return nil, nil
+		return &gitrevisions.Commit{}, nil
 	}
 	commit := *f.capture
 	if commit.Hash != "" {
@@ -3170,7 +3167,7 @@ func (f *fakeRevisionStore) RestoreDocumentContentToPath(_ context.Context, _ st
 func (f *fakeRevisionStore) FilesAt(_ context.Context, hash CommitHash) (map[string]string, error) {
 	f.filesAtCalls++
 	if f.filesAt == nil {
-		return nil, nil
+		return map[string]string{}, nil
 	}
 	return f.filesAt[hash], nil
 }
@@ -3220,4 +3217,93 @@ func closeOnce(ch chan struct{}) func() {
 			close(ch)
 		})
 	}
+}
+
+type workspaceSyncStartupLogRecords struct {
+	Records []workspaceSyncStartupLogRecord
+}
+
+type workspaceSyncStartupLogRecord struct {
+	Level slog.Level
+	Attrs []slog.Attr
+}
+
+func (r *workspaceSyncStartupLogRecords) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (r *workspaceSyncStartupLogRecords) Handle(_ context.Context, record slog.Record) error {
+	attrs := make([]slog.Attr, 0, record.NumAttrs())
+	record.Attrs(func(attr slog.Attr) bool {
+		attrs = append(attrs, attr)
+		return true
+	})
+	r.Records = append(r.Records, workspaceSyncStartupLogRecord{
+		Level: record.Level,
+		Attrs: attrs,
+	})
+	return nil
+}
+
+func (r *workspaceSyncStartupLogRecords) WithAttrs([]slog.Attr) slog.Handler {
+	return r
+}
+
+func (r *workspaceSyncStartupLogRecords) WithGroup(string) slog.Handler {
+	return r
+}
+
+type startupPhaseLifecycle uint8
+
+const (
+	startupPhaseStarted startupPhaseLifecycle = iota
+	startupPhaseCompleted
+)
+
+type startupPhaseLogObservation struct {
+	Phase     string
+	Lifecycle startupPhaseLifecycle
+}
+
+func reportStartupPhaseLifecycle(phases ...string) types.GomegaMatcher {
+	expected := make([]startupPhaseLogObservation, 0, len(phases)*2)
+	for _, phase := range phases {
+		expected = append(expected,
+			startupPhaseLogObservation{Phase: phase, Lifecycle: startupPhaseStarted},
+			startupPhaseLogObservation{Phase: phase, Lifecycle: startupPhaseCompleted},
+		)
+	}
+	return WithTransform(func(records *workspaceSyncStartupLogRecords) []startupPhaseLogObservation {
+		GinkgoHelper()
+		observed := make([]startupPhaseLogObservation, 0, len(records.Records))
+		for _, record := range records.Records {
+			phase, ok := record.startupPhase()
+			if !ok || record.Level != slog.LevelInfo {
+				continue
+			}
+			observed = append(observed, startupPhaseLogObservation{
+				Phase:     phase,
+				Lifecycle: record.startupPhaseLifecycle(),
+			})
+		}
+		return observed
+	}, ConsistOf(expected))
+}
+
+func (r workspaceSyncStartupLogRecord) startupPhase() (string, bool) {
+	for _, attr := range r.Attrs {
+		if attr.Key == "phase" {
+			return attr.Value.String(), true
+		}
+	}
+	return "", false
+}
+
+func (r workspaceSyncStartupLogRecord) startupPhaseLifecycle() startupPhaseLifecycle {
+	for _, attr := range r.Attrs {
+		if attr.Key == "duration" {
+			return startupPhaseCompleted
+		}
+	}
+	return startupPhaseStarted
 }

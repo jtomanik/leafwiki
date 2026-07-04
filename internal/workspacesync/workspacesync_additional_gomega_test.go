@@ -411,15 +411,6 @@ func (f *fakeFSWatcher) Paths() []string                               { return 
 func (f *fakeFSWatcher) Log(fswatcher.Severity, string, ...any)        {}
 func (f *fakeFSWatcher) Close()                                        { f.closeCount++ }
 
-func readWatcherEvents(ch <-chan watcherEvent) []watcherEvent {
-	GinkgoHelper()
-	var out []watcherEvent
-	for event := range ch {
-		out = append(out, event)
-	}
-	return out
-}
-
 func wikivalidationIssueForRoute(route string) wikivalidation.Issue {
 	GinkgoHelper()
 	return wikivalidation.Issue{
