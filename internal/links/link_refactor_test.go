@@ -12,8 +12,8 @@ import (
 // - Page and section with the same basename are not cross-rewritten
 // - Broken non-canonical links are not silently rewritten by refactor
 
-var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
-	ginkgo.It("rewrites absolute relative and subtree wiki targets without touching external or image links", func() {
+var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label("unit"), func() {
+	ginkgo.It("rewrites absolute relative and subtree wiki targets without touching external or image links", ginkgo.Label("unit"), func() {
 		content := `
 [Absolute](/docs/b)
 	[Relative](./b)
@@ -37,7 +37,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		))
 	})
 
-	ginkgo.It("keeps canonical page markdown extensions on absolute and relative rewritten links", func() {
+	ginkgo.It("keeps canonical page markdown extensions on absolute and relative rewritten links", ginkgo.Label("unit"), func() {
 		content := "[Absolute](/docs/b.md)\n[Relative](./b.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -52,7 +52,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		))
 	})
 
-	ginkgo.It("uses the configured markdown root prefix for absolute output", func() {
+	ginkgo.It("uses the configured markdown root prefix for absolute output", ginkgo.Label("unit"), func() {
 		content := "[Absolute](/sync/old.md)\n[Relative](./old.md)"
 
 		result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
@@ -70,7 +70,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		))
 	})
 
-	ginkgo.It("recognizes absolute input that already includes the markdown root prefix", func() {
+	ginkgo.It("recognizes absolute input that already includes the markdown root prefix", ginkgo.Label("unit"), func() {
 		content := "[Absolute](/docs/sync/old.md)"
 
 		result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
@@ -85,7 +85,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		Expect(result.Content).To(ContainSubstring("[Absolute](/docs/sync/new.md)"))
 	})
 
-	ginkgo.It("preserves explicit dot-slash style for same-directory page links", func() {
+	ginkgo.It("preserves explicit dot-slash style for same-directory page links", ginkgo.Label("unit"), func() {
 		content := "[Relative](./b.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -98,7 +98,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		Expect(result.Content).To(Equal("[Relative](./c.md)"))
 	})
 
-	ginkgo.It("rewrites canonical page links without healing legacy extensionless page links", func() {
+	ginkgo.It("rewrites canonical page links without healing legacy extensionless page links", ginkgo.Label("unit"), func() {
 		content := "[Target](/target)\n[Canonical](/target.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/source", []RewriteRule{{
@@ -114,7 +114,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		))
 	})
 
-	ginkgo.It("ignores link-like text separated from a destination by whitespace", func() {
+	ginkgo.It("ignores link-like text separated from a destination by whitespace", ginkgo.Label("unit"), func() {
 		content := "[Space] (/docs/b.md)\n[Newline]\n(/docs/b.md)\n[Canonical](/docs/b.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
@@ -131,7 +131,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		))
 	})
 
-	ginkgo.It("rewrites only the real destination when title text looks like a link", func() {
+	ginkgo.It("rewrites only the real destination when title text looks like a link", ginkgo.Label("unit"), func() {
 		content := `[Outer](/docs/a.md "[Inner](/docs/b.md)")`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{
@@ -151,7 +151,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		Expect(result.Content).To(Equal(`[Outer](/docs/renamed-a.md "[Inner](/docs/b.md)")`))
 	})
 
-	ginkgo.It("does not cross-rewrite a same-basename section link during a page refactor", func() {
+	ginkgo.It("does not cross-rewrite a same-basename section link during a page refactor", ginkgo.Label("unit"), func() {
 		content := "[Page](/docs/sync.md)\n[Section](/docs/sync)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
@@ -167,7 +167,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		))
 	})
 
-	ginkgo.It("rewrites only the exact healed target for legacy page override rules", func() {
+	ginkgo.It("rewrites only the exact healed target for legacy page override rules", ginkgo.Label("unit"), func() {
 		content := "[Sync page](/docs/sync)\n[Sync child](/docs/sync/child.md)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
@@ -180,7 +180,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		Expect(result.Content).To(Equal("[Sync page](/docs/sync-page.md)\n[Sync child](/docs/sync/child.md)"))
 	})
 
-	ginkgo.It("leaves asset links unchanged while rewriting wiki links", func() {
+	ginkgo.It("leaves asset links unchanged while rewriting wiki links", ginkgo.Label("unit"), func() {
 		content := `
 [AssetAbs](/assets/abc/manual.pdf)
 [AssetRel](assets/abc/manual.pdf)
@@ -201,8 +201,8 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 	})
 })
 
-var _ = ginkgo.Describe("markdown refactor relative path semantics", func() {
-	ginkgo.It("uses source-file directory semantics for moved section links", func() {
+var _ = ginkgo.Describe("markdown refactor relative path semantics", ginkgo.Label("unit"), func() {
+	ginkgo.It("uses source-file directory semantics for moved section links", ginkgo.Label("unit"), func() {
 		content := "[Section](../b)"
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/current", []RewriteRule{{
@@ -214,7 +214,7 @@ var _ = ginkgo.Describe("markdown refactor relative path semantics", func() {
 		Expect(result.Content).To(Equal("[Section](../../guides/b)"))
 	})
 
-	ginkgo.It("recalculates relative links against the moved source path", func() {
+	ginkgo.It("recalculates relative links against the moved source path", ginkgo.Label("unit"), func() {
 		content := `[Relative](../shared)`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/page", []RewriteRule{{

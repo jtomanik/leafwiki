@@ -50,7 +50,7 @@ func countMarkdownRootIndexBuilds(index *markdownlinks.Index) *int {
 	return &calls
 }
 
-var _ = ginkgo.Describe("markdown link extraction", func() {
+var _ = ginkgo.Describe("markdown link extraction", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns normalized wiki destinations while filtering external anchors and query details", func() {
 		md := `
 # Example
@@ -130,7 +130,7 @@ Internal: [Page](/docs/page1)
 	})
 })
 
-var _ = ginkgo.Describe("link service refactor matches", func() {
+var _ = ginkgo.Describe("link service refactor matches", ginkgo.Label("integration"), func() {
 	ginkgo.It("accepts route paths when matching descendants by prefix and kind", func() {
 		store, err := NewLinksStore(linksTempDir())
 		Expect(err).NotTo(HaveOccurred())
@@ -175,7 +175,7 @@ func setupTreeForLinksTest() (*tree.TreeService, tree.PageID, tree.PageID) {
 	return ts, *page1IDPtr, *page2IDPtr
 }
 
-var _ = ginkgo.Describe("target link resolution", func() {
+var _ = ginkgo.Describe("target link resolution", ginkgo.Label("integration"), func() {
 	ginkgo.It("resolves relative page links from the current page directory", func() {
 		ts, page1ID, page2ID := setupTreeForLinksTest()
 
@@ -442,7 +442,7 @@ func createSimpleLinkedPages(ts *tree.TreeService) (pageAID, pageBID tree.PageID
 	return pageAID, pageBID
 }
 
-var _ = ginkgo.Describe("link service indexing", func() {
+var _ = ginkgo.Describe("link service indexing", ginkgo.Label("integration"), func() {
 	ginkgo.It("records backlinks when pages link to existing targets", func() {
 		svc, ts, _ := setupLinkService()
 		pageAID, pageBID := createSimpleLinkedPages(ts)
@@ -459,7 +459,7 @@ var _ = ginkgo.Describe("link service indexing", func() {
 })
 
 // - Duplicate syntaxes do not create duplicate target identities after migration
-var _ = ginkgo.Describe("same-path page and section targets", func() {
+var _ = ginkgo.Describe("same-path page and section targets", ginkgo.Label("integration"), func() {
 	ginkgo.It("keeps page and section target identities distinct", func() {
 		dataDir := linksTempDir()
 		rootDir := filepath.Join(linksTempDir(), "workspace")
@@ -525,7 +525,7 @@ leafwiki_title: Sync Section
 	})
 })
 
-var _ = ginkgo.Describe("markdown root prefix indexing", func() {
+var _ = ginkgo.Describe("markdown root prefix indexing", ginkgo.Label("integration"), func() {
 	ginkgo.It("resolves prefixed absolute markdown links during full indexing", func() {
 		dataDir := linksTempDir()
 		repoRoot := linksTempDir()
@@ -568,7 +568,7 @@ leafwiki_title: Glossary
 	})
 })
 
-var _ = ginkgo.Describe("markdown root prefix page updates", func() {
+var _ = ginkgo.Describe("markdown root prefix page updates", ginkgo.Label("integration"), func() {
 	ginkgo.It("resolves prefixed absolute markdown links during single-page updates", func() {
 		dataDir := linksTempDir()
 		repoRoot := linksTempDir()
@@ -611,7 +611,7 @@ leafwiki_title: Glossary
 	})
 })
 
-var _ = ginkgo.Describe("root-backed markdown indexing", func() {
+var _ = ginkgo.Describe("root-backed markdown indexing", ginkgo.Label("integration"), func() {
 	ginkgo.It("builds the markdown index once for a full batch", func() {
 		dataDir := linksTempDir()
 		rootDir := filepath.Join(linksTempDir(), "workspace")
@@ -652,7 +652,7 @@ leafwiki_title: Target
 	})
 })
 
-var _ = ginkgo.Describe("link service reindexing", func() {
+var _ = ginkgo.Describe("link service reindexing", ginkgo.Label("integration"), func() {
 	ginkgo.It("replaces old links when source content changes", func() {
 		svc, ts, _ := setupLinkService()
 		pageAID, pageBID := createSimpleLinkedPages(ts)
@@ -673,7 +673,7 @@ var _ = ginkgo.Describe("link service reindexing", func() {
 
 	})
 })
-var _ = ginkgo.Describe("single-page link updates", func() {
+var _ = ginkgo.Describe("single-page link updates", ginkgo.Label("integration"), func() {
 	ginkgo.It("updates only the selected page outgoing links", func() {
 		svc, ts, _ := setupLinkService()
 		pageAID, pageBID := createSimpleLinkedPages(ts)
@@ -693,7 +693,7 @@ var _ = ginkgo.Describe("single-page link updates", func() {
 	})
 })
 
-var _ = ginkgo.Describe("link clearing", func() {
+var _ = ginkgo.Describe("link clearing", ginkgo.Label("integration"), func() {
 	ginkgo.It("removes every indexed link", func() {
 		svc, ts, _ := setupLinkService()
 		_, pageBID := createSimpleLinkedPages(ts)
@@ -709,7 +709,7 @@ var _ = ginkgo.Describe("link clearing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("outgoing link queries", func() {
+var _ = ginkgo.Describe("outgoing link queries", ginkgo.Label("integration"), func() {
 	ginkgo.It("returns resolved outgoing links with target page details", func() {
 		svc, ts, _ := setupLinkService()
 		pageAID, pageBID := createSimpleLinkedPages(ts)
@@ -731,7 +731,7 @@ var _ = ginkgo.Describe("outgoing link queries", func() {
 	})
 })
 
-var _ = ginkgo.Describe("outgoing link queries for pages without links", func() {
+var _ = ginkgo.Describe("outgoing link queries for pages without links", ginkgo.Label("integration"), func() {
 	ginkgo.It("returns an empty outgoing result", func() {
 		svc, ts, _ := setupLinkService()
 
@@ -755,7 +755,7 @@ var _ = ginkgo.Describe("outgoing link queries for pages without links", func() 
 	})
 })
 
-var _ = ginkgo.Describe("asset link filtering during indexing", func() {
+var _ = ginkgo.Describe("asset link filtering during indexing", ginkgo.Label("integration"), func() {
 	ginkgo.It("excludes asset links from outgoing and broken-link sets", func() {
 		svc, ts, _ := setupLinkService()
 
@@ -791,7 +791,7 @@ var _ = ginkgo.Describe("asset link filtering during indexing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("outgoing result mapping", func() {
+var _ = ginkgo.Describe("outgoing result mapping", ginkgo.Label("integration"), func() {
 	ginkgo.It("adds resolved target metadata to outgoing result items", func() {
 		ts, page1ID, page2ID := setupTreeForLinksTest()
 
@@ -813,7 +813,7 @@ var _ = ginkgo.Describe("outgoing result mapping", func() {
 	})
 })
 
-var _ = ginkgo.Describe("late-created target indexing", func() {
+var _ = ginkgo.Describe("late-created target indexing", ginkgo.Label("integration"), func() {
 	ginkgo.It("resolves formerly broken links after reindexing", func() {
 		svc, ts, _ := setupLinkService()
 
@@ -860,7 +860,7 @@ var _ = ginkgo.Describe("late-created target indexing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("exact-path link healing", func() {
+var _ = ginkgo.Describe("exact-path link healing", ginkgo.Label("integration"), func() {
 	ginkgo.It("resolves existing broken links without a full reindex", func() {
 		svc, ts, _ := setupLinkService()
 
@@ -905,7 +905,7 @@ var _ = ginkgo.Describe("exact-path link healing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("broken incoming link queries", func() {
+var _ = ginkgo.Describe("broken incoming link queries", ginkgo.Label("integration"), func() {
 	ginkgo.It("returns broken links that target the requested path", func() {
 		svc, ts, store := setupLinkService()
 
@@ -953,7 +953,7 @@ var _ = ginkgo.Describe("broken incoming link queries", func() {
 	})
 })
 
-var _ = ginkgo.Describe("broken incoming link filtering", func() {
+var _ = ginkgo.Describe("broken incoming link filtering", ginkgo.Label("integration"), func() {
 	ginkgo.It("returns only broken links for the requested path", func() {
 		svc, ts, store := setupLinkService()
 
@@ -994,7 +994,7 @@ var _ = ginkgo.Describe("broken incoming link filtering", func() {
 	})
 })
 
-var _ = ginkgo.Describe("broken incoming link queries without matching links", func() {
+var _ = ginkgo.Describe("broken incoming link queries without matching links", ginkgo.Label("integration"), func() {
 	ginkgo.It("returns empty results for healthy and unused paths", func() {
 		svc, ts, store := setupLinkService()
 
@@ -1028,7 +1028,7 @@ var _ = ginkgo.Describe("broken incoming link queries without matching links", f
 	})
 })
 
-var _ = ginkgo.Describe("broken incoming link ordering", func() {
+var _ = ginkgo.Describe("broken incoming link ordering", ginkgo.Label("integration"), func() {
 	ginkgo.It("orders broken incoming links by source title", func() {
 		svc, ts, store := setupLinkService()
 
@@ -1066,7 +1066,7 @@ var _ = ginkgo.Describe("broken incoming link ordering", func() {
 	})
 })
 
-var _ = ginkgo.Describe("broken incoming link healing", func() {
+var _ = ginkgo.Describe("broken incoming link healing", ginkgo.Label("integration"), func() {
 	ginkgo.It("removes healed links from broken incoming queries", func() {
 		svc, ts, store := setupLinkService()
 
@@ -1114,7 +1114,7 @@ var _ = ginkgo.Describe("broken incoming link healing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("extensionless link healing", func() {
+var _ = ginkgo.Describe("extensionless link healing", ginkgo.Label("integration"), func() {
 	ginkgo.It("homes extensionless links to matching sections instead of page twins", func() {
 		svc, ts, _ := setupLinkService()
 
@@ -1163,7 +1163,7 @@ var _ = ginkgo.Describe("extensionless link healing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("batch link updates and healing", func() {
+var _ = ginkgo.Describe("batch link updates and healing", ginkgo.Label("integration"), func() {
 	ginkgo.It("updates and heals multiple source pages in one pass", func() {
 		svc, ts, _ := setupLinkService()
 
@@ -1214,7 +1214,7 @@ var _ = ginkgo.Describe("batch link updates and healing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("batch healing for extensionless links", func() {
+var _ = ginkgo.Describe("batch healing for extensionless links", ginkgo.Label("integration"), func() {
 	ginkgo.It("leaves extensionless links broken until a matching section exists", func() {
 		svc, ts, _ := setupLinkService()
 
@@ -1257,7 +1257,7 @@ var _ = ginkgo.Describe("batch healing for extensionless links", func() {
 	})
 })
 
-var _ = ginkgo.Describe("root-backed batch link updates", func() {
+var _ = ginkgo.Describe("root-backed batch link updates", ginkgo.Label("integration"), func() {
 	ginkgo.It("builds the markdown index once while updating multiple pages", func() {
 		dataDir := linksTempDir()
 		rootDir := filepath.Join(linksTempDir(), "workspace")
@@ -1302,7 +1302,7 @@ leafwiki_title: Target
 	})
 })
 
-var _ = ginkgo.Describe("empty batch link updates", func() {
+var _ = ginkgo.Describe("empty batch link updates", ginkgo.Label("integration"), func() {
 	ginkgo.It("skips markdown index construction for nil-only batches", func() {
 		dataDir := linksTempDir()
 		rootDir := filepath.Join(linksTempDir(), "workspace")
@@ -1322,7 +1322,7 @@ var _ = ginkgo.Describe("empty batch link updates", func() {
 	})
 })
 
-var _ = ginkgo.Describe("root-backed rewritten link updates", func() {
+var _ = ginkgo.Describe("root-backed rewritten link updates", ginkgo.Label("integration"), func() {
 	ginkgo.It("builds the markdown index once while rewriting multiple pages", func() {
 		dataDir := linksTempDir()
 		rootDir := filepath.Join(linksTempDir(), "workspace")
@@ -1379,7 +1379,7 @@ leafwiki_title: New Target
 	})
 })
 
-var _ = ginkgo.Describe("empty rewritten link updates", func() {
+var _ = ginkgo.Describe("empty rewritten link updates", ginkgo.Label("integration"), func() {
 	ginkgo.It("skips markdown index construction for nil-only rewrite batches", func() {
 		dataDir := linksTempDir()
 		rootDir := filepath.Join(linksTempDir(), "workspace")
@@ -1399,7 +1399,7 @@ var _ = ginkgo.Describe("empty rewritten link updates", func() {
 	})
 })
 
-var _ = ginkgo.Describe("source page reindexing during batch healing", func() {
+var _ = ginkgo.Describe("source page reindexing during batch healing", ginkgo.Label("integration"), func() {
 	ginkgo.It("moves backlinks from old targets to new targets after source content changes", func() {
 		svc, ts, _ := setupLinkService()
 

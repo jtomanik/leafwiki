@@ -12,7 +12,7 @@ import (
 )
 
 var _ = ginkgo.Describe("links store persistence", func() {
-	ginkgo.It("creates its SQLite database inside the configured storage directory", func() {
+	ginkgo.It("creates its SQLite database inside the configured storage directory", ginkgo.Label("integration"), func() {
 		tmp := linksTempDir()
 		store, err := NewLinksStore(tmp)
 		Expect(err).NotTo(HaveOccurred())
@@ -21,13 +21,13 @@ var _ = ginkgo.Describe("links store persistence", func() {
 		Expect(filepath.Join(tmp, "links.db")).To(BeAnExistingFile())
 	})
 
-	ginkgo.It("keeps Windows-style storage paths under the links database file", func() {
+	ginkgo.It("keeps Windows-style storage paths under the links database file", ginkgo.Label("unit"), func() {
 		got := strings.ReplaceAll(linksDatabasePath(`C:\wiki\data`, "links.db"), `\`, `/`)
 
 		Expect(got).To(Equal(`C:/wiki/data/links.db`))
 	})
 
-	ginkgo.It("returns outgoing links for large page batches without dropping entries", func() {
+	ginkgo.It("returns outgoing links for large page batches without dropping entries", ginkgo.Label("integration"), func() {
 		store, err := NewLinksStore(linksTempDir())
 		Expect(err).NotTo(HaveOccurred())
 		closeLinksStoreForTest(store)

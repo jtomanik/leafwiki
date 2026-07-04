@@ -8,8 +8,8 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("RewriteMarkdownLinks", func() {
-	ginkgo.It("rewrites markdown through the wrapper and returns the replacement count", func() {
+var _ = ginkgo.Describe("RewriteMarkdownLinks", ginkgo.Label("unit"), func() {
+	ginkgo.It("rewrites markdown through the wrapper and returns the replacement count", ginkgo.Label("unit"), func() {
 		content := "[Absolute](/docs/old)\n[Relative](./old)\n[External](https://example.com/docs/old)"
 
 		rewritten, count := RewriteMarkdownLinks(content, "/docs/source", []RewriteRule{{
@@ -24,8 +24,8 @@ var _ = ginkgo.Describe("RewriteMarkdownLinks", func() {
 	})
 })
 
-var _ = ginkgo.Describe("LinkService store mutations", func() {
-	ginkgo.It("deletes outgoing links for a source page", func() {
+var _ = ginkgo.Describe("LinkService store mutations", ginkgo.Label("integration"), func() {
+	ginkgo.It("deletes outgoing links for a source page", ginkgo.Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
 		Expect(seedAdditionalLinks(store)).To(Succeed())
@@ -40,7 +40,7 @@ var _ = ginkgo.Describe("LinkService store mutations", func() {
 		))
 	})
 
-	ginkgo.It("marks exact page-kind links broken without marking same-path section links", func() {
+	ginkgo.It("marks exact page-kind links broken without marking same-path section links", ginkgo.Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
 		Expect(seedAdditionalLinks(store)).To(Succeed())
@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("LinkService store mutations", func() {
 		Expect(brokenSection).To(BeEmpty())
 	})
 
-	ginkgo.It("marks section prefixes broken while preserving same-path page twins", func() {
+	ginkgo.It("marks section prefixes broken while preserving same-path page twins", ginkgo.Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
 		Expect(seedAdditionalLinks(store)).To(Succeed())
@@ -83,8 +83,8 @@ var _ = ginkgo.Describe("LinkService store mutations", func() {
 	})
 })
 
-var _ = ginkgo.Describe("refactor prefix queries", func() {
-	ginkgo.It("returns prefix matches and source page IDs filtered by route kind", func() {
+var _ = ginkgo.Describe("refactor prefix queries", ginkgo.Label("integration"), func() {
+	ginkgo.It("returns prefix matches and source page IDs filtered by route kind", ginkgo.Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
 		Expect(seedAdditionalLinks(store)).To(Succeed())

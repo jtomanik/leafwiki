@@ -209,7 +209,7 @@ func (r *linksScriptedRows) Next(dest []driver.Value) error {
 }
 
 var _ = Describe("links SQL store persistence edge behavior", func() {
-	It("propagates construction, recovery, schema, migration, and close failures", func() {
+	It("propagates construction, recovery, schema, migration, and close failures", Label("integration"), func() {
 		openErr := errors.New("links open failed")
 		restoreOpen := setLinksSeam(&linksSQLOpen, func(string, string) (*sql.DB, error) {
 			return nil, openErr
@@ -355,7 +355,7 @@ var _ = Describe("links SQL store persistence edge behavior", func() {
 		Expect(store.Close()).To(MatchError(closeErr))
 	})
 
-	It("propagates add and replace transaction failures", func() {
+	It("propagates add and replace transaction failures", Label("integration"), func() {
 		fromPageID := newFixturePageID("source-page")
 		targetLink := TargetLink{
 			TargetPageID:   newFixturePageID("target-page"),
@@ -471,7 +471,7 @@ var _ = Describe("links SQL store persistence edge behavior", func() {
 		Expect(service.IndexAllPages()).To(MatchError(beginErr))
 	})
 
-	It("returns stable read results and propagates query row failures", func() {
+	It("returns stable read results and propagates query row failures", Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		restoreCloseRows := setLinksSeam(&linksCloseRows, func(interface{ Close() error }) error {
 			return errors.New("links query close failed")

@@ -66,6 +66,18 @@ type appliedRewriteRuleResult struct {
 	Applied bool
 }
 
+type rewriteRuleApplicationState uint8
+
+const (
+	rewriteRuleApplicationUnapplied rewriteRuleApplicationState = iota
+	rewriteRuleApplicationApplied
+)
+
+type rewriteRuleApplication struct {
+	State rewriteRuleApplicationState
+	Path  tree.RoutePath
+}
+
 type rewrittenLinkDestinationResult struct {
 	Destination string
 	Changed     bool
@@ -92,16 +104,27 @@ func rewriteRelativeLinkForPathChangeResult(sourcePath tree.RoutePath, newSource
 	return rewrittenLinkDestinationResult{Destination: rewritten, Changed: changed, Warning: warning}
 }
 
+func rewriteRuleApplicationFor(result appliedRewriteRuleResult) rewriteRuleApplication {
+	if result.Applied {
+		return rewriteRuleApplication{
+			State: rewriteRuleApplicationApplied,
+			Path:  result.Path,
+		}
+	}
+	return rewriteRuleApplication{State: rewriteRuleApplicationUnapplied}
+}
+
 func matchAppliedRewriteRule(path tree.RoutePath) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result appliedRewriteRuleResult) (bool, error) {
-		return result.Path == path && result.Applied, nil
-	}).WithMessage("apply a rewrite rule")
+	return WithTransform(rewriteRuleApplicationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State": Equal(rewriteRuleApplicationApplied),
+		"Path":  Equal(path),
+	}))
 }
 
 func matchUnappliedRewriteRule() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result appliedRewriteRuleResult) (bool, error) {
-		return !result.Applied, nil
-	}).WithMessage("leave a rewrite rule unapplied")
+	return WithTransform(rewriteRuleApplicationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State": Equal(rewriteRuleApplicationUnapplied),
+	}))
 }
 
 func matchUnchangedLinkDestination(destination string, messageID sharederrors.MessageID) types.GomegaMatcher {
@@ -175,7 +198,7 @@ func linksStoreWithQueryError(err error) *LinksStore {
 }
 
 var _ = Describe("links persistence and rewrite edge behavior", func() {
-	It("migrates a legacy links table without target kinds", func() {
+	It("migrates a legacy links table without target kinds", Label("integration"), func() {
 		store := newManualLinksStore(linksTempDir())
 		_, err := store.db.Exec(`
 			CREATE TABLE links (
@@ -200,7 +223,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(store).To(HaveOutgoingKindsForPage(newFixturePageID("legacy-source"), defaultStoredTargetKind))
 	})
 
-	It("migrates a legacy links table with non-key target kind values", func() {
+	It("migrates a legacy links table with non-key target kind values", Label("integration"), func() {
 		store := newManualLinksStore(linksTempDir())
 		_, err := store.db.Exec(`
 			CREATE TABLE links (
@@ -225,7 +248,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(store).To(HaveOutgoingKindsForPage(newFixturePageID("section-kind-source"), sectionStoredTargetKind))
 	})
 
-	It("returns unfiltered prefix matches and marks broken links through service wrappers", func() {
+	It("returns unfiltered prefix matches and marks broken links through service wrappers", Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
 		Expect(seedAdditionalLinks(store)).To(Succeed())
@@ -267,7 +290,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(descendant).To(HaveLen(1))
 	})
 
-	It("closes stores and exposes the underlying database handle defensively", func() {
+	It("closes stores and exposes the underlying database handle defensively", Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
 
@@ -278,7 +301,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(NewLinkService("", nil, nil).Close()).To(Succeed())
 	})
 
-	It("normalizes wiki paths, suffixes, target kinds, and relative destinations", func() {
+	It("normalizes wiki paths, suffixes, target kinds, and relative destinations", Label("unit"), func() {
 		Expect(normalizeWikiPath("docs//topic/?x=1#frag")).To(Equal("/docs/topic"))
 		Expect(normalizeWikiPath("")).To(BeEmpty())
 		Expect(normalizeWikiPath("/")).To(Equal("/"))
@@ -317,7 +340,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(sourceMarkdownFileForKind("/docs/source", MarkdownSourceKindSection).FilesystemPath()).To(Equal(filepath.ToSlash("docs/source/index.md")))
 	})
 
-	It("deduplicates rewrite warnings and reports rewrite-rule application results", func() {
+	It("deduplicates rewrite warnings and reports rewrite-rule application results", Label("unit"), func() {
 		warnings := dedupeWarnings([]RewriteWarning{
 			{Message: "same"},
 			{Message: "same"},
@@ -348,7 +371,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(rewriteRuleMatchesExactKind(RewriteRule{Kind: TargetKindPage}, "")).To(BeFalse())
 	})
 
-	It("uses the in-memory markdown index fallback for loaded trees", func() {
+	It("uses the in-memory markdown index fallback for loaded trees", Label("integration"), func() {
 		root := &tree.PageNode{
 			Kind: tree.NodeKindSection,
 			Children: []*tree.PageNode{
@@ -378,7 +401,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(resolved.RoutePath).To(Equal(tree.RoutePathFromString("/docs/topic").Clean()))
 	})
 
-	It("returns empty fallbacks for unloaded tree resolution and missing result targets", func() {
+	It("returns empty fallbacks for unloaded tree resolution and missing result targets", Label("integration"), func() {
 		unloadedTree := tree.NewTreeService(linksTempDir())
 
 		Expect(resolveTargetLinksForSourceKind(unloadedTree, "/docs/source", tree.NodeKindPage, []string{"/docs/target.md"})).To(BeNil())
@@ -415,7 +438,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		}))
 	})
 
-	It("propagates store failures through service operations without nil-store panics", func() {
+	It("propagates store failures through service operations without nil-store panics", Label("integration"), func() {
 		loadedTree := newLoadedLinksTreeService()
 		page := createLoadedLinksPage(loadedTree, "Source", "source", "[Target](target.md)")
 
@@ -435,7 +458,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(NewLinkService("", loadedTree, linksStoreWithQueryError(rewriteErr)).UpdateRewrittenLinksAndHealForPages([]*tree.Page{page}, nil)).To(matchLinksError(rewriteErr))
 	})
 
-	It("propagates store operation failures from the database layer", func() {
+	It("propagates store operation failures from the database layer", Label("integration"), func() {
 		pageID := newFixturePageID("source-page")
 		target := tree.RoutePathFromString("/docs/target")
 
@@ -498,7 +521,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(err).To(matchLinksError(queryErr))
 	})
 
-	It("keeps no-op markdown rewrites stable and normalizes upward path changes", func() {
+	It("keeps no-op markdown rewrites stable and normalizes upward path changes", Label("unit"), func() {
 		engine := NewMarkdownRefactorEngine()
 		rules := []RewriteRule{{
 			OldPath: "/docs/old",
@@ -520,7 +543,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		))
 	})
 
-	It("returns broken targets and loaded-tree fallbacks for defensive markdown resolution", func() {
+	It("returns broken targets and loaded-tree fallbacks for defensive markdown resolution", Label("integration"), func() {
 		loadedTree := newLoadedLinksTreeService()
 		index := markdownlinks.NewIndex([]markdownlinks.Entry{{
 			Kind:      markdownlinks.EntryKindPage,
@@ -550,7 +573,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(markdownLinkIndexFromLoadedTreeWithOptions(nil, markdownlinks.Options{})).NotTo(BeNil())
 	})
 
-	It("reports rewrite warnings when destinations cannot be resolved or emitted", func() {
+	It("reports rewrite warnings when destinations cannot be resolved or emitted", Label("unit"), func() {
 		rules := []RewriteRule{{
 			OldPath: "/docs/old",
 			NewPath: "/docs/new",
@@ -615,7 +638,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(relativeWikiLinkPath("/docs/source", "")).To(BeEmpty())
 	})
 
-	It("rewrites relative path-change destinations and reports unresolved moves", func() {
+	It("rewrites relative path-change destinations and reports unresolved moves", Label("unit"), func() {
 		restoreResolve := setLinksSeam(&linksResolveMarkdownRoutePath, func(tree.MarkdownPath, string) (tree.RoutePath, error) {
 			return "", errors.New("resolve failed")
 		})
@@ -660,7 +683,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		)).To(matchUnchangedLinkDestination("old", rewriteWarningEmptyDestination))
 	})
 
-	It("treats unloaded trees as no-ops and propagates service store failures", func() {
+	It("treats unloaded trees as no-ops and propagates service store failures", Label("integration"), func() {
 		unloadedTree := tree.NewTreeService(linksTempDir())
 		unloadedStoreErr := errors.New("links unloaded store should not be used")
 		Expect(NewLinkService("", unloadedTree, linksStoreWithExecError(unloadedStoreErr)).IndexAllPages()).To(Succeed())

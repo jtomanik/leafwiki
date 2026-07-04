@@ -9,8 +9,8 @@ import (
 // - Parentheses in destinations do not corrupt the rewrite
 // - Source page move recalculates relative links without changing absolute links
 
-var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
-	ginkgo.It("keeps query strings and fragments attached to rewritten destinations", func() {
+var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label("unit"), func() {
+	ginkgo.It("keeps query strings and fragments attached to rewritten destinations", ginkgo.Label("unit"), func() {
 		content := `[Link](/docs/b?mode=1#intro)`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -22,7 +22,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		Expect(result.Content).To(Equal(`[Link](/guides/b?mode=1#intro)`))
 	})
 
-	ginkgo.It("rewrites destinations containing parentheses without corrupting them", func() {
+	ginkgo.It("rewrites destinations containing parentheses without corrupting them", ginkgo.Label("unit"), func() {
 		content := `[Draft](./page_(draft))`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -34,7 +34,7 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 		Expect(result.Content).To(Equal(`[Draft](../guides/page_(draft))`))
 	})
 
-	ginkgo.It("changes only the link destination segment when labels and titles contain punctuation", func() {
+	ginkgo.It("changes only the link destination segment when labels and titles contain punctuation", ginkgo.Label("unit"), func() {
 		content := `[Label with (parens)](/docs/b "Title")`
 
 		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
@@ -47,8 +47,8 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", func() {
 	})
 })
 
-var _ = ginkgo.Describe("markdown refactor path-change rewriting", func() {
-	ginkgo.It("uses file-relative semantics when a page moves across trees", func() {
+var _ = ginkgo.Describe("markdown refactor path-change rewriting", ginkgo.Label("unit"), func() {
+	ginkgo.It("uses file-relative semantics when a page moves across trees", ginkgo.Label("unit"), func() {
 		content := `[Target](./seite-a)`
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
@@ -67,7 +67,7 @@ var _ = ginkgo.Describe("markdown refactor path-change rewriting", func() {
 		Expect(result.Content).To(Equal(`[Target](../../test-link-refactoring/seite-a)`))
 	})
 
-	ginkgo.It("preserves canonical page markdown extensions after the source page moves", func() {
+	ginkgo.It("preserves canonical page markdown extensions after the source page moves", ginkgo.Label("unit"), func() {
 		content := `[Target](../b/target.md)`
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
@@ -81,7 +81,7 @@ var _ = ginkgo.Describe("markdown refactor path-change rewriting", func() {
 		Expect(result.Content).To(Equal(`[Target](../../docs/b/target.md)`))
 	})
 
-	ginkgo.It("leaves relative asset links unchanged when a source page moves", func() {
+	ginkgo.It("leaves relative asset links unchanged when a source page moves", ginkgo.Label("unit"), func() {
 		content := `[Asset](assets/abc/manual.pdf)`
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
@@ -100,7 +100,7 @@ var _ = ginkgo.Describe("markdown refactor path-change rewriting", func() {
 		Expect(result.Content).To(Equal(content))
 	})
 
-	ginkgo.It("leaves escaped pseudo-links unchanged while recalculating real relative links", func() {
+	ginkgo.It("leaves escaped pseudo-links unchanged while recalculating real relative links", ginkgo.Label("unit"), func() {
 		content := `\[Literal](./target.md)
 [Other](../shared/other.md)`
 
