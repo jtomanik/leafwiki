@@ -57,7 +57,7 @@ func createPageWithContent(treeService *tree.TreeService, title, slug, content s
 	return *id
 }
 
-var _ = ginkgo.Describe("property extraction from page metadata", func() {
+var _ = ginkgo.Describe("property extraction from page metadata", ginkgo.Label("unit"), func() {
 	ginkgo.DescribeTable("indexes text metadata fields",
 		func(row propertyExtractionCase) {
 			Expect(ExtractPropertiesFromContent(row.content)).To(row.matcher)
@@ -161,7 +161,7 @@ var _ = ginkgo.Describe("property extraction from page metadata", func() {
 	)
 })
 
-var _ = ginkgo.Describe("properties service page indexing", func() {
+var _ = ginkgo.Describe("properties service page indexing", ginkgo.Label("integration"), func() {
 	ginkgo.When("all tree pages are indexed", func() {
 		ginkgo.It("builds a queryable property index from page frontmatter", func() {
 			svc, treeService := setupPropertiesService()

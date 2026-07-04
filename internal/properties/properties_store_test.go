@@ -66,7 +66,7 @@ func havePropertyKeys(keys ...PropertyKeyCount) types.GomegaMatcher {
 	return Equal(keys)
 }
 
-var _ = ginkgo.Describe("properties store", func() {
+var _ = ginkgo.Describe("properties store", ginkgo.Label("integration"), func() {
 	ginkgo.When("the store is initialized", func() {
 		ginkgo.It("creates the SQLite database in the storage directory", func() {
 			storageDir := propertiesTempDir()
