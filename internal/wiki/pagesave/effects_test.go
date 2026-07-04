@@ -8,6 +8,7 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
@@ -68,16 +69,9 @@ var _ = ginkgo.Describe("page save side effects", func() {
 				After:     source,
 			})
 
-			outgoing, err := linkService.GetOutgoingLinksForPage(source.ID)
+			status, err := linkService.GetLinkStatusForPage(source.ID, source.CalculateRoutePath())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(outgoing).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Count": Equal(1),
-				"Outgoings": ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-					"FromPageID": Equal(source.ID),
-					"ToPath":     Equal(tree.RoutePathFromString("/target-page")),
-					"Broken":     BeTrue(),
-				})),
-			})))
+			Expect(status).To(haveSingleBrokenOutgoingLink(source.ID, tree.RoutePathFromString("/target-page")))
 		})
 	})
 
@@ -202,4 +196,25 @@ func (s *retryWorkspaceSyncer) SyncNow(context.Context, workspacesync.SyncReques
 		return workspacesync.SyncStatus{}, s.err
 	}
 	return workspacesync.SyncStatus{}, nil
+}
+
+func haveSingleBrokenOutgoingLink(fromPageID tree.PageID, targetPath tree.RoutePath) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Outgoings":       BeEmpty(),
+		"BrokenOutgoings": ConsistOf(matchUnresolvedOutgoingLink(fromPageID, targetPath)),
+		"Counts": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Outgoings":       BeZero(),
+			"BrokenOutgoings": Equal(1),
+		}),
+	}))
+}
+
+func matchUnresolvedOutgoingLink(fromPageID tree.PageID, targetPath tree.RoutePath) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"FromPageID": Equal(fromPageID),
+		"ToPath":     Equal(targetPath),
+		"ToPageID":   BeEmpty(),
+	})
 }
