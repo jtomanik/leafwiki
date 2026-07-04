@@ -362,6 +362,10 @@ func ginkgoFailureHelperInSpecDiagnostic(name string) string {
 	return fmt.Sprintf("avoid failure helper %s inside specs; use Gomega expectations so assertions read semantically", name)
 }
 
+func ginkgoHiddenFailHelperInSpecDiagnostic(name string) string {
+	return fmt.Sprintf("avoid helper %s that calls ginkgo.Fail inside specs; use Gomega expectations so assertions read semantically", name)
+}
+
 func ginkgoLinterRawIgnoreDiagnostic() string {
 	return "raw ginkgolinter ignore comments are not allowed; fix the generic lint or use semh waivers only for waivable semantic-hygiene rules"
 }

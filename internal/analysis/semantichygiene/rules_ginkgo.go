@@ -400,6 +400,10 @@ func checkGinkgoFailInSpec(ctx *analysisContext, call *ast.CallExpr, name string
 			ctx.report(ruleGinkgoFailInSpec, candidate, ginkgoFailureHelperInSpecDiagnostic(name))
 			return true
 		}
+		if name, ok := ginkgoHiddenFailHelperCall(ctx, candidate); ok {
+			ctx.report(ruleGinkgoFailInSpec, candidate, ginkgoHiddenFailHelperInSpecDiagnostic(name))
+			return true
+		}
 		return true
 	})
 }
@@ -422,6 +426,68 @@ func ginkgoFailureHelperCall(ctx *analysisContext, call *ast.CallExpr) (string, 
 
 func isFailureHelperName(name string) bool {
 	return hasFailureHelperPrefix(name, "fail") || hasFailureHelperPrefix(name, "fatal")
+}
+
+func ginkgoHiddenFailHelperCall(ctx *analysisContext, call *ast.CallExpr) (string, bool) {
+	if _, ok := unparenExpr(call.Fun).(*ast.Ident); !ok {
+		return "", false
+	}
+	fn := localFuncDeclForCall(ctx, call)
+	if fn == nil ||
+		fn.Body == nil ||
+		fn.Name == nil ||
+		!funcHasGinkgoHelperCall(fn.Body) ||
+		!funcBodyContainsGinkgoFail(ctx, fn.Body) {
+		return "", false
+	}
+	return fn.Name.Name, true
+}
+
+func localFuncDeclForCall(ctx *analysisContext, call *ast.CallExpr) *ast.FuncDecl {
+	target := calledFunctionObject(ctx, call)
+	if target == nil || target.Pkg() == nil || target.Pkg().Path() != ctx.pass.Pkg.Path() {
+		return nil
+	}
+	for _, file := range ctx.pass.Files {
+		var found *ast.FuncDecl
+		ast.Inspect(file, func(node ast.Node) bool {
+			if found != nil || node == nil {
+				return false
+			}
+			fn, ok := node.(*ast.FuncDecl)
+			if !ok || fn.Name == nil {
+				return true
+			}
+			if ctx.pass.TypesInfo.ObjectOf(fn.Name) == target {
+				found = fn
+				return false
+			}
+			return true
+		})
+		if found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func funcBodyContainsGinkgoFail(ctx *analysisContext, body *ast.BlockStmt) bool {
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if ok && isGinkgoFailCall(ctx, call) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func hasFailureHelperPrefix(name string, prefix string) bool {

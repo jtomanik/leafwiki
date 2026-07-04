@@ -1164,6 +1164,49 @@ var _ = ginkgo.Describe("tree behavior", func() {
 			))
 		})
 
+		ginkgo.It("reports helpers that hide ginkgo.Fail inside Ginkgo spec bodies", func() {
+			h := newRuleHarness("/repo/internal/mcp/mcp_test.go", "github.com/perber/wiki/internal/mcp", `package mcp
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+func (bddDSL) GinkgoHelper() {}
+func (bddDSL) Fail(message string) {}
+
+func requiredPrivateActorContextFailure() {
+	ginkgo.GinkgoHelper()
+	ginkgo.Fail("private actor context did not handle the request")
+}
+
+var _ = ginkgo.Describe("private actor context", func() {
+	ginkgo.It("accepts trusted private actor headers", func() {
+		requiredPrivateActorContextFailure()
+	})
+})
+`)
+			spec := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[spec.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+			fail := h.findCall("Fail")
+			h.ctx.pass.TypesInfo.Uses[fail.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"Fail",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, spec)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:ginkgo.fail-in-spec: avoid helper requiredPrivateActorContextFailure that calls ginkgo.Fail inside specs; use Gomega expectations so assertions read semantically",
+			))
+		})
+
 		ginkgo.It("reports goroutine assertions without recovery inside Ginkgo table bodies", func() {
 			h := newRuleHarness("/repo/internal/branding/branding_test.go", "github.com/perber/wiki/internal/branding", `package branding
 
