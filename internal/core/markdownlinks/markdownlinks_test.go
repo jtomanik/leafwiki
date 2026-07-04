@@ -344,7 +344,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			result := index.RewriteMarkdown("docs/a.md", `[B](</docs/b?mode=raw#part-two> "open B")`)
 
-			Expect(result).To(matchRewriteResult(`[B](</docs/b.md?mode=raw#part-two> "open B")`, true))
+			Expect(result).To(matchRewriteUpdatesContent(`[B](</docs/b.md?mode=raw#part-two> "open B")`))
 		})
 
 		ginkgo.It("rewrites reference definitions without touching code spans or fenced code blocks", func() {
@@ -356,7 +356,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 			result := index.RewriteMarkdown("docs/a.md", content)
 
 			want := "[B][b-ref]\n\n[b-ref]: /docs/b.md\n\n`[B](/docs/b)`\n\n```md\n[B](/docs/b)\n```\n"
-			Expect(result).To(matchRewriteResult(want, true))
+			Expect(result).To(matchRewriteUpdatesContent(want))
 		})
 
 		ginkgo.It("rewrites the real link while leaving escaped literal link text unchanged", func() {
@@ -370,7 +370,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			want := `\[B](/docs/b)
 [Real](/docs/b.md)`
-			Expect(result).To(matchRewriteResult(want, true))
+			Expect(result).To(matchRewriteUpdatesContent(want))
 		})
 
 		ginkgo.It("rewrites only syntactically valid inline links when literal text resembles links", func() {
@@ -382,7 +382,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 			result := index.RewriteMarkdown("docs/a.md", content)
 
 			want := "[Space] (/docs/b)\n[Newline]\n(/docs/b)\n[Real](/docs/b.md)"
-			Expect(result).To(matchRewriteResult(want, true))
+			Expect(result).To(matchRewriteUpdatesContent(want))
 		})
 
 		ginkgo.It("does not rewrite malformed inline-link tails but still rewrites valid tails", func() {
@@ -394,7 +394,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 			result := index.RewriteMarkdown("docs/a.md", content)
 
 			want := "[MissingTitleClose](/docs/b \"title\"\n[UnquotedTitle](/docs/b title)\n[NewlineTail](/docs/b\ntext)\n[LeadingSpace]( /docs/b.md)\n[QuotedTitle](/docs/b.md \"title\")\n[ParenTitle](/docs/b.md (title))"
-			Expect(result).To(matchRewriteResult(want, true))
+			Expect(result).To(matchRewriteUpdatesContent(want))
 		})
 
 		ginkgo.It("leaves image-only reference definitions unchanged", func() {
@@ -405,7 +405,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			result := index.RewriteMarkdown("docs/a.md", content)
 
-			Expect(result).To(matchRewriteResult(content, false))
+			Expect(result).To(matchRewriteLeavesContentUnchanged(content))
 		})
 
 		ginkgo.It("rewrites links nested inside list items", func() {
@@ -416,7 +416,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			result := index.RewriteMarkdown("docs/a.md", content)
 
-			Expect(result).To(matchRewriteResult("- parent\n    - [Target](/docs/b.md)\n", true))
+			Expect(result).To(matchRewriteUpdatesContent("- parent\n    - [Target](/docs/b.md)\n"))
 		})
 
 		ginkgo.It("applies reference and inline replacements in source-order-safe offset order", func() {
@@ -427,7 +427,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			result := index.RewriteMarkdown("docs/a.md", content)
 
-			Expect(result).To(matchRewriteResult("[b-ref]: /docs/b.md\n\n[B](/docs/b.md)\n", true))
+			Expect(result).To(matchRewriteUpdatesContent("[b-ref]: /docs/b.md\n\n[B](/docs/b.md)\n"))
 		})
 	})
 
@@ -441,7 +441,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			result := index.RewriteMarkdown("docs/a.md", content)
 
-			Expect(result).To(matchRewriteResult("``[B](/docs/b)``\n\n[B](/docs/b.md)\n", true))
+			Expect(result).To(matchRewriteUpdatesContent("``[B](/docs/b)``\n\n[B](/docs/b.md)\n"))
 		})
 
 		ginkgo.It("skips indented code blocks while rewriting visible markdown links", func() {
@@ -453,7 +453,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 			result := index.RewriteMarkdown("docs/a.md", content)
 
 			want := "Example:\n\n    [B](/docs/b)\n\t[C](/docs/b)\n\n[B](/docs/b.md)\n"
-			Expect(result).To(matchRewriteResult(want, true))
+			Expect(result).To(matchRewriteUpdatesContent(want))
 		})
 	})
 
@@ -463,7 +463,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			result := index.RewriteMarkdown("index.md", "")
 
-			Expect(result).To(matchRewriteResult("", false))
+			Expect(result).To(matchRewriteLeavesContentUnchanged(""))
 		})
 
 		ginkgo.It("reports invalid and unresolved destinations without changing content", func() {
@@ -472,7 +472,7 @@ var _ = ginkgo.Describe("markdown link rewriting", func() {
 
 			result := index.RewriteMarkdown("index.md", content)
 
-			Expect(result).To(matchRewriteResult(content, false,
+			Expect(result).To(matchRewriteLeavesContentUnchanged(content,
 				Issue{Code: IssueCodeBrokenPage, Destination: "/missing.md"},
 				Issue{Code: IssueCodeInvalidPercentEncoding, Destination: "/docs/%zz"},
 			))

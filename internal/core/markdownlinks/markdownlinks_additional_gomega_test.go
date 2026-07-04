@@ -79,14 +79,22 @@ func matchRootSection(canonicalHref string) types.GomegaMatcher {
 	})
 }
 
-func matchRewriteResult(content string, changed bool, issues ...Issue) types.GomegaMatcher {
+func matchRewriteUpdatesContent(content string, issues ...Issue) types.GomegaMatcher {
+	return matchRewriteResult(content, BeTrue(), issues...)
+}
+
+func matchRewriteLeavesContentUnchanged(content string, issues ...Issue) types.GomegaMatcher {
+	return matchRewriteResult(content, BeFalse(), issues...)
+}
+
+func matchRewriteResult(content string, changed types.GomegaMatcher, issues ...Issue) types.GomegaMatcher {
 	issueMatcher := Equal(issues)
 	if len(issues) == 0 {
 		issueMatcher = BeEmpty()
 	}
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Content": Equal(content),
-		"Changed": Equal(changed),
+		"Changed": changed,
 		"Issues":  issueMatcher,
 	})
 }
@@ -299,13 +307,13 @@ var _ = ginkgo.Describe("markdown link parser internals", func() {
 	ginkgo.It("preserves link rewrite boundaries and formats root and encoded-section hrefs", func() {
 		Expect(mergeRanges([]textRange{{Start: 0, End: 2}, {Start: 1, End: 4}})).To(Equal([]textRange{{Start: 0, End: 4}}))
 
-		Expect(applyReplacementsResult("abc", nil)).To(matchRewriteResult("abc", false))
+		Expect(applyReplacementsResult("abc", nil)).To(matchRewriteLeavesContentUnchanged("abc"))
 
 		Expect(applyReplacementsResult("abcdef", []replacement{
 			{Start: 2, End: 1, Value: "skip"},
 			{Start: 1, End: 3, Value: "X"},
 			{Start: 1, End: 2, Value: "Y"},
-		})).To(matchRewriteResult("aYcdef", true))
+		})).To(matchRewriteUpdatesContent("aYcdef"))
 
 		base, suffix := splitURLSuffix("docs/page#section?query")
 		Expect(base).To(Equal("docs/page"))
