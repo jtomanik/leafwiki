@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("metadata migration", func() {
+var _ = ginkgo.Describe("metadata migration", ginkgo.Label("unit"), func() {
 	ginkgo.It("migrates legacy frontmatter into canonical metadata and requests writeback", func() {
 		raw := `---
 leafwiki_id: page-123
@@ -27,8 +27,7 @@ aliases:
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeTrue())
-		Expect(doc).To(matchExactPageDocument(PageDocument{
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentRequiringWriteback(matchExactPageDocument(PageDocument{
 			Body: "# Example Page\n",
 			Metadata: PageMetadata{
 				Version: 1,
@@ -50,7 +49,7 @@ aliases:
 					"aliases": []interface{}{"old-example"},
 				},
 			},
-		}))
+		})))
 	})
 
 	ginkgo.It("uses title aliases only when the managed title is absent", func() {
@@ -109,8 +108,7 @@ leafwiki_id: [broken
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(MatchError(ErrFrontmatterParse))
-		Expect(result.RequiresWriteback).To(BeFalse())
-		Expect(doc.Metadata.Page.ID).To(BeEmpty())
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentWithoutWriteback(HaveField("Metadata.Page.ID", BeEmpty())))
 	})
 
 	ginkgo.It("keeps unknown map and null legacy values in extra metadata", func() {
@@ -181,11 +179,12 @@ leafwiki_title: Legacy Title
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeTrue())
-		Expect(doc.Metadata.Page).To(Equal(PageMetadataPage{
-			ID:    "canonical-id",
-			Title: "Canonical Title",
-		}))
-		Expect(doc.Body).To(Equal("# Body\n"))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentRequiringWriteback(SatisfyAll(
+			HaveField("Metadata.Page", Equal(PageMetadataPage{
+				ID:    "canonical-id",
+				Title: "Canonical Title",
+			})),
+			HaveField("Body", Equal("# Body\n")),
+		)))
 	})
 })

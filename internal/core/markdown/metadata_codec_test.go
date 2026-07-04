@@ -177,11 +177,10 @@ Body text.
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeFalse())
-		Expect(doc).To(matchExactPageDocument(PageDocument{
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentWithoutWriteback(matchExactPageDocument(PageDocument{
 			Body:     "# Example Page\n\nBody text.\n",
 			Metadata: exampleCanonicalMetadata(),
-		}))
+		})))
 	})
 
 	ginkgo.It("renders canonical metadata comments in stable field order", func() {
@@ -264,8 +263,7 @@ Body`
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeFalse())
-		Expect(doc.Body).To(Equal("---\nleafwiki_id: [broken\n---\nBody"))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentWithoutWriteback(HaveField("Body", Equal("---\nleafwiki_id: [broken\n---\nBody"))))
 	})
 
 	ginkgo.It("strips legacy frontmatter after a blank separator below canonical metadata", func() {
@@ -283,8 +281,7 @@ Body`
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeTrue())
-		Expect(doc.Body).To(Equal("Body"))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentRequiringWriteback(HaveField("Body", Equal("Body"))))
 	})
 
 	ginkgo.It("strips tag and property-only legacy frontmatter below canonical metadata", func() {
@@ -304,8 +301,7 @@ Body`
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeTrue())
-		Expect(doc.Body).To(Equal("Body"))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentRequiringWriteback(HaveField("Body", Equal("Body"))))
 	})
 
 	ginkgo.It("strips legacy frontmatter with unknown non-scalar values below canonical metadata", func() {
@@ -326,8 +322,7 @@ Body`
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeTrue())
-		Expect(doc.Body).To(Equal("Body"))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentRequiringWriteback(HaveField("Body", Equal("Body"))))
 	})
 
 	ginkgo.It("strips title-only legacy frontmatter below canonical metadata", func() {
@@ -344,8 +339,7 @@ Body`
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeTrue())
-		Expect(doc.Body).To(Equal("Body"))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentRequiringWriteback(HaveField("Body", Equal("Body"))))
 	})
 
 	ginkgo.It("protects literal body frontmatter when rendering canonical metadata", func() {
@@ -362,8 +356,7 @@ Body`
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeFalse())
-		Expect(doc.Body).To(Equal(body))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentWithoutWriteback(HaveField("Body", Equal(body))))
 	})
 
 	ginkgo.It("keeps literal canonical comments when they belong to the body", func() {
@@ -382,7 +375,6 @@ Body`
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeFalse())
-		Expect(doc.Body).To(Equal("<!-- leafwiki\nversion: 1\npage:\n  id: body-comment\n-->\nBody"))
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentWithoutWriteback(HaveField("Body", Equal("<!-- leafwiki\nversion: 1\npage:\n  id: body-comment\n-->\nBody"))))
 	})
 })

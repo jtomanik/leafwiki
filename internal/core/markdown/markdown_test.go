@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-var _ = ginkgo.Describe("markdown", func() {
+var _ = ginkgo.Describe("markdown", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses the standard frontmatter title before heading fallback", func() {
 		tmp := markdownTempDir()
 		abs := writeMarkdownTestFile(tmp, "t.md", "---\ntitle: FM Title\n---\n\n# Heading")
@@ -86,8 +86,7 @@ leafwiki_title: Old Title
 
 		doc, result, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(result.RequiresWriteback).To(BeFalse())
-		Expect(doc).To(matchExactPageDocument(PageDocument{
+		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentWithoutWriteback(matchExactPageDocument(PageDocument{
 			Body: "\n# Heading",
 			Metadata: PageMetadata{
 				Version: 1,
@@ -102,7 +101,7 @@ leafwiki_title: Old Title
 					"aliases": []interface{}{"one"},
 				},
 			},
-		}))
+		})))
 	})
 
 	ginkgo.It("preserves canonical fields and extra boundaries during writeback", func() {

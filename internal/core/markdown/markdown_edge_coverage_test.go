@@ -8,10 +8,11 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	yaml "gopkg.in/yaml.v3"
 )
 
-var _ = ginkgo.Describe("markdown metadata parse render and writeback failures", func() {
+var _ = ginkgo.Describe("markdown metadata parse render and writeback failures", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns stable errors for malformed legacy frontmatter fallbacks", func() {
 		_, err := parseFrontmatterYAML("leafwiki_title: {{title}}\nbroken: [")
 		Expect(err).To(MatchError(ErrFrontmatterParse))
@@ -78,8 +79,13 @@ leafwiki_title: Legacy Page
 ---
 Legacy body`
 		Expect(mf.SetRawContentPreservingManagedMetadata(legacyRaw)).To(Succeed())
-		Expect(mf.RequiresWriteback()).To(BeTrue())
-		Expect(mf.GetContent()).To(Equal("Legacy body"))
+		Expect(mf).To(matchMarkdownFileRequiringWriteback("Legacy body", matchPageMetadata(gstruct.Fields{
+			"Version": Equal(1),
+			"Page": matchPageMetadataPage(gstruct.Fields{
+				"ID": Equal("page-123"),
+			}),
+			"Extra": HaveKeyWithValue("aliases", []interface{}{"old-page"}),
+		})))
 	})
 
 	ginkgo.It("returns write errors before mutating writeback state", func() {
@@ -104,7 +110,12 @@ Legacy body`
 		}
 
 		Expect(mf.WriteToFile()).To(matchMarkdownPathError())
-		Expect(mf.RequiresWriteback()).To(BeTrue())
+		Expect(mf).To(matchMarkdownFileRequiringWriteback("body", matchPageMetadata(gstruct.Fields{
+			"Version": Equal(1),
+			"Page": matchPageMetadataPage(gstruct.Fields{
+				"ID": Equal("page-123"),
+			}),
+		})))
 	})
 
 	ginkgo.It("reports canonical metadata parser and renderer edge errors", func() {
