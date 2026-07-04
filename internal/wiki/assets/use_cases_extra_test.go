@@ -51,7 +51,7 @@ func matchAssetDownload(filename tree.AssetName, mimeType string, content []byte
 }
 
 var _ = ginkgo.Describe("asset helpers", func() {
-	ginkgo.It("assetErrorStatus maps localized asset error codes", func() {
+	ginkgo.It("assigns HTTP status classes to validation missing duplicate and unknown asset failures", func() {
 		Expect(assetErrorStatus(ErrCodeAssetFileTooLarge)).To(Equal(http.StatusRequestEntityTooLarge))
 		Expect(assetErrorStatus(ErrCodeAssetMissingFile)).To(Equal(http.StatusBadRequest))
 		Expect(assetErrorStatus(ErrCodeAssetInvalidName)).To(Equal(http.StatusBadRequest))
@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("asset helpers", func() {
 		Expect(logOutput.String()).To(ContainSubstring("close failed"))
 	})
 
-	ginkgo.It("respondWithAssetError maps localized and generic errors", func() {
+	ginkgo.It("returns structured asset errors for localized failures and internal responses for generic failures", func() {
 		gin.SetMode(gin.TestMode)
 
 		localizedRec := httptest.NewRecorder()
