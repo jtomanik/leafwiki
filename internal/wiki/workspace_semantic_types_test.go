@@ -8,7 +8,7 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.Describe("workspace identity validation", func() {
+var _ = ginkgo.Describe("workspace identity validation", ginkgo.Label("unit"), func() {
 	ginkgo.It("preserves validated semantic workspace IDs on normalized workspaces", func() {
 		workspace := NormalizeWorkspace(Workspace{
 			ID:      workspaceid.WorkspaceID("docs"),

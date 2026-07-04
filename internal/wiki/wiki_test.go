@@ -14,7 +14,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	coreauth "github.com/perber/wiki/internal/core/auth"
@@ -50,9 +49,33 @@ func beMissingFileSystemPath() types.GomegaMatcher {
 
 func matchResolvedOutgoingLinkToPath(path tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gcustom.MakeMatcher(func(item corelinks.OutgoingResultItem) (bool, error) {
-		return item.ToPath == path && !item.Broken, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be a resolved outgoing link to\n{{format .Data 1}}", path)
+	return WithTransform(outgoingLinkResolutionFromItem, Equal(outgoingLinkResolutionObservation{
+		ToPath: path,
+		State:  outgoingLinkResolved,
+	}))
+}
+
+type outgoingLinkResolutionState string
+
+const (
+	outgoingLinkResolved outgoingLinkResolutionState = "resolved"
+	outgoingLinkBroken   outgoingLinkResolutionState = "broken"
+)
+
+type outgoingLinkResolutionObservation struct {
+	ToPath tree.RoutePath
+	State  outgoingLinkResolutionState
+}
+
+func outgoingLinkResolutionFromItem(item corelinks.OutgoingResultItem) outgoingLinkResolutionObservation {
+	state := outgoingLinkResolved
+	if item.Broken {
+		state = outgoingLinkBroken
+	}
+	return outgoingLinkResolutionObservation{
+		ToPath: item.ToPath,
+		State:  state,
+	}
 }
 
 type wikiServiceSet struct {
@@ -271,7 +294,7 @@ func mcpServerStoppedSuccessfully(err error) bool {
 }
 
 var _ = ginkgo.Describe("wiki runtime behavior", func() {
-	ginkgo.It("removes a leaf page from the tree", func() {
+	ginkgo.It("removes a leaf page from the tree", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 		page := createPageForTest(w, "system", nil, "Trash", "trash", pageNodeKind())
@@ -280,7 +303,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 
-	ginkgo.It("keeps the legacy storage directory layout for the default workspace", func() {
+	ginkgo.It("keeps the legacy storage directory layout for the default workspace", ginkgo.Label("integration"), func() {
 		dataDir := wikiTestTempDir()
 		wikiInstance, err := NewWiki(&WikiOptions{
 			StorageDir:          dataDir,
@@ -302,7 +325,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(filepath.Join(dataDir, "root", "welcome-to-leafwiki.md")).To(existAsFileSystemPath())
 	})
 
-	ginkgo.It("stores workspace content in the root directory and service state in the data directory", func() {
+	ginkgo.It("stores workspace content in the root directory and service state in the data directory", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w := createWikiTestInstanceWithWorkspace(Workspace{
@@ -351,7 +374,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		}
 	})
 
-	ginkgo.It("starts workspace services without owning identity or branding stores", func() {
+	ginkgo.It("starts workspace services without owning identity or branding stores", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
@@ -395,7 +418,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(filepath.Join(rootDir, "welcome-to-leafwiki.md")).To(existAsFileSystemPath())
 	})
 
-	ginkgo.It("starts control-plane services without creating workspace stores", func() {
+	ginkgo.It("starts control-plane services without creating workspace stores", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
@@ -427,7 +450,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(filepath.Join(rootDir, "welcome-to-leafwiki.md")).To(beMissingFileSystemPath())
 	})
 
-	ginkgo.It("reports crashed runtime roles through control-plane health", func() {
+	ginkgo.It("reports crashed runtime roles through control-plane health", ginkgo.Label("integration"), func() {
 		w, err := NewWiki(&WikiOptions{
 			Workspace: Workspace{
 				ID:      "current",
@@ -470,7 +493,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(body.Checks).To(haveRuntimeRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateCrashed))
 	})
 
-	ginkgo.It("starts while reporting markdown validation errors from workspace sync", func() {
+	ginkgo.It("starts while reporting markdown validation errors from workspace sync", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
@@ -495,7 +518,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(w.WorkspaceSyncStatus()).To(haveWorkspaceSyncValidationPath(SatisfyAny(Equal("a.md"), Equal("b.md"))))
 	})
 
-	ginkgo.It("applies the markdown link root prefix to sync validation and link indexing", func() {
+	ginkgo.It("applies the markdown link root prefix to sync validation and link indexing", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "repo", "docs")
 		Expect(os.MkdirAll(filepath.Join(rootDir, "sync"), 0o755)).To(Succeed())
@@ -535,7 +558,7 @@ leafwiki_title: Glossary
 		closeWithErrorCheckForTest(w.Close)
 	})
 
-	ginkgo.It("records web-created pages in workspace sync revisions", func() {
+	ginkgo.It("records web-created pages in workspace sync revisions", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
@@ -561,7 +584,7 @@ leafwiki_title: Glossary
 		Expect(revisions).To(ContainElement(HaveField("AuthorID", Equal("alice"))))
 	})
 
-	ginkgo.It("records imported page changes in workspace sync snapshots", func() {
+	ginkgo.It("records imported page changes in workspace sync snapshots", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
@@ -599,7 +622,7 @@ leafwiki_title: Glossary
 		)))
 	})
 
-	ginkgo.It("rebuilds derived indexes from refreshed workspace markdown", func() {
+	ginkgo.It("rebuilds derived indexes from refreshed workspace markdown", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
@@ -696,7 +719,7 @@ workspace-sync-updated-token`
 		Expect(result.Count).To(BeZero())
 	})
 
-	ginkgo.It("serves native stdio tools as the public editor when auth is disabled", func() {
+	ginkgo.It("serves native stdio tools as the public editor when auth is disabled", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
@@ -747,7 +770,7 @@ workspace-sync-updated-token`
 		Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
 	})
 
-	ginkgo.It("marks MCP writes as workspace sync revisions and serves revision history", func() {
+	ginkgo.It("marks MCP writes as workspace sync revisions and serves revision history", ginkgo.Label("integration"), func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
@@ -816,7 +839,7 @@ workspace-sync-updated-token`
 		Eventually(serverDone).WithTimeout(10 * time.Second).Should(Receive(Satisfy(mcpServerStoppedSuccessfully)))
 	})
 
-	ginkgo.It("rejects workspaces whose data and content directories are the same", func() {
+	ginkgo.It("rejects workspaces whose data and content directories are the same", ginkgo.Label("unit"), func() {
 		dir := wikiTestTempDir()
 
 		_, err := NewWiki(&WikiOptions{
@@ -829,7 +852,7 @@ workspace-sync-updated-token`
 		Expect(err).To(MatchError(ErrWorkspaceRootDirEqualsDataDir))
 	})
 
-	ginkgo.It("rejects workspaces whose content directory contains service state", func() {
+	ginkgo.It("rejects workspaces whose content directory contains service state", ginkgo.Label("unit"), func() {
 		rootDir := filepath.Join(wikiTestTempDir(), "wiki")
 		dataDir := filepath.Join(rootDir, "data")
 
@@ -844,7 +867,7 @@ workspace-sync-updated-token`
 		Expect(rootDir).To(beMissingFileSystemPath())
 	})
 
-	ginkgo.It("normalizes workspace paths before services create state", func() {
+	ginkgo.It("normalizes workspace paths before services create state", ginkgo.Label("integration"), func() {
 		baseDir := wikiTestTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -865,7 +888,7 @@ workspace-sync-updated-token`
 		Expect(filepath.Join(rootDir, "welcome-to-leafwiki.md")).To(existAsFileSystemPath())
 	})
 
-	ginkgo.It("refuses non-recursive deletion of a page with children", func() {
+	ginkgo.It("refuses non-recursive deletion of a page with children", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 		parent := createPageForTest(w, "system", nil, "Parent", "parent", pageNodeKind())
@@ -878,7 +901,7 @@ workspace-sync-updated-token`
 		Expect(err).To(MatchError(tree.ErrPageHasChildren))
 	})
 
-	ginkgo.It("removes a page subtree recursively", func() {
+	ginkgo.It("removes a page subtree recursively", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 		parent := createPageForTest(w, "system", nil, "Parent", "parent", pageNodeKind())
@@ -891,7 +914,7 @@ workspace-sync-updated-token`
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 
-	ginkgo.It("creates the default administrator with the configured password", func() {
+	ginkgo.It("creates the default administrator with the configured password", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
@@ -899,7 +922,7 @@ workspace-sync-updated-token`
 		Expect(err).To(Succeed())
 	})
 
-	ginkgo.It("accepts default admin credentials and rejects invalid credentials", func() {
+	ginkgo.It("accepts default admin credentials and rejects invalid credentials", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
@@ -914,7 +937,7 @@ workspace-sync-updated-token`
 		Expect(err).To(MatchError(coreauth.ErrUserInvalidCredentials))
 	})
 
-	ginkgo.It("starts without an auth service when authentication is disabled", func() {
+	ginkgo.It("starts without an auth service when authentication is disabled", ginkgo.Label("integration"), func() {
 		// Create a wiki instance with AuthDisabled set to true
 		wikiInstance, err := NewWiki(&WikiOptions{
 			StorageDir:          wikiTestTempDir(),
@@ -931,7 +954,7 @@ workspace-sync-updated-token`
 		Expect(wikiInstance.auth).To(BeNil())
 	})
 
-	ginkgo.It("keeps login unavailable when authentication is disabled", func() {
+	ginkgo.It("keeps login unavailable when authentication is disabled", ginkgo.Label("integration"), func() {
 		// Create a wiki instance with AuthDisabled set to true
 		wikiInstance, err := NewWiki(&WikiOptions{
 			StorageDir:   wikiTestTempDir(),
@@ -944,7 +967,7 @@ workspace-sync-updated-token`
 		Expect(wikiInstance.auth).To(BeNil())
 	})
 
-	ginkgo.It("keeps logout unavailable when authentication is disabled", func() {
+	ginkgo.It("keeps logout unavailable when authentication is disabled", ginkgo.Label("integration"), func() {
 		// Create a wiki instance with AuthDisabled set to true
 		wikiInstance, err := NewWiki(&WikiOptions{
 			StorageDir:   wikiTestTempDir(),
@@ -957,7 +980,7 @@ workspace-sync-updated-token`
 		Expect(wikiInstance.auth).To(BeNil())
 	})
 
-	ginkgo.It("keeps refresh tokens unavailable when authentication is disabled", func() {
+	ginkgo.It("keeps refresh tokens unavailable when authentication is disabled", ginkgo.Label("integration"), func() {
 		// Create a wiki instance with AuthDisabled set to true
 		wikiInstance, err := NewWiki(&WikiOptions{
 			StorageDir:   wikiTestTempDir(),
@@ -970,7 +993,7 @@ workspace-sync-updated-token`
 		Expect(wikiInstance.auth).To(BeNil())
 	})
 
-	ginkgo.It("allows page workflows when authentication is disabled", func() {
+	ginkgo.It("allows page workflows when authentication is disabled", ginkgo.Label("integration"), func() {
 		// Create a wiki instance with AuthDisabled set to true
 		wikiInstance, err := NewWiki(&WikiOptions{
 			StorageDir:   wikiTestTempDir(),

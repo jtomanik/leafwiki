@@ -10,7 +10,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 
 	"github.com/perber/wiki/internal/branding"
@@ -33,7 +32,7 @@ var (
 	errFixtureWikiCloseFailed   = errors.New("close failed")
 )
 
-var _ = ginkgo.Describe("wiki startup initialization behavior", func() {
+var _ = ginkgo.Describe("wiki startup initialization behavior", ginkgo.Label("integration"), func() {
 	ginkgo.It("returns each NewWiki startup orchestration error", func() {
 		_, err := NewWiki(&WikiOptions{
 			StorageDir:       wikiTestTempDir(),
@@ -301,12 +300,62 @@ var _ = ginkgo.Describe("wiki startup initialization behavior", func() {
 
 func haveFailedSearchInitializationStatus() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gcustom.MakeMatcher(func(status *search.IndexingStatus) (bool, error) {
-		return status != nil &&
-			status.IsFailed() &&
-			status.Failed > 0 &&
-			!status.FinishedAt.IsZero(), nil
-	}).WithMessage("record a failed search initialization status")
+	return WithTransform(searchInitializationObservationFromStatus, Equal(searchInitializationObservation{
+		State:    searchInitializationFailed,
+		Failures: searchInitializationFailuresRecorded,
+		Finished: searchInitializationFinishedRecorded,
+	}))
+}
+
+type searchInitializationState string
+
+const (
+	searchInitializationMissing searchInitializationState = "missing"
+	searchInitializationFailed  searchInitializationState = "failed"
+	searchInitializationOther   searchInitializationState = "other"
+)
+
+type searchInitializationFailureState string
+
+const (
+	searchInitializationFailuresMissing  searchInitializationFailureState = "no failures recorded"
+	searchInitializationFailuresRecorded searchInitializationFailureState = "failures recorded"
+)
+
+type searchInitializationFinishedState string
+
+const (
+	searchInitializationFinishedMissing  searchInitializationFinishedState = "finish time missing"
+	searchInitializationFinishedRecorded searchInitializationFinishedState = "finish time recorded"
+)
+
+type searchInitializationObservation struct {
+	State    searchInitializationState
+	Failures searchInitializationFailureState
+	Finished searchInitializationFinishedState
+}
+
+func searchInitializationObservationFromStatus(status *search.IndexingStatus) searchInitializationObservation {
+	if status == nil {
+		return searchInitializationObservation{State: searchInitializationMissing}
+	}
+	state := searchInitializationOther
+	if status.IsFailed() {
+		state = searchInitializationFailed
+	}
+	failures := searchInitializationFailuresMissing
+	if status.Failed > 0 {
+		failures = searchInitializationFailuresRecorded
+	}
+	finished := searchInitializationFinishedMissing
+	if !status.FinishedAt.IsZero() {
+		finished = searchInitializationFinishedRecorded
+	}
+	return searchInitializationObservation{
+		State:    state,
+		Failures: failures,
+		Finished: finished,
+	}
 }
 
 func restoreWikiTestSeams() func() {

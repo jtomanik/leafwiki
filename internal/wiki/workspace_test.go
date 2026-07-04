@@ -8,7 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("workspace directory validation", func() {
+var _ = ginkgo.Describe("workspace directory validation", ginkgo.Label("unit"), func() {
 	ginkgo.It("accepts the default content root under the data directory", func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 

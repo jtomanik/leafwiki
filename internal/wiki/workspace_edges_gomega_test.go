@@ -9,7 +9,21 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("workspace validation edges", func() {
+type workspacePathContainment string
+
+const (
+	workspacePathContained    workspacePathContainment = "contained"
+	workspacePathNotContained workspacePathContainment = "not-contained"
+)
+
+func workspacePathContainmentFor(parent, child string) workspacePathContainment {
+	if pathContains(parent, child) {
+		return workspacePathContained
+	}
+	return workspacePathNotContained
+}
+
+var _ = ginkgo.Describe("workspace validation edges", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects missing data and equal root/data directories", func() {
 		sameDir := filepath.Join(wikiTestTempDir(), "same")
 
@@ -98,7 +112,7 @@ var _ = ginkgo.Describe("workspace validation edges", func() {
 	})
 
 	ginkgo.It("treats paths with no relative form as not contained", func() {
-		Expect(pathContains(filepath.Join(wikiTestTempDir(), "parent"), "relative-child")).To(BeFalse())
+		Expect(workspacePathContainmentFor(filepath.Join(wikiTestTempDir(), "parent"), "relative-child")).To(Equal(workspacePathNotContained))
 	})
 })
 

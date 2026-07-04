@@ -11,7 +11,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -30,17 +29,17 @@ import (
 )
 
 var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
-	ginkgo.It("workspace sync page and restore facade methods fail clearly when sync is disabled", func() {
+	ginkgo.It("workspace sync page and restore facade methods fail clearly when sync is disabled", ginkgo.Label("unit"), func() {
 		w := &Wiki{}
 		ctx := context.Background()
 		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("page-1")}}
 
 		status := w.WorkspaceSyncStatus()
-		Expect(status.Enabled).To(BeFalse())
+		Expect(status).To(haveWorkspaceSyncMode(workspaceSyncModeDisabled))
 
 		status, err := w.WorkspaceSyncRefresh(ctx, workspacesync.SyncRequest{})
 		Expect(err).To(matchWorkspaceSyncDisabled())
-		Expect(status.Enabled).To(BeFalse())
+		Expect(status).To(haveWorkspaceSyncMode(workspaceSyncModeDisabled))
 
 		snapshotList, err := w.WorkspaceSyncSnapshots(ctx, 10)
 		Expect(err).To(matchWorkspaceSyncDisabled())
@@ -52,7 +51,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 
 		status, err = w.WorkspaceSyncRestoreWorkspace(ctx, "abc123", workspacesync.Actor{ID: "user-1"}, workspacesync.SourceWeb)
 		Expect(err).To(matchWorkspaceSyncDisabled())
-		Expect(status.Enabled).To(BeFalse())
+		Expect(status).To(haveWorkspaceSyncMode(workspaceSyncModeDisabled))
 
 		revisions, err := w.WorkspaceSyncPageRevisions(ctx, page, "", 5)
 		Expect(err).To(matchWorkspaceSyncDisabled())
@@ -67,7 +66,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(restored).To(BeNil())
 	})
 
-	ginkgo.It("workspace sync facade methods delegate to the configured sync service", func() {
+	ginkgo.It("workspace sync facade methods delegate to the configured sync service", ginkgo.Label("unit"), func() {
 		treeService := tree.NewTreeService(wikiTestTempDir())
 		Expect(treeService.LoadTree()).To(Succeed())
 		kind := tree.NodeKindPage
@@ -104,7 +103,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(fake.restoredDocumentCommit).To(Equal(workspacesync.CommitHashFromRevisionID(revision.RevisionIDFromString("rev-2"))))
 	})
 
-	ginkgo.It("workspace sync restore page revision returns sync errors before reading the restored page", func() {
+	ginkgo.It("workspace sync restore page revision returns sync errors before reading the restored page", ginkgo.Label("unit"), func() {
 		expected := errors.New("restore failed")
 		w := &Wiki{workspaceSync: &fakeWorkspaceSyncFacade{restoreDocumentErr: expected}}
 
@@ -119,7 +118,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(restored).To(BeNil())
 	})
 
-	ginkgo.It("workspace sync lifecycle helpers handle nil services and watcher failures", func() {
+	ginkgo.It("workspace sync lifecycle helpers handle nil services and watcher failures", ginkgo.Label("unit"), func() {
 		(&Wiki{}).configureWorkspaceSyncRebuilder()
 		(&Wiki{}).startWorkspaceSyncWatcher()
 
@@ -137,7 +136,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(fake).To(haveWorkspaceSyncLifecycleObserved())
 	})
 
-	ginkgo.It("route registrar accessors expose the expected route groups", func() {
+	ginkgo.It("route registrar accessors expose the expected route groups", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
@@ -146,7 +145,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(w.WorkspacedRegistrars()).To(HaveLen(10))
 	})
 
-	ginkgo.It("MCP handlers and presence accessors are available through the facade", func() {
+	ginkgo.It("MCP handlers and presence accessors are available through the facade", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
@@ -184,7 +183,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(agentSessions).To(BeEmpty())
 	})
 
-	ginkgo.It("frontend and importer route helpers keep working when optional setup fails", func() {
+	ginkgo.It("frontend and importer route helpers keep working when optional setup fails", ginkgo.Label("unit"), func() {
 		expectedBrandingErr := errors.New("branding unavailable")
 		originalFrontendBrandingConfig := frontendBrandingConfig
 		frontendBrandingConfig = func(*corebranding.BrandingService) (*corebranding.BrandingConfigResponse, error) {
@@ -223,7 +222,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(requestedPath).To(Equal(filepath.Join(w.storageDir, ".importer")))
 	})
 
-	ginkgo.It("workspace sync actor lookup preserves IDs and enriches known users", func() {
+	ginkgo.It("workspace sync actor lookup preserves IDs and enriches known users", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
@@ -246,7 +245,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(actor).To(haveWorkspaceSyncActor(workspacesync.ActorIDFromUserID(knownUserID), Equal("syncactor"), Equal("syncactor@example.com")))
 	})
 
-	ginkgo.It("import adapter delegates tree, page, and asset operations", func() {
+	ginkgo.It("import adapter delegates tree, page, and asset operations", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 		adapter := NewWikiImportAdapter(w)
@@ -396,14 +395,44 @@ var (
 	expectedAgentPresenceUnavailable   = errors.New("agent presence is unavailable")
 )
 
+type workspaceSyncMode string
+
+const (
+	workspaceSyncModeEnabled  workspaceSyncMode = "enabled"
+	workspaceSyncModeDisabled workspaceSyncMode = "disabled"
+)
+
+func haveWorkspaceSyncMode(mode workspaceSyncMode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(status workspacesync.SyncStatus) workspaceSyncMode {
+		if status.Enabled {
+			return workspaceSyncModeEnabled
+		}
+		return workspaceSyncModeDisabled
+	}, Equal(mode))
+}
+
+type workspaceSyncLifecycleObservation string
+
+const (
+	workspaceSyncLifecycleMissing  workspaceSyncLifecycleObservation = "missing"
+	workspaceSyncLifecycleObserved workspaceSyncLifecycleObservation = "rebuilder configured and watcher stopped"
+	workspaceSyncLifecyclePartial  workspaceSyncLifecycleObservation = "partial"
+)
+
 func haveWorkspaceSyncLifecycleObserved() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gcustom.MakeMatcher(func(fake *fakeWorkspaceSyncFacade) (bool, error) {
-		return fake != nil &&
-			fake.afterSync != nil &&
-			fake.startCalled &&
-			fake.stopCalled, nil
-	}).WithMessage("observe workspace sync rebuilder configuration and watcher lifecycle")
+	return WithTransform(workspaceSyncLifecycleFromFacade, Equal(workspaceSyncLifecycleObserved))
+}
+
+func workspaceSyncLifecycleFromFacade(fake *fakeWorkspaceSyncFacade) workspaceSyncLifecycleObservation {
+	if fake == nil {
+		return workspaceSyncLifecycleMissing
+	}
+	if fake.afterSync != nil && fake.startCalled && fake.stopCalled {
+		return workspaceSyncLifecycleObserved
+	}
+	return workspaceSyncLifecyclePartial
 }
 
 func haveWorkspaceSyncActor(id workspacesync.ActorID, name types.GomegaMatcher, email types.GomegaMatcher) types.GomegaMatcher {
@@ -417,16 +446,43 @@ func haveWorkspaceSyncActor(id workspacesync.ActorID, name types.GomegaMatcher, 
 
 func haveMissingWikiPathLookup(path tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gcustom.MakeMatcher(func(lookup *tree.PathLookup) (bool, error) {
-		return lookup != nil && lookup.Path == path && !lookup.Exists, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be a missing wiki path lookup for\n{{format .Data 1}}", path)
+	return WithTransform(func(lookup *tree.PathLookup) wikiPathLookupObservation {
+		return wikiPathLookupFromResult(lookup)
+	}, Equal(wikiPathLookupObservation{Path: path, State: wikiPathLookupMissing}))
 }
 
 func haveExistingWikiPathLookup(path tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gcustom.MakeMatcher(func(lookup *tree.PathLookup) (bool, error) {
-		return lookup != nil && lookup.Path == path && lookup.Exists, nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} be an existing wiki path lookup for\n{{format .Data 1}}", path)
+	return WithTransform(func(lookup *tree.PathLookup) wikiPathLookupObservation {
+		return wikiPathLookupFromResult(lookup)
+	}, Equal(wikiPathLookupObservation{Path: path, State: wikiPathLookupExisting}))
+}
+
+type wikiPathLookupState string
+
+const (
+	wikiPathLookupUnavailable wikiPathLookupState = "unavailable"
+	wikiPathLookupMissing     wikiPathLookupState = "missing"
+	wikiPathLookupExisting    wikiPathLookupState = "existing"
+)
+
+type wikiPathLookupObservation struct {
+	Path  tree.RoutePath
+	State wikiPathLookupState
+}
+
+func wikiPathLookupFromResult(lookup *tree.PathLookup) wikiPathLookupObservation {
+	if lookup == nil {
+		return wikiPathLookupObservation{State: wikiPathLookupUnavailable}
+	}
+	state := wikiPathLookupMissing
+	if lookup.Exists {
+		state = wikiPathLookupExisting
+	}
+	return wikiPathLookupObservation{
+		Path:  lookup.Path,
+		State: state,
+	}
 }
 
 func matchWorkspaceSyncDisabled() types.GomegaMatcher {
