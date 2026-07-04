@@ -377,7 +377,9 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 	checkGomegaMatcherFactoryGenericToolErrorArgs(ctx, fn)
 	checkGomegaMatcherFactoryBooleanErrorGate(ctx, fn)
 	checkGomegaMatcherFactoryStructuredProtocolStatus(ctx, fn)
-	if fn.Type.Params == nil || !gomegaMatcherFactoryName(fn.Name.Name) {
+	isMatcherFactory := gomegaMatcherFactoryName(fn.Name.Name)
+	isRenderedOutputMatcherFactory := gomegaRenderedOutputMatcherFactoryName(fn.Name.Name)
+	if fn.Type.Params == nil || !isMatcherFactory && !isRenderedOutputMatcherFactory {
 		return
 	}
 	for _, field := range fn.Type.Params.List {
@@ -389,7 +391,9 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 				continue
 			}
 			if semanticType, ok := semanticTypeForTestHelperParamName(name.Name, fn.Name.Name); ok {
-				ctx.report(ruleSemanticRawSignature, name, customMatcherSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
+				if isMatcherFactory {
+					ctx.report(ruleSemanticRawSignature, name, customMatcherSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
+				}
 				continue
 			}
 			if testHelperMessageParamName(name.Name, fn.Name.Name) {
@@ -397,7 +401,9 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 				continue
 			}
 			if testHelperFieldParamName(name.Name, fn.Name.Name) {
-				ctx.report(ruleSemanticRawField, name, customMatcherFieldParameterDiagnostic(fn.Name.Name, name.Name))
+				if isMatcherFactory {
+					ctx.report(ruleSemanticRawField, name, customMatcherFieldParameterDiagnostic(fn.Name.Name, name.Name))
+				}
 			}
 		}
 	}
@@ -3189,6 +3195,22 @@ func gomegaMatcherFactoryName(name string) bool {
 		strings.HasPrefix(name, "Contain") ||
 		strings.HasPrefix(name, "Match") ||
 		strings.HasPrefix(name, "Be")
+}
+
+func gomegaRenderedOutputMatcherFactoryName(name string) bool {
+	canonical := canonicalName(name)
+	if !strings.HasPrefix(canonical, "have") &&
+		!strings.HasPrefix(canonical, "contain") &&
+		!strings.HasPrefix(canonical, "match") &&
+		!strings.HasPrefix(canonical, "be") {
+		return false
+	}
+	return strings.Contains(canonical, "error") ||
+		strings.Contains(canonical, "fatal") ||
+		strings.Contains(canonical, "message") ||
+		strings.Contains(canonical, "output") ||
+		strings.Contains(canonical, "stderr") ||
+		strings.Contains(canonical, "stdout")
 }
 
 func funcReturnsGomegaMatcher(fn *ast.FuncDecl) bool {

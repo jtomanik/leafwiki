@@ -1715,13 +1715,33 @@ func semanticTypeForTestHelperParamName(paramName string, funcName string) (stri
 }
 
 func testHelperMessageParamName(paramName string, funcName string) bool {
-	if canonicalName(paramName) != "message" {
+	canonicalParam := canonicalName(paramName)
+	canonicalFunc := canonicalName(funcName)
+	if canonicalParam == "message" {
+		return strings.Contains(canonicalFunc, "structured") ||
+			strings.Contains(canonicalFunc, "localized") ||
+			strings.Contains(canonicalFunc, "error")
+	}
+	if !isRenderedOutputParamName(canonicalParam) {
 		return false
 	}
-	canonicalFunc := canonicalName(funcName)
 	return strings.Contains(canonicalFunc, "structured") ||
 		strings.Contains(canonicalFunc, "localized") ||
-		strings.Contains(canonicalFunc, "error")
+		strings.Contains(canonicalFunc, "error") ||
+		strings.Contains(canonicalFunc, "fatal") ||
+		strings.Contains(canonicalFunc, "message") ||
+		strings.Contains(canonicalFunc, "output") ||
+		strings.Contains(canonicalFunc, "stderr") ||
+		strings.Contains(canonicalFunc, "stdout")
+}
+
+func isRenderedOutputParamName(canonicalParam string) bool {
+	switch canonicalParam {
+	case "context", "fragment", "prefix", "suffix", "text", "output", "stderr", "stdout", "cause", "reason":
+		return true
+	default:
+		return false
+	}
 }
 
 func testHelperFieldParamName(paramName string, funcName string) bool {

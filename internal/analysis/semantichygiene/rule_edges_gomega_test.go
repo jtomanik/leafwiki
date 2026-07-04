@@ -1755,6 +1755,31 @@ func matchToolErrorResult() GomegaMatcher {
 			))
 		})
 
+		ginkgo.It("reports lowercase matcher factories that accept rendered error output fragments", func() {
+			h := newRuleHarness("/repo/e2e/cmd/wikid-store/main_test.go", "github.com/perber/wiki/e2e/cmd/wikid-store", `package main
+
+type GomegaMatcher interface{}
+
+func WithTransform(transform any, matcher any) GomegaMatcher { return nil }
+func Equal(expected any) GomegaMatcher { return nil }
+
+func haveWikidStoreErrorContext(context string) GomegaMatcher {
+	return WithTransform(func(raw string) string {
+		return parseFatalOutput(raw, context)
+	}, Equal(context))
+}
+
+func parseFatalOutput(raw string, context string) string {
+	return context
+}
+`)
+			checkGomegaMatcherFactorySignature(h.ctx, h.findFunc("haveWikidStoreErrorContext"))
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:i18n.message-parameter: custom matcher haveWikidStoreErrorContext parameter context accepts rendered prose; assert MessageID/catalog semantics instead",
+			))
+		})
+
 		ginkgo.It("reports map index aliases asserted as local values", func() {
 			h := newRuleHarness("/repo/internal/http/router_test.go", "github.com/perber/wiki/internal/http", `package http
 
