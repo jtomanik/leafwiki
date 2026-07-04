@@ -31,7 +31,7 @@ func beNormalizedAgentHookEvent() types.GomegaMatcher {
 	}).WithMessage("be a normalized agent hook event")
 }
 
-var _ = Describe("agent hook normalization", func() {
+var _ = Describe("agent hook normalization", Label("unit"), func() {
 	It("hashes Codex session identity while preserving safe tool metadata", func() {
 		seenAt := time.Date(2026, 6, 7, 10, 11, 12, 0, time.UTC)
 		raw := []byte(`{
@@ -127,6 +127,7 @@ type supportedProviderEventCase struct {
 }
 
 var _ = DescribeTable("supported provider event normalization",
+	Label("unit"),
 	func(tc supportedProviderEventCase) {
 		seenAt := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 
@@ -180,6 +181,7 @@ type normalizeFailureCase struct {
 }
 
 var _ = DescribeTable("normalization failure handling",
+	Label("unit"),
 	func(tc normalizeFailureCase) {
 		seenAt := time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC)
 
@@ -210,6 +212,7 @@ const (
 )
 
 var _ = DescribeTable("provider permission response protocol",
+	Label("unit"),
 	func(tc allowResponseCase) {
 		Expect(string(AllowResponse(tc.provider))).To(Equal(tc.want))
 	},
@@ -220,7 +223,7 @@ var _ = DescribeTable("provider permission response protocol",
 	Entry("unsupported", allowResponseCase{provider: rawProviderUnsupportedFixture, want: ""}),
 )
 
-var _ = Describe("agent hook normalized event validation", func() {
+var _ = Describe("agent hook normalized event validation", Label("unit"), func() {
 	It("accepts normalized events produced by Normalize", func() {
 		event, err := normalizeEvent(ProviderCodex, []byte(`{
 			"hook_event_name":"PreToolUse",

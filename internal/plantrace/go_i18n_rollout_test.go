@@ -83,13 +83,13 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 		"API validation error exposes field codes not prose-only assertions":
 		return evidence("internal/core/shared/errors/field_error_test.go", "ValidationErrors"), true
 	case "API success response includes messageId and catalog-backed message":
-		return evidence("internal/wiki/pages/i18n_success_test.go", "API success message catalog rendering"), true
+		return evidence("internal/wiki/pages/i18n_success_test.go", "API success message catalog resolution"), true
 	case "MCP tool descriptor description renders from catalog",
 		"MCP message-only output uses catalog-backed message",
 		"MCP unknown tool protocol errors are not over-wrapped":
 		return evidence("internal/wiki/mcp/tool_contracts_test.go", "renders descriptions from the catalog"), true
 	case "MCP structured error keeps _meta.error compatibility":
-		return evidence("internal/wiki/mcp/mcp_integration_test.go", "assertMCPStructuredError"), true
+		return evidence("internal/wiki/mcp/mcp_integration_test.go", "matchMCPStructuredError"), true
 	case "CLI help renders catalog-backed text to stdout":
 		return evidence("cmd/leafwiki/main_test.go", "catalog-backed usage line"), true
 	case "run.sh help uses generated catalog text",

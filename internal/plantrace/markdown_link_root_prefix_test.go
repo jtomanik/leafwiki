@@ -31,7 +31,7 @@ var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenari
 	{"Importer and refactor generated absolute links include the configured prefix", mlrpEvidence("internal/importer/content_transformer_test.go", "applies the markdown root prefix to generated link hrefs")},
 	{"CLI env YAML and run wrapper expose the same prefix setting", mlrpEvidence("cmd/leafwiki/main_test.go", "TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars")},
 	{"Daemon identity changes when markdown link root prefix changes", mlrpEvidence("cmd/leafwiki/main_test.go", "TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields")},
-	{"MCP and HTTP config report markdownLinkRootPrefix", mlrpEvidence("internal/wiki/mcp/mcp_integration_test.go", "config[\"markdownLinkRootPrefix\"]")},
+	{"MCP and HTTP config report markdownLinkRootPrefix", mlrpEvidence("internal/wiki/mcp/mcp_integration_test.go", "HaveKeyWithValue(\"markdownLinkRootPrefix\", \"/docs\")")},
 	{"LeafWiki preview navigates prefixed Markdown hrefs without changing route identity", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix preview click navigates to unprefixed route")},
 	{"Base path and markdown link root prefix remain separate", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix remains separate from base path")},
 	{"Plan scenarios are covered by automated evidence", mlrpEvidence("internal/plantrace/markdown_link_root_prefix_test.go", "TestMarkdownLinkRootPrefixPlanScenarioTitleAuditIndex")},

@@ -12,7 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("workspace ID parsing", func() {
+var _ = Describe("workspace ID parsing", Label("unit"), func() {
 	It("returns a semantic workspace ID for a valid slug", func() {
 		id, err := ParseWorkspaceID("docs-home")
 
@@ -31,7 +31,7 @@ var _ = Describe("workspace ID parsing", func() {
 	})
 })
 
-var _ = Describe("workspace ID boundary helpers", func() {
+var _ = Describe("workspace ID boundary helpers", Label("unit"), func() {
 	It("returns stable string forms for transport, URL, and storage boundaries", func() {
 		id := WorkspaceID("docs-home")
 
@@ -54,7 +54,7 @@ var _ = Describe("workspace ID boundary helpers", func() {
 	})
 })
 
-var _ = Describe("workspace ID validation errors", func() {
+var _ = Describe("workspace ID validation errors", Label("unit"), func() {
 	It("returns the required code for empty input", func() {
 		_, err := ParseWorkspaceID("")
 
@@ -78,7 +78,7 @@ var _ = Describe("workspace ID validation errors", func() {
 	})
 })
 
-var _ = Describe("workspace ID SQL conversion", func() {
+var _ = Describe("workspace ID SQL conversion", Label("unit"), func() {
 	It("Value returns the string form for a valid workspace ID", func() {
 		value, err := WorkspaceID("docs-home").Value()
 

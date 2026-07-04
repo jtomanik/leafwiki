@@ -1,0 +1,38 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "plan_title": "go-ginkgo-test-taxonomy-labels",
+  "thread_id": "019f2c2a-d4d8-7c21-9828-e262612ea50c",
+  "thread_link": "codex://threads/019f2c2a-d4d8-7c21-9828-e262612ea50c",
+  "created_at": "2026-07-04T11:30:00Z",
+  "status": "planned",
+  "steps": [
+    {
+      "name": "Observe",
+      "status": "completed",
+      "artifact": "docs/plans/go-ginkgo-test-taxonomy-labels.OBSERVE.md"
+    },
+    {
+      "name": "Orient",
+      "status": "completed",
+      "artifact": "docs/plans/go-ginkgo-test-taxonomy-labels.CONTEXT.md"
+    },
+    {
+      "name": "Decide",
+      "status": "completed",
+      "artifact": "docs/plans/go-ginkgo-test-taxonomy-labels.DECISION.md"
+    },
+    {
+      "name": "Act",
+      "status": "completed",
+      "artifact": "docs/plans/go-ginkgo-test-taxonomy-labels.PLAN.md"
+    }
+  ],
+  "decisions": [
+    "Use unit, integration, and e2e as the exclusive primary Go/Ginkgo taxonomy labels.",
+    "Define Go/Ginkgo e2e as acting on the LeafWiki product binary or command build artifact.",
+    "Exclude Playwright and Docker proxy tests from this Go/Ginkgo label taxonomy.",
+    "Use semantichygiene for invalid-label hard failures.",
+    "Keep missing labels report-only during the parallel cleanup phase.",
+    "Use a separate taxonomy worktree or branch and integrate small commits."
+  ]
+}

@@ -282,7 +282,7 @@ var parseFrontmatterCases = []parseFrontmatterCase{
 	},
 }
 
-var _ = ginkgo.Describe("frontmatter", func() {
+var _ = ginkgo.Describe("frontmatter", ginkgo.Label("unit"), func() {
 	ginkgo.Describe("frontmatter block splitting", func() {
 		for _, tt := range splitFrontmatterCases {
 			tt := tt

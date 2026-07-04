@@ -20,6 +20,8 @@ func BeforeEach(body func()) bool { return true }
 
 func Entry(description string, args ...any) any { return nil }
 
+func Label(labels ...string) any { return nil }
+
 func By(description string) {}
 
 func DeferCleanup(args ...any) {}

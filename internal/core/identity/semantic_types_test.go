@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("semantic identity types", func() {
+var _ = Describe("semantic identity types", Label("unit"), func() {
 	It("normalizes user IDs for metadata and actor contracts", func() {
 		const expectedUserID UserID = " user-1 "
 		userID := UserIDFromString(" user-1 ")

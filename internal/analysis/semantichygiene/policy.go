@@ -35,6 +35,9 @@ const (
 	ruleGinkgoPending                      ruleID = "ginkgo.pending"
 	ruleGinkgoFlakeAttempts                ruleID = "ginkgo.flake-attempts"
 	ruleGinkgoRestrictedDecorator          ruleID = "ginkgo.restricted-decorator"
+	ruleGinkgoTaxonomyUnknownLabel         ruleID = "ginkgo.taxonomy-label.unknown"
+	ruleGinkgoTaxonomyDynamicLabel         ruleID = "ginkgo.taxonomy-label.dynamic"
+	ruleGinkgoTaxonomyMultipleLabels       ruleID = "ginkgo.taxonomy-label.multiple"
 	ruleGinkgoContainerCall                ruleID = "ginkgo.container-call"
 	ruleGinkgoContainerStateInitialization ruleID = "ginkgo.container-state-initialization"
 	ruleGinkgoEntrySetupValue              ruleID = "ginkgo.entry-setup-value"
@@ -142,6 +145,9 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleGinkgoPending:                      hardRule(ruleGinkgoPending),
 	ruleGinkgoFlakeAttempts:                hardRule(ruleGinkgoFlakeAttempts),
 	ruleGinkgoRestrictedDecorator:          hardRule(ruleGinkgoRestrictedDecorator),
+	ruleGinkgoTaxonomyUnknownLabel:         hardRule(ruleGinkgoTaxonomyUnknownLabel),
+	ruleGinkgoTaxonomyDynamicLabel:         hardRule(ruleGinkgoTaxonomyDynamicLabel),
+	ruleGinkgoTaxonomyMultipleLabels:       hardRule(ruleGinkgoTaxonomyMultipleLabels),
 	ruleGinkgoContainerCall:                hardRule(ruleGinkgoContainerCall),
 	ruleGinkgoContainerStateInitialization: hardRule(ruleGinkgoContainerStateInitialization),
 	ruleGinkgoEntrySetupValue:              hardRule(ruleGinkgoEntrySetupValue),

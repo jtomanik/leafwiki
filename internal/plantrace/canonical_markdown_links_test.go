@@ -81,7 +81,7 @@ var canonicalMarkdownLinksPlanScenarioCoverage = []canonicalPlanScenarioCoverage
 	{"Importer does not coerce assets with .md extension under asset namespaces", evidence("internal/importer/content_transformer_test.go", "asset markdown path remains unchanged")},
 	{"User can click a canonical page link in preview", evidence("e2e/tests/page.spec.ts", "preview-clicks-canonical-absolute-page-link-with-query-fragment")},
 	{"Workspace sync repairs links and shows validation errors for the rest", evidence("e2e/tests/workspace-sync.spec.ts", "workspace-sync-repairs-link-and-keeps-remaining-validation-error-in-same-sync")},
-	{"MCP agent context returns canonical examples", evidence("internal/wiki/mcp/mcp_integration_test.go", "LocalMCPGetContext_ReturnsAgentReadyContext")},
+	{"MCP agent context returns canonical examples", evidence("internal/wiki/mcp/mcp_integration_test.go", "returns agent-ready context state and canonical link examples")},
 	{"User can click a canonical section link in preview", evidence("e2e/tests/page.spec.ts", "preview-clicks-section-link-with-trailing-slash-and-canonicalizes-url")},
 	{"Preview shows a broken-link state for unresolved canonical page links", evidence("e2e/tests/page.spec.ts", "preview-shows-broken-state-for-unresolved-canonical-page-md-link")},
 	{"Direct browser route opens canonical .md page deep link", evidence("e2e/tests/page.spec.ts", "direct-browser-deep-link-page-md-opens-viewer-page")},

@@ -147,7 +147,7 @@ var invalidCanonicalMetadataRenderCases = []renderPageDocumentErrorCase{
 	},
 }
 
-var _ = ginkgo.Describe("metadata codec", func() {
+var _ = ginkgo.Describe("metadata codec", ginkgo.Label("unit"), func() {
 	ginkgo.It("parses canonical metadata comments without requiring writeback", func() {
 		raw := `<!-- leafwiki
 version: 1

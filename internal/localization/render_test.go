@@ -35,7 +35,7 @@ const (
 	testCatalogFixtureUsageDefault     = "Usage: leafwiki [command]"
 )
 
-var _ = Describe("English renderer", func() {
+var _ = Describe("English renderer", Label("unit"), func() {
 	It("renders catalog messages with positional arguments", func() {
 		rendered := English.Render("errors.page.version_conflict", "fallback", "docs.md", "README.md")
 
@@ -104,7 +104,7 @@ func (id stringMessageID) String() string {
 	return string(id)
 }
 
-var _ = Describe("localization fallback and catalog validation contracts", func() {
+var _ = Describe("localization fallback and catalog validation contracts", Label("unit"), func() {
 	It("nil renderer falls back using positional template data", func() {
 		var renderer *Renderer
 
