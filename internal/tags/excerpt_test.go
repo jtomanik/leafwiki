@@ -84,13 +84,13 @@ var _ = ginkgo.Describe("tag page excerpt extraction", func() {
 	})
 
 	ginkgo.It("truncates long content with an ellipsis", func() {
-		body := strings.Repeat("word ", 200)
+		body := strings.Repeat("w", excerpt.MaxRunes+20)
 		raw := "---\ntitle: T\n---\n\n" + body
 
 		got := ExtractExcerptFromContent(raw)
 
 		Expect(got).To(HaveSuffix("..."))
-		Expect(len([]rune(got))).To(BeNumerically("<=", excerpt.MaxRunes+10))
+		Expect([]rune(strings.TrimSuffix(got, "..."))).To(HaveLen(excerpt.MaxRunes))
 	})
 
 	ginkgo.It("leaves short content untruncated", func() {

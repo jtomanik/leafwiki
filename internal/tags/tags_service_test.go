@@ -278,7 +278,7 @@ func pageKind() *tree.NodeKind {
 func createPageWithTags(ts *tree.TreeService, title, slug string, tags []string) tree.PageID {
 	ginkgo.GinkgoHelper()
 
-	idPtr, err := ts.CreateNode("system", nil, title, newFixtureSlug(slug), pageKind())
+	idPtr, err := ts.CreateNode("system", nil, title, tree.SlugFromString(slug), pageKind())
 	Expect(err).NotTo(HaveOccurred())
 
 	frontmatter := "---\ntags:\n"
@@ -287,7 +287,7 @@ func createPageWithTags(ts *tree.TreeService, title, slug string, tags []string)
 	}
 	frontmatter += "---\n\n# " + title
 
-	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, newFixtureSlug(slug), &frontmatter, true)).To(Succeed())
+	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, tree.SlugFromString(slug), &frontmatter, true)).To(Succeed())
 
 	return *idPtr
 }

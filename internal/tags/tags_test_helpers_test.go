@@ -72,7 +72,7 @@ func matchFixturePageIDSet(ids ...string) types.GomegaMatcher {
 
 	pageIDs := make([]tree.PageID, 0, len(ids))
 	for _, id := range ids {
-		pageIDs = append(pageIDs, newFixturePageID(id))
+		pageIDs = append(pageIDs, tree.PageIDFromString(id))
 	}
 	return matchPageIDSet(pageIDs...)
 }
@@ -82,7 +82,7 @@ func matchPageIDsInOrder(ids ...string) types.GomegaMatcher {
 
 	pageIDs := make([]tree.PageID, 0, len(ids))
 	for _, id := range ids {
-		pageIDs = append(pageIDs, newFixturePageID(id))
+		pageIDs = append(pageIDs, tree.PageIDFromString(id))
 	}
 	return Equal(pageIDs)
 }
