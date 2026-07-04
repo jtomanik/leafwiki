@@ -262,8 +262,8 @@ var _ = DescribeTable("remote-user auth source detection",
 		}
 		Expect(authmw.IsRemoteUser(c)).To(Equal(expected))
 	},
-	Entry("returns true for reverse-proxy auth source", authmw.AuthSourceRemoteUser, true, true),
-	Entry("returns false for normal authenticated users", "session", true, false),
-	Entry("returns false when auth source is absent", nil, false, false),
-	Entry("returns false when auth source has the wrong type", 42, true, false),
+	Entry("recognizes contexts populated by reverse-proxy authentication", authmw.AuthSourceRemoteUser, true, true),
+	Entry("ignores session-authenticated contexts", "session", true, false),
+	Entry("ignores contexts without an auth source", nil, false, false),
+	Entry("ignores auth source values with the wrong type", 42, true, false),
 )
