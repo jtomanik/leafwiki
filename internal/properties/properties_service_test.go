@@ -50,10 +50,10 @@ func pageKind() *tree.NodeKind {
 func createPageWithContent(treeService *tree.TreeService, title, slug, content string) tree.PageID {
 	ginkgo.GinkgoHelper()
 
-	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, newFixtureSlug(slug), pageKind())
+	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), pageKind())
 	Expect(err).To(Succeed())
 	Expect(id).NotTo(BeNil())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, newFixtureSlug(slug), &content, true)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &content, true)).To(Succeed())
 	return *id
 }
 

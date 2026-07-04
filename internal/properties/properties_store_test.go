@@ -39,7 +39,7 @@ func newTestStore() *PropertiesStore {
 func testPageIDs(ids ...string) []tree.PageID {
 	pageIDs := make([]tree.PageID, 0, len(ids))
 	for _, id := range ids {
-		pageIDs = append(pageIDs, newFixturePageID(id))
+		pageIDs = append(pageIDs, tree.PageIDFromString(id))
 	}
 	return pageIDs
 }
