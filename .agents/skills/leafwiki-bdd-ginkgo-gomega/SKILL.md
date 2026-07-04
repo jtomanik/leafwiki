@@ -1,6 +1,6 @@
 ---
 name: leafwiki-bdd-ginkgo-gomega
-description: Use when writing, reviewing, or fixing LeafWiki Ginkgo/Gomega tests, especially semantic-hygiene failures, migrated Test-style specs, weak Gomega assertions, table specs, or specs that should read as system behaviour documentation.
+description: Use when writing, reviewing, or fixing LeafWiki Ginkgo/Gomega tests, especially semantic-hygiene failures, taxonomy labels, migrated Test-style specs, weak Gomega assertions, table specs, or specs that should read as system behaviour documentation.
 ---
 
 # LeafWiki BDD Ginkgo/Gomega
@@ -22,6 +22,47 @@ var _ = Describe("import plan creation", func() {
 ```
 
 The full name should read like: `import plan creation when the upload is not a zip returns a localized invalid-upload error`.
+
+## Taxonomy Labels
+
+Use exactly one primary taxonomy label for each runnable Go/Ginkgo spec when
+the boundary is clear. Missing labels are rollout debt. Invalid, dynamic, or
+multiple effective primary labels are checker failures.
+
+Ginkgo labels inherit. Label the narrowest truthful `Describe`,
+`DescribeTable`, `Entry`, or `It`; do not add a child label that conflicts with
+an inherited parent label. Mixed packages need spec/table/container labels, not
+a package-wide label.
+
+| Label | Use for | Do not use for |
+|---|---|---|
+| `unit` | one package/component contract, in process, deterministic; temp files are fine when the file format or layout is under test | real HTTP routes, MCP client/server, SQLite adapters, subprocesses, daemons, Fosite/OAuth, git-backed sync, or multi-service `wiki.NewWiki` stacks |
+| `integration` | multiple LeafWiki components wired together, or one component through a real in-process adapter boundary such as `httptest`, Gin middleware, SQLite stores, OAuth, MCP SDK/server, importer+wiki, workspace sync, daemon registries, or `wiki.NewWiki` | command/runtime build artifacts driven as a shipped product boundary |
+| `e2e` | Go/Ginkgo specs that act on a LeafWiki binary/build artifact through CLI, process stdio/status, API, MCP transport, started runtime HTTP/MCP, or filesystem effects | in-process command helper tests, Playwright browser tests, or Docker/reverse-proxy tests outside Go/Ginkgo |
+
+Bad taxonomy shape:
+
+```go
+var _ = Describe("page routes", Label("integration"), func() {
+	It("normalizes route paths", Label("unit"), func() {
+		// invalid: effective labels are integration and unit
+	})
+})
+```
+
+Good mixed-file shape:
+
+```go
+var _ = Describe("page routes", func() {
+	Describe("route path parsing", Label("unit"), func() {
+		It("normalizes repeated slashes", func() {})
+	})
+
+	Describe("HTTP route handling", Label("integration"), func() {
+		It("serves the normalized page", func() {})
+	})
+})
+```
 
 ## Bad -> Good
 
@@ -86,6 +127,7 @@ DescribeTable("configuration validation",
 | Do | Avoid |
 |---|---|
 | `Describe(subject) / When(condition) / It(outcome)` | top-level `It` or migrated `Test...` names |
+| One effective `Label("unit"|"integration"|"e2e")` at the narrowest truthful node | dynamic labels, unknown labels, or conflicting inherited labels |
 | Semantic domain matchers: `HaveWorkspaceID`, `ReportConfigIssue` | repeated field assertions and raw map/index assertions |
 | Typed IDs, semantic values, message IDs, validation codes | hardcoded prose, raw IDs, raw error strings |
 | `Expect(err).To(Succeed())` or meaningful `MatchError`/domain matcher | generic `HaveOccurred()` for meaningful failures |
@@ -121,10 +163,28 @@ When fixing semantic-hygiene findings, keep the checker strict and fix tests in 
 1. Replace `GinkgoT()` and `testing.T` failures inside specs with Gomega/Ginkgo-native assertions.
 2. Rename `Test...` Ginkgo nodes and table entries into behaviour descriptions.
 3. Move top-level `It`/`Specify` into meaningful containers, or use a tiny budgeted waiver only for a real package invariant.
-4. Convert wide table rows to struct rows with named fields.
-5. Extract semantic matchers where repeated field assertions obscure behaviour.
+4. Add or correct taxonomy labels only after the spec boundary is understood.
+5. Convert wide table rows to struct rows with named fields.
+6. Extract semantic matchers where repeated field assertions obscure behaviour.
 
-Do not add baselines, broad allowlists, `ginkgo-linter:ignore-*`, or checker relaxations to make the gate pass.
+Do not add baselines, broad allowlists, `//nolint`, `ginkgo-linter:ignore-*`,
+or checker relaxations to make the gate pass. Change the checker only to make a
+newly observed bad pattern fail, and add the red fixture first.
+
+## Fixer Contract
+
+A fixer thread should treat semantic-hygiene output as product-quality
+feedback, not as a linter to appease. The acceptable path is to improve the
+spec narrative, assertions, helpers, labels, or fixtures until the gate reflects
+real behaviour documentation.
+
+Reject changes that:
+
+- weaken or bypass semantic hygiene, ginkgolinter, or taxonomy policy
+- add labels by directory guess instead of reading the spec boundary
+- replace one weak assertion with another semantically equivalent weak form
+- rename specs to hide `Test...` without producing behaviour names
+- introduce broad helper abstractions whose only purpose is avoiding a rule
 
 ## Acceptance
 
