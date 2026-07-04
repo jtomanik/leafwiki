@@ -12,6 +12,7 @@ import (
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
+	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/tree"
 	sqlite "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -536,7 +537,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 
 		index, err := NewSQLiteIndex(storageDir)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchSQLitePrimaryCode(sqlite3.SQLITE_BUSY))
 		Expect(index).To(BeNil())
 	})
 
@@ -566,10 +567,10 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 			"broken",
 			"Broken",
 			tree.NodeKindPage,
-			"---\nleafwiki_id: [invalid: yaml: structure\n---\nBody",
+			"<!-- leafwiki",
 		)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(markdown.ErrMetadataParse))
 	})
 
 	ginkgo.It("returns database errors while indexing and removing pages", func() {
@@ -592,7 +593,7 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		Expect(insertErrorIndex.IndexPage("docs/insert-error", "docs/insert-error.md", "insert-error", "Insert Error", tree.NodeKindPage, "body")).To(matchSQLitePrimaryError())
 
 		rows, err := index.RemovePageByFilePath("docs/delete-error.md")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchSQLitePrimaryError())
 		Expect(rows).To(Equal(int64(0)))
 	})
 
@@ -643,21 +644,19 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 	ginkgo.It("returns row scan errors from malformed search rows", func() {
 		index := newSQLiteIndexForSpec()
 		Expect(index.withDB(func(db *sql.DB) error {
-			_, err := db.Exec(
-				`INSERT INTO pages (path, filepath, pageID, kind, title, headings, content) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				"docs/null-title",
-				"docs/null-title.md",
-				"null-title",
-				searchSQLiteNodeKindFromNodeKind(tree.NodeKindPage),
-				nil,
-				"",
-				"body",
-			)
+			if _, err := db.Exec(`DROP TABLE pages`); err != nil {
+				return err
+			}
+			if _, err := db.Exec(`CREATE TABLE pages (pageID INTEGER, path TEXT, kind TEXT, title TEXT, content TEXT)`); err != nil {
+				return err
+			}
+			_, err := db.Exec(`INSERT INTO pages (pageID, path, kind, title, content) VALUES (?, ?, ?, ?, ?)`,
+				42, "docs/answer", searchSQLiteNodeKindFromNodeKind(tree.NodeKindPage), "Answer", "body")
 			return err
 		})).To(Succeed())
 
-		_, err := index.Search("", []tree.PageID{"null-title"}, 0, 10)
-		Expect(err).To(HaveOccurred())
+		_, err := index.Search("", []tree.PageID{"42"}, 0, 10)
+		Expect(err).To(MatchError(tree.ErrScanPageID))
 
 		pageIDIndex := newSQLiteIndexForSpec()
 		Expect(pageIDIndex.withDB(func(db *sql.DB) error {
@@ -714,12 +713,12 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		Expect(err).To(MatchError(rowsErr))
 	})
 
-	ginkgo.DescribeTable("buildFuzzyQuery handles FTS and token edge cases",
+	ginkgo.DescribeTable("normalizes user search queries for full-text search",
 		func(input string, want string) {
 			Expect(buildFuzzyQuery(input)).To(Equal(want))
 		},
 		ginkgo.Entry("trims and appends wildcards", "  hello world  ", "hello* world*"),
-		ginkgo.Entry("keeps explicit FTS wildcard", "hello*", "hello*"),
+		ginkgo.Entry("keeps explicit full-text wildcard", "hello*", "hello*"),
 		ginkgo.Entry("keeps phrase query", `"hello world"`, `"hello world"`),
 		ginkgo.Entry("keeps boolean OR query", "hello OR world", "hello OR world"),
 		ginkgo.Entry("quotes special path-like token", "docs/page-name", `"docs/page-name"`),
@@ -802,11 +801,16 @@ func matchSearchItem(fields gstruct.Fields) types.GomegaMatcher {
 
 func matchSQLitePrimaryError() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
+	return matchSQLitePrimaryCode(sqlite3.SQLITE_ERROR)
+}
+
+func matchSQLitePrimaryCode(code int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
 	return WithTransform(func(err error) int {
 		var sqliteErr *sqlite.Error
 		if !errors.As(err, &sqliteErr) {
 			return -1
 		}
 		return sqliteErr.Code() & 0xFF
-	}, Equal(sqlite3.SQLITE_ERROR))
+	}, Equal(code))
 }
