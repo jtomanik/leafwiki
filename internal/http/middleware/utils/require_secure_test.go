@@ -2,12 +2,21 @@ package utils
 
 import (
 	"crypto/tls"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+)
+
+type secureTransportOutcome string
+
+const (
+	secureTransportAccepted   secureTransportOutcome = "secure transport accepted"
+	insecureTransportAllowed  secureTransportOutcome = "insecure transport allowed"
+	insecureTransportRejected secureTransportOutcome = "insecure transport rejected"
 )
 
 var _ = Describe("RequireSecure", func() {
@@ -19,20 +28,20 @@ var _ = Describe("RequireSecure", func() {
 		ctx := requireSecureContext(nil)
 		ctx.Request.TLS = &tls.ConnectionState{}
 
-		secure, err := RequireSecure(ctx, false)
+		outcome, err := requireSecureTransportOutcome(ctx, false)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(secure).To(BeTrue())
+		Expect(outcome).To(Equal(secureTransportAccepted))
 	})
 
 	DescribeTable("accepts trusted HTTPS forwarding headers",
 		func(headers http.Header) {
 			ctx := requireSecureContext(headers)
 
-			secure, err := RequireSecure(ctx, false)
+			outcome, err := requireSecureTransportOutcome(ctx, false)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(secure).To(BeTrue())
+			Expect(outcome).To(Equal(secureTransportAccepted))
 		},
 		Entry("X-Forwarded-Proto HTTPS", http.Header{"X-Forwarded-Proto": []string{"HTTPS"}}),
 		Entry("X-Forwarded-Proto chain containing HTTPS", http.Header{"X-Forwarded-Proto": []string{"http, https"}}),
@@ -43,21 +52,37 @@ var _ = Describe("RequireSecure", func() {
 	It("allows insecure requests when configured", func() {
 		ctx := requireSecureContext(nil)
 
-		secure, err := RequireSecure(ctx, true)
+		outcome, err := requireSecureTransportOutcome(ctx, true)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(secure).To(BeFalse())
+		Expect(outcome).To(Equal(insecureTransportAllowed))
 	})
 
 	It("rejects insecure requests when secure cookies are required", func() {
 		ctx := requireSecureContext(nil)
 
-		secure, err := RequireSecure(ctx, false)
+		outcome, err := requireSecureTransportOutcome(ctx, false)
 
 		Expect(err).To(MatchError(ErrHTTPSRequired))
-		Expect(secure).To(BeFalse())
+		Expect(outcome).To(Equal(insecureTransportRejected))
 	})
 })
+
+func requireSecureTransportOutcome(ctx *gin.Context, allowInsecure bool) (secureTransportOutcome, error) {
+	GinkgoHelper()
+
+	secure, err := RequireSecure(ctx, allowInsecure)
+	if errors.Is(err, ErrHTTPSRequired) {
+		return insecureTransportRejected, err
+	}
+	if err != nil {
+		return "", err
+	}
+	if secure {
+		return secureTransportAccepted, nil
+	}
+	return insecureTransportAllowed, nil
+}
 
 func requireSecureContext(headers http.Header) *gin.Context {
 	GinkgoHelper()
