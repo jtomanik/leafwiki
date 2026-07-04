@@ -21,23 +21,23 @@ var _ = DescribeTable("SQLite recoverable error classification",
 	func(tc sqliteErrorCase) {
 		Expect(IsSQLiteRecoverableError(tc.err)).To(Equal(tc.want))
 	},
-	Entry("treats SQLITE_IOERR as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(10), want: true}),
-	Entry("treats SQLITE_CORRUPT as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(11), want: true}),
-	Entry("treats SQLITE_NOTADB as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(26), want: true}),
-	Entry("does not treat SQLITE_IOERR_NOMEM as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(10 | (12 << 8)), want: false}),
-	Entry("does not treat SQLITE_BUSY as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(5), want: false}),
-	Entry("does not treat SQLITE_LOCKED as recoverable", sqliteErrorCase{err: sqliteErrorWithCode(6), want: false}),
-	Entry("does not treat non-SQLite errors as recoverable", sqliteErrorCase{err: errors.New("boom"), want: false}),
+	Entry("accepts primary disk I/O failures for database rebuild", sqliteErrorCase{err: sqliteErrorWithCode(10), want: true}),
+	Entry("accepts corrupt database images for database rebuild", sqliteErrorCase{err: sqliteErrorWithCode(11), want: true}),
+	Entry("accepts non-database files for database rebuild", sqliteErrorCase{err: sqliteErrorWithCode(26), want: true}),
+	Entry("rejects extended out-of-memory I/O failures from rebuild recovery", sqliteErrorCase{err: sqliteErrorWithCode(10 | (12 << 8)), want: false}),
+	Entry("rejects busy lock contention from rebuild recovery", sqliteErrorCase{err: sqliteErrorWithCode(5), want: false}),
+	Entry("rejects locked database contention from rebuild recovery", sqliteErrorCase{err: sqliteErrorWithCode(6), want: false}),
+	Entry("rejects ordinary errors from rebuild recovery", sqliteErrorCase{err: errors.New("boom"), want: false}),
 )
 
 var _ = DescribeTable("SQLite transient lock error classification",
 	func(tc sqliteErrorCase) {
 		Expect(IsSQLiteTransientLockError(tc.err)).To(Equal(tc.want))
 	},
-	Entry("treats SQLITE_BUSY as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(5), want: true}),
-	Entry("treats SQLITE_LOCKED as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(6), want: true}),
-	Entry("does not treat SQLITE_IOERR as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(10), want: false}),
-	Entry("does not treat non-SQLite errors as transient lock contention", sqliteErrorCase{err: errors.New("boom"), want: false}),
+	Entry("recognizes busy database responses as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(5), want: true}),
+	Entry("recognizes locked database responses as transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(6), want: true}),
+	Entry("rejects disk I/O failures from transient lock contention", sqliteErrorCase{err: sqliteErrorWithCode(10), want: false}),
+	Entry("rejects ordinary errors from transient lock contention", sqliteErrorCase{err: errors.New("boom"), want: false}),
 )
 
 var _ = Describe("SQLite file cleanup", func() {
