@@ -15,7 +15,7 @@ var _ = ginkgo.Describe("auth seam failure behavior", func() {
 	ginkgo.Describe("API key service branches", func() {
 		ginkgo.It("propagates random and store failures while creating API keys", func() {
 			_, _, _, service, user := setupTestAPIKeyService()
-			userID := newFixtureUserID(user.ID)
+			userID := UserIDFromString(user.ID)
 
 			idRandomErr := errors.New("id random failed")
 			restoreRand := setAuthSeam(&authRandRead, func([]byte) (int, error) {
@@ -324,7 +324,7 @@ var _ = ginkgo.Describe("auth seam failure behavior", func() {
 
 			admin, err := service.CreateUser("admin", "admin@example.com", "password", RoleAdmin)
 			Expect(err).NotTo(HaveOccurred())
-			adminID := newFixtureUserID(admin.ID)
+			adminID := UserIDFromString(admin.ID)
 
 			countErr := errors.New("count failed")
 			restoreCount := setAuthSeam(&authUserStoreCountAdminUsers, func(*UserStore) (int, error) {
@@ -365,7 +365,7 @@ var _ = ginkgo.Describe("auth seam failure behavior", func() {
 			restoreDelete := setAuthSeam(&authUserStoreDeleteUser, func(*UserStore, UserID) error {
 				return deleteErr
 			})
-			Expect(service.DeleteUser(newFixtureUserID(editor.ID))).To(MatchError(deleteErr))
+			Expect(service.DeleteUser(UserIDFromString(editor.ID))).To(MatchError(deleteErr))
 			restoreDelete()
 
 			listErr := errors.New("list failed")
@@ -446,7 +446,7 @@ var _ = ginkgo.Describe("auth seam failure behavior", func() {
 			restoreHash := setAuthSeam(&authGeneratePasswordHash, func([]byte, int) ([]byte, error) {
 				return nil, ownHashErr
 			})
-			Expect(service.ChangeOwnPassword(newFixtureUserID(user.ID), "old", "new")).To(MatchError(ownHashErr))
+			Expect(service.ChangeOwnPassword(UserIDFromString(user.ID), "old", "new")).To(MatchError(ownHashErr))
 			restoreHash()
 		})
 	})

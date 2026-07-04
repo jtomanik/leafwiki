@@ -209,7 +209,7 @@ func (m apiKeyVerificationMatcher) NegatedFailureMessage(actual interface{}) str
 var _ = ginkgo.Describe("api key service", func() {
 	ginkgo.It("stores only the API key hash and lists the public key metadata", func() {
 		_, _, store, service, user := setupTestAPIKeyService()
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 
 		created, err := service.CreateAPIKey(userID, "  Local Codex  ", userID)
 		Expect(err).To(Succeed())
@@ -228,7 +228,7 @@ var _ = ginkgo.Describe("api key service", func() {
 
 	ginkgo.It("verifies active API keys and rejects malformed revoked or orphaned credentials", func() {
 		_, userService, _, service, user := setupTestAPIKeyService()
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 
 		created, err := service.CreateAPIKey(userID, "MCP client", userID)
 		Expect(err).To(Succeed())
@@ -269,7 +269,7 @@ var _ = ginkgo.Describe("api key service", func() {
 
 	ginkgo.It("waits out a transient last-used write lock while verifying a key", func() {
 		storageDir, _, _, service, user := setupTestAPIKeyService()
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 		created, err := service.CreateAPIKey(userID, "MCP client", userID)
 		Expect(err).To(Succeed())
 
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("api key service", func() {
 
 	ginkgo.It("waits out a transient API key lookup lock while verifying a key", func() {
 		storageDir, _, _, service, user := setupTestAPIKeyService()
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 		created, err := service.CreateAPIKey(userID, "MCP client", userID)
 		Expect(err).To(Succeed())
 
@@ -326,7 +326,7 @@ var _ = ginkgo.Describe("api key service", func() {
 
 	ginkgo.It("waits out a transient user lookup lock while verifying a key", func() {
 		storageDir, _, _, service, user := setupTestAPIKeyService()
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 		created, err := service.CreateAPIKey(userID, "MCP client", userID)
 		Expect(err).To(Succeed())
 
@@ -352,11 +352,11 @@ var _ = ginkgo.Describe("api key service", func() {
 
 	ginkgo.It("keeps another user's API key active when revocation is requested by the wrong owner", func() {
 		_, userService, _, service, user := setupTestAPIKeyService()
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 		other, err := userService.CreateUser("other", "other@example.com", "password123", RoleEditor)
 		Expect(err).To(Succeed())
 
-		created, err := service.CreateAPIKey(newFixtureUserID(other.ID), "Other key", userID)
+		created, err := service.CreateAPIKey(UserIDFromString(other.ID), "Other key", userID)
 		Expect(err).To(Succeed())
 
 		Expect(service.RevokeAPIKey(userID, created.Key.ID)).To(SatisfyAny(
@@ -369,7 +369,7 @@ var _ = ginkgo.Describe("api key service", func() {
 
 	ginkgo.It("rejects last-used updates for revoked API keys", func() {
 		_, _, store, service, user := setupTestAPIKeyService()
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 
 		created, err := service.CreateAPIKey(userID, "Race key", userID)
 		Expect(err).To(Succeed())

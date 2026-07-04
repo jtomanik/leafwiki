@@ -87,7 +87,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 
 		ginkgo.It("rejects empty names and missing referenced users before storing a key", func() {
 			_, _, _, service, user := setupTestAPIKeyService()
-			userID := newFixtureUserID(user.ID)
+			userID := UserIDFromString(user.ID)
 
 			_, err := service.CreateAPIKey(userID, "  \t  ", userID)
 			Expect(err).To(Equal(ErrAPIKeyInvalidName))
@@ -286,10 +286,10 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 			bob, err := service.CreateUser("bob", "bob@example.com", "password", RoleViewer)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = service.UpdateUser(newFixtureUserID(bob.ID), alice.Username, bob.Email, "", RoleViewer)
+			_, err = service.UpdateUser(UserIDFromString(bob.ID), alice.Username, bob.Email, "", RoleViewer)
 			Expect(err).To(Equal(ErrUserAlreadyExists))
 
-			_, err = service.UpdateUser(newFixtureUserID(bob.ID), bob.Username, alice.Email, "", RoleViewer)
+			_, err = service.UpdateUser(UserIDFromString(bob.ID), bob.Username, alice.Email, "", RoleViewer)
 			Expect(err).To(Equal(ErrUserAlreadyExists))
 		})
 
@@ -299,7 +299,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 
 			user, err := service.CreateUser("carol", "carol@example.com", "password", RoleEditor)
 			Expect(err).NotTo(HaveOccurred())
-			_, err = service.UpdateUser(newFixtureUserID(user.ID), user.Username, user.Email, "", "owner")
+			_, err = service.UpdateUser(UserIDFromString(user.ID), user.Username, user.Email, "", "owner")
 			Expect(err).To(Equal(ErrUserInvalidRole))
 
 			_, err = service.UpdateUser(newFixtureUserID("missing-user"), "missing", "missing@example.com", "", RoleViewer)
@@ -313,7 +313,7 @@ var _ = ginkgo.Describe("auth boundary behavior", func() {
 		ginkgo.It("updates passwords directly and rejects missing password-login identifiers", func() {
 			user, err := service.CreateUser("dana", "dana@example.com", "old-password", RoleEditor)
 			Expect(err).NotTo(HaveOccurred())
-			userID := newFixtureUserID(user.ID)
+			userID := UserIDFromString(user.ID)
 
 			Expect(service.UpdatePassword(userID, "new-password")).To(Succeed())
 			_, err = service.GetUserByEmailOrUsernameAndPassword("dana", "old-password")

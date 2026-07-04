@@ -45,24 +45,24 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(empty).To(BeNil())
 
-		aliceLabel, err := resolver.ResolveUserLabel(newFixtureUserID(alice.ID))
+		aliceLabel, err := resolver.ResolveUserLabel(UserIDFromString(alice.ID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(aliceLabel).To(Equal(&UserLabel{ID: alice.ID, Username: "alice"}))
 
 		bob, err := service.CreateUser("bob", "bob@example.com", "bobpass", RoleViewer)
 		Expect(err).NotTo(HaveOccurred())
-		bobLabel, err := resolver.ResolveUserLabel(newFixtureUserID(bob.ID))
+		bobLabel, err := resolver.ResolveUserLabel(UserIDFromString(bob.ID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(bobLabel).To(Equal(&UserLabel{ID: bob.ID, Username: "bob"}))
 
-		_, err = service.UpdateUser(newFixtureUserID(alice.ID), "alice-renamed", "alice@example.com", "", RoleEditor)
+		_, err = service.UpdateUser(UserIDFromString(alice.ID), "alice-renamed", "alice@example.com", "", RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
-		cachedLabel, err := resolver.ResolveUserLabel(newFixtureUserID(alice.ID))
+		cachedLabel, err := resolver.ResolveUserLabel(UserIDFromString(alice.ID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cachedLabel.Username).To(Equal("alice"))
 
 		Expect(resolver.Reload()).To(Succeed())
-		reloadedLabel, err := resolver.ResolveUserLabel(newFixtureUserID(alice.ID))
+		reloadedLabel, err := resolver.ResolveUserLabel(UserIDFromString(alice.ID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reloadedLabel.Username).To(Equal("alice-renamed"))
 	})
@@ -74,9 +74,9 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		user, err := service.CreateUser("charlie", "charlie@example.com", "correct-password", RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(acceptedAuthPassword(service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "correct-password"))).To(Succeed())
+		Expect(acceptedAuthPassword(service.DoesIDAndPasswordMatch(UserIDFromString(user.ID), "correct-password"))).To(Succeed())
 
-		Expect(rejectedAuthPassword(service.DoesIDAndPasswordMatch(newFixtureUserID(user.ID), "wrong-password"))).To(Equal(ErrUserInvalidCredentials))
+		Expect(rejectedAuthPassword(service.DoesIDAndPasswordMatch(UserIDFromString(user.ID), "wrong-password"))).To(Equal(ErrUserInvalidCredentials))
 
 		Expect(rejectedAuthPassword(service.DoesIDAndPasswordMatch(newFixtureUserID("missing-user"), "correct-password"))).To(Equal(ErrUserNotFound))
 	})
@@ -112,7 +112,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 
 		user, err := service.CreateUser("erin", "erin@example.com", "old-password", RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 
 		Expect(service.ChangeOwnPassword(userID, "wrong-password", "new-password")).To(Equal(ErrUserInvalidCredentials))
 		_, err = service.GetUserByEmailOrUsernameAndPassword("erin", "old-password")

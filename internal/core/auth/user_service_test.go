@@ -62,7 +62,7 @@ var _ = ginkgo.Describe("user service", func() {
 		service := setupTestUserService()
 
 		user, _ := service.CreateUser("bob", "bob@example.com", "initial", "editor")
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 
 		updated, err := service.UpdateUser(userID, "bobnew", "bobnew@example.com", "newpass", "admin")
 		Expect(err).NotTo(HaveOccurred())
@@ -77,7 +77,7 @@ var _ = ginkgo.Describe("user service", func() {
 		service := setupTestUserService()
 
 		user, _ := service.CreateUser("bob", "bob@example.com", "initial", RoleEditor)
-		userID := newFixtureUserID(user.ID)
+		userID := UserIDFromString(user.ID)
 
 		updated, err := service.UpdateUser(userID, "bobnew", "bobnew@example.com", "", "")
 		Expect(err).NotTo(HaveOccurred())
@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("user service", func() {
 
 		admin, _ := service.CreateUser("admin", "admin@example.com", "pass", RoleAdmin)
 
-		_, err := service.UpdateUser(newFixtureUserID(admin.ID), admin.Username, admin.Email, "", RoleViewer)
+		_, err := service.UpdateUser(UserIDFromString(admin.ID), admin.Username, admin.Email, "", RoleViewer)
 		Expect(err).To(MatchError(ErrLastAdminCannotBeDemoted))
 	})
 
@@ -102,7 +102,7 @@ var _ = ginkgo.Describe("user service", func() {
 		admin1, _ := service.CreateUser("admin1", "admin1@example.com", "pass", RoleAdmin)
 		_, _ = service.CreateUser("admin2", "admin2@example.com", "pass", RoleAdmin)
 
-		updated, err := service.UpdateUser(newFixtureUserID(admin1.ID), admin1.Username, admin1.Email, "", RoleViewer)
+		updated, err := service.UpdateUser(UserIDFromString(admin1.ID), admin1.Username, admin1.Email, "", RoleViewer)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(updated.Role).To(Equal(RoleViewer))
 	})
@@ -111,11 +111,11 @@ var _ = ginkgo.Describe("user service", func() {
 		service := setupTestUserService()
 
 		admin, _ := service.CreateUser("admin", "admin@example.com", "secret", "admin")
-		err := service.DeleteUser(newFixtureUserID(admin.ID))
+		err := service.DeleteUser(UserIDFromString(admin.ID))
 		Expect(err).To(MatchError(ErrUserAdminCannotBeDeleted))
 
 		editor, _ := service.CreateUser("editor", "editor@example.com", "secret", "editor")
-		err = service.DeleteUser(newFixtureUserID(editor.ID))
+		err = service.DeleteUser(UserIDFromString(editor.ID))
 		Expect(err).NotTo(HaveOccurred())
 	})
 

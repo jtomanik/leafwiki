@@ -95,7 +95,7 @@ var _ = ginkgo.Describe("auth service", func() {
 		user, err := authService.ValidateToken(tokens1.Token)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = authService.RevokeAllUserSessions(newFixtureUserID(user.ID))
+		err = authService.RevokeAllUserSessions(UserIDFromString(user.ID))
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = authService.RefreshToken(tokens1.RefreshToken)
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("auth service", func() {
 		user1, err := authService.ValidateToken(tokens1.Token)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = authService.RevokeAllUserSessions(newFixtureUserID(user1.ID))
+		err = authService.RevokeAllUserSessions(UserIDFromString(user1.ID))
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = authService.RefreshToken(tokens1.RefreshToken)

@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("user store", func() {
 
 		Expect(store.CreateUser(user)).To(Succeed())
 
-		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
+		retrievedUser, err := store.GetUserByID(UserIDFromString(user.ID))
 		Expect(err).To(Succeed())
 		Expect(retrievedUser).To(matchStoredUser(user))
 	})
@@ -120,7 +120,7 @@ var _ = ginkgo.Describe("user store", func() {
 		_, err := store.GetUserByID(newFixtureUserID("non-existing-id"))
 		Expect(err).To(MatchError(ErrUserNotFound))
 
-		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
+		retrievedUser, err := store.GetUserByID(UserIDFromString(user.ID))
 		Expect(err).To(Succeed())
 		Expect(retrievedUser).To(matchStoredUser(user))
 	})
@@ -140,7 +140,7 @@ var _ = ginkgo.Describe("user store", func() {
 		user.Password = "newpassword"
 		Expect(store.UpdateUser(user)).To(Succeed())
 
-		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
+		retrievedUser, err := store.GetUserByID(UserIDFromString(user.ID))
 		Expect(err).To(Succeed())
 		Expect(retrievedUser).To(matchStoredUser(user))
 		Expect(store.UpdateUser(&User{
@@ -242,9 +242,9 @@ var _ = ginkgo.Describe("user store", func() {
 		Expect(err).To(Succeed())
 		initialCount := len(users)
 
-		Expect(store.DeleteUser(newFixtureUserID(user.ID))).To(Succeed())
+		Expect(store.DeleteUser(UserIDFromString(user.ID))).To(Succeed())
 
-		_, err = store.GetUserByID(newFixtureUserID(user.ID))
+		_, err = store.GetUserByID(UserIDFromString(user.ID))
 		Expect(err).To(MatchError(ErrUserNotFound))
 		users, err = store.GetAllUsers()
 		Expect(err).To(Succeed())
@@ -363,9 +363,9 @@ var _ = ginkgo.Describe("user store", func() {
 		}
 
 		Expect(store.CreateUser(user)).To(Succeed())
-		Expect(store.UpdatePassword(newFixtureUserID(user.ID), "newpassword")).To(Succeed())
+		Expect(store.UpdatePassword(UserIDFromString(user.ID), "newpassword")).To(Succeed())
 
-		retrievedUser, err := store.GetUserByID(newFixtureUserID(user.ID))
+		retrievedUser, err := store.GetUserByID(UserIDFromString(user.ID))
 		Expect(err).To(Succeed())
 		Expect(retrievedUser).To(HaveField("Password", "newpassword"))
 	})
