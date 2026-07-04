@@ -9,7 +9,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
-	"github.com/onsi/gomega/types"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -199,21 +198,4 @@ func writeValidationMarkdown(filePath string, content string) {
 	GinkgoHelper()
 	Expect(os.MkdirAll(filepath.Dir(filePath), 0o755)).To(Succeed())
 	Expect(os.WriteFile(filePath, []byte(content), 0o644)).To(Succeed())
-}
-
-func validationIssueCodeCount(result wikivalidation.Result, code wikivalidation.IssueCode) int {
-	count := 0
-	for _, issue := range result.Issues {
-		if issue.Code == code {
-			count++
-		}
-	}
-	return count
-}
-
-func matchMarkdownValidationIssue(code wikivalidation.IssueCode) types.GomegaMatcher {
-	GinkgoHelper()
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Code": Equal(code),
-	})
 }

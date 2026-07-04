@@ -4432,15 +4432,6 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-func containsToolProtocolName(values []string, want wikimcp.ToolProtocolName) bool {
-	for _, value := range values {
-		if wikimcp.ToolProtocolNameFromWireName(value) == want {
-			return true
-		}
-	}
-	return false
-}
-
 func callToolStructured(session *sdkmcp.ClientSession, name string, args map[string]any) map[string]any {
 	GinkgoHelper()
 
@@ -5160,9 +5151,10 @@ func issueHTTPCSRF(router http.Handler) (string, []*http.Cookie) {
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	token := rec.Header().Get("X-CSRF-Token")
 	result := rec.Result()
-	defer result.Body.Close()
+	cookies := result.Cookies()
+	Expect(result.Body.Close()).To(Succeed())
 	if token == "" {
-		for _, cookie := range result.Cookies() {
+		for _, cookie := range cookies {
 			if cookie.Name == "leafwiki_csrf" || cookie.Name == "__Host-leafwiki_csrf" {
 				token = cookie.Value
 				break
@@ -5170,7 +5162,7 @@ func issueHTTPCSRF(router http.Handler) (string, []*http.Cookie) {
 		}
 	}
 	Expect(token).NotTo(BeEmpty())
-	return token, result.Cookies()
+	return token, cookies
 }
 
 func nestedMap(value map[string]any, key string) map[string]any {
@@ -5210,35 +5202,6 @@ func stringSliceField(value map[string]any, key string) []string {
 		out = append(out, item.(string))
 	}
 	return out
-}
-
-func arrayContainsObjectField(value any, field string, want any) bool {
-	items, ok := value.([]any)
-	if !ok {
-		return false
-	}
-	for _, item := range items {
-		obj, ok := item.(map[string]any)
-		if ok && obj[field] == want {
-			return true
-		}
-	}
-	return false
-}
-
-func objectWithField(value any, field string, want any) map[string]any {
-	GinkgoHelper()
-
-	Expect(value).To(BeAssignableToTypeOf([]any{}), "value should be an array")
-	items := value.([]any)
-	for _, item := range items {
-		obj, ok := item.(map[string]any)
-		if ok && obj[field] == want {
-			return obj
-		}
-	}
-	Expect(items).To(ContainElement(HaveKeyWithValue(field, want)), "array should include object with %s=%#v", field, want)
-	return nil
 }
 
 func changedPathsFromContext(output map[string]any) map[string]bool {
@@ -5342,15 +5305,6 @@ func validationIssueCodes(output map[string]any) ([]wikivalidation.IssueCode, er
 	return codes, nil
 }
 
-func containsIssueCode(codes []wikivalidation.IssueCode, want wikivalidation.IssueCode) bool {
-	for _, code := range codes {
-		if code == want {
-			return true
-		}
-	}
-	return false
-}
-
 func validationIssueCodeCount(output map[string]any, wantCode wikivalidation.IssueCode, wantPath string) int {
 	GinkgoHelper()
 
@@ -5370,17 +5324,4 @@ func assertRecentChangesIncludePath(output map[string]any, wantPath string) {
 	GinkgoHelper()
 
 	Expect(changedPathsFromChanges(arrayField(output, "recentChanges"))).To(HaveKey(wantPath))
-}
-
-func arrayContainsString(value any, want string) bool {
-	items, ok := value.([]any)
-	if !ok {
-		return false
-	}
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
 }

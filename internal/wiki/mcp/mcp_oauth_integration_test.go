@@ -681,7 +681,8 @@ var _ = Describe("local MCP OAuth bearer protection", Label("integration"), func
 		))
 
 		rec = performRequest(router, http.MethodPost, "http://leafwiki.local/mcp", nil, strings.NewReader("{}"))
-		rec.Result().Body.Close()
+		result := rec.Result()
+		Expect(result.Body.Close()).To(Succeed())
 		req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader("{}"))
 		req.RemoteAddr = "127.0.0.1:12345"
 		req.Header.Set("Authorization", "Bearer invalid-token")

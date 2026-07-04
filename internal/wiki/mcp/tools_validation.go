@@ -124,15 +124,24 @@ func (r *Routes) validateLoadedTree(ctx context.Context) wikivalidation.Result {
 	if r.treeService == nil {
 		return result
 	}
-	_ = r.treeService.WalkNodes(func(id tree.PageID) error {
+	walkErr := r.treeService.WalkNodes(func(id tree.PageID) error {
 		page, err := r.treeService.GetPage(id)
 		if err != nil {
-			return nil
+			return err
 		}
 		routePath := tree.RoutePathFromString(strings.Trim(page.CalculatePath(), "/"))
 		result = wikivalidation.Combine(result, r.validateMarkdownContent(ctx, routePath, page.RawContent, page.ID, page.Kind))
 		return nil
 	})
+	if walkErr != nil {
+		return validationResultFromIssues([]wikivalidation.Issue{{
+			Severity:   wikivalidation.IssueSeverityError,
+			Code:       wikivalidation.IssueCodeWorkspaceScanError,
+			SourcePath: tree.MarkdownPathFromString("workspace"),
+			MessageID:  wikivalidation.IssueCodeWorkspaceScanError.MessageID(),
+			Message:    walkErr.Error(),
+		}})
+	}
 	return result
 }
 

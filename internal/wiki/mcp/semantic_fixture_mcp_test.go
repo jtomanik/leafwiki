@@ -11,11 +11,3 @@ func newFixturePageID[T ~string](raw T) tree.PageID {
 func newFixtureRoutePath[T ~string](raw T) tree.RoutePath {
 	return tree.NewRoutePathUnchecked(string(raw))
 }
-
-func newFixtureSlug[T ~string](raw T) tree.Slug {
-	return tree.NewSlugUnchecked(raw)
-}
-
-func newFixtureUserID[T ~string](raw T) tree.UserID {
-	return tree.NewUserIDUnchecked(string(raw))
-}
