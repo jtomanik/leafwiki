@@ -769,14 +769,15 @@ var _ = Describe("HTTP router", func() {
 		router.ServeHTTP(rec, req)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d: %s", rec.Code, rec.Body.String())
 
-		entry := findJSONLogEntry(logs.String(), "http request")
-		Expect(entry).To(SatisfyAll(
+		entries := jsonLogEntries(logs.String())
+		Expect(entries).To(ContainElement(SatisfyAll(
+			HaveKeyWithValue("msg", "http request"),
 			HaveKeyWithValue("method", http.MethodGet),
 			HaveKeyWithValue("path", "/api/health"),
 			HaveKeyWithValue("status", float64(http.StatusOK)),
 			HaveKey("latency"),
 			HaveKey("ip"),
-		), "http request log entry = %#v", entry)
+		)), "request log entries = %#v", entries)
 
 	})
 })
@@ -5784,9 +5785,10 @@ func captureDefaultLogs() *bytes.Buffer {
 	return &logs
 }
 
-func findJSONLogEntry(logs string, msg string) map[string]any {
+func jsonLogEntries(logs string) []map[string]any {
 	GinkgoHelper()
 
+	entries := []map[string]any{}
 	for _, line := range strings.Split(strings.TrimSpace(logs), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -5797,10 +5799,7 @@ func findJSONLogEntry(logs string, msg string) map[string]any {
 			Expect(err).NotTo(HaveOccurred(), "log line is not JSON: %v\n%s", err, line)
 		}
 
-		if entry["msg"] == msg {
-			return entry
-		}
+		entries = append(entries, entry)
 	}
-	Fail(fmt.Sprintf("logs did not contain msg %q:\n%s", msg, logs))
-	return nil
+	return entries
 }
