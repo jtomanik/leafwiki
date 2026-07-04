@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("markdown section replacement", func() {
+var _ = ginkgo.Describe("markdown section replacement", ginkgo.Label("unit"), func() {
 	ginkgo.It("replaces a nested heading while preserving sibling sections", func() {
 		content := "# Guide\n\n## API\n\n### Auth\n\nold auth\n\n### Rate Limits\n\nkeep rate limits\n\n## Other\n\nkeep other\n"
 

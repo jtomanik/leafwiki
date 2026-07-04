@@ -12,6 +12,7 @@ type apiSuccessMessageCase struct {
 }
 
 var _ = ginkgo.DescribeTable("API success message catalog resolution",
+	ginkgo.Label("unit"),
 	func(tc apiSuccessMessageCase) {
 		Expect(tc.messageID).To(ResolveCatalogMessage())
 	},

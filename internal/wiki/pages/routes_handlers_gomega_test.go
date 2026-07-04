@@ -73,7 +73,7 @@ func matchRouteSuccessMessage(messageID sharederrors.MessageID) types.GomegaMatc
 	})
 }
 
-var _ = ginkgo.Describe("page route handlers", func() {
+var _ = ginkgo.Describe("page route handlers", ginkgo.Label("integration"), func() {
 	ginkgo.BeforeEach(func() {
 		gin.SetMode(gin.TestMode)
 	})

@@ -29,7 +29,7 @@ import (
 const pageMetadataWhitespacePropertyKeyFixture = " key "
 
 var _ = ginkgo.Describe("deterministic page helper edges", func() {
-	ginkgo.It("rejects invalid markdown section targets and metadata patch fields", func() {
+	ginkgo.It("rejects invalid markdown section targets and metadata patch fields", ginkgo.Label("unit"), func() {
 		_, err := ReplaceMarkdownSection("# Page\n", []string{" "}, 0, "")
 		Expect(err).To(MatchError(ErrSectionHeadingPathRequired))
 
@@ -71,7 +71,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		))
 	})
 
-	ginkgo.It("normalizes metadata and resolves README fallback pages", func() {
+	ginkgo.It("normalizes metadata and resolves README fallback pages", ginkgo.Label("unit"), func() {
 		page := &dto.Page{Node: &dto.Node{ID: "page-1"}}
 		EnrichPageMetadata(page, func(tree.PageID) (string, error) {
 			return "<!-- leafwiki malformed\n-->\nbody", nil
@@ -124,7 +124,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(out.Page).To(BeIdenticalTo(sectionPage))
 	})
 
-	ginkgo.It("validates page lookup permalink slug and error contracts", func() {
+	ginkgo.It("validates page lookup permalink slug and error contracts", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		docs := deps.createPage("Docs", "docs", tree.NodeKindSection, nil)
 		guide := deps.createPage("Guide", "guide", tree.NodeKindPage, &docs.ID)
@@ -173,7 +173,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(pageErrorStatus(sharederrors.ErrorCode("unknown"))).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("normalizes route input for root README metadata and versions", func() {
+	ginkgo.It("normalizes route input for root README metadata and versions", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		var noKind tree.NodeKind
 
@@ -233,7 +233,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		))
 	})
 
-	ginkgo.It("deduplicates and sorts refactor warnings deterministically", func() {
+	ginkgo.It("deduplicates and sorts refactor warnings deterministically", ginkgo.Label("unit"), func() {
 		first := RefactorWarning{MessageID: sharederrors.MessageID("warnings.refactor.a"), Message: "beta"}
 		second := RefactorWarning{MessageID: sharederrors.MessageID("warnings.refactor.a"), Message: "alpha"}
 		third := RefactorWarning{MessageID: sharederrors.MessageID("warnings.refactor.b"), Message: "alpha"}
@@ -254,7 +254,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(ensureRefactorWarnings([]RefactorWarning{first})).To(Equal([]RefactorWarning{first}))
 	})
 
-	ginkgo.It("rejects invalid direct page use-case requests", func() {
+	ginkgo.It("rejects invalid direct page use-case requests", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		userID := tree.UserIDFromString("pages-direct-user")
 
@@ -289,7 +289,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(HavePageValidationFields("path", "title"))
 	})
 
-	ginkgo.It("records direct mutation events for create, update, and delete use cases", func() {
+	ginkgo.It("records direct mutation events for create, update, and delete use cases", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		recorder := &recordingPageSaveEffect{}
 		orchestrator := pagesave.NewPageSaveOrchestrator(recorder)
@@ -357,7 +357,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(recorder.events).To(HaveExactElements(createdEvent, updatedEvent, deletedEvent))
 	})
 
-	ginkgo.It("configures refactor use cases and helper defaults", func() {
+	ginkgo.It("configures refactor use cases and helper defaults", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		slugger := tree.NewSlugService()
 		customOrchestrator := pagesave.NewPageSaveOrchestrator()
@@ -411,7 +411,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(snapshotPage(noNode)).To(BeIdenticalTo(noNode))
 	})
 
-	ginkgo.It("returns structured route errors for malformed payloads", func() {
+	ginkgo.It("returns structured route errors for malformed payloads", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		page := deps.createPage("Payload", "payload", tree.NodeKindPage, nil)
 
@@ -495,7 +495,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(ValidatePageMetadataInput([]string{"alpha", "beta"}, map[string]string{"owner": "alice"})).To(Succeed())
 	})
 
-	ginkgo.It("returns route errors for unauthorized and invalid requests", func() {
+	ginkgo.It("returns route errors for unauthorized and invalid requests", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		page := deps.createPage("Page", "page", tree.NodeKindPage, nil)
 
@@ -537,7 +537,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		}
 	})
 
-	ginkgo.It("validates refactor helper outcomes for invalid plans", func() {
+	ginkgo.It("validates refactor helper outcomes for invalid plans", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -626,7 +626,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(warnings).To(Equal([]RefactorWarning{{MessageID: "a", Message: "one"}, {MessageID: "b", Message: "two"}}))
 	})
 
-	ginkgo.It("builds refactor plans around link and rewrite failures", func() {
+	ginkgo.It("builds refactor plans around link and rewrite failures", ginkgo.Label("unit"), func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -817,7 +817,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(subtreeSideEffectApply.rewritePathChangedSubtree(userID, "test", []pathChangeSnapshot{snapshot}, "old", "new")).To(MatchError(sideEffectErr))
 	})
 
-	ginkgo.It("returns refactor apply failures from mutation and rewrite steps", func() {
+	ginkgo.It("returns refactor apply failures from mutation and rewrite steps", ginkgo.Label("unit"), func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -1059,7 +1059,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(sectionOut.Page.ID).To(Equal(docs.ID))
 	})
 
-	ginkgo.It("returns direct page mutation validation and side-effect failures", func() {
+	ginkgo.It("returns direct page mutation validation and side-effect failures", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -1202,7 +1202,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(collectSubtreeIDs(nil)).To(BeEmpty())
 	})
 
-	ginkgo.It("returns validation README fallback and route error outcomes", func() {
+	ginkgo.It("returns validation README fallback and route error outcomes", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 
 		_, _, err := NormalizePagePathInput("docs/page.md", "folder")
@@ -1296,7 +1296,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		}
 	})
 
-	ginkgo.It("returns post-mutation failures from page use cases", func() {
+	ginkgo.It("returns post-mutation failures from page use cases", ginkgo.Label("unit"), func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
@@ -1724,7 +1724,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(MatchError(ensureSideEffectErr))
 	})
 
-	ginkgo.It("returns filesystem metadata and asset mutation failures", func() {
+	ginkgo.It("returns filesystem metadata and asset mutation failures", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))

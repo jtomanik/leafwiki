@@ -25,7 +25,7 @@ import (
 )
 
 var _ = ginkgo.Describe("metadata and validation helpers", func() {
-	ginkgo.It("registers public, private, and refactor page route sets", func() {
+	ginkgo.It("registers public, private, and refactor page route sets", ginkgo.Label("integration"), func() {
 		publicRouter := httpinternal.NewRouter(
 			[]httpinternal.RouteRegistrar{NewRoutes(RoutesConfig{})},
 			httpinternal.FrontendConfig{},
@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(privateRouter).NotTo(BeNil())
 	})
 
-	ginkgo.It("enriches public page metadata from canonical page metadata", func() {
+	ginkgo.It("enriches public page metadata from canonical page metadata", ginkgo.Label("unit"), func() {
 		page := &dto.Page{Node: &dto.Node{ID: "page-1"}}
 
 		raw, err := markdown.RenderPageDocument(markdown.PageDocument{
@@ -71,7 +71,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		})))
 	})
 
-	ginkgo.It("extracts normalized tags and string properties from metadata", func() {
+	ginkgo.It("extracts normalized tags and string properties from metadata", ginkgo.Label("unit"), func() {
 		tags := normalizeMetadataTags([]interface{}{"One", " one ", 42, "Two", ""})
 		Expect(tags).To(Equal([]string{"one", "two"}))
 		Expect(normalizeMetadataTags("not-a-list")).To(BeEmpty())
@@ -90,7 +90,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(properties).To(Equal(map[string]string{"owner": "Alice"}))
 	})
 
-	ginkgo.It("handles metadata enrichment and patch no-op edges", func() {
+	ginkgo.It("handles metadata enrichment and patch no-op edges", ginkgo.Label("unit"), func() {
 		EnrichPageMetadata(nil, nil)
 
 		page := &dto.Page{Node: &dto.Node{ID: "page-1"}}
@@ -128,7 +128,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(meta.Fields).To(BeNil())
 	})
 
-	ginkgo.It("builds markdown with a public metadata patch while preserving private fields", func() {
+	ginkgo.It("builds markdown with a public metadata patch while preserving private fields", ginkgo.Label("unit"), func() {
 		current, err := markdown.RenderPageDocument(markdown.PageDocument{
 			Body: "Old body",
 			Metadata: markdown.PageMetadata{
@@ -169,7 +169,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		}))
 	})
 
-	ginkgo.It("applies partial metadata patches with normalized tags and validated property removals", func() {
+	ginkgo.It("applies partial metadata patches with normalized tags and validated property removals", ginkgo.Label("unit"), func() {
 		tags, properties, err := ApplyMetadataPatch(
 			[]string{"Alpha", "beta"},
 			map[string]string{"status": "draft", "owner": "alice"},
@@ -188,7 +188,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(err).To(HavePageValidationFieldError("removeProperties. leafwiki_hidden ", FieldCodePagePropertyKeyWhitespace, MessageIDPagePropertyKeyWhitespace))
 	})
 
-	ginkgo.It("validates and normalizes route path and page kind inputs", func() {
+	ginkgo.It("validates and normalizes route path and page kind inputs", ginkgo.Label("unit"), func() {
 		routePath, kind, err := NormalizePagePathInput(" /Docs/Index.md ", "section")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(routePath).To(Equal(tree.RoutePath("Docs")))
@@ -241,7 +241,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(*optionalID).To(Equal("page-1"))
 	})
 
-	ginkgo.It("handles README markdown path fallback routing", func() {
+	ginkgo.It("handles README markdown path fallback routing", ginkgo.Label("unit"), func() {
 		Expect(" docs/README.md ").To(HaveReadmeMarkdownFallbackRoutes("docs/README", "docs"))
 
 		Expect("docs/page.md").To(BeIgnoredByReadmeMarkdownFallbackRoutes())
@@ -289,7 +289,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 
-	ginkgo.It("maps page-domain errors to localized details and statuses", func() {
+	ginkgo.It("maps page-domain errors to localized details and statuses", ginkgo.Label("unit"), func() {
 		Expect(tree.ErrPageNotFound).To(HavePageErrorDetail(http.StatusNotFound, ErrCodePageNotFound))
 
 		localized := sharederrors.NewLocalizedErrorFromCode(ErrCodePageVersionConflict, nil)
@@ -320,7 +320,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 		Expect(pageErrorStatus(ErrCodePageInternalError)).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("writes structured page errors for localized, validation, sentinel, and fallback failures", func() {
+	ginkgo.It("writes structured page errors for localized, validation, sentinel, and fallback failures", ginkgo.Label("integration"), func() {
 		rec := respondWithPageErrorRecorder(sharederrors.NewLocalizedErrorFromCode(ErrCodePageInvalidRequest, nil))
 		Expect(rec).To(HavePageErrorResponse(http.StatusBadRequest, ErrCodePageInvalidRequest), rec.Body.String())
 

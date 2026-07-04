@@ -106,7 +106,7 @@ func slug[T ~string](value T) tree.Slug {
 // CreatePageUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("page use case behavior", func() {
+var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), func() {
 	ginkgo.It("creates a root page", func() {
 		deps := newTestDeps()
 		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
