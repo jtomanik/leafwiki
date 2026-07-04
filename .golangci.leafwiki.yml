@@ -9,6 +9,13 @@ linters:
     - ginkgolinter
     - govet
     - leafwiki
+    - ineffassign
+    - unused
+    - errcheck
+    - nilerr
+    - nilnil
+    - bodyclose
+    - sqlclosecheck
   settings:
     custom:
       leafwiki:
