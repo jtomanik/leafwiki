@@ -2,7 +2,6 @@ package test_utils
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"os"
@@ -16,7 +15,7 @@ const wrapCloseFailurePrefix = "failed to close resource"
 
 var errFixtureCloseFailed = errors.New("close failed")
 
-var _ = ginkgo.Describe("test utilities", func() {
+var _ = ginkgo.Describe("test utilities", ginkgo.Label("unit"), func() {
 	ginkgo.It("CreateMultipartFile returns an opened file and original filename", func() {
 		file, filename, err := CreateMultipartFile("upload.txt", []byte("hello"))
 		Expect(err).NotTo(HaveOccurred())
@@ -126,23 +125,23 @@ var _ = ginkgo.Describe("test utilities", func() {
 
 	ginkgo.It("WriteFile reports mkdir and write failures through the test helper", func() {
 		cases := []struct {
-			name      string
-			configure func(error)
-			want      string
+			name       string
+			configure  func(error)
+			wantFormat string
 		}{
 			{
 				name: "mkdir",
 				configure: func(err error) {
 					mkdirAll = func(string, os.FileMode) error { return err }
 				},
-				want: "mkdir: mkdir failed",
+				wantFormat: "mkdir: %v",
 			},
 			{
 				name: "write",
 				configure: func(err error) {
 					writeFile = func(string, []byte, os.FileMode) error { return err }
 				},
-				want: "write: write failed",
+				wantFormat: "write: %v",
 			},
 		}
 
@@ -152,12 +151,16 @@ var _ = ginkgo.Describe("test utilities", func() {
 			restore := restoreTestUtilsSeams()
 			func() {
 				defer restore()
-				tc.configure(errors.New(tc.name + " failed"))
-				tb := &fakeTestHelper{panicOnFatal: true}
+				failure := errors.New(tc.name + " failed")
+				tc.configure(failure)
+				tb := &fakeTestHelper{}
 
-				Expect(func() {
-					WriteFile(tb, tempTestUtilsDir(), "file.txt", "hello")
-				}).To(PanicWith(ContainSubstring(tc.want)))
+				WriteFile(tb, tempTestUtilsDir(), "file.txt", "hello")
+
+				Expect(tb.fatalRecord()).To(SatisfyAll(
+					HaveField("Format", Equal(tc.wantFormat)),
+					HaveField("Args", HaveExactElements(MatchError(failure))),
+				))
 			}()
 		}
 	})
@@ -179,25 +182,33 @@ var _ = ginkgo.Describe("test utilities", func() {
 
 	ginkgo.It("FixturePath reports getwd and missing fixture failures", func() {
 		restore := restoreTestUtilsSeams()
+		wdFailure := errors.New("wd failed")
 		getwd = func() (string, error) {
-			return "", errors.New("wd failed")
+			return "", wdFailure
 		}
-		Expect(func() {
-			FixturePath(&fakeTestHelper{panicOnFatal: true}, "pages", "fixtures")
-		}).To(PanicWith(ContainSubstring("getwd: wd failed")))
+		wdLookup := &fakeTestHelper{}
+		FixturePath(wdLookup, "pages", "fixtures")
+		Expect(wdLookup.fatalRecord()).To(SatisfyAll(
+			HaveField("Format", Equal("getwd: %v")),
+			HaveField("Args", HaveExactElements(MatchError(wdFailure))),
+		))
 		restore()
 
 		restore = restoreTestUtilsSeams()
 		ginkgo.DeferCleanup(restore)
+		wd := "/tmp/wiki"
 		getwd = func() (string, error) {
-			return "/tmp/wiki", nil
+			return wd, nil
 		}
 		stat = func(string) (os.FileInfo, error) {
 			return nil, os.ErrNotExist
 		}
-		Expect(func() {
-			FixturePath(&fakeTestHelper{panicOnFatal: true}, "pages", "fixtures")
-		}).To(PanicWith(ContainSubstring("fixture path not found")))
+		missingFixture := &fakeTestHelper{}
+		FixturePath(missingFixture, "pages", "fixtures")
+		Expect(missingFixture.fatalRecord()).To(SatisfyAll(
+			HaveField("Format", Equal("fixture path not found for %q from working directory %q")),
+			HaveField("Args", HaveExactElements("pages", wd)),
+		))
 	})
 
 	ginkgo.It("WrapCloseWithErrorCheck accepts successful closes and fails on close errors", func() {
@@ -269,10 +280,9 @@ func (w errorWriter) Write([]byte) (int, error) {
 }
 
 type fakeTestHelper struct {
-	helperCalls  int
-	panicOnFatal bool
-	fatalFormat  string
-	fatalArgs    []any
+	helperCalls int
+	fatalFormat string
+	fatalArgs   []any
 }
 
 type fatalRecord struct {
@@ -285,12 +295,11 @@ func (t *fakeTestHelper) Helper() {
 }
 
 func (t *fakeTestHelper) Fatalf(format string, args ...any) {
+	if t.fatalFormat != "" {
+		return
+	}
 	t.fatalFormat = format
 	t.fatalArgs = append([]any(nil), args...)
-	message := fmt.Sprintf(format, args...)
-	if t.panicOnFatal {
-		panic(message)
-	}
 }
 
 func (t *fakeTestHelper) fatalRecord() fatalRecord {
