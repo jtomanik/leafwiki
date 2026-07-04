@@ -6,6 +6,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 )
@@ -20,6 +21,30 @@ func matchPageMetadataPage(fields gstruct.Fields) types.GomegaMatcher {
 
 func matchPageDocument(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchRawContentWithoutWriteback(content string, metadata types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(file *MarkdownFile) (bool, error) {
+		if file == nil || file.RequiresWriteback() {
+			return false, nil
+		}
+		return SatisfyAll(
+			HaveField("GetContent()", Equal(content)),
+			HaveField("GetMetadata()", metadata),
+		).Match(file)
+	}).WithMessage("keep raw markdown content without requiring writeback")
+}
+
+func matchParsedContentRequiringWriteback(content string, metadata types.GomegaMatcher) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(file *MarkdownFile) (bool, error) {
+		if file == nil || !file.RequiresWriteback() {
+			return false, nil
+		}
+		return SatisfyAll(
+			HaveField("GetContent()", Equal(content)),
+			HaveField("GetMetadata()", metadata),
+		).Match(file)
+	}).WithMessage("preserve parsed markdown content requiring writeback")
 }
 
 var _ = ginkgo.Describe("metadata and file helpers", func() {
@@ -92,15 +117,14 @@ var _ = ginkgo.Describe("metadata and file helpers", func() {
 
 		Expect(mf.SetRawContentReplacingManagedMetadata("plain body")).To(Succeed())
 
-		Expect(mf.GetContent()).To(Equal("plain body"))
-		Expect(mf).To(SatisfyAll(
-			HaveField("RequiresWriteback()", BeFalse()),
-			HaveField("GetMetadata()", matchPageMetadata(gstruct.Fields{
+		Expect(mf).To(matchRawContentWithoutWriteback(
+			"plain body",
+			matchPageMetadata(gstruct.Fields{
 				"Version": Equal(1),
 				"Page": matchPageMetadataPage(gstruct.Fields{
 					"ID": BeEmpty(),
 				}),
-			})),
+			}),
 		))
 	})
 
@@ -114,15 +138,14 @@ leafwiki_title: New Title
 New body`)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(mf).To(SatisfyAll(
-			HaveField("GetMetadata()", matchPageMetadata(gstruct.Fields{
+		Expect(mf).To(matchParsedContentRequiringWriteback(
+			"New body",
+			matchPageMetadata(gstruct.Fields{
 				"Page": matchPageMetadataPage(gstruct.Fields{
 					"ID":    Equal("new-page"),
 					"Title": Equal("New Title"),
 				}),
-			})),
-			HaveField("GetContent()", Equal("New body")),
-			HaveField("RequiresWriteback()", BeTrue()),
+			}),
 		))
 	})
 
