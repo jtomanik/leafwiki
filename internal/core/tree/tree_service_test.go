@@ -97,7 +97,7 @@ func matchPersistedPageIDOrder(want ...PageID) types.GomegaMatcher {
 	return WithTransform(func(got []string) []PageID {
 		typed := make([]PageID, 0, len(got))
 		for _, rawID := range got {
-			typed = append(typed, newFixturePageID(rawID))
+			typed = append(typed, PageIDFromString(rawID))
 		}
 		return typed
 	}, Equal(want))
@@ -1030,7 +1030,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		frontmatter, _, err := parseRequiredFrontmatter(string(raw))
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
-		Expect(newFixturePageID(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
+		Expect(PageIDFromString(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiCreatedAt", Not(BeEmpty())),
 			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
@@ -1220,7 +1220,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		frontmatter, body, err := parseRequiredFrontmatter(string(raw))
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
-		Expect(newFixturePageID(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
+		Expect(PageIDFromString(strings.TrimSpace(frontmatter.LeafWikiID))).To(Equal(*id))
 		Expect(frontmatter.LeafWikiTitle).To(
 			Equal(
 				"Docs"), "expected leafwiki_title Docs, got %q",
@@ -1337,7 +1337,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 		newSlug := "documentation"
 		{
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", newFixtureSlug(newSlug), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", SlugFromString(newSlug), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
@@ -2294,7 +2294,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", WithTransform(func(raw string) PageID {
-				return newFixturePageID(raw)
+				return PageIDFromString(raw)
 			}, Equal(*id))),
 			HaveField("LeafWikiTitle", Equal("Docs")),
 			HaveField("LeafWikiCreatedAt", Equal("2026-03-22T10:15:30Z")),
@@ -3411,7 +3411,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		frontmatter, migratedBody, err := parseRequiredFrontmatter(string(raw))
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
-		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(PageIDFromString(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(strings.TrimSpace(frontmatter.
 			LeafWikiTitle,
 		)).NotTo(BeEmpty(),
@@ -3512,7 +3512,7 @@ Hello World
 		frontmatter, migratedBody, err := parseRequiredFrontmatter(migrated)
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
-		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(PageIDFromString(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(strings.TrimSpace(frontmatter.
 			LeafWikiTitle,
 		)).NotTo(BeEmpty(),
@@ -3601,7 +3601,7 @@ Hello World
 		frontmatter, migratedBody, err := parseRequiredFrontmatter(string(raw))
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
-		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(PageIDFromString(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(frontmatter.LeafWikiTitle).To(
 			Equal(
 				"Existing Title"),
@@ -3707,7 +3707,7 @@ Hello World
 		frontmatter, migratedBody, err := parseRequiredFrontmatter(migrated)
 		Expect(err).To(Succeed(), "ParseFrontmatter: %v", err)
 
-		Expect(newFixturePageID(frontmatter.LeafWikiID)).To(Equal(*id))
+		Expect(PageIDFromString(frontmatter.LeafWikiID)).To(Equal(*id))
 		Expect(frontmatter.LeafWikiTitle).To(
 			Equal(
 				"Alias Title"), "expected title alias to remain effective, got %q",
@@ -4585,7 +4585,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 
 		for _, title := range []string{"A", "B", "C"} {
 			{
-				_, err := svc.CreateNode("u", nil, title, newFixtureSlug(strings.ToLower(title)), ptrKind(NodeKindPage))
+				_, err := svc.CreateNode("u", nil, title, SlugFromString(strings.ToLower(title)), ptrKind(NodeKindPage))
 				Expect(err).To(Succeed(), "CreateNode %s: %v",
 
 					title, err)
@@ -4786,14 +4786,14 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		{
 
 			// First update succeeds — advances the version.
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(currentVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersionFromString(currentVersion), false)
 			Expect(err).To(Succeed(), "first UpdateNode failed: %v",
 
 				err)
 		}
 
 		// Second update with the same (now stale) version must fail.
-		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", Slug("page"), nil, newFixturePageVersion(currentVersion), false)
+		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", Slug("page"), nil, PageVersionFromString(currentVersion), false)
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -4824,13 +4824,13 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		{
 
 			// Advance the version via an update.
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(staleVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersionFromString(staleVersion), false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
 		}
 
-		err := svc.DeleteNode("system", *id, false, newFixturePageVersion(staleVersion))
+		err := svc.DeleteNode("system", *id, false, PageVersionFromString(staleVersion))
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -4862,13 +4862,13 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		{
 
 			// Advance the version.
-			err := svc.UpdateNode(newFixtureUserID("system"), *moveID, "Move v2", Slug("move"), nil, newFixturePageVersion(staleVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *moveID, "Move v2", Slug("move"), nil, PageVersionFromString(staleVersion), false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
 		}
 
-		err := svc.MoveNode("system", *moveID, *destID, newFixturePageVersion(staleVersion))
+		err := svc.MoveNode("system", *moveID, *destID, PageVersionFromString(staleVersion))
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -4900,13 +4900,13 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 		{
 
 			// Advance the version.
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, newFixturePageVersion(staleVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersionFromString(staleVersion), false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
 		}
 
-		err := svc.ConvertNode("system", *id, NodeKindSection, newFixturePageVersion(staleVersion))
+		err := svc.ConvertNode("system", *id, NodeKindSection, PageVersionFromString(staleVersion))
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -4970,7 +4970,7 @@ var _ = ginkgo.Describe("tree service behavior", func() {
 			err)
 		{
 
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Raw Test", Slug("raw-test"), &body, newFixturePageVersion(page.Version()), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Raw Test", Slug("raw-test"), &body, PageVersionFromString(page.Version()), false)
 			Expect(err).To(Succeed(), "UpdateNode: %v",
 
 				err,

@@ -28,7 +28,7 @@ import (
 
 func findChildBySlug(parent *PageNode, slug string) *PageNode {
 	ginkgo.GinkgoHelper()
-	wantSlug := newFixtureSlug(slug)
+	wantSlug := SlugFromString(slug)
 	for _, ch := range parent.Children {
 		if ch.Slug == wantSlug {
 			return ch
@@ -939,7 +939,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 		Expect(err).To(Succeed(), "failed to reload page: %v",
 
 			err)
-		Expect(newFixturePageID(pageMd.
+		Expect(PageIDFromString(pageMd.
 			GetFrontmatter().LeafWikiID,
 		)).
 			To(Equal(page.
@@ -953,7 +953,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 		Expect(err).To(Succeed(), "failed to reload section index: %v",
 
 			err)
-		Expect(newFixturePageID(sectionMd.
+		Expect(PageIDFromString(sectionMd.
 			GetFrontmatter().LeafWikiID,
 		)).To(Equal(section.
 			ID), "expected section frontmatter ID=%q, got %q",
@@ -1214,7 +1214,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", func() {
 		frontmatter := mdFile.GetFrontmatter()
 		Expect(frontmatter).To(SatisfyAll(
 			HaveField("LeafWikiID", WithTransform(func(raw string) PageID {
-				return newFixturePageID(raw)
+				return PageIDFromString(raw)
 			}, Equal(page.ID))),
 			HaveField("LeafWikiCreatedAt", Equal(wantTime.Format(time.RFC3339))),
 			HaveField("LeafWikiUpdatedAt", Equal(wantTime.Format(time.RFC3339))),

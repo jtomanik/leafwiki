@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("workspace markdown route mapping", func() {
 				err,
 			)
 			Expect(got).To(SatisfyAll(
-				HaveField("SourcePath", Equal(newFixtureWorkspaceSourcePath(tt.relPath))),
+				HaveField("SourcePath", Equal(WorkspaceSourcePathFromString(tt.relPath))),
 				HaveField("Skip", Equal(tt.wantSkip)),
 				HaveField("SkipReason", Equal(tt.wantReason)),
 			), "unexpected workspace route skip decision: %#v", got)
@@ -93,9 +93,9 @@ var _ = ginkgo.Describe("workspace markdown route mapping", func() {
 				return
 			}
 			Expect(got).To(SatisfyAll(
-				HaveField("RoutePath", Equal(newFixtureRoutePath(tt.wantRoute))),
+				HaveField("RoutePath", Equal(RoutePathFromString(tt.wantRoute))),
 				HaveField("Kind", Equal(tt.wantKind)),
-				HaveField("ContentPath", Equal(newFixtureMarkdownPath(tt.wantContent))),
+				HaveField("ContentPath", Equal(MarkdownPathFromString(tt.wantContent))),
 			), "unexpected workspace route mapping: %#v", got)
 
 		})
