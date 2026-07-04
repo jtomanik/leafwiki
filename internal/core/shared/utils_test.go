@@ -138,7 +138,7 @@ var _ = Describe("shared utility contracts", func() {
 		Expect(id).To(BeEmpty())
 	})
 
-	It("atomicReplace removes Windows targets before rename and returns remove failures", func() {
+	It("removes existing Windows targets before rename and returns cleanup failures", func() {
 		DeferCleanup(restoreSharedUtilitySeams())
 		runtimeGOOS = "windows"
 		removed := ""
