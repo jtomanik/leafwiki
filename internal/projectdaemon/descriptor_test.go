@@ -8,7 +8,9 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 )
 
 var _ = ginkgo.Describe("project daemon descriptors", func() {
@@ -54,9 +56,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(loaded).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"ControlToken": Equal("control-token"),
-			"Config": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"AuthDisabled": BeFalse(),
-			}),
+			"Config":       matchAuthEnabledConfig(),
 		})))
 	})
 
@@ -108,16 +108,13 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 			"Role":         Equal(RoleWikid),
 			"Roles":        Not(BeEmpty()),
 		}))
-			Expect(descriptorWireMap(path)).NotTo(HaveValue(BeEquivalentTo("session-api-key")))
+		Expect(descriptorWireMap(path)).NotTo(HaveValue(BeEquivalentTo("session-api-key")))
 		loaded, err := ReadTrustedDescriptor(path)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(loaded).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"RuntimeStack": Equal(RuntimeStackWikidFrontd),
 			"Role":         Equal(RoleWikid),
-			"Roles": ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Name":    Equal(RoleWorkspaced),
-				"Private": BeTrue(),
-			})),
+			"Roles":        ContainElement(matchPrivateReadyRoleHealth(RoleWorkspaced)),
 		})))
 	})
 
@@ -251,4 +248,18 @@ func descriptorWireMap(path string) map[string]any {
 	var wire map[string]any
 	Expect(json.Unmarshal(raw, &wire)).To(Succeed())
 	return wire
+}
+
+func matchAuthEnabledConfig() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(config Config) (bool, error) {
+		return !config.AuthDisabled, nil
+	}).WithMessage("preserve auth-enabled descriptor config")
+}
+
+func matchPrivateReadyRoleHealth(name RoleName) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(role RoleHealth) (bool, error) {
+		return role.Name == name &&
+			role.State == RoleStateReady &&
+			role.Private, nil
+	}).WithMessage("report private ready role health")
 }

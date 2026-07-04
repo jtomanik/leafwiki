@@ -14,6 +14,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -198,10 +199,7 @@ var _ = ginkgo.Describe("project daemon control server", func() {
 
 		health, err := client.Health(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(health).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"PID": Equal(123),
-			"OK":  BeTrue(),
-		})))
+		Expect(health).To(matchHealthyDaemonHealth(123))
 		handle, err := client.RegisterSession(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(handle.ID).NotTo(BeEmpty())
@@ -343,6 +341,14 @@ func decodeControlResponse[T any](resp *httptest.ResponseRecorder) T {
 	var out T
 	Expect(json.Unmarshal(resp.Body.Bytes(), &out)).To(Succeed())
 	return out
+}
+
+func matchHealthyDaemonHealth(pid int) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(health *DaemonHealth) (bool, error) {
+		return health != nil &&
+			health.OK &&
+			health.PID == pid, nil
+	}).WithMessage("report healthy daemon control status")
 }
 
 func matchControlHTTPError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {

@@ -7,6 +7,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -31,7 +32,7 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 		registry.Record(event)
 
 		Expect(registry.Count()).To(Equal(1))
-		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
+		Expect(registry.List()).To(ConsistOf(matchMCPAgentPresenceSession(gstruct.Fields{
 			"Provider":      Equal(agenthooks.ProviderCodex),
 			"SessionIDHash": Equal(event.SessionIDHash),
 			"FirstSeenAt":   BeTemporally("==", now),
@@ -40,7 +41,6 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 			"Model":         Equal("gpt-5.4"),
 			"Source":        Equal(agenthooks.AgentSourceCLI),
 			"ToolName":      Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
-			"IsMCPTool":     BeTrue(),
 		})))
 		Expect(counts).To(Equal([]int{1}))
 
@@ -69,11 +69,10 @@ var _ = ginkgo.Describe("agent presence registry", func() {
 
 		registry.Record(event)
 
-		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
-			"Model":     BeEmpty(),
-			"Source":    BeEmpty(),
-			"ToolName":  Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
-			"IsMCPTool": BeTrue(),
+		Expect(registry.List()).To(ConsistOf(matchMCPAgentPresenceSession(gstruct.Fields{
+			"Model":    BeEmpty(),
+			"Source":   BeEmpty(),
+			"ToolName": Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
 		})))
 	})
 
@@ -235,6 +234,16 @@ func normalizedAgentHookEventResult(provider agenthooks.ProviderID, raw []byte, 
 
 func matchAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
+}
+
+func matchMCPAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(session AgentPresenceSession) (bool, error) {
+		matched, err := matchAgentPresenceSession(fields).Match(session)
+		if err != nil || !matched {
+			return matched, err
+		}
+		return session.IsMCPTool, nil
+	}).WithMessage("record an MCP tool agent presence session")
 }
 
 func reportSeenPresenceState(seen bool, count int) types.GomegaMatcher {
