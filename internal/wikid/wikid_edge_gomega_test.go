@@ -361,7 +361,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Created).To(BeTrue())
+			Expect(result).To(matchCreatedWorkspaceRegistration(workspaceid.WorkspaceID("docs")))
 			grants, err := NewGrantStore(layout.DBPath).GrantsForSubject("user:1")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(grants).To(Equal([]Grant{{Subject: "user:1", WorkspaceID: result.Workspace.ID, Role: GrantRoleEditor}}))
@@ -1154,6 +1154,14 @@ type workspaceOrderSnapshot struct {
 	ThirdDisplayName  string
 }
 
+type workspaceOrderTieState string
+
+const (
+	workspaceOrderTieMissing workspaceOrderTieState = "missing"
+	workspaceOrderTieFolded  workspaceOrderTieState = "equal-fold"
+	workspaceOrderTieSplit   workspaceOrderTieState = "split"
+)
+
 func haveHomeWorkspaceFirstAndEqualFoldTie() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return SatisfyAll(
@@ -1171,11 +1179,54 @@ func haveHomeWorkspaceFirstAndEqualFoldTie() types.GomegaMatcher {
 			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 				"FirstID": Equal(HomeWorkspaceID),
 			}),
-			WithTransform(func(snapshot workspaceOrderSnapshot) bool {
-				return strings.EqualFold(snapshot.SecondDisplayName, snapshot.ThirdDisplayName)
-			}, BeTrue()),
+			WithTransform(workspaceOrderTieStateFromSnapshot, Equal(workspaceOrderTieFolded)),
 		)),
 	)
+}
+
+func matchCreatedWorkspaceRegistration(id workspaceid.WorkspaceID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(workspaceRegistrationStateFromResult, Equal(workspaceRegistrationState{
+		id:      id,
+		outcome: workspaceRegistrationCreated,
+	}))
+}
+
+type workspaceRegistrationOutcome string
+
+const (
+	workspaceRegistrationMissing workspaceRegistrationOutcome = "missing"
+	workspaceRegistrationCreated workspaceRegistrationOutcome = "created"
+	workspaceRegistrationReused  workspaceRegistrationOutcome = "reused"
+)
+
+type workspaceRegistrationState struct {
+	id      workspaceid.WorkspaceID
+	outcome workspaceRegistrationOutcome
+}
+
+func workspaceRegistrationStateFromResult(result RegisterWorkspaceResult) workspaceRegistrationState {
+	outcome := workspaceRegistrationReused
+	if result.Created {
+		outcome = workspaceRegistrationCreated
+	}
+	if result.Workspace.ID == "" {
+		outcome = workspaceRegistrationMissing
+	}
+	return workspaceRegistrationState{
+		id:      result.Workspace.ID,
+		outcome: outcome,
+	}
+}
+
+func workspaceOrderTieStateFromSnapshot(snapshot workspaceOrderSnapshot) workspaceOrderTieState {
+	if snapshot.SecondDisplayName == "" || snapshot.ThirdDisplayName == "" {
+		return workspaceOrderTieMissing
+	}
+	if strings.EqualFold(snapshot.SecondDisplayName, snapshot.ThirdDisplayName) {
+		return workspaceOrderTieFolded
+	}
+	return workspaceOrderTieSplit
 }
 
 func matchWikidSQLitePrimaryError(code int) types.GomegaMatcher {
