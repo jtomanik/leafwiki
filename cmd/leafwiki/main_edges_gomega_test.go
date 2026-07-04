@@ -33,6 +33,7 @@ import (
 	"github.com/perber/wiki/internal/frontd"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
+	"github.com/perber/wiki/internal/localization"
 	"github.com/perber/wiki/internal/locking"
 	leaflogging "github.com/perber/wiki/internal/logging"
 	"github.com/perber/wiki/internal/projectdaemon"
@@ -73,6 +74,49 @@ func containsProjectDaemonMismatch(mismatches []projectdaemon.Mismatch, want pro
 		}
 	}
 	return false
+}
+
+func MatchProjectDaemonStartupFailure() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return SatisfyAll(
+		HaveField("Kind", Equal(projectDaemonStartupErrorKindStartup)),
+		HaveField("MessageID", Equal(projectDaemonStartupErrorMessageID())),
+	)
+}
+
+func MatchProjectDaemonLockStartupFailure() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return SatisfyAll(
+		HaveField("Kind", Equal(projectDaemonStartupErrorKindLock)),
+		HaveField("MessageID", Equal(projectDaemonStartupErrorMessageID())),
+	)
+}
+
+func projectDaemonStartupErrorMessageID() sharederrors.MessageID {
+	return projectDaemonStartupError{MessageID: localization.MessageIDCLIErrorProjectDaemonFailed}.MessageID
+}
+
+func MatchNativeStdioParseErrorFrame() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+
+	return WithTransform(func(raw string) ([]int, error) {
+		codes := []int{}
+		for _, response := range nativeStdioResponses(raw) {
+			if len(response.Error) == 0 {
+				continue
+			}
+			var frameError struct {
+				Code int `json:"code"`
+			}
+			if err := json.Unmarshal(response.Error, &frameError); err != nil {
+				return nil, err
+			}
+			codes = append(codes, frameError.Code)
+		}
+		return codes, nil
+	}, ContainElement(-32700))
 }
 
 func MatchPathError() types.GomegaMatcher {
@@ -417,6 +461,24 @@ func MatchProjectDaemonRoleHealth(name projectdaemon.RoleName, state projectdaem
 	return gstruct.MatchFields(gstruct.IgnoreExtras, expected)
 }
 
+func MatchPrivateProjectDaemonRoleHealth(name projectdaemon.RoleName, state projectdaemon.RoleState, fields gstruct.Fields) types.GomegaMatcher {
+	return SatisfyAll(
+		MatchProjectDaemonRoleHealth(name, state, fields),
+		gcustom.MakeMatcher(func(role projectdaemon.RoleHealth) (bool, error) {
+			return role.Private, nil
+		}).WithMessage("mark project daemon role as private"),
+	)
+}
+
+func MatchWorkspaceSyncEnabledDaemonConfig(fields gstruct.Fields) types.GomegaMatcher {
+	return SatisfyAll(
+		gstruct.MatchFields(gstruct.IgnoreExtras, fields),
+		gcustom.MakeMatcher(func(cfg projectdaemon.Config) (bool, error) {
+			return cfg.EnableWorkspaceSync, nil
+		}).WithMessage("enable workspace sync in daemon config"),
+	)
+}
+
 func MatchFederatedEnsureUnexpectedResult(workspaceID workspaceid.WorkspaceID, resultType string) types.GomegaMatcher {
 	expected := struct {
 		WorkspaceID workspaceid.WorkspaceID
@@ -714,9 +776,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 				"PID": Equal(123),
 				"URL": Equal("http://127.0.0.1:8080"),
 			}),
-			MatchProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateReady, gstruct.Fields{
-				"PID":     Equal(123),
-				"Private": BeTrue(),
+			MatchPrivateProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateReady, gstruct.Fields{
+				"PID": Equal(123),
 			}),
 		))
 
@@ -750,7 +811,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(os.ReadFile(path)).To(WithTransform(func(raw []byte) error {
 			return json.Unmarshal(raw, &startupErr)
 		}, Succeed()))
-		Expect(startupErr.Kind).To(Equal(projectDaemonStartupErrorKindStartup))
+		Expect(startupErr).To(MatchProjectDaemonStartupFailure())
 		Expect(formatProjectDaemonStartupError(startupErr)).To(MatchError(errProjectDaemonStartupFailed))
 
 		lockDir := filepath.Join(leafwikiTempDir(), "locked-data")
@@ -765,7 +826,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(os.ReadFile(lockPath)).To(WithTransform(func(raw []byte) error {
 			return json.Unmarshal(raw, &lockStartupErr)
 		}, Succeed()))
-		Expect(lockStartupErr.Kind).To(Equal(projectDaemonStartupErrorKindLock))
+		Expect(lockStartupErr).To(MatchProjectDaemonLockStartupFailure())
 
 		blankPath := filepath.Join(leafwikiTempDir(), "blank.json")
 		writeProjectDaemonStartupError(" ", os.ErrPermission)
@@ -786,7 +847,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(os.WriteFile(ownerFailureStartup, raw, 0o600)).To(Succeed())
 		Expect(runInternalProjectDaemon(context.Background(), ownerFailureStartup)).To(MatchPathError())
-		Expect(os.ReadFile(ownerErrPath)).To(ContainSubstring("resolve data dir"))
+		var ownerStartupErr projectDaemonStartupError
+		Expect(os.ReadFile(ownerErrPath)).To(WithTransform(func(raw []byte) error {
+			return json.Unmarshal(raw, &ownerStartupErr)
+		}, Succeed()))
+		Expect(ownerStartupErr).To(MatchProjectDaemonStartupFailure())
 	})
 
 	ginkgo.It("filters native STDIO frames without leaking invalid JSON to the MCP stream", func() {
@@ -798,7 +863,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(forwarded).To(BeEmpty())
-		Expect(stdout.String()).To(Equal(leafwikiNativeStdioParseErrorFrame + "\n"))
+		Expect(stdout.String()).To(MatchNativeStdioParseErrorFrame())
 	})
 
 	ginkgo.It("normalizes valid native STDIO frames and preserves IO failures", func() {
@@ -849,8 +914,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 	ginkgo.It("parses startup diagnostics and trusts only local daemon control URLs", func() {
 		structured := parseProjectDaemonStartupError([]byte(`{"message":" ` + leafwikiFixtureDaemonStopped + ` "}`))
-		Expect(structured.Kind).To(Equal(projectDaemonStartupErrorKindStartup))
-		Expect(structured.RenderedMessage).To(Equal(leafwikiFixtureDaemonStopped))
+		Expect(structured).To(MatchProjectDaemonStartupFailure())
 		Expect(formatProjectDaemonStartupError(structured)).To(MatchError(errProjectDaemonStartupFailed))
 
 		lockStartup := parseProjectDaemonStartupError([]byte("acquire data directory lock: /tmp/wiki"))
@@ -983,13 +1047,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		expectedDataDir, expectedRootDir, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(daemonCfg).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		Expect(daemonCfg).To(MatchWorkspaceSyncEnabledDaemonConfig(gstruct.Fields{
 			"WorkspaceID":            Equal(workspaceid.WorkspaceID("home")),
 			"DataDir":                Equal(expectedDataDir),
 			"RootDir":                Equal(expectedRootDir),
 			"LogFile":                Equal(filepath.Join(expectedDataDir, ".leafwiki", "logs", "leafwiki.log")),
 			"InjectCodeInHeaderHash": Not(BeEmpty()),
-			"EnableWorkspaceSync":    BeTrue(),
 			"MarkdownLinkRootPrefix": Equal("/docs"),
 		}))
 
@@ -1147,7 +1210,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		editor, err := w.UserService().CreateUser("token-editor", "token-editor@example.com", "password", coreauth.RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
-		editorID := newFixtureUserID(editor.ID)
+		editorID := coreauth.UserIDFromString(editor.ID)
 		created, err := w.APIKeyService().CreateAPIKey(editorID, "MCP client", editorID)
 		Expect(err).NotTo(HaveOccurred())
 		info, err := frontdMCPTokenVerifier(w)(context.Background(), created.Secret, req)
@@ -1250,7 +1313,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ginkgo.DeferCleanup(w.Close)
 		editor, err := w.UserService().CreateUser("edge-editor", "edge-editor@example.com", "password", coreauth.RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
-		editorID := newFixtureUserID(editor.ID)
+		editorID := coreauth.UserIDFromString(editor.ID)
 		apiKey, err := w.APIKeyService().CreateAPIKey(editorID, "edge mcp", editorID)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -1522,7 +1585,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		crashDone <- frontdExitedErr
 		waitForLeafwikiRoleState(crashRuntime, projectdaemon.RoleFrontd, projectdaemon.RoleStateCrashed)
 		Expect(published).To(ContainElement(ContainElement(HaveField("State", Equal(projectdaemon.RoleStateCrashed)))))
-		Expect(crashRuntime.supervisor.State(projectdaemon.RoleFrontd).Error).To(Equal(leafwikiFixtureFrontdExited))
+		Expect(crashRuntime.supervisor.State(projectdaemon.RoleFrontd)).To(MatchProjectDaemonRoleHealth(projectdaemon.RoleFrontd, projectdaemon.RoleStateCrashed, nil))
 		releaseLeafwikiRuntimeRoleProcesses(crashDoneChans, context.Canceled)
 
 		scheduledProc, scheduledDone := newLeafwikiRuntimeRoleProcess(projectdaemon.RoleFrontd, 402)
@@ -1884,9 +1947,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			"PrivateMCPURL": Equal("http://workspaced.local/mcp"),
 			"PublicURL":     Equal("http://frontd.local"),
 			"Roles": ContainElements(
-				MatchProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateReady, gstruct.Fields{
-					"Private": BeTrue(),
-					"URL":     Equal("http://workspaced.local"),
+				MatchPrivateProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateReady, gstruct.Fields{
+					"URL": Equal("http://workspaced.local"),
 				}),
 				MatchProjectDaemonRoleHealth(projectdaemon.RoleFrontd, projectdaemon.RoleStateReady, gstruct.Fields{
 					"URL": Equal("http://frontd.local"),
@@ -3108,8 +3170,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return nil, marshalErr
 		}
 		startupErrPath := filepath.Join(leafwikiTempDir(), "startup.err")
-		writeProjectDaemonStartupError(startupErrPath, errors.New("plain startup error"))
-		Expect(os.ReadFile(startupErrPath)).To(Equal([]byte("plain startup error")))
+		plainStartupErr := errors.New("project daemon startup marshal fallback")
+		writeProjectDaemonStartupError(startupErrPath, plainStartupErr)
+		rawFallbackStartupErr, err := os.ReadFile(startupErrPath)
+		Expect(err).NotTo(HaveOccurred())
+		var fallbackStartupErr projectDaemonStartupError
+		Expect(json.Unmarshal(rawFallbackStartupErr, &fallbackStartupErr)).To(MatchJSONSyntaxError())
 		_, err = spawnProjectDaemonOwner(leafwikiRuntimeConfig{DisableAuth: true, Logging: leaflogging.Config{Target: leaflogging.TargetStderr}})
 		Expect(err).To(MatchError(marshalErr))
 		_, err = writeInternalRuntimeRoleStartupConfig(internalRuntimeRoleStartupConfig{Role: projectdaemon.RoleFrontd})

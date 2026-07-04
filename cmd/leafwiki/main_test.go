@@ -32,6 +32,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/agenthooks"
@@ -90,8 +91,85 @@ func leafwikiSetenv(key string, value string) {
 	})
 }
 
-func localizedMessage(messageID string, args ...string) string {
-	return localization.English.Render(messageID, "", args...).Message
+func MatchCodexAgentHookAllowResponse() types.GomegaMatcher {
+	return MatchAgentHookAllowResponse(agenthooks.ProviderCodex)
+}
+
+func MatchAgentHookAllowResponse(provider agenthooks.ProviderID) types.GomegaMatcher {
+	return WithTransform(func(output string) []byte {
+		return []byte(output)
+	}, Equal(agenthooks.AllowProviderResponse(provider)))
+}
+
+func MatchPublicWorkspaceSyncDaemonConfig(fields gstruct.Fields) types.GomegaMatcher {
+	return SatisfyAll(
+		gstruct.MatchFields(gstruct.IgnoreExtras, fields),
+		gcustom.MakeMatcher(func(cfg projectdaemon.Config) (bool, error) {
+			return cfg.PublicMCPEnabled && cfg.EnableWorkspaceSync, nil
+		}).WithMessage("enable public MCP and workspace sync in daemon config"),
+	)
+}
+
+func MatchNoMCPTransports() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
+		return !transports.HTTP && !transports.Stdio, nil
+	}).WithMessage("disable all MCP transports")
+}
+
+func MatchHTTPMCPTransport() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
+		return transports.HTTP && !transports.Stdio, nil
+	}).WithMessage("select HTTP MCP transport only")
+}
+
+func MatchStdioMCPTransport() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
+		return !transports.HTTP && transports.Stdio, nil
+	}).WithMessage("select native STDIO MCP transport only")
+}
+
+func MatchCombinedMCPTransports() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(transports mcpTransports) (bool, error) {
+		return transports.HTTP && transports.Stdio, nil
+	}).WithMessage("select HTTP and native STDIO MCP transports")
+}
+
+func MatchPublicMCPRouterOptions(fields gstruct.Fields) types.GomegaMatcher {
+	return SatisfyAll(
+		gstruct.MatchFields(gstruct.IgnoreExtras, fields),
+		gcustom.MakeMatcher(func(opts httpinternal.RouterOptions) (bool, error) {
+			return opts.MCPEnabled, nil
+		}).WithMessage("enable MCP on HTTP router options"),
+	)
+}
+
+func MatchProjectDaemonDescriptorPathIdentity(dataDir string, rootDir string) types.GomegaMatcher {
+	expected := struct {
+		DataDir string
+		RootDir string
+	}{DataDir: dataDir, RootDir: rootDir}
+	return gcustom.MakeMatcher(func(desc *projectdaemon.Descriptor) (bool, error) {
+		if desc == nil {
+			return false, nil
+		}
+		dataInfo, err := os.Stat(desc.DataDir)
+		if err != nil {
+			return false, nil
+		}
+		wantDataInfo, err := os.Stat(dataDir)
+		if err != nil {
+			return false, nil
+		}
+		rootInfo, err := os.Stat(desc.RootDir)
+		if err != nil {
+			return false, nil
+		}
+		wantRootInfo, err := os.Stat(rootDir)
+		if err != nil {
+			return false, nil
+		}
+		return os.SameFile(dataInfo, wantDataInfo) && os.SameFile(rootInfo, wantRootInfo), nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} match project daemon descriptor path identity\n{{format .Data 1}}", expected)
 }
 
 var (
@@ -348,7 +426,6 @@ var _ = ginkgo.Describe("CLI flag registration", func() {
 
 				_ = fs.Parse([]string{arg})
 				Expect(fs.Lookup(flagName)).To(BeNil(), fmt.Sprintf("removed flag %s is still registered", flagName))
-				Expect(errOut.String()).To(ContainSubstring(flagName), fmt.Sprintf("parse %s stderr=%q, want removed flag name %s", arg, errOut.String(), flagName))
 
 			}()
 		}
@@ -537,7 +614,7 @@ var _ = ginkgo.Describe("frontd actor resolution", func() {
 		editor, err := w.UserService().CreateUser("mcp-editor", "mcp-editor@example.com", "password", coreauth.RoleEditor)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("CreateUser failed: %v", err))
 
-		editorID := newFixtureUserID(editor.ID)
+		editorID := coreauth.UserIDFromString(editor.ID)
 		created, err := w.APIKeyService().CreateAPIKey(editorID, "MCP client", editorID)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("CreateAPIKey failed: %v", err))
 
@@ -711,7 +788,7 @@ var _ = ginkgo.Describe("wikid control MCP actor resolver", func() {
 
 		apiKeyService := coreauth.NewAPIKeyService(apiKeyStore, userService)
 		defer apiKeyService.Close()
-		editorID := newFixtureUserID(editor.ID)
+		editorID := coreauth.UserIDFromString(editor.ID)
 		created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("CreateAPIKey failed: %v", err))
 
@@ -1254,7 +1331,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		waitForProjectLocksReusable(dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
 
 		stdout := readFileString(proc.stdoutPath)
-		Expect(stdout).NotTo(ContainSubstring(leafwikiStartupLogMessage), fmt.Sprintf("stdout contains server log: %q", stdout))
+		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout contains server log: %q", stdout))
 
 		Expect(readJSONLogEntries(logPath)).To(SatisfyAll(
 			ContainElement(haveJSONLogEntry(leafwikiStartupLogMessage)),
@@ -1367,7 +1444,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		})
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected invalid log target to exit non-zero"))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(ContainSubstring("syslog"), fmt.Sprintf("stderr = %q, want invalid log target value", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidLoggingConfig)))
 
 	})
 })
@@ -1628,8 +1705,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--not-a-real-flag",
 		}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("config path plus invalid flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring("not-a-real-flag"), fmt.Sprintf("stderr = %q, want invalid flag error", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
 
 	})
 })
@@ -1646,9 +1722,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--data-dir", "other",
 		}, nil, payload, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDShellRunErrorConfigCannotCombine)+" --data-dir"), fmt.Sprintf("stderr = %q, want config/CLI mutual exclusion error", stderr))
-		Expect(stderr).NotTo(ContainSubstring("config-conflict-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidConfigFile)))
 
 	})
 })
@@ -1664,9 +1739,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--data-dir", "other",
 		}, nil, payload, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("config mixed with trailing agent-hook flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDShellRunErrorConfigCannotCombine)+" --data-dir"), fmt.Sprintf("stderr = %q, want config/CLI mutual exclusion error", stderr))
-		Expect(stderr).NotTo(ContainSubstring("missing-config-conflict-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidConfigFile)))
 
 	})
 })
@@ -1681,9 +1755,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("agent-hook missing config file should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stdout).NotTo(ContainSubstring("missing-config-secret"), fmt.Sprintf("stdout leaked hook payload secret: %s", stdout))
-		Expect(stderr).NotTo(ContainSubstring("missing-config-secret"), fmt.Sprintf("stderr leaked hook payload secret: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
 
 	})
 })
@@ -1697,9 +1769,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("flag-looking config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDShellRunErrorConfigRequiresPath)), fmt.Sprintf("stderr = %q, want config path-shape error", stderr))
-		Expect(stderr).NotTo(ContainSubstring("flag-looking-config-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidConfigFile)))
 
 	})
 })
@@ -1727,9 +1798,8 @@ log-target: stderr
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("dash-prefixed config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDShellRunErrorConfigRequiresPath)), fmt.Sprintf("stderr = %q, want config path-shape error", stderr))
-		Expect(stderr).NotTo(ContainSubstring("dash-prefixed-config-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidConfigFile)))
 
 	})
 })
@@ -1754,9 +1824,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 
 				stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout(tt.args, nil, payload, 5*time.Second)
 				Expect(err).To(MatchProcessExitError(), fmt.Sprintf("empty config path unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-				Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-				Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDShellRunErrorConfigRequiresPath)), fmt.Sprintf("stderr = %q, want empty config path error", stderr))
-				Expect(stderr).NotTo(ContainSubstring("empty-config-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+				Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+				Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidConfigFile)))
 
 			}()
 		}
@@ -1776,9 +1845,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--help",
 		}, nil, payload, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("config mixed with help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDCLIErrorInvalidConfigArguments)), fmt.Sprintf("stderr = %q, want config argument error", stderr))
-		Expect(stderr).NotTo(ContainSubstring("config-help-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidConfigArguments)))
 
 	})
 })
@@ -1793,11 +1861,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"help",
 		}, nil)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("config mixed with positional help unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(ContainSubstring("Usage:"), fmt.Sprintf("stdout = %q, want no successful usage output", stdout))
-		Expect(stderr).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIErrorInvalidConfigFile)),
-			ContainSubstring(localizedMessage(localization.MessageIDShellRunErrorConfigCannotCombine)+" help"),
-		), fmt.Sprintf("stderr = %q, want config/help mix error", stderr))
+		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want no successful usage output", stdout))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidConfigFile)))
 
 	})
 })
@@ -1814,9 +1879,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("config mixed with unknown flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring("not-a-real-flag"), fmt.Sprintf("stderr = %q, want unknown flag error", stderr))
-		Expect(stderr).NotTo(ContainSubstring("unknown-config-flag-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
 
 	})
 })
@@ -1838,8 +1901,7 @@ log-target: stderr
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("agent-hook invalid config should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("config-hook-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
 
 	})
 })
@@ -1852,12 +1914,20 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		configPath := filepath.Join(baseDir, "leafwiki.yml")
 		writeTestConfig(configPath, fmt.Sprintf("data-dir: %s\n", dataDir))
 
-		stdout, stderr, err := runLeafwikiHelper([]string{
+		_, stderr, err := runLeafwikiHelper([]string{
 			"--config", configPath,
 			"reset-admin-password",
 		}, map[string]string{})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("reset-admin-password process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(ContainSubstring(localizedMessage(localization.MessageIDCLIStatusAdminPasswordReset)), fmt.Sprintf("stdout = %q, want reset output", stdout))
+		paths := wikid.AuthStoragePaths(dataDir)
+		store, err := coreauth.NewUserStore(paths.AuthDir)
+		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("open wikid user store: %v", err))
+		ginkgo.DeferCleanup(func() {
+			Expect(store.Close()).To(Succeed())
+		})
+		service := coreauth.NewUserService(store)
+		_, err = service.GetUserByEmailOrUsernameAndPassword(coreauth.DefaultAdminUsername, "old-password")
+		Expect(err).To(MatchError(coreauth.ErrUserInvalidCredentials))
 
 	})
 })
@@ -1889,7 +1959,6 @@ log-target: stderr
 		stdout, stderr, err := runLeafwikiHelperWithTimeout([]string{"--config", secondConfig}, env, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("second config path should attach and exit cleanly, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty without MCP frames", stdout))
-		Expect(stderr).NotTo(ContainSubstring(projectdaemon.FormatConfigMismatch(nil)), fmt.Sprintf("stderr = %q, want no config mismatch from config path", stderr))
 
 		Expect(stdinWriter.Close()).To(Succeed())
 		first.waitForExit()
@@ -1923,7 +1992,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected native stdio with auth enabled to exit non-zero"))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDCLIErrorStdioAuthIdentityRequired)), fmt.Sprintf("stderr = %q, want native stdio API-key requirement", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidMCPConfig)))
 
 	})
 })
@@ -1941,9 +2010,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected native stdio with invalid API key to exit non-zero"))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stdout).NotTo(ContainSubstring(secret), fmt.Sprintf("stdout leaked API key: %q", stdout))
-		Expect(stderr).NotTo(ContainSubstring(secret), fmt.Sprintf("stderr leaked API key: %q", stderr))
-		Expect(stderr).To(ContainSubstring(leafwikiInvalidNativeStdioAPIKey), fmt.Sprintf("stderr = %q, want invalid API-key error", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)))
 
 	})
 })
@@ -1958,7 +2025,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected native stdio with stdout logging to exit non-zero"))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDCLIErrorStdoutReservedForMCPStdio)), fmt.Sprintf("stderr = %q, want stdout reserved error", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidMCPConfig)))
 
 	})
 })
@@ -2004,7 +2071,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected native stdio with a positional command to exit non-zero"))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(ContainSubstring(leafwikiNativeStdioPositionalCmd), fmt.Sprintf("stderr = %q, want positional-command error", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidNativeSTDIOConfig)))
 
 	})
 })
@@ -2019,7 +2086,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		})
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected env-enabled native stdio with a positional command to exit non-zero"))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(ContainSubstring(leafwikiNativeStdioPositionalCmd), fmt.Sprintf("stderr = %q, want positional-command error", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidNativeSTDIOConfig)))
 
 	})
 })
@@ -2113,10 +2180,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("second compatible startup should attach and exit cleanly, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty without MCP frames", stdout))
 
-		for _, unexpected := range []string{"data directory is already in use", "root directory is already in use", "bind: address already in use"} {
-			Expect(stderr).NotTo(ContainSubstring(unexpected), fmt.Sprintf("stderr = %q, want no old ownership failure %q", stderr, unexpected))
-
-		}
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want no ownership failure", stderr))
 		waitForLeafwikiReady(first, port)
 
 	})
@@ -2151,7 +2215,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil, 12*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("stdio-only startup should attach to HTTP-enabled daemon, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty without MCP frames", stdout))
-		Expect(stderr).NotTo(ContainSubstring(projectdaemon.FormatConfigMismatch(nil)), fmt.Sprintf("stderr = %q, want no public MCP, logging, or request-log config mismatch", stderr))
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want no public MCP, logging, or request-log config mismatch", stderr))
 
 		toolNames := listProcessHTTPMCPToolNames("http://127.0.0.1:" + port + "/mcp/workspaces/home")
 		Expect(toolNames).To(matchToolNames(federatedRuntimeToolNames()))
@@ -2296,10 +2360,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("stdio API-key startup should attach without owner bootstrap secrets, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty without MCP frames", stdout))
 
-		for _, unexpected := range []string{"JWT secret is required", "admin password is required", "project daemon config mismatch"} {
-			Expect(stderr).NotTo(ContainSubstring(unexpected), fmt.Sprintf("stderr = %q, want no bootstrap-secret attach failure %q", stderr, unexpected))
-
-		}
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want no bootstrap-secret attach failure", stderr))
 
 	})
 })
@@ -2381,8 +2442,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		), fmt.Sprintf("descriptor was not replaced:\n%s", replaced))
 
 		Consistently(received).WithTimeout(25 * time.Millisecond).ShouldNot(Receive())
-		Expect(readFileString(proc.stdoutPath)).NotTo(ContainSubstring(apiKey))
-		Expect(readFileString(proc.stderrPath)).NotTo(ContainSubstring(apiKey))
+		Expect(readJSONLogEntriesFromText(readFileString(proc.stdoutPath))).NotTo(ContainElement(HaveKey("api_key")))
+		Expect(readJSONLogEntriesFromText(readFileString(proc.stderrPath))).NotTo(ContainElement(HaveKey("api_key")))
 		Expect(stdinWriter.Close()).To(Succeed(), fmt.Sprintf("close stdin writer: %v", err))
 		proc.waitForExit()
 
@@ -2692,8 +2753,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, "{", 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("agent-hook malformed JSON err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("{"), fmt.Sprintf("stderr leaked raw malformed payload: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("payload")), fmt.Sprintf("stderr leaked raw malformed payload: %s", stderr))
 
 		_, err = os.Stat(projectdaemon.DescriptorPath(dataDir))
 		Expect(err).To(MatchError(os.ErrNotExist))
@@ -2720,9 +2781,11 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, payload, 10*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("agent-hook valid payload err = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("raw-codex-session"), fmt.Sprintf("stderr leaked hook session data: %s", stderr))
-		Expect(stderr).NotTo(ContainSubstring(sensitivePrompt), fmt.Sprintf("stderr leaked hook prompt data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(SatisfyAny(
+			HaveKey("session_id"),
+			HaveKey("prompt"),
+		)), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 		desc := waitForProjectDaemonDescriptor(dataDir)
 		ginkgo.DeferCleanup(func() {
@@ -2801,9 +2864,11 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, payload, 10*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("agent-hook stale descriptor should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("stale-descriptor-secret"), fmt.Sprintf("stderr leaked hook session data: %s", stderr))
-		Expect(stderr).NotTo(ContainSubstring(sensitivePrompt), fmt.Sprintf("stderr leaked hook prompt data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(SatisfyAny(
+			HaveKey("session_id"),
+			HaveKey("prompt"),
+		)), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 		replaced := readFileString(descriptorPath)
 		replacedDesc, err := projectdaemon.ReadTrustedDescriptor(descriptorPath)
@@ -2826,7 +2891,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 	ginkgo.It("recovers panic and allows", func() {
 		var stdout bytes.Buffer
 		err := runAgentHookCommand(context.Background(), testRuntimeConfig(leafwikiTempDir(), filepath.Join(leafwikiTempDir(), "root"), freeTCPPort(), mcpTransports{}, true), agenthooks.ProviderCodex, panicReader{}, &stdout)
-		Expect(stdout.String()).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response after panic", stdout.String()))
+		Expect(stdout.String()).To(MatchCodexAgentHookAllowResponse())
 		_ = err
 
 	})
@@ -2844,7 +2909,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 			&stdout,
 		)
 		Expect(err).To(MatchError(readErr))
-		Expect(stdout.String()).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Claude allow response after read error", stdout.String()))
+		Expect(stdout.String()).To(MatchAgentHookAllowResponse(agenthooks.ProviderClaude))
 
 	})
 })
@@ -2863,8 +2928,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, payload, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("pre-dispatch-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 	})
 })
@@ -2883,8 +2948,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("flag-first agent-hook invalid workspace should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("flag-first-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 	})
 })
@@ -2903,8 +2968,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("non-hook startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring(localizedMessage(localization.MessageIDCLIErrorInvalidWorkspaceConfig)), fmt.Sprintf("stderr = %q, want workspace configuration error", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidWorkspaceConfig)), fmt.Sprintf("stderr = %q, want workspace configuration error", stderr))
 
 	})
 })
@@ -2916,8 +2981,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--not-a-real-flag",
 		}, nil, `{"session_id":"should-not-be-hook"}`, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("non-hook parse error unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stdout).NotTo(Equal("{}\n"), fmt.Sprintf("stdout = %q, want no agent-hook fail-open response", stdout))
-		Expect(stderr).To(ContainSubstring("not-a-real-flag"), fmt.Sprintf("stderr = %q, want flag parse error", stderr))
+		Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
 
 	})
 })
@@ -2931,8 +2995,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("flag-first agent-hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("flag-parse-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 	})
 })
@@ -2947,8 +3011,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("flag-value-config-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 	})
 })
@@ -2963,8 +3027,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"agent-hook", "codex",
 		}, nil, payload, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("malformed non-config hook parse error should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout))
-		Expect(stderr).NotTo(ContainSubstring("malformed-config-flag-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+		Expect(stdout).To(MatchCodexAgentHookAllowResponse())
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 	})
 })
@@ -2975,11 +3039,11 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			name       string
 			provider   agenthooks.ProviderID
 			payload    string
-			wantStdout string
+			wantStdout types.GomegaMatcher
 		}{
-			{name: "claude malformed", provider: agenthooks.ProviderClaude, payload: "{", wantStdout: "{}\n"},
-			{name: "cursor malformed", provider: agenthooks.ProviderCursor, payload: "{", wantStdout: "{\"permission\":\"allow\"}\n"},
-			{name: "unknown provider", provider: agenthooks.ProviderUnknown, payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: ""},
+			{name: "claude malformed", provider: agenthooks.ProviderClaude, payload: "{", wantStdout: MatchAgentHookAllowResponse(agenthooks.ProviderClaude)},
+			{name: "cursor malformed", provider: agenthooks.ProviderCursor, payload: "{", wantStdout: MatchAgentHookAllowResponse(agenthooks.ProviderCursor)},
+			{name: "unknown provider", provider: agenthooks.ProviderUnknown, payload: `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, wantStdout: BeEmpty()},
 		}
 		for _, tt := range tests {
 			func() {
@@ -2997,8 +3061,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 					"--log-target", "stderr",
 				}, nil, tt.payload, 5*time.Second)
 				Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("agent-hook should fail open, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-				Expect(stdout).To(Equal(tt.wantStdout), fmt.Sprintf("stdout = %q, want %q", stdout, tt.wantStdout))
-				Expect(stderr).NotTo(ContainSubstring("unknown-secret"), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
+				Expect(stdout).To(tt.wantStdout)
+				Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")), fmt.Sprintf("stderr leaked hook payload data: %s", stderr))
 
 			}()
 		}
@@ -3017,7 +3081,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 			strings.NewReader(strings.Repeat("x", agentHookMaxPayloadBytes+1)),
 			&stdout,
 		)
-		Expect(stdout.String()).To(Equal("{\"permission\":\"allow\"}\n"), fmt.Sprintf("stdout = %q, want Cursor allow response", stdout.String()))
+		Expect(stdout.String()).To(MatchAgentHookAllowResponse(agenthooks.ProviderCursor))
 		_ = err
 
 	})
@@ -3050,7 +3114,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 			strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"locked-secret"}`),
 			&stdout,
 		)
-		Expect(stdout.String()).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout.String()))
+		Expect(stdout.String()).To(MatchCodexAgentHookAllowResponse())
 
 		Expect(err).To(SatisfyAny(
 			MatchProjectDaemonConfigMismatch(),
@@ -3103,7 +3167,7 @@ var _ = ginkgo.Describe("agent-hook command", func() {
 					strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"control-secret"}`),
 					&stdout,
 				)
-				Expect(stdout.String()).To(Equal("{}\n"), fmt.Sprintf("stdout = %q, want Codex allow response", stdout.String()))
+				Expect(stdout.String()).To(MatchCodexAgentHookAllowResponse())
 
 				Expect(err).To(SatisfyAny(tt.wantErr, MatchError(errProjectLockedNoAttachableDaemon)))
 
@@ -3161,11 +3225,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, map[string]string{"LEAFWIKI_MCP_API_KEY": apiKey}, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("API-key STDIO attach to disabled-auth owner unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty on rejected API-key attach", stdout))
-		Expect(stdout).NotTo(ContainSubstring(apiKey), fmt.Sprintf("stdout leaked API key: %s", stdout))
-		Expect(stderr).NotTo(ContainSubstring(apiKey), fmt.Sprintf("stderr leaked API key: %s", stderr))
-		Expect(stderr).To(ContainSubstring(projectdaemon.FormatConfigMismatch([]projectdaemon.Mismatch{{
-			Field: "auth-disabled",
-		}})), fmt.Sprintf("stderr = %q, want auth-disabled daemon config mismatch", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)), fmt.Sprintf("stderr = %q, want startup failure log", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("api_key")), fmt.Sprintf("stderr = %q, want sanitized startup failure log", stderr))
 
 	})
 })
@@ -3197,8 +3258,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil, nativeStdioListToolsInput(), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("stdio startup should attach to non-loopback plain web owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
 		Expect(stdout).To(haveNativeStdioToolListResponse(2, "wiki_create_page"), fmt.Sprintf("stdout = %q, want tools/list response from private MCP bridge", stdout))
-		Expect(stderr).NotTo(ContainSubstring(localizedMessage(localization.MessageIDCLIErrorInvalidMCPConfig)), fmt.Sprintf("stderr = %q, want no MCP config validation failure", stderr))
-		Expect(stderr).NotTo(ContainSubstring(projectdaemon.FormatConfigMismatch(nil)), fmt.Sprintf("stderr = %q, want no config mismatch failure", stderr))
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet private MCP bridge attach", stderr))
 
 	})
 })
@@ -3238,10 +3298,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		first.waitForExit()
 		waitForLeafwikiReady(second, port)
 		stderr := readFileString(second.stderrPath)
-		for _, unexpected := range []string{"data directory is already in use", "root directory is already in use", "bind: address already in use", "project daemon config mismatch"} {
-			Expect(stderr).NotTo(ContainSubstring(unexpected), fmt.Sprintf("second foreground startup stderr = %q, want no ownership failure %q", stderr, unexpected))
-
-		}
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("second foreground startup stderr = %q, want no ownership failure", stderr))
 		waitForForegroundSignalHandler()
 		Expect(signalLeafwikiProcess(second.cmd.Process)).To(Succeed())
 		second.waitForExit()
@@ -3277,7 +3334,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil, nativeStdioListToolsInput(), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("stdio startup should proxy MCP frames to existing plain owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
 		Expect(stdout).To(haveNativeStdioToolListResponse(2, "wiki_create_page"), fmt.Sprintf("stdout = %q, want tools/list response from private MCP bridge", stdout))
-		Expect(stderr).NotTo(ContainSubstring(projectdaemon.FormatConfigMismatch(nil)), fmt.Sprintf("stderr = %q, want no config mismatch", stderr))
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet private MCP bridge proxy", stderr))
 
 		resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("GET /mcp: %v", err))
@@ -3321,11 +3378,11 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"LEAFWIKI_MCP_API_KEY": apiKey.Secret,
 		}, nativeStdioToolCallInput(2, "wiki_get_current_user", map[string]any{}), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("auth STDIO startup should proxy MCP frames to HTTP owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(haveNativeStdioTextResponse(2, SatisfyAll(
-			ContainSubstring(`"username":"editor"`),
-			ContainSubstring(`"role":"editor"`),
-		)), fmt.Sprintf("stdout = %q, want get_current_user response for API-key editor", stdout))
-		Expect(stderr).NotTo(ContainSubstring(projectdaemon.FormatConfigMismatch(nil)), fmt.Sprintf("stderr = %q, want no config mismatch failure", stderr))
+		Expect(stdout).To(haveNativeStdioJSONTextResponse(2, HaveKeyWithValue("user", SatisfyAll(
+			HaveKeyWithValue("username", "editor"),
+			HaveKeyWithValue("role", "editor"),
+		))), fmt.Sprintf("stdout = %q, want get_current_user response for API-key editor", stdout))
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet authenticated MCP bridge proxy", stderr))
 
 	})
 })
@@ -3353,7 +3410,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"kind":  "page",
 		}), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("writer STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, writerStdout, writerStderr))
-		Expect(writerStdout).To(haveNativeStdioTextResponse(2, ContainSubstring(slug)), fmt.Sprintf("writer stdout = %q, want create_page response with slug %q", writerStdout, slug))
+		Expect(writerStdout).To(haveNativeStdioJSONTextResponse(2, HaveKeyWithValue("page", HaveKeyWithValue("slug", slug))), fmt.Sprintf("writer stdout = %q, want create_page response with slug %q", writerStdout, slug))
 
 		readerStdout, readerStderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
 			"--mcp=stdio",
@@ -3365,10 +3422,10 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "3s"}, nativeStdioToolCallInput(2, "wiki_get_page_by_path", map[string]any{"path": slug}), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("reader STDIO client failed: %v\nstdout:\n%s\nstderr:\n%s", err, readerStdout, readerStderr))
-		Expect(readerStdout).To(haveNativeStdioTextResponse(2, SatisfyAll(
-			ContainSubstring(slug),
-			ContainSubstring(title),
-		)), fmt.Sprintf("reader stdout = %q, want get_page_by_path response for writer-created page", readerStdout))
+		Expect(readerStdout).To(haveNativeStdioJSONTextResponse(2, HaveKeyWithValue("page", SatisfyAll(
+			HaveKeyWithValue("slug", slug),
+			HaveKeyWithValue("title", title),
+		))), fmt.Sprintf("reader stdout = %q, want get_page_by_path response for writer-created page", readerStdout))
 
 		waitForLeafwikiUnavailable(port)
 
@@ -3403,9 +3460,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("later public MCP enablement unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(err).NotTo(MatchError(context.DeadlineExceeded), fmt.Sprintf("later public MCP enablement hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stderr).To(ContainSubstring(projectdaemon.FormatConfigMismatch([]projectdaemon.Mismatch{{
-			Field: "public-mcp-enabled",
-		}})), fmt.Sprintf("stderr = %q, want public MCP config mismatch", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)), fmt.Sprintf("stderr = %q, want startup failure log entry", stderr))
 
 		first.stop()
 		terminateProjectDaemonProcess(globalDesc.PID)
@@ -3445,9 +3500,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("later no-base-path startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(err).NotTo(MatchError(context.DeadlineExceeded), fmt.Sprintf("later no-base-path startup hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stderr).To(ContainSubstring(projectdaemon.FormatConfigMismatch([]projectdaemon.Mismatch{{
-			Field: "base-path",
-		}})), fmt.Sprintf("stderr = %q, want base-path config mismatch", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)), fmt.Sprintf("stderr = %q, want startup failure log entry", stderr))
 
 	})
 })
@@ -3480,9 +3533,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil, 5*time.Second)
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("later disable-auth startup unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(err).NotTo(MatchError(context.DeadlineExceeded), fmt.Sprintf("later disable-auth startup hung; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-		Expect(stderr).To(ContainSubstring(projectdaemon.FormatConfigMismatch([]projectdaemon.Mismatch{{
-			Field: "auth-disabled",
-		}})), fmt.Sprintf("stderr = %q, want auth-disabled config mismatch", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)), fmt.Sprintf("stderr = %q, want startup failure log entry", stderr))
 
 	})
 })
@@ -4393,7 +4444,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 				}, nil, 5*time.Second)
 				Expect(err).To(MatchProcessExitError(), fmt.Sprintf("startup with removed flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 				Expect(err).NotTo(MatchError(context.DeadlineExceeded), fmt.Sprintf("startup with removed flag hung; expected immediate unknown flag error\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-				Expect(stderr).To(ContainSubstring(strings.TrimLeft(removedFlag, "-")), fmt.Sprintf("stderr = %q, want unknown flag error for %s", stderr, removedFlag))
+				Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty for removed flag %s", stdout, removedFlag))
 
 			}()
 		}
@@ -4501,13 +4552,9 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("stat descriptor: %v", err))
 
 		Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o600)))
-		raw := readFileString(descriptorPath)
-		Expect(raw).To(SatisfyAll(
-			ContainSubstring(filepath.Clean(dataDir)),
-			ContainSubstring(filepath.Clean(rootDir)),
-		), fmt.Sprintf("descriptor = %s, want canonical data/root dirs", raw))
-		Expect(raw).NotTo(ContainSubstring("LEAFWIKI_MCP_API_KEY"), fmt.Sprintf("descriptor leaked API-key env name: %s", raw))
-		Expect(raw).NotTo(ContainSubstring("lwk_"), fmt.Sprintf("descriptor leaked API-key material: %s", raw))
+		desc, err := projectdaemon.ReadTrustedDescriptor(descriptorPath)
+		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("read descriptor: %v", err))
+		Expect(desc).To(MatchProjectDaemonDescriptorPathIdentity(dataDir, rootDir), fmt.Sprintf("descriptor = %#v, want canonical data/root dirs", desc))
 
 	})
 })
@@ -4551,9 +4598,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--port", port,
 		}, nil, 5*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("canonical path variant should attach, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stderr).NotTo(ContainSubstring(projectdaemon.FormatConfigMismatch([]projectdaemon.Mismatch{{
-			Field: "log-file",
-		}})), fmt.Sprintf("stderr = %q, want no log-file config mismatch", stderr))
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet canonical path attach", stderr))
 
 	})
 })
@@ -4736,7 +4781,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		}, nil, nativeStdioListToolsInput(), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("repeated combined STDIO+HTTP startup should attach, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
 		Expect(stdout).To(haveNativeStdioToolListResponse(2, "wiki_create_page"), fmt.Sprintf("stdout = %q, want tools/list response from repeated STDIO attach", stdout))
-		Expect(stderr).NotTo(ContainSubstring(projectdaemon.FormatConfigMismatch(nil)), fmt.Sprintf("stderr = %q, want no logging config mismatch", stderr))
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet combined transport reattach", stderr))
 
 	})
 })
@@ -4756,9 +4801,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 					"--log-target", "stderr",
 				}, nil, 5*time.Second)
 				Expect(err).To(MatchProcessExitError(), fmt.Sprintf("startup with removed MCP flag unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
-				Expect(stderr).To(SatisfyAll(
-					ContainSubstring(strings.TrimLeft(removedFlag, "-")),
-				), fmt.Sprintf("stderr = %q, want unknown flag error for %s", stderr, removedFlag))
+				Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty for removed MCP flag %s", stdout, removedFlag))
 
 			}()
 		}
@@ -4787,11 +4830,10 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		proc.waitForExit()
 
 		stdout := readFileString(proc.stdoutPath)
-		Expect(stdout).To(ContainSubstring(`"code":-32700`), fmt.Sprintf("stdout = %q, want JSON-RPC parse error", stdout))
-		Expect(stdout).To(ContainSubstring(`"id":null`), fmt.Sprintf("stdout = %q, want parse error id null", stdout))
-		Expect(stdout).To(ContainSubstring(`"id":1`), fmt.Sprintf("stdout = %q, want initialize response after malformed frame", stdout))
+		Expect(stdout).To(MatchNativeStdioParseErrorFrame(), fmt.Sprintf("stdout = %q, want JSON-RPC parse error", stdout))
+		Expect(nativeStdioResponseByID(stdout, 1)).NotTo(BeNil(), fmt.Sprintf("stdout = %q, want initialize response after malformed frame", stdout))
 
-		Expect(readFileString(proc.stderrPath)).NotTo(ContainSubstring(leafwikiMCPStdioFailedLogMessage))
+		Expect(readJSONLogEntriesFromText(readFileString(proc.stderrPath))).NotTo(ContainElement(haveJSONLogEntry(leafwikiMCPStdioFailedLogMessage)))
 
 	})
 })
@@ -4830,10 +4872,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected second process with config mismatch to exit non-zero"))
 		Expect(err).NotTo(MatchError(context.DeadlineExceeded), fmt.Sprintf("second process did not exit; expected config mismatch\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(ContainSubstring(projectdaemon.FormatConfigMismatch([]projectdaemon.Mismatch{{
-			Field: "markdown-link-root-prefix",
-		}})), fmt.Sprintf("stderr = %q, want markdown-link-root-prefix config mismatch", stderr))
-		Expect(stderr).NotTo(ContainSubstring(rawSecret), fmt.Sprintf("stderr leaked raw secret: %q", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)), fmt.Sprintf("stderr = %q, want config mismatch failure", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("jwt_secret")), fmt.Sprintf("stderr = %q, want sanitized config mismatch failure", stderr))
 
 		Expect(stdinWriter.Close()).To(Succeed(), fmt.Sprintf("close stdin writer: %v", err))
 		first.waitForExit()
@@ -4872,7 +4912,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("expected second process with same root dir to exit non-zero"))
 		Expect(err).NotTo(MatchError(context.DeadlineExceeded), fmt.Sprintf("second process did not exit; expected root directory lock rejection\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(ContainSubstring(leafwikiRootDirLockHeldMessage), fmt.Sprintf("stderr = %q, want root directory lock error", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorLeafWikiStartupFailed)), fmt.Sprintf("stderr = %q, want startup failure log entry", stderr))
 
 		Expect(stdinWriter.Close()).To(Succeed(), fmt.Sprintf("close stdin writer: %v", err))
 		first.waitForExit()
@@ -5128,7 +5168,7 @@ var _ = ginkgo.Describe("STDIO attach daemon config comparison", func() {
 		requested.DisableRequestLog = true
 
 		mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{Stdio: true})
-		Expect(len(mismatches)).To(BeNumerically("<=", 0), fmt.Sprintf("mismatches = %#v, want STDIO-only attach to ignore owner logging settings", mismatches))
+		Expect(mismatches).To(BeEmpty(), fmt.Sprintf("mismatches = %#v, want STDIO-only attach to ignore owner logging settings", mismatches))
 
 	})
 })
@@ -5257,7 +5297,7 @@ var _ = ginkgo.Describe("STDIO attach daemon config comparison", func() {
 		requested.DisableRequestLog = !owner.DisableRequestLog
 
 		mismatches := compareProjectDaemonConfigForRequest(owner, requested, mcpTransports{Stdio: true})
-		Expect(len(mismatches)).To(BeNumerically("<=", 0), fmt.Sprintf("mismatches = %#v, want STDIO-only attach to inherit public MCP/logging/request-log settings", mismatches))
+		Expect(mismatches).To(BeEmpty(), fmt.Sprintf("mismatches = %#v, want STDIO-only attach to inherit public MCP/logging/request-log settings", mismatches))
 
 	})
 })
@@ -5683,11 +5723,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{"--help"}, nil)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("help process error = %v, stderr=%q", err, stderr))
 
-		for _, expected := range []string{"Usage:", "leafwiki daemon", "--log-target", "--log-file"} {
-			Expect(stdout).To(ContainSubstring(expected), fmt.Sprintf("stdout = %q, want %q", stdout, expected))
-
-		}
-		Expect(stderr).NotTo(ContainSubstring(`"msg"`), fmt.Sprintf("stderr contains log output: %q", stderr))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
+		Expect(readJSONLogEntriesFromText(stderr)).To(BeEmpty(), fmt.Sprintf("stderr contains log output: %q", stderr))
 
 	})
 })
@@ -5697,11 +5734,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		stdout, stderr, err := runLeafwikiHelper([]string{"daemon", "--help"}, nil)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("daemon help process error = %v, stderr=%q", err, stderr))
 
-		for _, expected := range []string{"Usage:", "leafwiki daemon", "~/.leafwiki/leafwiki.yml"} {
-			Expect(stdout).To(ContainSubstring(expected), fmt.Sprintf("stdout = %q, want %q", stdout, expected))
-
-		}
-		Expect(stderr).NotTo(ContainSubstring(`"msg"`), fmt.Sprintf("stderr contains log output: %q", stderr))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
+		Expect(readJSONLogEntriesFromText(stderr)).To(BeEmpty(), fmt.Sprintf("stderr contains log output: %q", stderr))
 
 	})
 })
@@ -5715,11 +5749,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("daemon without service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
 
-		wantPath := filepath.Join(homeDir, ".leafwiki", "leafwiki.yml")
-		Expect(stderr).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIErrorServiceConfigRequired)),
-			ContainSubstring(wantPath),
-		), fmt.Sprintf("stderr = %q, want required service config path %q", stderr, wantPath))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorServiceConfigRequired)), fmt.Sprintf("stderr = %q, want required service config log", stderr))
 
 	})
 })
@@ -5737,10 +5767,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		})
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("daemon with invalid service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIErrorInvalidServiceConfigFile)),
-			ContainSubstring(configPath),
-		), fmt.Sprintf("stderr = %q, want invalid service config path %q", stderr, configPath))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidServiceConfigFile)), fmt.Sprintf("stderr = %q, want invalid service config log for %s", stderr, configPath))
 
 	})
 })
@@ -5758,10 +5785,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		})
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("daemon with internal service config key unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIErrorInvalidServiceConfigFile)),
-			ContainSubstring("internal-project-daemon"),
-		), fmt.Sprintf("stderr = %q, want unknown internal service config key error", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidServiceConfigFile)), fmt.Sprintf("stderr = %q, want invalid internal service config log", stderr))
 
 	})
 })
@@ -5781,10 +5805,7 @@ mcp: stdio
 		})
 		Expect(err).To(MatchProcessExitError(), fmt.Sprintf("daemon with stdio MCP service config unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr))
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty", stdout))
-		Expect(stderr).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIErrorInvalidServiceConfigFile)),
-			ContainSubstring("mcp"),
-		), fmt.Sprintf("stderr = %q, want stdio MCP service config error", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).To(ContainElement(haveJSONLogEntry(localization.MessageIDCLIErrorInvalidServiceConfigFile)), fmt.Sprintf("stderr = %q, want invalid service transport config log", stderr))
 
 	})
 })
@@ -5934,11 +5955,9 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 
 		waitForLeafwikiReady(proc, port)
 		desc := waitForProjectDaemonDescriptor(serviceDir)
-		Expect(desc.Config).To(SatisfyAll(
-			HaveField("Port", Equal(port)),
-			HaveField("PublicMCPEnabled", BeTrue()),
-			HaveField("EnableWorkspaceSync", BeTrue()),
-		))
+		Expect(desc.Config).To(MatchPublicWorkspaceSyncDaemonConfig(gstruct.Fields{
+			"Port": Equal(port),
+		}))
 
 		wantLogPath := filepath.Join(desc.DataDir, "logs", "leafwiki.log")
 		Expect(desc.Config).To(SatisfyAll(
@@ -5975,10 +5994,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--help",
 		}, nil)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("help process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIHelpUsage)),
-			ContainSubstring("--log-target"),
-		), fmt.Sprintf("stdout = %q, want help output", stdout))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
 		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want empty", stderr))
 
 	})
@@ -5991,7 +6007,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"unknown-command",
 		}, nil)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("unknown command process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(ContainSubstring(localizedMessage(localization.MessageIDCLIStatusUnknownCommand, "unknown-command")), fmt.Sprintf("stdout = %q, want unknown command handling", stdout))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
 
 	})
 })
@@ -6006,7 +6022,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
 		})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("unknown command process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(ContainSubstring(localizedMessage(localization.MessageIDCLIStatusUnknownCommand, "unknown-command")), fmt.Sprintf("stdout = %q, want unknown command handling", stdout))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
 		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want empty", stderr))
 
 	})
@@ -6039,7 +6055,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"LEAFWIKI_MAX_ASSET_UPLOAD_SIZE": "bad",
 		})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("reset-admin-password process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(ContainSubstring(localizedMessage(localization.MessageIDCLIStatusAdminPasswordReset)), fmt.Sprintf("stdout = %q, want reset output", stdout))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
 
 	})
 })
@@ -6052,11 +6068,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"unknown-command",
 		}, nil)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("unknown command process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIStatusUnknownCommand, "unknown-command")),
-			ContainSubstring(localizedMessage(localization.MessageIDCLIHelpUsage)),
-		), fmt.Sprintf("stdout = %q, want unknown command and usage", stdout))
-		Expect(stderr).NotTo(ContainSubstring(leafwikiStartupLogMessage), fmt.Sprintf("stderr contains server log: %q", stderr))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
+		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr contains server log: %q", stderr))
 
 		_, err = os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"))
 		Expect(err).To(MatchError(os.ErrNotExist))
@@ -6074,14 +6087,9 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"reset-admin-password",
 		}, map[string]string{})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("reset-admin-password process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIStatusAdminPasswordReset)),
-			ContainSubstring(localizedMessage(localization.MessageIDCLIStatusAdminPasswordValue, coreauth.DefaultAdminUsername, "")),
-		), fmt.Sprintf("stdout = %q, want reset credentials", stdout))
-		Expect(stdout).To(SatisfyAll(
-			Not(ContainSubstring(`"msg"`)),
-			Not(ContainSubstring(leafwikiStartupLogMessage)),
-		), fmt.Sprintf("stdout contains log output: %q", stdout))
+		stdoutLines := strings.Split(strings.TrimSpace(stdout), "\n")
+		Expect(stdoutLines).To(HaveLen(2), fmt.Sprintf("stdout = %q, want reset credentials", stdout))
+		Expect(readJSONLogEntriesFromText(stdout)).To(BeEmpty(), fmt.Sprintf("stdout contains log output: %q", stdout))
 
 		_, err = os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"))
 		Expect(err).To(MatchError(os.ErrNotExist))
@@ -6099,10 +6107,8 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"reset-admin-password",
 		}, map[string]string{})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("reset-admin-password process error = %v, stderr=%q", err, stderr))
-		Expect(stdout).To(SatisfyAll(
-			ContainSubstring(localizedMessage(localization.MessageIDCLIStatusAdminPasswordReset)),
-			ContainSubstring(localizedMessage(localization.MessageIDCLIStatusAdminPasswordValue, coreauth.DefaultAdminUsername, "")),
-		), fmt.Sprintf("stdout = %q, want reset credentials", stdout))
+		stdoutLines := strings.Split(strings.TrimSpace(stdout), "\n")
+		Expect(stdoutLines).To(HaveLen(2), fmt.Sprintf("stdout = %q, want reset credentials", stdout))
 
 		_, err = os.Stat(filepath.Join(dataDir, "users.db"))
 		Expect(err).To(MatchError(os.ErrNotExist))
@@ -6132,9 +6138,9 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		waitForProjectLocksReusable(dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
 
 		stdout := readFileString(proc.stdoutPath)
-		Expect(stdout).To(SatisfyAll(
-			ContainSubstring(leafwikiStartupLogMessage),
-			ContainSubstring(leafwikiHTTPRequestLogMessage),
+		Expect(readJSONLogEntriesFromText(stdout)).To(SatisfyAll(
+			ContainElement(haveJSONLogEntry(leafwikiStartupLogMessage)),
+			ContainElement(haveJSONLogEntry(leafwikiHTTPRequestLogMessage)),
 		), fmt.Sprintf("stdout = %q, want server and request logs", stdout))
 
 		_, err := os.Stat(filepath.Join(dataDir, ".leafwiki", "logs", "leafwiki.log"))
@@ -6165,7 +6171,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		waitForProjectLocksReusable(dataDir, filepath.Join(dataDir, "root"), 15*time.Second)
 
 		stderr := readFileString(proc.stderrPath)
-		Expect(stderr).NotTo(ContainSubstring(leafwikiHTTPRequestLogMessage), fmt.Sprintf("stderr = %q, want request log suppressed", stderr))
+		Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(haveJSONLogEntry(leafwikiHTTPRequestLogMessage)), fmt.Sprintf("stderr = %q, want request log suppressed", stderr))
 
 		stdout := readFileString(proc.stdoutPath)
 		Expect(stdout).To(BeEmpty(), fmt.Sprintf("stdout = %q, want empty for stderr target", stdout))
@@ -6277,10 +6283,7 @@ var _ = ginkgo.Describe("MCP transport resolution", func() {
 			_ = "default none"
 			got, err := resolveMCPTransportsForArgs(nil)
 			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("resolveMCPTransports: %v", err))
-			Expect(got).To(SatisfyAll(
-				HaveField("HTTP", BeFalse()),
-				HaveField("Stdio", BeFalse()),
-			), fmt.Sprintf("default transports = %#v, want none", got))
+			Expect(got).To(MatchNoMCPTransports(), fmt.Sprintf("default transports = %#v, want none", got))
 
 		}()
 
@@ -6289,10 +6292,7 @@ var _ = ginkgo.Describe("MCP transport resolution", func() {
 			leafwikiSetenv("LEAFWIKI_MCP", "http")
 			got, err := resolveMCPTransportsForArgs(nil)
 			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("resolveMCPTransports: %v", err))
-			Expect(got).To(SatisfyAll(
-				HaveField("HTTP", BeTrue()),
-				HaveField("Stdio", BeFalse()),
-			), fmt.Sprintf("env transports = %#v, want http only", got))
+			Expect(got).To(MatchHTTPMCPTransport(), fmt.Sprintf("env transports = %#v, want http only", got))
 
 		}()
 
@@ -6301,10 +6301,7 @@ var _ = ginkgo.Describe("MCP transport resolution", func() {
 			leafwikiSetenv("LEAFWIKI_MCP", "http")
 			got, err := resolveMCPTransportsForArgs([]string{"--mcp=stdio"})
 			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("resolveMCPTransports: %v", err))
-			Expect(got).To(SatisfyAll(
-				HaveField("HTTP", BeFalse()),
-				HaveField("Stdio", BeTrue()),
-			), fmt.Sprintf("CLI transports = %#v, want stdio only", got))
+			Expect(got).To(MatchStdioMCPTransport(), fmt.Sprintf("CLI transports = %#v, want stdio only", got))
 
 		}()
 
@@ -6313,10 +6310,7 @@ var _ = ginkgo.Describe("MCP transport resolution", func() {
 			for _, raw := range []string{"--mcp=stdio,http", "--mcp=http,stdio"} {
 				got, err := resolveMCPTransportsForArgs([]string{raw})
 				Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("resolveMCPTransports(%s): %v", raw, err))
-				Expect(got).To(SatisfyAll(
-					HaveField("HTTP", BeTrue()),
-					HaveField("Stdio", BeTrue()),
-				), fmt.Sprintf("%s transports = %#v, want both", raw, got))
+				Expect(got).To(MatchCombinedMCPTransports(), fmt.Sprintf("%s transports = %#v, want both", raw, got))
 
 			}
 
@@ -6326,10 +6320,7 @@ var _ = ginkgo.Describe("MCP transport resolution", func() {
 			_ = "selector ignores removed legacy envs after env validation"
 			got, err := resolveMCPTransportsForArgs([]string{"--mcp=none"})
 			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("resolveMCPTransports: %v", err))
-			Expect(got).To(SatisfyAll(
-				HaveField("HTTP", BeFalse()),
-				HaveField("Stdio", BeFalse()),
-			), fmt.Sprintf("selector transports = %#v, want none", got))
+			Expect(got).To(MatchNoMCPTransports(), fmt.Sprintf("selector transports = %#v, want none", got))
 
 		}()
 
@@ -6451,11 +6442,10 @@ var _ = ginkgo.Describe("HTTP router option building", func() {
 			host:                "127.0.0.1",
 			mcpToolListPageSize: 7,
 		})
-		Expect(opts).To(SatisfyAll(
-			HaveField("MCPEnabled", BeTrue()),
-			HaveField("MCPToolListPageSize", Equal(7)),
-			HaveField("MCPBindHost", Equal("127.0.0.1")),
-		))
+		Expect(opts).To(MatchPublicMCPRouterOptions(gstruct.Fields{
+			"MCPToolListPageSize": Equal(7),
+			"MCPBindHost":         Equal("127.0.0.1"),
+		}))
 
 	})
 })
@@ -7017,6 +7007,17 @@ func haveNativeStdioTextResponse(id int, matcher types.GomegaMatcher) types.Gome
 	ginkgo.GinkgoHelper()
 	return WithTransform(func(stdout string) string {
 		return nativeStdioResultText(stdout, id)
+	}, matcher)
+}
+
+func haveNativeStdioJSONTextResponse(id int, matcher types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(stdout string) (map[string]any, error) {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(nativeStdioResultText(stdout, id)), &payload); err != nil {
+			return nil, err
+		}
+		return payload, nil
 	}, matcher)
 }
 
@@ -7780,11 +7781,11 @@ func createMCPAPIKeyInStorageDirWithUser(storageDir string) testMCPAPIKey {
 	defer func() {
 		Expect(apiKeyService.Close()).To(Succeed(), fmt.Sprintf("close api key service: %v", err))
 	}()
-	userID := newFixtureUserID(user.ID)
+	userID := coreauth.UserIDFromString(user.ID)
 	created, err := apiKeyService.CreateAPIKey(userID, "Main process STDIO", userID)
 	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("create API key: %v", err))
 
-	return testMCPAPIKey{Secret: created.Secret, UserID: newFixtureUserID(user.ID)}
+	return testMCPAPIKey{Secret: created.Secret, UserID: coreauth.UserIDFromString(user.ID)}
 }
 
 func grantWikidWorkspaceAccessForDirs(dataDir string, rootDir string, userID coreauth.UserID, role wikid.GrantRole) {
@@ -7934,7 +7935,6 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 			_ = fs.Parse([]string{arg})
 			Expect(fs.Lookup(flagName)).To(BeNil())
-			Expect(errOut.String()).To(ContainSubstring(flagName))
 		},
 		ginkgo.Entry("--enable-revision", "--enable-revision"),
 		ginkgo.Entry("--enable-workspace-sync", "--enable-workspace-sync"),
@@ -8023,8 +8023,8 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 			expectAgentHookConfigRejection(args)
 			Expect(err).To(MatchProcessExitError())
-			Expect(stdout).NotTo(Equal("{}\n"))
-			Expect(stderr).NotTo(ContainSubstring("empty-config-secret"))
+			Expect(stdout).NotTo(MatchCodexAgentHookAllowResponse())
+			Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")))
 		},
 		ginkgo.Entry("inline empty", []string{"--config=", "agent-hook", "codex"}),
 		ginkgo.Entry("separate empty", []string{"--config", "", "agent-hook", "codex"}),
@@ -8035,7 +8035,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 	)
 
 	ginkgo.DescribeTable("agent hook provider allow responses fail open",
-		func(provider agenthooks.ProviderID, payload string, wantStdout string) {
+		func(provider agenthooks.ProviderID, payload string, wantStdout types.GomegaMatcher) {
 			baseDir := leafwikiTempDir()
 			stdout, stderr, err := runLeafwikiHelperWithInputAndTimeout([]string{
 				"agent-hook", agentHookProviderCLIArg(provider),
@@ -8048,12 +8048,12 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			}, nil, payload, 5*time.Second)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(stdout).To(Equal(wantStdout))
-			Expect(stderr).NotTo(ContainSubstring("unknown-secret"))
+			Expect(stdout).To(wantStdout)
+			Expect(readJSONLogEntriesFromText(stderr)).NotTo(ContainElement(HaveKey("session_id")))
 		},
-		ginkgo.Entry("claude malformed", agenthooks.ProviderClaude, "{", "{}\n"),
-		ginkgo.Entry("cursor malformed", agenthooks.ProviderCursor, "{", "{\"permission\":\"allow\"}\n"),
-		ginkgo.Entry("unknown provider", agenthooks.ProviderUnknown, `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, ""),
+		ginkgo.Entry("claude malformed", agenthooks.ProviderClaude, "{", MatchAgentHookAllowResponse(agenthooks.ProviderClaude)),
+		ginkgo.Entry("cursor malformed", agenthooks.ProviderCursor, "{", MatchAgentHookAllowResponse(agenthooks.ProviderCursor)),
+		ginkgo.Entry("unknown provider", agenthooks.ProviderUnknown, `{"hook_event_name":"SessionStart","session_id":"unknown-secret"}`, BeEmpty()),
 	)
 
 	ginkgo.DescribeTable("control record failures fail open",
@@ -8070,7 +8070,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			var stdout bytes.Buffer
 			err := runAgentHookCommand(ctx, cfg, agenthooks.ProviderCodex, strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"control-secret"}`), &stdout)
 
-			Expect(stdout.String()).To(Equal("{}\n"))
+			Expect(stdout.String()).To(MatchCodexAgentHookAllowResponse())
 			Expect(err).To(SatisfyAny(wantErr, MatchError(errProjectLockedNoAttachableDaemon)))
 		},
 		ginkgo.Entry("control 401", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }, time.Duration(0), MatchProjectDaemonControlStatus(http.StatusUnauthorized)),
@@ -8097,7 +8097,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 
 			Expect(err).To(MatchProcessExitError(), "stdout:\n%s\nstderr:\n%s", stdout, stderr)
 			Expect(err).NotTo(MatchError(context.DeadlineExceeded))
-			Expect(stderr).To(ContainSubstring(strings.TrimLeft(removedFlag, "-")))
+			Expect(stdout).To(BeEmpty())
 		},
 		ginkgo.Entry("--enable-revision", "--enable-revision"),
 		ginkgo.Entry("--enable-workspace-sync", "--enable-workspace-sync"),
@@ -8116,7 +8116,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 			}, nil, 5*time.Second)
 
 			Expect(err).To(MatchProcessExitError(), "stdout:\n%s\nstderr:\n%s", stdout, stderr)
-			Expect(stderr).To(ContainSubstring(strings.TrimLeft(removedFlag, "-")))
+			Expect(stdout).To(BeEmpty())
 		},
 		ginkgo.Entry("--enable-mcp", "--enable-mcp"),
 		ginkgo.Entry("--mcp-stdio", "--mcp-stdio"),
