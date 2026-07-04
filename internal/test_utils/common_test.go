@@ -205,12 +205,13 @@ var _ = ginkgo.Describe("test utilities", func() {
 		WrapCloseWithErrorCheck(func() error { return nil }, tb)
 		Expect(tb.helperCalls).To(Equal(1))
 
-		Expect(func() {
-			WrapCloseWithErrorCheck(func() error { return errFixtureCloseFailed }, &fakeTestHelper{panicOnFatal: true})
-		}).To(PanicWith(SatisfyAll(
-			ContainSubstring(wrapCloseFailurePrefix),
-			ContainSubstring(errFixtureCloseFailed.Error()),
-		)))
+		failedClose := &fakeTestHelper{}
+		WrapCloseWithErrorCheck(func() error { return errFixtureCloseFailed }, failedClose)
+
+		Expect(failedClose.fatalRecord()).To(SatisfyAll(
+			HaveField("Format", Equal(wrapCloseFailurePrefix+": %v")),
+			HaveField("Args", HaveExactElements(MatchError(errFixtureCloseFailed))),
+		))
 	})
 })
 
@@ -270,6 +271,13 @@ func (w errorWriter) Write([]byte) (int, error) {
 type fakeTestHelper struct {
 	helperCalls  int
 	panicOnFatal bool
+	fatalFormat  string
+	fatalArgs    []any
+}
+
+type fatalRecord struct {
+	Format string
+	Args   []any
 }
 
 func (t *fakeTestHelper) Helper() {
@@ -277,9 +285,18 @@ func (t *fakeTestHelper) Helper() {
 }
 
 func (t *fakeTestHelper) Fatalf(format string, args ...any) {
+	t.fatalFormat = format
+	t.fatalArgs = append([]any(nil), args...)
 	message := fmt.Sprintf(format, args...)
 	if t.panicOnFatal {
 		panic(message)
+	}
+}
+
+func (t *fakeTestHelper) fatalRecord() fatalRecord {
+	return fatalRecord{
+		Format: t.fatalFormat,
+		Args:   append([]any(nil), t.fatalArgs...),
 	}
 }
 
