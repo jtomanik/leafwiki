@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/markdown"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 var invalidRevisionPageIDCases = []struct {
@@ -280,7 +281,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		pageID := newFixturePageID("page-1")
 		created := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 		for i := 0; i < 2; i++ {
-			rev := &Revision{ID: newFixtureRevisionID(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
+			rev := &Revision{ID: RevisionIDFromString(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
 			Expect(store.SaveRevision(rev)).To(Succeed())
 		}
 
@@ -377,7 +378,7 @@ var _ = ginkgo.Describe("fs store", func() {
 			tc := tc
 			ginkgo.It(tc.name, func() {
 				store := NewFSStore(revisionTempDir())
-				pageID := newFixturePageID(tc.id)
+				pageID := tree.PageIDFromString(tc.id)
 				_, _, err := store.ListRevisionsPage(pageID, "", 50)
 				Expect(err).To(rejectRevisionValidation())
 				_, err = store.GetLatestRevision(pageID)

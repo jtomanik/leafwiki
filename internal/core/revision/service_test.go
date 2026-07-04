@@ -27,19 +27,19 @@ func createRevisionTestPage(treeService *tree.TreeService, title, slug, content 
 	ginkgo.GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode("tester", nil, title, newFixtureSlug(slug), &kind)
+	id, err := treeService.CreateNode("tester", nil, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(id).NotTo(BeNil())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, newFixtureSlug(slug), &content, false)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, tree.SlugFromString(slug), &content, false)).To(Succeed())
 	return *id
 }
 
 func revisionTestPageID[T ~string](raw T) tree.PageID {
-	return newFixturePageID(string(raw))
+	return tree.PageIDFromString(raw)
 }
 
 func revisionTestUserID(raw string) tree.UserID {
-	return newFixtureUserID(raw)
+	return tree.UserIDFromString(raw)
 }
 
 func renderRevisionTestMarkdown[T ~string](pageID T, title string, fields map[string]interface{}, extra map[string]interface{}, body string) string {
@@ -103,20 +103,20 @@ var _ = ginkgo.Describe("service", func() {
 		writeLiveAsset(storageDir, pageID1, "a.txt", "asset-a")
 		writeLiveAsset(storageDir, pageID2, "b.txt", "asset-b")
 
-		page1, err := treeService.GetPage(newFixturePageID(pageID1))
+		page1, err := treeService.GetPage(tree.PageIDFromString(pageID1))
 		Expect(err).NotTo(HaveOccurred())
-		page2, err := treeService.GetPage(newFixturePageID(pageID2))
+		page2, err := treeService.GetPage(tree.PageIDFromString(pageID2))
 		Expect(err).NotTo(HaveOccurred())
 
 		errs := service.RecordContentUpdates([]*tree.Page{page1, page2}, "tester", "batch")
 		Expect(errs).To(HaveLen(2))
 		Expect(errs).To(HaveEach(Succeed()))
 
-		revisions1, err := service.ListRevisions(newFixturePageID(pageID1))
+		revisions1, err := service.ListRevisions(tree.PageIDFromString(pageID1))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions1).To(HaveExactElements(HaveField("Type", RevisionTypeContentUpdate)))
 
-		revisions2, err := service.ListRevisions(newFixturePageID(pageID2))
+		revisions2, err := service.ListRevisions(tree.PageIDFromString(pageID2))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions2).To(HaveExactElements(HaveField("Type", RevisionTypeContentUpdate)))
 
@@ -124,11 +124,11 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(errs).To(HaveLen(2))
 		Expect(errs).To(HaveEach(Succeed()))
 
-		revisions1After, err := service.ListRevisions(newFixturePageID(pageID1))
+		revisions1After, err := service.ListRevisions(tree.PageIDFromString(pageID1))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions1After).To(HaveLen(1))
 
-		revisions2After, err := service.ListRevisions(newFixturePageID(pageID2))
+		revisions2After, err := service.ListRevisions(tree.PageIDFromString(pageID2))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions2After).To(HaveLen(1))
 	})
@@ -140,9 +140,9 @@ var _ = ginkgo.Describe("service", func() {
 		writeLiveAsset(storageDir, pageID1, "a.txt", "asset-a")
 		writeLiveAsset(storageDir, pageID2, "b.txt", "asset-b")
 
-		page1, err := treeService.GetPage(newFixturePageID(pageID1))
+		page1, err := treeService.GetPage(tree.PageIDFromString(pageID1))
 		Expect(err).NotTo(HaveOccurred())
-		page2, err := treeService.GetPage(newFixturePageID(pageID2))
+		page2, err := treeService.GetPage(tree.PageIDFromString(pageID2))
 		Expect(err).NotTo(HaveOccurred())
 
 		errs := service.RecordContentUpdates([]*tree.Page{page1, nil, page2}, "tester", "batch")
@@ -152,11 +152,11 @@ var _ = ginkgo.Describe("service", func() {
 			Succeed(),
 		))
 
-		revisions1, err := service.ListRevisions(newFixturePageID(pageID1))
+		revisions1, err := service.ListRevisions(tree.PageIDFromString(pageID1))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions1).To(HaveLen(1))
 
-		revisions2, err := service.ListRevisions(newFixturePageID(pageID2))
+		revisions2, err := service.ListRevisions(tree.PageIDFromString(pageID2))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions2).To(HaveLen(1))
 	})
@@ -166,14 +166,14 @@ var _ = ginkgo.Describe("service", func() {
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset-a")
 
-		page, err := treeService.GetPage(newFixturePageID(pageID))
+		page, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 
 		errs := service.RecordContentUpdates([]*tree.Page{page, page}, "tester", "batch")
 		Expect(errs).To(HaveLen(2))
 		Expect(errs).To(HaveEach(Succeed()))
 
-		revisions, err := service.ListRevisions(newFixturePageID(pageID))
+		revisions, err := service.ListRevisions(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions).To(HaveLen(1))
 	})
@@ -203,15 +203,15 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content"))).
 			To(haveRecordedRevision(Not(BeNil())))
 
-		revisions, err := service.ListRevisions(newFixturePageID(pageID))
+		revisions, err := service.ListRevisions(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions).To(HaveExactElements(HaveField("Type", RevisionTypeContentUpdate)))
-		paged, _, err := service.ListRevisionsPage(newFixturePageID(pageID), "", 1)
+		paged, _, err := service.ListRevisionsPage(tree.PageIDFromString(pageID), "", 1)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(paged).To(HaveLen(1))
 
 		Expect(service.DeletePageData(typedPageID)).To(Succeed())
-		revisions, err = service.ListRevisions(newFixturePageID(pageID))
+		revisions, err = service.ListRevisions(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions).To(BeEmpty())
 
@@ -234,7 +234,7 @@ var _ = ginkgo.Describe("service", func() {
 		parentKind := tree.NodeKindSection
 		parentID, err := treeService.CreateNode("tester", nil, "Docs", "docs", &parentKind)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(treeService.MoveNodeUncheckedVersion("tester", newFixturePageID(pageID), *parentID)).To(Succeed())
+		Expect(treeService.MoveNodeUncheckedVersion("tester", tree.PageIDFromString(pageID), *parentID)).To(Succeed())
 		Expect(createdRevisionRecord(service.RecordStructureChange(revisionTestPageID(pageID), "tester", "structure"))).
 			To(haveRecordedRevision(SatisfyAll(
 				HaveField("Type", RevisionTypeStructureUpdate),
@@ -271,7 +271,7 @@ var _ = ginkgo.Describe("service", func() {
 
 		typedPageID := revisionTestPageID(pageID)
 		Expect(service.recordRestoreRevision(typedPageID, revisionTestUserID("tester"))).To(Succeed())
-		latest, err := service.GetLatestRevision(newFixturePageID(pageID))
+		latest, err := service.GetLatestRevision(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(latest).To(HaveField("Type", RevisionTypeRestore))
 
@@ -369,12 +369,12 @@ var _ = ginkgo.Describe("service", func() {
 			To(haveRecordedRevision(HaveField("ID", assetRev1.ID)))
 
 		content := "hello-2"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
 		Expect(createdRevisionRecord(service.RecordAssetChange(revisionTestPageID(pageID), "tester", "asset after content"))).
 			To(haveRecordedRevision(Not(HaveField("ID", assetRev1.ID))))
 
 		content = "hello-3"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
 		Expect(createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content"))).
 			To(haveRecordedRevision(HaveField("Type", RevisionTypeContentUpdate)))
 	})
@@ -394,21 +394,21 @@ var _ = ginkgo.Describe("service", func() {
 		pageID := *pageIDPtr
 
 		originalContent := "first version"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Original", newFixtureSlug("original"), &originalContent, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Original", newFixtureSlug("original"), &originalContent, false)).To(Succeed())
 		writeLiveAsset(storageDir, pageID, "old.txt", "old-asset")
 		originalRecord := createdRevisionRecord(service.RecordAssetChange(revisionTestPageID(pageID), "tester", "original state"))
 		Expect(originalRecord).To(haveRecordedRevision(Not(BeNil())))
 		originalRev := originalRecord.Revision
 
 		changedContent := "second version"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Changed", newFixtureSlug("changed"), &changedContent, false)).To(Succeed())
-		Expect(treeService.MoveNodeUncheckedVersion("tester", newFixturePageID(pageID), *archiveID)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Changed", newFixtureSlug("changed"), &changedContent, false)).To(Succeed())
+		Expect(treeService.MoveNodeUncheckedVersion("tester", tree.PageIDFromString(pageID), *archiveID)).To(Succeed())
 		Expect(os.Remove(revisionAssetPath(storageDir, pageID, "old.txt"))).To(Succeed())
 		writeLiveAsset(storageDir, pageID, "new.txt", "new-asset")
 
-		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(originalRev.ID), newFixtureUserID("tester"))).To(Succeed())
+		Expect(service.RestoreRevision(tree.PageIDFromString(pageID), RevisionIDFromString(originalRev.ID), newFixtureUserID("tester"))).To(Succeed())
 
-		page, err := treeService.GetPage(newFixturePageID(pageID))
+		page, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		// Restore rehydrates revision content and title while preserving the current slug/path.
 		Expect(page).To(SatisfyAll(
@@ -424,7 +424,7 @@ var _ = ginkgo.Describe("service", func() {
 		_, err = os.Stat(revisionAssetPath(storageDir, pageID, "new.txt"))
 		Expect(err).To(MatchError(os.ErrNotExist))
 
-		latest, err := service.GetLatestRevision(newFixturePageID(pageID))
+		latest, err := service.GetLatestRevision(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(latest).To(HaveField("Type", RevisionTypeRestore))
 	})
@@ -442,7 +442,7 @@ var _ = ginkgo.Describe("service", func() {
 			map[string]interface{}{"aliases": []interface{}{"one"}},
 			"Body",
 		)
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
 
 		firstRecord := createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "first"))
 		Expect(firstRecord).To(haveRecordedRevision(SatisfyAll(
@@ -458,7 +458,7 @@ var _ = ginkgo.Describe("service", func() {
 			map[string]interface{}{"aliases": []interface{}{"two"}},
 			"Body",
 		)
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
 
 		secondRecord := createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "second"))
 		Expect(secondRecord).To(haveRecordedRevision(SatisfyAll(
@@ -487,7 +487,7 @@ var _ = ginkgo.Describe("service", func() {
 			map[string]interface{}{"aliases": []interface{}{"one"}},
 			"Body",
 		)
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
 		firstRecord := createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "first"))
 		Expect(firstRecord).To(haveRecordedRevision(Not(BeNil())))
 		firstRev := firstRecord.Revision
@@ -497,20 +497,20 @@ var _ = ginkgo.Describe("service", func() {
 			map[string]interface{}{"aliases": []interface{}{"two"}},
 			"Body changed",
 		)
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), newFixturePageID(pageID), "Changed", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), tree.PageIDFromString(pageID), "Changed", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
 		Expect(createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second"))).
 			To(haveRecordedRevision(Not(BeNil())))
 
-		beforeRestore, err := treeService.GetPage(newFixturePageID(pageID))
+		beforeRestore, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		managedID := beforeRestore.ID
 		managedCreatedAt := beforeRestore.Metadata.CreatedAt
 		managedCreatorID := beforeRestore.Metadata.CreatorID
 		beforeUpdatedAt := beforeRestore.Metadata.UpdatedAt
 
-		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
+		Expect(service.RestoreRevision(tree.PageIDFromString(pageID), RevisionIDFromString(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
 
-		page, err := treeService.GetPage(newFixturePageID(pageID))
+		page, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(page).To(SatisfyAll(
 			HaveField("ID", managedID),
@@ -521,7 +521,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 		Expect(page.Metadata.UpdatedAt).To(BeTemporally(">", beforeUpdatedAt))
 
-		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
+		raw, err := treeService.ReadPageRaw(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		Expect(parsedRevisionFrontmatter(markdown.ParseFrontmatter(raw))).To(haveParsedRevisionFrontmatter(
@@ -576,8 +576,8 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "second"))).
 			To(haveRecordedRevision(Not(BeNil())))
 
-		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
-		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
+		Expect(service.RestoreRevision(tree.PageIDFromString(pageID), RevisionIDFromString(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
+		raw, err := treeService.ReadPageRaw(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		doc, _, err := markdown.ParsePageDocument(raw)
@@ -601,7 +601,7 @@ var _ = ginkgo.Describe("service", func() {
 		pageID := *pageIDPtr
 
 		firstRaw := renderRevisionTestMarkdown(pageID, "Page", nil, nil, "Empty metadata body")
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &firstRaw, true)).To(Succeed())
 		firstRecord := createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "creator", "empty metadata"))
 		Expect(firstRecord).To(haveRecordedRevision(Not(BeNil())))
 		firstRev := firstRecord.Revision
@@ -612,12 +612,12 @@ var _ = ginkgo.Describe("service", func() {
 			map[string]interface{}{"source": "imported"},
 			"Non-empty metadata body",
 		)
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("editor"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &secondRaw, true)).To(Succeed())
 		Expect(createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "editor", "non-empty metadata"))).
 			To(haveRecordedRevision(Not(BeNil())))
 
-		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
-		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
+		Expect(service.RestoreRevision(tree.PageIDFromString(pageID), RevisionIDFromString(firstRev.ID), newFixtureUserID("restorer"))).To(Succeed())
+		raw, err := treeService.ReadPageRaw(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		doc, _, err := markdown.ParsePageDocument(raw)
@@ -643,9 +643,9 @@ var _ = ginkgo.Describe("service", func() {
 			nil,
 			"Current body",
 		)
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialRaw, true)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &initialRaw, true)).To(Succeed())
 
-		page, err := treeService.GetPage(newFixturePageID(pageID))
+		page, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 
 		state := service.revisionStateFromPage(page)
@@ -658,9 +658,9 @@ var _ = ginkgo.Describe("service", func() {
 		legacyRevision.ExtraFrontmatterHash = ""
 		Expect(service.store.SaveRevision(legacyRevision)).To(Succeed())
 
-		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
+		Expect(service.RestoreRevision(tree.PageIDFromString(pageID), RevisionIDFromString(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
 
-		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
+		raw, err := treeService.ReadPageRaw(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		Expect(parsedRevisionFrontmatter(markdown.ParseFrontmatter(raw))).To(haveParsedRevisionFrontmatter(
@@ -678,9 +678,9 @@ var _ = ginkgo.Describe("service", func() {
 		pageID := *pageIDPtr
 
 		initialContent := "Current body"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialContent, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &initialContent, false)).To(Succeed())
 
-		page, err := treeService.GetPage(newFixturePageID(pageID))
+		page, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 
 		state := service.revisionStateFromPage(page)
@@ -699,9 +699,9 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(service.store.SaveRevision(legacyRevision)).To(Succeed())
 
-		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
+		Expect(service.RestoreRevision(tree.PageIDFromString(pageID), RevisionIDFromString(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
 
-		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
+		raw, err := treeService.ReadPageRaw(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		doc, _, err := markdown.ParsePageDocument(raw)
@@ -724,9 +724,9 @@ var _ = ginkgo.Describe("service", func() {
 		pageID := *pageIDPtr
 
 		initialContent := "Current body"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &initialContent, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("creator"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &initialContent, false)).To(Succeed())
 
-		page, err := treeService.GetPage(newFixturePageID(pageID))
+		page, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 
 		legacyBody := "---\ntitle: not frontmatter\n---\nBody content"
@@ -740,13 +740,13 @@ var _ = ginkgo.Describe("service", func() {
 		legacyRevision.ExtraFrontmatterHash = ""
 		Expect(service.store.SaveRevision(legacyRevision)).To(Succeed())
 
-		Expect(service.RestoreRevision(newFixturePageID(pageID), newFixtureRevisionID(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
+		Expect(service.RestoreRevision(tree.PageIDFromString(pageID), RevisionIDFromString(legacyRevision.ID), newFixtureUserID("restorer"))).To(Succeed())
 
-		restoredPage, err := treeService.GetPage(newFixturePageID(pageID))
+		restoredPage, err := treeService.GetPage(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(restoredPage.Content).To(Equal(legacyBody))
 
-		raw, err := treeService.ReadPageRaw(newFixturePageID(pageID))
+		raw, err := treeService.ReadPageRaw(tree.PageIDFromString(pageID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(haveCanonicalRevisionRawStorage())
 		fm, body, hasFrontmatter, err := markdown.ParseFrontmatter(raw)
@@ -766,7 +766,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(os.Remove(missingManifestPath)).To(Succeed())
 
 		content := "hello-updated"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
 		contentRecord := createdRevisionRecord(service.RecordContentUpdate(revisionTestPageID(pageID), "tester", "content"))
 		Expect(contentRecord).To(haveRecordedRevision(HaveField("AssetManifestHash", firstRev.AssetManifestHash)))
 		contentRev := contentRecord.Revision
@@ -823,13 +823,13 @@ var _ = ginkgo.Describe("service", func() {
 		baseRev := baseRecord.Revision
 
 		content := "two"
-		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), newFixturePageID(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), tree.PageIDFromString(pageID), "Page", newFixtureSlug("page"), &content, false)).To(Succeed())
 		writeLiveAsset(storageDir, pageID, "b.txt", "asset-b")
 		targetRecord := createdRevisionRecord(service.RecordAssetChange(revisionTestPageID(pageID), "tester", "target"))
 		Expect(targetRecord).To(haveRecordedRevision(Not(BeNil())))
 		targetRev := targetRecord.Revision
 
-		comparison, err := service.CompareRevisionSnapshots(newFixturePageID(pageID), newFixtureRevisionID(baseRev.ID), newFixtureRevisionID(targetRev.ID))
+		comparison, err := service.CompareRevisionSnapshots(tree.PageIDFromString(pageID), RevisionIDFromString(baseRev.ID), RevisionIDFromString(targetRev.ID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(comparison).To(SatisfyAll(
 			HaveField("Base", Not(BeNil())),
@@ -853,7 +853,7 @@ var _ = ginkgo.Describe("service", func() {
 
 		Expect(os.Remove(revisionAssetPath(storageDir, pageID, "image.png"))).To(Succeed())
 
-		asset, err := service.GetRevisionAsset(newFixturePageID(pageID), newFixtureRevisionID(rev.ID), tree.AssetName("image.png"))
+		asset, err := service.GetRevisionAsset(tree.PageIDFromString(pageID), RevisionIDFromString(rev.ID), tree.AssetName("image.png"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(asset).NotTo(BeNil())
 		Expect(asset.Asset.Name).To(Equal("image.png"))
@@ -871,7 +871,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(record).To(haveRecordedRevision(Not(BeNil())))
 		rev := record.Revision
 
-		_, err := service.GetRevisionAsset(newFixturePageID(pageID), newFixtureRevisionID(rev.ID), tree.AssetName("missing.png"))
+		_, err := service.GetRevisionAsset(tree.PageIDFromString(pageID), RevisionIDFromString(rev.ID), tree.AssetName("missing.png"))
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetNotFound))
 	})
 })

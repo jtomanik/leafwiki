@@ -35,11 +35,11 @@ func createGomegaRevisionPage(treeService *tree.TreeService, title, slug, conten
 	GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode(newFixtureUserID("tester"), nil, title, newFixtureSlug(slug), &kind)
+	id, err := treeService.CreateNode(newFixtureUserID("tester"), nil, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(id).NotTo(BeNil())
 
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, newFixtureSlug(slug), &content, false)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, tree.SlugFromString(slug), &content, false)).To(Succeed())
 	return *id
 }
 
