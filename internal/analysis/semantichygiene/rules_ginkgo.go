@@ -18,6 +18,7 @@ func checkGinkgoSpecQualityCall(ctx *analysisContext, call *ast.CallExpr) {
 	checkGinkgoVagueName(ctx, call, name)
 	checkGinkgoTestingTInSpec(ctx, call, name)
 	checkGinkgoFailInSpec(ctx, call, name)
+	checkGinkgoTaxonomyLabels(ctx, call, name)
 	switch {
 	case isFocusedGinkgoNodeName(name):
 		ctx.report(ruleGinkgoFocus, call, ginkgoFocusDiagnostic())

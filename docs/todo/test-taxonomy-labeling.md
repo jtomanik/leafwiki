@@ -26,25 +26,25 @@ not checker policy.
 ## Snapshot
 
 - Snapshot date: 2026-07-04.
-- Snapshot source: source scan in the taxonomy docs worktree.
-- Planned report command: `rtk bash scripts/report-test-taxonomy.sh`.
-- Report command status: not implemented in this docs-only slice.
-- Go `_test.go` files scanned: 326.
-- Test directories scanned: 64.
-- Existing Go/Ginkgo `Label(...)` usage found: none.
+- Snapshot source: `rtk bash scripts/report-test-taxonomy.sh`.
+- Report command: `rtk bash scripts/report-test-taxonomy.sh`.
+- Report command status: implemented as report-only inventory.
+- Go `_test.go` files scanned: 330.
+- Runnable Go/Ginkgo specs scanned: 3618.
+- Taxonomy-labeled runnable specs found: 3.
+- Missing taxonomy labels reported: 3615.
 - Exclusions used for the snapshot: `references/`, `ui/leafwiki-ui/node_modules/`, and `testdata/`.
 
-Refresh this ledger from the report command after the report-only inventory
-exists. Until then, treat the package groups below as review queues, not as a
-complete generated inventory.
+Refresh this ledger from the report command as labeling progresses. Treat the
+package groups below as review queues, not as a complete generated inventory.
 
 ## Rollout State
 
 - [x] Taxonomy policy documented in `docs/testing-taxonomy.md`.
-- [ ] Semantic hygiene rejects unknown taxonomy labels.
-- [ ] Semantic hygiene rejects dynamic taxonomy labels.
-- [ ] Semantic hygiene rejects specs with more than one effective primary taxonomy label.
-- [ ] Report-only missing-label inventory exists.
+- [x] Semantic hygiene rejects unknown taxonomy labels.
+- [x] Semantic hygiene rejects dynamic taxonomy labels.
+- [x] Semantic hygiene rejects specs with more than one effective primary taxonomy label.
+- [x] Report-only missing-label inventory exists.
 - [ ] Stable pilot label slice exists.
 - [ ] Missing taxonomy labels are hard-failing.
 - [ ] Label-filtered CI is enabled.

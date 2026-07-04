@@ -1,6 +1,9 @@
 package semantichygiene
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func stringCallDiagnostic(typeName string, callee string) string {
 	return fmt.Sprintf("semantic value %s converted to string before internal call %s; make the callee accept %s", typeName, callee, typeName)
@@ -316,6 +319,18 @@ func ginkgoFlakeAttemptsDiagnostic() string {
 
 func ginkgoRestrictedDecoratorDiagnostic(name string) string {
 	return fmt.Sprintf("avoid Ginkgo %s decorator unless the test suite policy explicitly allows it", name)
+}
+
+func ginkgoTaxonomyUnknownLabelDiagnostic(label string) string {
+	return fmt.Sprintf("Ginkgo label %q is not allowed by the LeafWiki test taxonomy; use unit, integration, or e2e", label)
+}
+
+func ginkgoTaxonomyDynamicLabelDiagnostic() string {
+	return "Ginkgo taxonomy labels must be static string literals"
+}
+
+func ginkgoTaxonomyMultipleLabelsDiagnostic(labels []string) string {
+	return fmt.Sprintf("Ginkgo spec has multiple primary taxonomy labels (%s); use exactly one of unit, integration, or e2e", strings.Join(labels, ", "))
 }
 
 func ginkgoWideEntryDiagnostic() string {
