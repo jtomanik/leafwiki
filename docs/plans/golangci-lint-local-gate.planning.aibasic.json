@@ -1,0 +1,36 @@
+{
+  "planTitle": "golangci-lint-local-gate",
+  "threadId": "019f2d28-549f-7343-a07c-02d87e169ee5",
+  "threadUrl": "codex://threads/019f2d28-549f-7343-a07c-02d87e169ee5",
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "createdAt": "2026-07-04T00:00:00Z",
+  "artifacts": {
+    "observe": "docs/plans/golangci-lint-local-gate.OBSERVE.md",
+    "context": "docs/plans/golangci-lint-local-gate.CONTEXT.md",
+    "decision": "docs/plans/golangci-lint-local-gate.DECISION.md",
+    "plan": "docs/plans/golangci-lint-local-gate.PLAN.md"
+  },
+  "state": {
+    "observe": "complete",
+    "orient": "complete",
+    "decide": "complete",
+    "act": "complete"
+  },
+  "scope": {
+    "localToolingOnly": true,
+    "ciOutOfScope": true,
+    "requiresSeparateWorktreeForImplementation": true,
+    "noLintBaseline": true
+  },
+  "keyDecisions": [
+    "Use a local custom golangci-lint binary as the static source-policy gate.",
+    "Register LeafWiki analyzers through a golangci-lint module plugin.",
+    "Keep runtime tests, frontend lint/build, E2E, and install smoke checks outside golangci-lint.",
+    "Retire policy-bearing shell checker logic only after golangci-lint parity is proven.",
+    "Enable noisy stock linters only after cleanup slices make them green."
+  ],
+  "verification": [
+    "rtk jq . docs/plans/golangci-lint-local-gate.planning.aibasic.json",
+    "rtk git diff --check -- docs/plans/golangci-lint-local-gate.OBSERVE.md docs/plans/golangci-lint-local-gate.CONTEXT.md docs/plans/golangci-lint-local-gate.DECISION.md docs/plans/golangci-lint-local-gate.PLAN.md docs/plans/golangci-lint-local-gate.planning.aibasic.json"
+  ]
+}
