@@ -1726,6 +1726,35 @@ func TestToolResult() {
 			))
 		})
 
+		ginkgo.It("reports matcher factories that hide raw MCP protocol result status assertions", func() {
+			h := newRuleHarness("/repo/internal/wiki/mcp/tools_test.go", "github.com/perber/wiki/internal/wiki/mcp", `package mcp
+
+type GomegaMatcher interface{}
+type matcherBuilder struct{}
+type gcustomPackage struct{}
+
+var gcustom gcustomPackage
+
+func (gcustomPackage) MakeMatcher(fn any) matcherBuilder { return matcherBuilder{} }
+func (matcherBuilder) WithMessage(message string) GomegaMatcher { return nil }
+
+type CallToolResult struct {
+	IsError bool
+}
+
+func matchToolErrorResult() GomegaMatcher {
+	return gcustom.MakeMatcher(func(result *CallToolResult) (bool, error) {
+		return result != nil && result.IsError, nil
+	}).WithMessage("be an MCP tool error result")
+}
+`)
+			checkGomegaMatcherFactorySignature(h.ctx, h.findFunc("matchToolErrorResult"))
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",
+			))
+		})
+
 		ginkgo.It("reports map index aliases asserted as local values", func() {
 			h := newRuleHarness("/repo/internal/http/router_test.go", "github.com/perber/wiki/internal/http", `package http
 

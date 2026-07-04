@@ -372,6 +372,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 	}
 	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
 	checkGomegaMatcherFactoryBooleanErrorGate(ctx, fn)
+	checkGomegaMatcherFactoryStructuredProtocolStatus(ctx, fn)
 	if fn.Type.Params == nil || !gomegaMatcherFactoryName(fn.Name.Name) {
 		return
 	}
@@ -407,6 +408,23 @@ func checkGomegaMatcherFactoryBooleanErrorGate(ctx *analysisContext, fn *ast.Fun
 		return
 	}
 	ctx.report(ruleGomegaProxyBoolean, fn.Name, gomegaMatcherFactoryBooleanErrorGateDiagnostic())
+}
+
+func checkGomegaMatcherFactoryStructuredProtocolStatus(ctx *analysisContext, fn *ast.FuncDecl) {
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch current := node.(type) {
+		case nil:
+			return false
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			if predicate := gomegaStructuredProtocolStatusPredicateMatcher(ctx, current); predicate != nil {
+				ctx.report(ruleGomegaStructuredProtocolStatus, predicate, gomegaStructuredProtocolStatusMatcherDiagnostic())
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func matcherFactoryBoolParams(ctx *analysisContext, fn *ast.FuncDecl) map[types.Object]bool {
@@ -614,6 +632,87 @@ func gomegaGenericErrorPredicateMatcher(ctx *analysisContext, call *ast.CallExpr
 		return nil
 	}
 	return genericErrorPredicateReturn(ctx, fn.Body, errorParams)
+}
+
+func gomegaStructuredProtocolStatusPredicateMatcher(ctx *analysisContext, call *ast.CallExpr) ast.Expr {
+	if callName(call) != "MakeMatcher" || len(call.Args) == 0 {
+		return nil
+	}
+	fn, ok := call.Args[0].(*ast.FuncLit)
+	if !ok {
+		return nil
+	}
+	return rawStructuredProtocolStatusPredicateReturn(ctx, fn.Body)
+}
+
+func rawStructuredProtocolStatusPredicateReturn(ctx *analysisContext, body *ast.BlockStmt) ast.Expr {
+	var predicate ast.Expr
+	ast.Inspect(body, func(node ast.Node) bool {
+		if predicate != nil || node == nil {
+			return false
+		}
+		switch current := node.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ReturnStmt:
+			if len(current.Results) > 0 {
+				predicate = rawStructuredProtocolStatusPredicate(ctx, current.Results[0])
+			}
+			return false
+		}
+		return true
+	})
+	return predicate
+}
+
+func rawStructuredProtocolStatusPredicate(ctx *analysisContext, expr ast.Expr) ast.Expr {
+	expr = unparenExpr(expr)
+	if rawStructuredProtocolStatusNilGuard(ctx, expr) {
+		return nil
+	}
+	if rawStructuredProtocolStatusSelector(ctx, expr) {
+		return expr
+	}
+	switch current := expr.(type) {
+	case *ast.UnaryExpr:
+		if current.Op != token.NOT {
+			return nil
+		}
+		if rawStructuredProtocolStatusSelector(ctx, current.X) {
+			return current
+		}
+	case *ast.BinaryExpr:
+		if current.Op != token.LAND && current.Op != token.LOR {
+			return nil
+		}
+		left := rawStructuredProtocolStatusPredicate(ctx, current.X)
+		right := rawStructuredProtocolStatusPredicate(ctx, current.Y)
+		if left == nil && !rawStructuredProtocolStatusNilGuard(ctx, current.X) {
+			return nil
+		}
+		if right == nil && !rawStructuredProtocolStatusNilGuard(ctx, current.Y) {
+			return nil
+		}
+		if left != nil {
+			return left
+		}
+		return right
+	}
+	return nil
+}
+
+func rawStructuredProtocolStatusSelector(ctx *analysisContext, expr ast.Expr) bool {
+	selector, ok := unparenExpr(expr).(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == "IsError" && exprSuggestsStructuredProtocolValue(ctx, selector.X)
+}
+
+func rawStructuredProtocolStatusNilGuard(ctx *analysisContext, expr ast.Expr) bool {
+	binary, ok := unparenExpr(expr).(*ast.BinaryExpr)
+	if !ok || binary.Op != token.EQL && binary.Op != token.NEQ {
+		return false
+	}
+	return isNilExpr(binary.X) && exprSuggestsStructuredProtocolValue(ctx, binary.Y) ||
+		exprSuggestsStructuredProtocolValue(ctx, binary.X) && isNilExpr(binary.Y)
 }
 
 func gomegaMatcherErrorParams(ctx *analysisContext, fn *ast.FuncLit) map[types.Object]bool {
