@@ -464,6 +464,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	now := time.Now()
 	payload := structuredError{Code: "page_not_found", MessageID: "errors.page.not_found"}
 	status := struct{ LastError string }{}
+	var logOutput strings.Builder
 
 	Expect(err.Error()).To(Equal("boom"))                              // want "assert error values with MatchError instead of matching err.Error\\(\\)"
 	Expect(err.Error()).To(ContainSubstring("boom"))                   // want "assert error values with MatchError instead of matching err.Error\\(\\)"
@@ -500,6 +501,7 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(rec.Body.String()).To(ContainSubstring("ok"))  // want "use HaveHTTPBody matcher instead of matching recorder body strings directly"
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("ok")))
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("done")))                                                     // want "compose repeated HaveHTTPBody assertions for the same response into one matcher"
+	Expect(logOutput.String()).To(ContainSubstring("could not close store"))                                  // want "raw localized prose \"could not close store\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
 	Expect(resp.Header.Get("X-Request-Id")).To(Equal("abc"))                                                   // want "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
 	Expect(httptest.NewRequest(http.MethodGet, "/", nil)).To(HaveHTTPHeaderWithValue("X-Request-Id", "req-1")) // want "HaveHTTPHeaderWithValue matches HTTP responses; assert request headers with request-header semantics instead"
 	Expect(count).To(BeEquivalentTo(int64(1)))                                                                 // want "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"

@@ -1664,6 +1664,7 @@ func nameSuggestsTestRenderedProseSubject(name string) bool {
 	return canonical == "err" ||
 		canonical == "error" ||
 		canonical == "message" ||
+		identifierHasWord(name, "log") ||
 		strings.Contains(canonical, "error") ||
 		strings.Contains(canonical, "message") ||
 		strings.Contains(canonical, "stderr") ||
