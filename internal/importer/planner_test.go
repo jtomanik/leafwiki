@@ -11,7 +11,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -391,11 +390,9 @@ var _ = ginkgo.Describe("import plan existing page detection", func() {
 			TargetBasePath: "docs",
 		})
 		Expect(err).To(Succeed())
-		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
-			HaveField("Action", Equal(PlanActionSkip)),
-			HaveField("Exists", BeTrue()),
-			HaveField("ExistingID", gstruct.PointTo(Equal(tree.PageIDFromString(existingID)))),
-			HaveField("DesiredSlug", Equal(tree.Slug("a"))),
+		Expect(res).To(HaveImportPlanResult(ConsistOf(HaveSkippedExistingPage(
+			tree.PageIDFromString(existingID),
+			tree.Slug("a"),
 		))))
 
 	})

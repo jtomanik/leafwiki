@@ -12,6 +12,7 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 )
@@ -266,6 +267,54 @@ func HaveImportedPageDocument(body types.GomegaMatcher, fields types.GomegaMatch
 
 func HaveStoredPlanState(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func HaveFreshRunningStoredPlan(userID tree.UserID, totalItems int) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(plan *StoredPlan) (bool, error) {
+		if plan == nil || plan.CancelRequested {
+			return false, nil
+		}
+		return HaveStoredPlanState(gstruct.Fields{
+			"ExecutionStatus": Equal(ExecutionStatusRunning),
+			"ExecutionUserID": WithTransform(func(raw string) tree.UserID {
+				return tree.UserIDFromString(raw)
+			}, Equal(userID)),
+			"ExecutionResult": BeNil(),
+			"ExecutionError":  BeNil(),
+			"ExecutionProgress": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ProcessedItems": BeZero(),
+				"TotalItems":     Equal(totalItems),
+				"StartedAt":      Not(BeNil()),
+			}),
+		}).Match(plan)
+	}).WithMessage("start a fresh importer execution")
+}
+
+func HaveCanceledStoredPlan(result *ExecutionResult) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(plan *StoredPlan) (bool, error) {
+		if plan == nil || plan.CancelRequested {
+			return false, nil
+		}
+		return HaveStoredPlanState(gstruct.Fields{
+			"ExecutionStatus": Equal(ExecutionStatusCanceled),
+			"ExecutionResult": Equal(result),
+			"ExecutionError":  BeNil(),
+			"ExecutionProgress": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"FinishedAt":            Not(BeNil()),
+				"CurrentItemSourcePath": BeNil(),
+			}),
+		}).Match(plan)
+	}).WithMessage("finish importer execution as canceled")
+}
+
+func HaveSkippedExistingPage(existingID tree.PageID, slug tree.Slug) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(item PlanItem) (bool, error) {
+		return item.Action == PlanActionSkip &&
+			item.Exists &&
+			item.ExistingID != nil &&
+			*item.ExistingID == existingID &&
+			item.DesiredSlug == slug, nil
+	}).WithMessage("skip an existing wiki page")
 }
 
 type fakeExecWikiState struct {

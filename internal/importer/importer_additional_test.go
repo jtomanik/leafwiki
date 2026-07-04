@@ -725,18 +725,7 @@ var _ = ginkgo.Describe("PlanStore execution state edges", func() {
 
 		plan, err := startStoredPlanExecutionResult(store, "user-1")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(plan).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"ExecutionStatus": Equal(ExecutionStatusRunning),
-			"ExecutionUserID": Equal("user-1"),
-			"CancelRequested": BeFalse(),
-			"ExecutionResult": BeNil(),
-			"ExecutionError":  BeNil(),
-			"ExecutionProgress": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"ProcessedItems": BeZero(),
-				"TotalItems":     Equal(2),
-				"StartedAt":      Not(BeNil()),
-			}),
-		})))
+		Expect(plan).To(HaveFreshRunningStoredPlan(newFixtureUserID("user-1"), 2))
 
 		plan, err = startStoredPlanExecutionResult(store, "user-2")
 		Expect(err).To(MatchError(errImporterExecutionNotStarted))
@@ -765,16 +754,7 @@ var _ = ginkgo.Describe("PlanStore execution state edges", func() {
 		Expect(store.FinishExecution("plan-1", result, ErrImportCanceled)).To(Succeed())
 		state, err = store.Get()
 		Expect(err).NotTo(HaveOccurred())
-		Expect(state).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"ExecutionStatus": Equal(ExecutionStatusCanceled),
-			"ExecutionResult": Equal(result),
-			"ExecutionError":  BeNil(),
-			"CancelRequested": BeFalse(),
-			"ExecutionProgress": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"FinishedAt":            Not(BeNil()),
-				"CurrentItemSourcePath": BeNil(),
-			}),
-		})))
+		Expect(state).To(HaveCanceledStoredPlan(result))
 
 		failed := NewPlanStore()
 		Expect(failed.Set(&StoredPlan{Plan: &PlanResult{ID: "plan-2"}, ExecutionStatus: ExecutionStatusRunning})).To(Succeed())
