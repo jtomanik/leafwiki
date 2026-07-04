@@ -214,8 +214,8 @@ var _ = ginkgo.Describe("auth seam failure behavior", func() {
 			})
 			refreshed, err := service.RefreshToken(tokens.RefreshToken)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(refreshed.RefreshToken).NotTo(BeEmpty())
 			restoreRevoke()
+			Expect(service.RevokeRefreshToken(refreshed.RefreshToken)).To(Succeed())
 		})
 
 		ginkgo.It("reports token helper failures from random and signing seams", func() {

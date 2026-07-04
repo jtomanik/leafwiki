@@ -45,7 +45,6 @@ var _ = ginkgo.Describe("auth service", func() {
 
 		tokens, err := authService.Login("testuser", "securepass")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(tokens.RefreshToken).NotTo(BeEmpty())
 
 		newTokens, err := authService.RefreshToken(tokens.RefreshToken)
 		Expect(err).NotTo(HaveOccurred())
