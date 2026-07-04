@@ -326,7 +326,7 @@ var _ = ginkgo.Describe("revision routes", ginkgo.Label("integration"), func() {
 		rec = performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{
 				GetWorkspaceRevision: func(context.Context, *tree.Page, revision.RevisionID) (*revision.RevisionSnapshot, error) {
-					return nil, nil
+					return nil, os.ErrNotExist
 				},
 			}).handleCompareRevisions,
 			http.MethodGet,
@@ -448,7 +448,7 @@ var _ = ginkgo.Describe("revision routes", ginkgo.Label("integration"), func() {
 			NewRoutes(RoutesConfig{
 				TreeService: fixture.treeService,
 				RestoreWorkspaceRevision: func(context.Context, *tree.Page, revision.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error) {
-					return nil, nil
+					return nil, os.ErrNotExist
 				},
 			}).handleRestoreRevision,
 			http.MethodPost,

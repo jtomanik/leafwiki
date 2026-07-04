@@ -266,7 +266,8 @@ func ValidateSemanticMoveParentID(parentID tree.PageID) (tree.PageID, error) {
 
 func ValidateOptionalParentID(parentID *string) (*string, error) {
 	if parentID == nil {
-		return nil, nil
+		var absentParentID *string
+		return absentParentID, nil
 	}
 	validated, err := ValidateMoveParentID(*parentID)
 	if err != nil {
@@ -277,7 +278,8 @@ func ValidateOptionalParentID(parentID *string) (*string, error) {
 
 func ValidateOptionalSemanticParentID(parentID *tree.PageID) (*tree.PageID, error) {
 	if parentID == nil {
-		return nil, nil
+		var absentParentID *tree.PageID
+		return absentParentID, nil
 	}
 	validated, err := ValidateSemanticMoveParentID(*parentID)
 	if err != nil {

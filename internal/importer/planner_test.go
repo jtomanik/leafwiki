@@ -30,11 +30,10 @@ type fakeWiki struct {
 	updateCalls        int
 	lastUpdatedContent *string
 
-	ensureFn      func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error)
-	updateFn      func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error)
-	ensureErr     error
-	ensureNilPage bool
-	updateErr     error
+	ensureFn  func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error)
+	updateFn  func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error)
+	ensureErr error
+	updateErr error
 }
 
 type fakeLookupForKindKey struct {
@@ -73,9 +72,6 @@ func (f *fakeWiki) EnsurePath(userID tree.UserID, targetPath tree.RoutePath, tit
 	}
 	if f.ensureErr != nil {
 		return nil, f.ensureErr
-	}
-	if f.ensureNilPage {
-		return nil, nil
 	}
 	k := tree.NodeKindPage
 	if kind != nil {

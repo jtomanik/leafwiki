@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/shared/sqliteutil"
 	"github.com/perber/wiki/internal/core/tree"
 	_ "modernc.org/sqlite"
@@ -120,18 +119,24 @@ func (s *PropertiesStore) SetPropertiesForPage(pageID tree.PageID, props map[str
 	}
 
 	if len(props) > 0 {
-		stmt, err := tx.Prepare(`INSERT OR IGNORE INTO page_properties(page_id, key, value, type) VALUES (?, ?, ?, ?)`)
-		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("failed to prepare property insert: %w", err)
-		}
-		defer shared.LogClose(stmt.Close, "could not close statement")
-
-		for k, e := range props {
-			if _, err := stmt.Exec(pageID, k, e.Value, e.Type); err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("failed to insert property %q for page %s: %w", k, pageID, err)
+		if err := func() (err error) {
+			stmt, err := tx.Prepare(`INSERT OR IGNORE INTO page_properties(page_id, key, value, type) VALUES (?, ?, ?, ?)`)
+			if err != nil {
+				return fmt.Errorf("failed to prepare property insert: %w", err)
 			}
+			defer func() {
+				err = errors.Join(err, stmt.Close())
+			}()
+
+			for k, e := range props {
+				if _, err := stmt.Exec(pageID, k, e.Value, e.Type); err != nil {
+					return fmt.Errorf("failed to insert property %q for page %s: %w", k, pageID, err)
+				}
+			}
+			return nil
+		}(); err != nil {
+			_ = tx.Rollback()
+			return err
 		}
 	}
 
@@ -156,7 +161,7 @@ func (s *PropertiesStore) Clear() error {
 
 // GetAllPropertyKeys returns distinct property keys with page count, optionally filtered by
 // prefix. limit <= 0 means no limit.
-func (s *PropertiesStore) GetAllPropertyKeys(filter string, pageSize PropertyKeyLimit) ([]PropertyKeyCount, error) {
+func (s *PropertiesStore) GetAllPropertyKeys(filter string, pageSize PropertyKeyLimit) (result []PropertyKeyCount, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -175,9 +180,10 @@ func (s *PropertiesStore) GetAllPropertyKeys(filter string, pageSize PropertyKey
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	var result []PropertyKeyCount
 	for rows.Next() {
 		var kc PropertyKeyCount
 		if err := scanPropertyKeyCount(rows, &kc); err != nil {
@@ -189,7 +195,7 @@ func (s *PropertiesStore) GetAllPropertyKeys(filter string, pageSize PropertyKey
 }
 
 // GetPageIDsByProperty returns page IDs where key = key AND value = value (exact match).
-func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]tree.PageID, error) {
+func (s *PropertiesStore) GetPageIDsByProperty(key, value string) (pageIDs []tree.PageID, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -200,9 +206,10 @@ func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]tree.PageID
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	var pageIDs []tree.PageID
 	for rows.Next() {
 		var id tree.PageID
 		if err := rows.Scan(&id); err != nil {
@@ -214,7 +221,7 @@ func (s *PropertiesStore) GetPageIDsByProperty(key, value string) ([]tree.PageID
 }
 
 // GetPropertiesForPages returns a map of pageID → properties for the given page IDs.
-func (s *PropertiesStore) GetPropertiesForPages(pageIDs []tree.PageID) (map[tree.PageID]map[string]PropertyEntry, error) {
+func (s *PropertiesStore) GetPropertiesForPages(pageIDs []tree.PageID) (result map[tree.PageID]map[string]PropertyEntry, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -236,9 +243,11 @@ func (s *PropertiesStore) GetPropertiesForPages(pageIDs []tree.PageID) (map[tree
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	result := make(map[tree.PageID]map[string]PropertyEntry)
+	result = make(map[tree.PageID]map[string]PropertyEntry)
 	for rows.Next() {
 		var pageID tree.PageID
 		var key, value, typ string

@@ -143,5 +143,6 @@ func (uc *ClearImportPlanUseCase) Execute(_ context.Context) (*coreimporter.Curr
 	if err := uc.svc.ClearCurrentPlan(); err != nil {
 		return nil, err
 	}
-	return nil, nil
+	var clearedPlan *coreimporter.CurrentPlanState
+	return clearedPlan, nil
 }

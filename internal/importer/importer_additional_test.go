@@ -588,7 +588,8 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			hash: "h1",
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 				if targetPath == "nil-page" {
-					return nil, nil
+					var missingCreatedPage *tree.Page
+					return missingCreatedPage, nil
 				}
 				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
 			},

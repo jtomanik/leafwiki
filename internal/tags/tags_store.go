@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/perber/wiki/internal/core/shared"
 	"github.com/perber/wiki/internal/core/shared/sqliteutil"
 	"github.com/perber/wiki/internal/core/tree"
 	_ "modernc.org/sqlite"
@@ -113,18 +112,9 @@ func (s *TagsStore) SetTagsForPage(pageID tree.PageID, tags []string) error {
 	}
 
 	if len(tags) > 0 {
-		stmt, err := tx.Prepare(`INSERT OR IGNORE INTO page_tags(page_id, tag) VALUES (?, ?)`)
-		if err != nil {
+		if err := insertPageTags(tx, pageID, tags); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("failed to prepare tag insert: %w", err)
-		}
-		defer shared.LogClose(stmt.Close, "could not close statement")
-
-		for _, tag := range tags {
-			if _, err := stmt.Exec(pageID, tag); err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("failed to insert tag %q for page %s: %w", tag, pageID, err)
-			}
+			return err
 		}
 	}
 
@@ -137,6 +127,23 @@ func (s *TagsStore) DeleteTagsForPage(pageID tree.PageID) error {
 
 	_, err := s.db.Exec(`DELETE FROM page_tags WHERE page_id = ?`, pageID)
 	return err
+}
+
+func insertPageTags(tx *sql.Tx, pageID tree.PageID, tags []string) (err error) {
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO page_tags(page_id, tag) VALUES (?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare tag insert: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, stmt.Close())
+	}()
+
+	for _, tag := range tags {
+		if _, err := stmt.Exec(pageID, tag); err != nil {
+			return fmt.Errorf("failed to insert tag %q for page %s: %w", tag, pageID, err)
+		}
+	}
+	return nil
 }
 
 // SetPageIndex atomically replaces tags and excerpt for a page.
@@ -156,18 +163,9 @@ func (s *TagsStore) SetPageIndex(pageID tree.PageID, tags []string, excerpt stri
 	}
 
 	if len(tags) > 0 {
-		stmt, err := tx.Prepare(`INSERT OR IGNORE INTO page_tags(page_id, tag) VALUES (?, ?)`)
-		if err != nil {
+		if err := insertPageTags(tx, pageID, tags); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("failed to prepare tag insert: %w", err)
-		}
-		defer shared.LogClose(stmt.Close, "could not close statement")
-
-		for _, tag := range tags {
-			if _, err := stmt.Exec(pageID, tag); err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("failed to insert tag %q for page %s: %w", tag, pageID, err)
-			}
+			return err
 		}
 	}
 
@@ -205,7 +203,7 @@ func (s *TagsStore) DeletePageIndex(pageID tree.PageID) error {
 }
 
 // GetExcerptsForPages returns a map of pageID → excerpt for the given page IDs.
-func (s *TagsStore) GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]string, error) {
+func (s *TagsStore) GetExcerptsForPages(pageIDs []tree.PageID) (result map[tree.PageID]string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -226,9 +224,11 @@ func (s *TagsStore) GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	result := make(map[tree.PageID]string)
+	result = make(map[tree.PageID]string)
 	for rows.Next() {
 		var pageID tree.PageID
 		var excerpt string
@@ -260,7 +260,7 @@ func (s *TagsStore) Clear() error {
 }
 
 // GetAllTags returns tags with page count, optionally filtered by prefix. limit <= 0 means no limit.
-func (s *TagsStore) GetAllTags(filter string, pageSize TagLimit) ([]TagCount, error) {
+func (s *TagsStore) GetAllTags(filter string, pageSize TagLimit) (result []TagCount, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -279,9 +279,10 @@ func (s *TagsStore) GetAllTags(filter string, pageSize TagLimit) ([]TagCount, er
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	var result []TagCount
 	for rows.Next() {
 		var tc TagCount
 		if err := scanTagCount(rows, &tc); err != nil {
@@ -295,7 +296,7 @@ func (s *TagsStore) GetAllTags(filter string, pageSize TagLimit) ([]TagCount, er
 // GetAllTagsForSelection returns suggestion tags with counts for pages that
 // already match all selected tags. Selected tags themselves are excluded from
 // the result set so the caller only gets additive suggestions.
-func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, pageSize TagLimit) ([]TagCount, error) {
+func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, pageSize TagLimit) (result []TagCount, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -338,9 +339,10 @@ func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, pag
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	var result []TagCount
 	for rows.Next() {
 		var tc TagCount
 		if err := scanTagCount(rows, &tc); err != nil {
@@ -352,7 +354,7 @@ func (s *TagsStore) GetAllTagsForSelection(filter string, selected []string, pag
 }
 
 // GetPageIDsByTags returns page IDs that have ALL of the given tags (AND logic).
-func (s *TagsStore) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {
+func (s *TagsStore) GetPageIDsByTags(tags []string) (pageIDs []tree.PageID, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -377,9 +379,10 @@ func (s *TagsStore) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	var pageIDs []tree.PageID
 	for rows.Next() {
 		var id tree.PageID
 		if err := rows.Scan(&id); err != nil {
@@ -390,7 +393,7 @@ func (s *TagsStore) GetPageIDsByTags(tags []string) ([]tree.PageID, error) {
 	return pageIDs, rows.Err()
 }
 
-func (s *TagsStore) getAllTagsLocked(filter string, pageSize TagLimit) ([]TagCount, error) {
+func (s *TagsStore) getAllTagsLocked(filter string, pageSize TagLimit) (result []TagCount, err error) {
 	query := `
 		SELECT tag, COUNT(DISTINCT page_id) AS count
 		FROM page_tags
@@ -406,9 +409,10 @@ func (s *TagsStore) getAllTagsLocked(filter string, pageSize TagLimit) ([]TagCou
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	var result []TagCount
 	for rows.Next() {
 		var tc TagCount
 		if err := scanTagCount(rows, &tc); err != nil {
@@ -420,7 +424,7 @@ func (s *TagsStore) getAllTagsLocked(filter string, pageSize TagLimit) ([]TagCou
 }
 
 // GetTagsForPages returns a map of pageID → tags for the given page IDs.
-func (s *TagsStore) GetTagsForPages(pageIDs []tree.PageID) (map[tree.PageID][]string, error) {
+func (s *TagsStore) GetTagsForPages(pageIDs []tree.PageID) (result map[tree.PageID][]string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -442,9 +446,11 @@ func (s *TagsStore) GetTagsForPages(pageIDs []tree.PageID) (map[tree.PageID][]st
 	if err != nil {
 		return nil, err
 	}
-	defer shared.LogClose(rows.Close, "could not close rows")
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 
-	result := make(map[tree.PageID][]string)
+	result = make(map[tree.PageID][]string)
 	for rows.Next() {
 		var pageID tree.PageID
 		var tag string

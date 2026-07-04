@@ -523,5 +523,5 @@ func (s pageTagsServiceStub) GetTagsForPages([]tree.PageID) (map[tree.PageID][]s
 }
 
 func (s pageTagsServiceStub) GetExcerptsForPages([]tree.PageID) (map[tree.PageID]string, error) {
-	return nil, nil
+	return map[tree.PageID]string{}, nil
 }

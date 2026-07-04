@@ -198,8 +198,10 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(cfg.GetFaviconFile()).To(BeEmpty())
 
 		frontendBrandingConfig = func(*corebranding.BrandingService) (*corebranding.BrandingConfigResponse, error) {
-			return nil, nil
+			var missingBrandingConfig *corebranding.BrandingConfigResponse
+			return missingBrandingConfig, nil
 		}
+		cfg = (&Wiki{branding: &corebranding.BrandingService{}}).FrontendConfig()
 		Expect(cfg.GetSiteName()).To(BeEmpty())
 		Expect(cfg.GetFaviconFile()).To(BeEmpty())
 

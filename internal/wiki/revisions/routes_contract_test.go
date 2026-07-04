@@ -14,10 +14,10 @@ var _ = ginkgo.Describe("routes contracts", ginkgo.Label("unit"), func() {
 	ginkgo.It("requires semantic revision IDs in route callbacks", func() {
 		_ = RoutesConfig{
 			GetWorkspaceRevision: func(context.Context, *tree.Page, revision.RevisionID) (*revision.RevisionSnapshot, error) {
-				return nil, nil
+				return &revision.RevisionSnapshot{}, nil
 			},
 			RestoreWorkspaceRevision: func(context.Context, *tree.Page, revision.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error) {
-				return nil, nil
+				return &tree.Page{}, nil
 			},
 		}
 	})

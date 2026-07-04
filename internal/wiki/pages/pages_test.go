@@ -81,10 +81,6 @@ func sectionKind() *tree.NodeKind {
 	return &k
 }
 
-func semanticUserID(id string) tree.UserID {
-	return tree.UserIDFromString(id)
-}
-
 func pageID[T ~string](id T) tree.PageID {
 	return tree.PageIDFromString(id)
 }
