@@ -462,7 +462,7 @@ var toolOutputOptionalProperties = map[string][]string{
 	"wiki_replace_page_section": {"validation", "page", "linkStatus"},
 }
 
-var _ = Describe("local MCP registration", func() {
+var _ = Describe("local MCP registration", Label("integration"), func() {
 	It("gates the endpoint by configuration and exposes the federated tool contract", func() {
 		w := newLocalMCPTestWiki(false)
 
@@ -635,7 +635,7 @@ var _ = Describe("local MCP registration", func() {
 	})
 })
 
-var _ = DescribeTable("local MCP tool registration honors feature gates",
+var _ = DescribeTable("local MCP tool registration honors feature gates", Label("integration"),
 	func(enableLinkRefactor bool, extraTools []string) {
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
@@ -666,7 +666,7 @@ var _ = DescribeTable("local MCP tool registration honors feature gates",
 )
 
 // - MCP agent context returns canonical examples
-var _ = Describe("local MCP context", func() {
+var _ = Describe("local MCP context", Label("integration"), func() {
 	It("returns agent-ready context state and canonical link examples", func() {
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
@@ -726,7 +726,7 @@ var _ = Describe("local MCP context", func() {
 	})
 })
 
-var _ = Describe("local MCP context recommendations", func() {
+var _ = Describe("local MCP context recommendations", Label("integration"), func() {
 	It("recommends workspace refresh when federated runtime tools are available", func() {
 		w := newLocalMCPTestWiki(false)
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -747,7 +747,7 @@ var _ = Describe("local MCP context recommendations", func() {
 	})
 })
 
-var _ = Describe("local MCP context checkpoints", func() {
+var _ = Describe("local MCP context checkpoints", Label("integration"), func() {
 	It("uses the calling session checkpoint when no since token is supplied", func() {
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
@@ -888,7 +888,7 @@ var _ = Describe("local MCP context checkpoints", func() {
 	})
 })
 
-var _ = Describe("local MCP presence", func() {
+var _ = Describe("local MCP presence", Label("integration"), func() {
 	It("includes authenticated web heartbeat state in context", func() {
 		w := newLocalMCPTestWiki(false)
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -1040,7 +1040,7 @@ var _ = Describe("local MCP presence", func() {
 	})
 })
 
-var _ = Describe("local MCP workspace refresh", func() {
+var _ = Describe("local MCP workspace refresh", Label("integration"), func() {
 	It("syncs direct markdown files into page and context results", func() {
 		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
@@ -1212,7 +1212,7 @@ var _ = Describe("local MCP workspace refresh", func() {
 	})
 })
 
-var _ = Describe("local MCP subtree lookup", func() {
+var _ = Describe("local MCP subtree lookup", Label("integration"), func() {
 	It("returns path roots with breadcrumbs and requested expansion details", func() {
 		w := newLocalMCPTestWiki(false)
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -1311,7 +1311,7 @@ var _ = Describe("local MCP subtree lookup", func() {
 	})
 })
 
-var _ = Describe("local MCP validation tools", func() {
+var _ = Describe("local MCP validation tools", Label("integration"), func() {
 	It("validates the current filesystem snapshot instead of stale loaded tree links", func() {
 		rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
@@ -1546,7 +1546,7 @@ var _ = Describe("local MCP validation tools", func() {
 	})
 })
 
-var _ = Describe("local MCP path tools", func() {
+var _ = Describe("local MCP path tools", Label("integration"), func() {
 	It("resolve same-basename page and section twins by canonical paths", func() {
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
@@ -1722,7 +1722,7 @@ leafwiki_title: MCP Section Only
 	})
 })
 
-var _ = Describe("local MCP wiki validation", func() {
+var _ = Describe("local MCP wiki validation", Label("integration"), func() {
 	It("reports unsynced markdown issues through structured validation codes", func() {
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
@@ -1886,7 +1886,7 @@ var _ = Describe("local MCP wiki validation", func() {
 	})
 })
 
-var _ = Describe("local MCP page metadata updates", func() {
+var _ = Describe("local MCP page metadata updates", Label("integration"), func() {
 	It("patches metadata without changing the page body", func() {
 		w := newLocalMCPTestWiki(false)
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -2008,7 +2008,7 @@ var _ = Describe("local MCP page metadata updates", func() {
 	})
 })
 
-var _ = Describe("local MCP page frontmatter preservation", func() {
+var _ = Describe("local MCP page frontmatter preservation", Label("integration"), func() {
 	It("preserves unmanaged frontmatter while patching metadata", func() {
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
@@ -2173,7 +2173,7 @@ var _ = Describe("local MCP page frontmatter preservation", func() {
 	})
 })
 
-var _ = Describe("local MCP page section replacement", func() {
+var _ = Describe("local MCP page section replacement", Label("integration"), func() {
 	It("preserves frontmatter while replacing a section body", func() {
 		w := newLocalMCPTestWikiWithOptions(wiki.WikiOptions{
 			AuthDisabled: true,
@@ -2406,7 +2406,7 @@ var _ = Describe("local MCP page section replacement", func() {
 	})
 })
 
-var _ = Describe("local MCP base path registration", func() {
+var _ = Describe("local MCP base path registration", Label("integration"), func() {
 	It("mounts the endpoint only under the configured base path", func() {
 		w := newLocalMCPTestWiki(false)
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -2438,7 +2438,7 @@ var _ = Describe("local MCP base path registration", func() {
 	})
 })
 
-var _ = Describe("local MCP page mutation parity", func() {
+var _ = Describe("local MCP page mutation parity", Label("integration"), func() {
 	It("keeps page mutation tools aligned with HTTP routes", func() {
 		runLocalMCPProtocolPageMutationParity()
 	})
@@ -2715,7 +2715,7 @@ func runLocalMCPProtocolPageMutationParity() {
 	recordHTTPMCPParity("wiki_search_pages", "GET /api/search")
 }
 
-var _ = Describe("local MCP page operation parity", func() {
+var _ = Describe("local MCP page operation parity", Label("integration"), func() {
 	It("keeps page operation tools aligned with HTTP routes", func() {
 		runLocalMCPProtocolPageOperationParity()
 	})
@@ -3212,7 +3212,7 @@ func runLocalMCPProtocolPageOperationParity() {
 	recordHTTPMCPParity("wiki_delete_page", "DELETE /api/pages/:id")
 }
 
-var _ = Describe("local MCP index and asset parity", func() {
+var _ = Describe("local MCP index and asset parity", Label("integration"), func() {
 	It("keeps index and asset tools aligned with HTTP routes", func() {
 		runLocalMCPProtocolIndexAndAssetParity()
 	})
@@ -3407,7 +3407,7 @@ func runLocalMCPProtocolIndexAndAssetParity() {
 	recordHTTPMCPParity("wiki_delete_asset", "DELETE /api/pages/:id/assets/:name")
 }
 
-var _ = Describe("local MCP asset protocol errors", func() {
+var _ = Describe("local MCP asset protocol errors", Label("integration"), func() {
 	It("rejects oversized uploads before page lookup", func() {
 		w := newLocalMCPTestWiki(false)
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -3475,7 +3475,7 @@ var _ = Describe("local MCP asset protocol errors", func() {
 	})
 })
 
-var _ = Describe("local MCP feature-gated tool parity", func() {
+var _ = Describe("local MCP feature-gated tool parity", Label("integration"), func() {
 	It("keeps feature-gated tools aligned with HTTP routes", func() {
 		runLocalMCPProtocolFeatureGatedToolParity()
 	})
@@ -3891,7 +3891,7 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 	recordHTTPMCPParity("wiki_restore_revision", "POST /api/pages/:id/revisions/:revisionId/restore")
 }
 
-var _ = Describe("local MCP HTTP parity evidence", func() {
+var _ = Describe("local MCP HTTP parity evidence", Label("integration"), func() {
 	It("confirms plan-traced MCP tools have matching HTTP route evidence", func() {
 		runHTTPMCPParityCoverage()
 	})

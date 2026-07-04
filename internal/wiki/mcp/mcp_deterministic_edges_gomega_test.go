@@ -25,7 +25,7 @@ import (
 )
 
 var _ = Describe("MCP deterministic edge behavior", func() {
-	Describe("checkpoint store guards", func() {
+	Describe("checkpoint store guards", Label("unit"), func() {
 		It("defaults limits and fills generated fields", func() {
 			store := newContextCheckpointStore(0)
 			before := time.Now().UTC()
@@ -86,7 +86,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 		})
 	})
 
-	Describe("request actor guards", func() {
+	Describe("request actor guards", Label("unit"), func() {
 		It("returns public editor only when auth is disabled", func() {
 			routes := &Routes{authDisabled: true}
 
@@ -143,7 +143,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 		})
 	})
 
-	Describe("HTTP route guards", func() {
+	Describe("HTTP route guards", Label("integration"), func() {
 		It("extracts bearer tokens defensively", func() {
 			Expect(bearerTokenFromRequest(nil)).To(BeEmpty())
 
@@ -214,7 +214,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 	})
 
 	Describe("context helper guards", func() {
-		It("reports default sync, session, actor, and formatting values", func() {
+		It("reports default sync, session, actor, and formatting values", Label("unit"), func() {
 			Expect(treeDisplayDepth(-1).ChildDepth()).To(Equal(treeDisplayDepth(-1)))
 			Expect(treeDisplayDepth(2).ChildDepth()).To(Equal(treeDisplayDepth(1)))
 			Expect((&Routes{}).currentWorkspaceSyncStatus()).To(Equal(workspacesync.SyncStatus{Enabled: false}))
@@ -226,7 +226,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			Expect(containsToolID([]ToolID{ToolGetPage}, ToolValidateWiki)).To(BeFalse())
 		})
 
-		It("falls back from snapshot listing to sync status changed paths", func() {
+		It("falls back from snapshot listing to sync status changed paths", Label("integration"), func() {
 			routes := newContextToolTestRoutes()
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
@@ -250,7 +250,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			})))
 		})
 
-		It("reports commit deltas across pagination outcomes", func() {
+		It("reports commit deltas across pagination outcomes", Label("integration"), func() {
 			routes := newContextToolTestRoutes()
 			status := workspacesync.SyncStatus{LastCommitHash: "latest"}
 
@@ -299,7 +299,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			))
 		})
 
-		It("handles page ID lookup guard branches for recent changes", func() {
+		It("handles page ID lookup guard branches for recent changes", Label("integration"), func() {
 			routes := newContextToolTestRoutes()
 			sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
@@ -313,7 +313,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 	})
 
 	Describe("validation helper guards", func() {
-		It("caches asset predicates and handles nil factories", func() {
+		It("caches asset predicates and handles nil factories", Label("unit"), func() {
 			nilFactory := cachedValidationAssetExists(nil)
 			Expect(nilFactory(newFixturePageID("page-1"), "image.png")).To(BeFalse())
 
@@ -336,7 +336,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			Expect(calls).To(Equal(2))
 		})
 
-		It("deduplicates validation issues by the full issue key", func() {
+		It("deduplicates validation issues by the full issue key", Label("unit"), func() {
 			duplicate := wikivalidation.Issue{
 				Severity:  wikivalidation.IssueSeverityError,
 				Code:      wikivalidation.IssueCodeBrokenLink,
@@ -350,7 +350,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			Expect(dedupeValidationIssues([]wikivalidation.Issue{duplicate, duplicate, distinct})).To(Equal([]wikivalidation.Issue{duplicate, distinct}))
 		})
 
-		It("normalizes content validation paths and source kinds", func() {
+		It("normalizes content validation paths and source kinds", Label("integration"), func() {
 			routes := newContextToolTestRoutes()
 			sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
@@ -391,7 +391,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			Expect(kind).To(Equal(tree.NodeKindSection))
 		})
 
-		It("cleans validation asset destinations and resolves root markdown targets", func() {
+		It("cleans validation asset destinations and resolves root markdown targets", Label("integration"), func() {
 			routes := newContextToolTestRoutes()
 
 			Expect(cleanValidationAssetDestination(" <image.png?size=large#preview> ")).To(Equal("image.png"))
@@ -407,7 +407,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 	})
 
 	Describe("subtree helper guards", func() {
-		It("handles nil nodes and depth bounds", func() {
+		It("handles nil nodes and depth bounds", Label("unit"), func() {
 			ctx := context.Background()
 			routes := &Routes{}
 			negative := -1
@@ -434,7 +434,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 			Expect(depth).To(Equal(treeDisplayDepth(maxContextTreeDepth)))
 		})
 
-		It("builds content previews and reports truncation at the requested depth", func() {
+		It("builds content previews and reports truncation at the requested depth", Label("integration"), func() {
 			routes := newContextToolTestRoutes()
 			parentID, err := routes.treeService.CreateNode("system", nil, "Parent", "parent", testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
@@ -460,7 +460,7 @@ var _ = Describe("MCP deterministic edge behavior", func() {
 		})
 	})
 
-	Describe("JSON and multipart helper guards", func() {
+	Describe("JSON and multipart helper guards", Label("unit"), func() {
 		It("closes in-memory multipart files without side effects", func() {
 			file := &memoryMultipartFile{Reader: bytes.NewReader([]byte("payload"))}
 

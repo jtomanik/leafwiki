@@ -18,7 +18,7 @@ import (
 
 const validationDuplicateLeafwikiIDMessage = "duplicate leafwiki_id"
 
-var _ = Describe("Validation tool helpers", func() {
+var _ = Describe("Validation tool helpers", Label("integration"), func() {
 	It("caches one asset predicate per page", func() {
 		calls := map[tree.PageID]int{}
 		assetExists := cachedValidationAssetExists(func(pageID tree.PageID) func(string) bool {

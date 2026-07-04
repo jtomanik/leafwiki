@@ -23,7 +23,7 @@ import (
 // - GitHub README section import becomes section link
 
 var _ = Describe("context tool helpers", func() {
-	It("handles case-insensitive markdown path names", func() {
+	It("handles case-insensitive markdown path names", Label("unit"), func() {
 		tests := map[string]string{
 			"Docs/API.MD":      "Docs/API",
 			"Docs/INDEX.MD":    "Docs",
@@ -37,7 +37,7 @@ var _ = Describe("context tool helpers", func() {
 		}
 	})
 
-	It("resolves root index markdown paths to the root page ID", func() {
+	It("resolves root index markdown paths to the root page ID", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 
 		got := routes.pageIDsForMarkdownPaths([]string{"index.md"})
@@ -45,7 +45,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(got).To(Equal([]tree.PageID{tree.RootPageID}))
 	})
 
-	It("uses markdown file kind for same-basename twins", func() {
+	It("uses markdown file kind for same-basename twins", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 
 		sectionID, err := routes.treeService.CreateNode("system", nil, "Sync Section", "sync", testNodeKindPtr(tree.NodeKindSection))
@@ -60,7 +60,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(sectionIDs).To(Equal([]tree.PageID{*sectionID}))
 	})
 
-	It("resolves README fallback markdown paths to sections", func() {
+	It("resolves README fallback markdown paths to sections", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 
 		sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
@@ -70,7 +70,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(pageIDs).To(Equal([]tree.PageID{*sectionID}))
 	})
 
-	It("uses workspace route normalization for README sections", func() {
+	It("uses workspace route normalization for README sections", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 		workspaceRoot := mcpTestTempDir()
 		routes.workspaceRootDir = workspaceRoot
@@ -83,7 +83,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(pageIDs).To(Equal([]tree.PageID{*sectionID}))
 	})
 
-	It("does not fallback lowercase readme markdown paths", func() {
+	It("does not fallback lowercase readme markdown paths", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 
 		_, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
@@ -93,7 +93,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(pageIDs).To(BeEmpty())
 	})
 
-	It("uses workspace route normalization for plan paths", func() {
+	It("uses workspace route normalization for plan paths", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 		plansID, err := routes.treeService.CreateNode("system", nil, "Plans", "plans", testNodeKindPtr(tree.NodeKindSection))
 		Expect(err).To(Succeed())
@@ -104,7 +104,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(pageIDs).To(Equal([]tree.PageID{*pageID}))
 	})
 
-	It("resolves recent root index changes to the root page ID", func() {
+	It("resolves recent root index changes to the root page ID", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 		ctx := context.Background()
 		createdAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
@@ -124,7 +124,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(changes).To(HaveExactElements(HaveField("PageIDs", Equal([]tree.PageID{tree.RootPageID}))))
 	})
 
-	It("handles context sync modes and session history", func() {
+	It("handles context sync modes and session history", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 		actor := toolActor{ID: "editor-1", User: &auth.User{ID: "editor-1", Username: "editor", Role: auth.RoleEditor}}
 		opts := httpinternal.RouterOptions{AuthDisabled: true, EnableWorkspaceSync: true}
@@ -214,7 +214,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(other.ContextHistory).To(HaveLen(1))
 	})
 
-	It("clamps context input limits", func() {
+	It("clamps context input limits", Label("unit"), func() {
 		huge := 999
 		negative := -1
 
@@ -226,7 +226,7 @@ var _ = Describe("context tool helpers", func() {
 		Expect(boundedRecentChangesLimit(&negative)).To(Equal(defaultContextRecentChangesLimit))
 	})
 
-	It("redacts sync status last-error paths", func() {
+	It("redacts sync status last-error paths", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 		rootDir := filepath.Join(mcpTestTempDir(), "content")
 		dataDir := filepath.Join(mcpTestTempDir(), "data")
@@ -272,7 +272,7 @@ var _ = Describe("context tool helpers", func() {
 		})))
 	})
 
-	It("evicts old checkpoint sessions", func() {
+	It("evicts old checkpoint sessions", Label("unit"), func() {
 		store := newContextCheckpointStore(2)
 		base := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 
@@ -294,7 +294,7 @@ var _ = Describe("context tool helpers", func() {
 		))
 	})
 
-	It("preserves the current checkpoint session when overflow removes another session", func() {
+	It("preserves the current checkpoint session when overflow removes another session", Label("unit"), func() {
 		store := newContextCheckpointStore(2)
 		store.maxSessions = 2
 		store.ttl = time.Hour
@@ -323,7 +323,7 @@ var _ = Describe("context tool helpers", func() {
 		))
 	})
 
-	It("prunes expired checkpoint sessions", func() {
+	It("prunes expired checkpoint sessions", Label("unit"), func() {
 		store := newContextCheckpointStore(2)
 		store.ttl = time.Minute
 		base := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
@@ -346,7 +346,7 @@ var _ = Describe("context tool helpers", func() {
 		))
 	})
 
-	It("expires current-session checkpoint tokens", func() {
+	It("expires current-session checkpoint tokens", Label("unit"), func() {
 		store := newContextCheckpointStore(2)
 		freshTime := time.Now().UTC()
 		expiredTime := freshTime.Add(-2 * time.Minute)
@@ -365,7 +365,7 @@ var _ = Describe("context tool helpers", func() {
 		)))
 	})
 
-	It("separates sync-status validation warnings from errors", func() {
+	It("separates sync-status validation warnings from errors", Label("unit"), func() {
 		validation := validationFromSyncStatus(workspacesync.SyncStatus{
 			ValidationErrors: []workspacesync.ValidationError{
 				{Path: "hidden.md", Message: "hidden markdown file", Severity: "warning"},

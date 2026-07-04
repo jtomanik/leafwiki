@@ -32,7 +32,7 @@ import (
 )
 
 var _ = Describe("MCP context checkpoints and route normalization", func() {
-	Describe("checkpoint eviction", func() {
+	Describe("checkpoint eviction", Label("unit"), func() {
 		It("evicts overflow and new sessions while preserving the active session", func() {
 			base := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 			store := newContextCheckpointStore(1)
@@ -71,7 +71,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 		})
 	})
 
-	Describe("actor and route guards", func() {
+	Describe("actor and route guards", Label("integration"), func() {
 		It("resolves token-info actors and distinguishes not-found from lookup failures", func() {
 			userDir := mcpTestTempDir()
 			store, err := coreauth.NewUserStore(userDir)
@@ -165,12 +165,12 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 	})
 
 	Describe("schema and context helpers", func() {
-		It("falls back to object schema and no optional tools for unknown gates", func() {
+		It("falls back to object schema and no optional tools for unknown gates", Label("unit"), func() {
 			Expect(toolOutputSchema(ToolID("unknown_tool")).Type).To(Equal("object"))
 			Expect(toolNamesForGate(optionalToolGate("unknown"))).To(BeNil())
 		})
 
-		It("reports presence, refresh, and snapshot delta behavior", func() {
+		It("reports presence, refresh, and snapshot delta behavior", Label("integration"), func() {
 			now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 			routes := newContextToolTestRoutes()
 			routes.webPresenceProvider = func(*coreauth.User) ([]wikipresence.Session, error) {
@@ -282,7 +282,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(change.ChangedPaths).To(Equal([]string{"home.md"}))
 		})
 
-		It("normalizes markdown paths and redacts workspace paths", func() {
+		It("normalizes markdown paths and redacts workspace paths", Label("integration"), func() {
 			routes := newContextToolTestRoutes()
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
@@ -314,7 +314,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 		})
 	})
 
-	Describe("navigation and partial-edit helpers", func() {
+	Describe("navigation and partial-edit helpers", Label("integration"), func() {
 		It("maps subtree and partial-edit failures to semantic errors", func() {
 			unloadedTree := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})
 			_, err := (&Routes{treeService: unloadedTree}).getSubtree(context.Background(), getSubtreeInput{})
@@ -347,7 +347,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 		})
 	})
 
-	Describe("validation and refresh helpers", func() {
+	Describe("validation and refresh helpers", Label("integration"), func() {
 		It("resolves validation links, paths, and page IDs semantically", func() {
 			routes := newContextToolTestRoutes()
 			routes.workspaceRootDir = ""

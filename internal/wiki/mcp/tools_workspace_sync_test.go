@@ -12,7 +12,7 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = Describe("Workspace sync tool helpers", func() {
+var _ = Describe("Workspace sync tool helpers", Label("integration"), func() {
 	It("propagates hard sync errors", func() {
 		expected := errors.New("capture failed")
 		routes := &Routes{

@@ -31,7 +31,7 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = Describe("MCP extracted tool bodies", func() {
+var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 	It("reports actor, page, partial-edit, and validation tool outcomes through semantic contracts", func() {
 		backendErr := errors.New("tool failed")
 		_, err := callActorTool[emptyInput, currentUserOutput](&Routes{}, context.Background(), nil, emptyInput{}, func(context.Context, toolActor, emptyInput) (currentUserOutput, error) {

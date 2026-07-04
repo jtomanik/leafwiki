@@ -17,7 +17,7 @@ import (
 	"github.com/perber/wiki/internal/wiki"
 )
 
-var _ = Describe("local MCP protocol errors", func() {
+var _ = Describe("local MCP protocol errors", Label("integration"), func() {
 	It("returns structured tool-error envelopes for invalid inputs and backend failures", func() {
 		w, _ := newProtocolErrorWikiWithStorage()
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{

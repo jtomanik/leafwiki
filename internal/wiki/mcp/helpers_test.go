@@ -22,7 +22,7 @@ import (
 )
 
 var _ = Describe("actor/request helpers", func() {
-	It("rejects missing token info by default", func() {
+	It("rejects missing token info by default", Label("unit"), func() {
 		routes := &Routes{}
 
 		for _, req := range []*sdkmcp.CallToolRequest{
@@ -35,7 +35,7 @@ var _ = Describe("actor/request helpers", func() {
 		}
 	})
 
-	It("uses the private actor context header", func() {
+	It("uses the private actor context header", Label("unit"), func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		encoded, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 			Version:     1,
@@ -75,7 +75,7 @@ var _ = Describe("actor/request helpers", func() {
 		))
 	})
 
-	It("uses a missing-token STDIO API key and reloads the current user", func() {
+	It("uses a missing-token STDIO API key and reloads the current user", Label("integration"), func() {
 		userService, apiKeyService, editor := newMCPAuthServices()
 		editorID := coreauth.UserIDFromString(editor.ID)
 		created, err := apiKeyService.CreateAPIKey(editorID, "Native STDIO", editorID)
@@ -103,7 +103,7 @@ var _ = Describe("actor/request helpers", func() {
 		Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserNotFound, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserNotFound)))
 	})
 
-	It("rejects viewer editor actors with a stable code", func() {
+	It("rejects viewer editor actors with a stable code", Label("unit"), func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 		encoded, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 			Version:     1,
@@ -132,7 +132,7 @@ var _ = Describe("actor/request helpers", func() {
 		Expect(err).To(matchLocalizedErrorCode(errCodeMCPEditorRoleRequired, sharederrors.MessageIDForCode(errCodeMCPEditorRoleRequired)))
 	})
 
-	It("preserves API key bearer verification storage errors", func() {
+	It("preserves API key bearer verification storage errors", Label("integration"), func() {
 		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture()
 		blocker := beginExclusiveMCPTestSQLiteTransaction(apiKeyDBPath)
 		DeferCleanup(blocker.rollback)
@@ -144,7 +144,7 @@ var _ = Describe("actor/request helpers", func() {
 		Expect(err).To(MatchError(errMCPAPIKeyVerifierFailed))
 	})
 
-	It("preserves missing-token API key storage errors", func() {
+	It("preserves missing-token API key storage errors", Label("integration"), func() {
 		_, apiKeyService, _, created, apiKeyDBPath := newMCPAPIKeyAuthFixture()
 		blocker := beginExclusiveMCPTestSQLiteTransaction(apiKeyDBPath)
 		DeferCleanup(blocker.rollback)

@@ -12,7 +12,7 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
-var _ = Describe("Tool descriptor contracts", func() {
+var _ = Describe("Tool descriptor contracts", Label("unit"), func() {
 	It("uses typed IDs and description IDs", func() {
 		Expect(toolMovePage).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Name":          Equal(ToolMovePage),

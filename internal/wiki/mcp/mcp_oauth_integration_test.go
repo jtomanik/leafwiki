@@ -50,7 +50,7 @@ type oauthMetadataCase struct {
 	resource          string
 }
 
-var _ = DescribeTable("LocalMCPOAuthMetadata",
+var _ = DescribeTable("LocalMCPOAuthMetadata", Label("integration"),
 	func(tc oauthMetadataCase) {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, httpinternal.RouterOptions{
@@ -111,7 +111,7 @@ var _ = DescribeTable("LocalMCPOAuthMetadata",
 	),
 )
 
-var _ = DescribeTable("LocalMCPOAuthDynamicClientRegistration invalid registrations",
+var _ = DescribeTable("LocalMCPOAuthDynamicClientRegistration invalid registrations", Label("integration"),
 	func(body string) {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -129,7 +129,7 @@ var _ = DescribeTable("LocalMCPOAuthDynamicClientRegistration invalid registrati
 	Entry("unsupported scope", `{"redirect_uris":["http://127.0.0.1:49152/callback"],"scope":"leafwiki:mcp other","token_endpoint_auth_method":"none"}`),
 )
 
-var _ = Describe("OAuth dynamic client registration", func() {
+var _ = Describe("OAuth dynamic client registration", Label("integration"), func() {
 	It("registers loopback public clients and exchanges authorization codes", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -179,7 +179,7 @@ var _ = Describe("OAuth dynamic client registration", func() {
 	})
 })
 
-var _ = Describe("OAuth dynamic client registration defaults", func() {
+var _ = Describe("OAuth dynamic client registration defaults", Label("integration"), func() {
 	It("adds refresh grants and binds refresh tokens to the registered client", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -234,7 +234,7 @@ var _ = Describe("OAuth dynamic client registration defaults", func() {
 	})
 })
 
-var _ = Describe("OAuth dynamic client registration scopes", func() {
+var _ = Describe("OAuth dynamic client registration scopes", Label("integration"), func() {
 	It("allows clients without a stored scope to request the advertised scope", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -272,7 +272,7 @@ var _ = Describe("OAuth dynamic client registration scopes", func() {
 	})
 })
 
-var _ = Describe("OAuth dynamic client registration grant restrictions", func() {
+var _ = Describe("OAuth dynamic client registration grant restrictions", Label("integration"), func() {
 	It("omits refresh tokens for authorization-code-only clients", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -306,7 +306,7 @@ var _ = Describe("OAuth dynamic client registration grant restrictions", func() 
 	})
 })
 
-var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect bad requests",
+var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect bad requests", Label("integration"),
 	func(override func(url.Values)) {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -324,7 +324,7 @@ var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect bad requ
 	Entry("redirect fragment", func(q url.Values) { q.Set("redirect_uri", "http://localhost:49152/callback#frag") }),
 )
 
-var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect errors",
+var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect errors", Label("integration"),
 	func(override func(url.Values), wantError *fosite.RFC6749Error, wantState string) {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -352,7 +352,7 @@ var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect redirect
 	Entry("unsupported scope redirects to client", func(q url.Values) { q.Set("scope", "leafwiki:mcp other") }, fosite.ErrInvalidScope, "redirect-error-state"),
 )
 
-var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect authenticated approval",
+var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect authenticated approval", Label("integration"),
 	func(redirectURI string) {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -376,7 +376,7 @@ var _ = DescribeTable("LocalMCPOAuthAuthorizeValidationAndLoginRedirect authenti
 	Entry("authenticated approval http://[::1]:49152/callback", "http://[::1]:49152/callback"),
 )
 
-var _ = Describe("OAuth authorization redirects", func() {
+var _ = Describe("OAuth authorization redirects", Label("integration"), func() {
 	It("sends unauthenticated clients through login before approval", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -396,7 +396,7 @@ var _ = Describe("OAuth authorization redirects", func() {
 	})
 })
 
-var _ = Describe("OAuth authorization with trusted remote users", func() {
+var _ = Describe("OAuth authorization with trusted remote users", Label("integration"), func() {
 	It("still requires explicit approval before issuing an authorization code", func() {
 		w := newLocalMCPAuthTestWiki()
 		trustedProxies, err := authmw.ParseTrustedProxies("192.0.2.1")
@@ -426,7 +426,7 @@ var _ = Describe("OAuth authorization with trusted remote users", func() {
 	})
 })
 
-var _ = Describe("OAuth token exchange", func() {
+var _ = Describe("OAuth token exchange", Label("integration"), func() {
 	It("rejects invalid grants and refreshes valid sessions", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -533,7 +533,7 @@ var _ = Describe("OAuth token exchange", func() {
 	})
 })
 
-var _ = Describe("OAuth token lifetimes", func() {
+var _ = Describe("OAuth token lifetimes", Label("integration"), func() {
 	It("uses wiki options for access token expiry", func() {
 		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{
 			AccessTokenTimeout:  15 * time.Minute,
@@ -588,7 +588,7 @@ var _ = Describe("OAuth token lifetimes", func() {
 	})
 })
 
-var _ = Describe("OAuth-authenticated writes", func() {
+var _ = Describe("OAuth-authenticated writes", Label("integration"), func() {
 	It("preserves CSRF protection and author metadata across HTTP and MCP mutations", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions(""))
@@ -666,7 +666,7 @@ func exerciseOAuthWriterCRUD(router http.Handler, session *sdkmcp.ClientSession,
 	return updatedPage
 }
 
-var _ = Describe("local MCP OAuth bearer protection", func() {
+var _ = Describe("local MCP OAuth bearer protection", Label("integration"), func() {
 	It("challenges unauthenticated requests and rejects stale bearer identities", func() {
 		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{})
 		opts := oauthRouterOptions("")
@@ -729,7 +729,7 @@ var _ = Describe("local MCP OAuth bearer protection", func() {
 	})
 })
 
-var _ = DescribeTable("OAuth-authenticated viewers are denied editor MCP tools",
+var _ = DescribeTable("OAuth-authenticated viewers are denied editor MCP tools", Label("integration"),
 	func(toolName wikimcp.ToolID, buildArgs func(pageID, currentVersion, latestRevisionID string) map[string]any) {
 		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{})
 		opts := oauthRouterOptions("")
@@ -835,7 +835,7 @@ var _ = DescribeTable("OAuth-authenticated viewers are denied editor MCP tools",
 	}),
 )
 
-var _ = Describe("local MCP API-key bearer protection", func() {
+var _ = Describe("local MCP API-key bearer protection", Label("integration"), func() {
 	It("allows editor keys and rejects viewer downgraded revoked and deleted credentials", func() {
 		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{})
 		opts := oauthRouterOptions("")
@@ -921,7 +921,7 @@ var _ = Describe("local MCP API-key bearer protection", func() {
 	})
 })
 
-var _ = Describe("local MCP context for viewers", func() {
+var _ = Describe("local MCP context for viewers", Label("integration"), func() {
 	It("skips forced workspace refresh while still returning context state", func() {
 		rootDir := filepath.Join(oauthTestTempDir(), "content")
 		w := newLocalMCPAuthTestWikiWithOptions(wiki.WikiOptions{
@@ -956,7 +956,7 @@ var _ = Describe("local MCP context for viewers", func() {
 	})
 })
 
-var _ = Describe("private MCP API-key sessions", func() {
+var _ = Describe("private MCP API-key sessions", Label("integration"), func() {
 	It("blocks read-only tools after the backing API key is revoked", func() {
 		w := newLocalMCPAuthTestWiki()
 
@@ -975,7 +975,7 @@ var _ = Describe("private MCP API-key sessions", func() {
 	})
 })
 
-var _ = Describe("local MCP OAuth base paths", func() {
+var _ = Describe("local MCP OAuth base paths", Label("integration"), func() {
 	It("accepts API-key sessions on the configured base path", func() {
 		w := newLocalMCPAuthTestWiki()
 		router := newLocalMCPTestRouter(w, oauthRouterOptions("/wiki"))

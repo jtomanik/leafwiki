@@ -20,7 +20,7 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = Describe("Revision tools", func() {
+var _ = Describe("Revision tools", Label("integration"), func() {
 	It("passes the workspace cursor and returns the next cursor", func() {
 		const revisionCursorFixture = "rev-3"
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{

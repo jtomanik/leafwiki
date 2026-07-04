@@ -6,7 +6,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = Describe("Semantic helper types", func() {
+var _ = Describe("Semantic helper types", Label("unit"), func() {
 	It("preserves page identifiers as typed page IDs", func() {
 		pageID, err := exactlyOneIDOrPageID("page-1", "")
 		Expect(err).NotTo(HaveOccurred())
