@@ -277,7 +277,6 @@ var _ = Describe("branding service", func() {
 		svc, _ := newTestBrandingService()
 
 		err := svc.UpdateBranding("")
-		Expect(err).To(HaveOccurred())
 
 		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired))
 
@@ -287,7 +286,6 @@ var _ = Describe("branding service", func() {
 		svc, _ := newTestBrandingService()
 
 		err := svc.UpdateBranding("   ")
-		Expect(err).To(HaveOccurred())
 
 		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameRequired, MessageIDBrandingSiteNameRequired))
 
@@ -300,7 +298,6 @@ var _ = Describe("branding service", func() {
 		longName := strings.Repeat("a", 101)
 
 		err := svc.UpdateBranding(longName)
-		Expect(err).To(HaveOccurred())
 
 		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameTooLong, MessageIDBrandingSiteNameTooLong))
 
@@ -328,7 +325,6 @@ var _ = Describe("branding service", func() {
 		nameWithControl := "My\x00Wiki"
 
 		err := svc.UpdateBranding(nameWithControl)
-		Expect(err).To(HaveOccurred())
 
 		Expect(err).To(HaveBrandingSiteNameValidationError(FieldCodeBrandingSiteNameControlCharacters, MessageIDBrandingSiteNameControlCharacters))
 
@@ -495,7 +491,7 @@ var _ = Describe("branding service", func() {
 		DeferCleanup(closeTempBrandingFile, tmp)
 
 		_, err = svc.UploadLogo(tmp, "logo.png")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingLogoUploadFailed))
 
 		// Should not have updated persisted config
 		store := NewBrandingStore(dir)
@@ -518,7 +514,7 @@ var _ = Describe("branding service", func() {
 		DeferCleanup(closeTempBrandingFile, tmp)
 
 		_, err = svc.UploadFavicon(tmp, "favicon.ico")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchBrandingLocalizedError(ErrCodeBrandingFaviconUploadFailed))
 
 		store := NewBrandingStore(dir)
 		cfg, err2 := store.Load()
