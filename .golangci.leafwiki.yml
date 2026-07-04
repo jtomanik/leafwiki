@@ -27,6 +27,9 @@ linters:
       forbid-focus-container: true
       suppress-len-assertion: true
       validate-async-intervals: true
+  exclusions:
+    paths:
+      - ^ui/leafwiki-ui/node_modules/
 
 issues:
   max-issues-per-linter: 0
