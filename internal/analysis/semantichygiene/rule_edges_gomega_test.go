@@ -1517,6 +1517,7 @@ func BeTrue() any { return nil }
 func BeFalse() any { return nil }
 func Equal(actual any) any { return nil }
 func HaveField(name string, matcher any) any { return nil }
+type Commit struct{ Created bool }
 
 func normalize() (string, bool) { return "", true }
 func foundState(found bool) string {
@@ -1586,6 +1587,8 @@ func TestAgentPresence() {
 	Expect(contentChanged).To(BeTrue())
 	revisionCreated := false
 	Expect(revisionCreated).To(BeFalse())
+	commit := Commit{Created: true}
+	Expect(commit.Created).To(BeTrue())
 	linkRemoved := true
 	Expect(linkRemoved).To(BeTrue())
 	fileRenamed := true
@@ -1609,6 +1612,7 @@ func TestAgentPresence() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",
 				"semh:gomega.proxy-boolean: assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers",

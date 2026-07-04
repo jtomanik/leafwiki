@@ -1640,11 +1640,20 @@ func assertionUsesProxyBoolean(ctx *analysisContext, assertion gomegaAssertion) 
 		}
 		return isBoolType(ctx.pass.TypesInfo.TypeOf(ident))
 	}
+	selector, ok := unparenExpr(assertion.actual).(*ast.SelectorExpr)
+	if ok && isBooleanMatcher(assertion.matcher) && selectorIsProxyBoolean(ctx, selector) {
+		return true
+	}
 	return compositeActualContainsIdent(assertion.actual, func(ident *ast.Ident) bool {
 		return (isProxyBooleanName(ident.Name) || identIsSemanticBooleanResult(ctx, ident)) &&
 			isBoolType(ctx.pass.TypesInfo.TypeOf(ident)) &&
 			!identIsCommaOKResult(ctx, ident)
 	})
+}
+
+func selectorIsProxyBoolean(ctx *analysisContext, selector *ast.SelectorExpr) bool {
+	return isProxyBooleanName(selector.Sel.Name) &&
+		isBoolType(ctx.pass.TypesInfo.TypeOf(selector))
 }
 
 func isProxyBooleanName(name string) bool {
