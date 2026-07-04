@@ -51,11 +51,11 @@ func matchRoutePage(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
-func matchRoutePathLookup(path tree.RoutePath, exists bool) types.GomegaMatcher {
+func matchExistingRoutePathLookup(path tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Path":   Equal(path),
-		"Exists": Equal(exists),
+		"Exists": BeTrue(),
 	})
 }
 
@@ -110,7 +110,7 @@ var _ = ginkgo.Describe("page route handlers", func() {
 		rec = performRoutesRequest(http.MethodGet, "/api/pages/lookup?path=docs/guide&kind=page", "", nil, nil, deps.routes.handleLookupPath)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 		lookup := decodeRoutesJSON[tree.PathLookup](rec)
-		Expect(lookup).To(matchRoutePathLookup(tree.RoutePath("docs/guide"), true))
+		Expect(lookup).To(matchExistingRoutePathLookup(tree.RoutePath("docs/guide")))
 
 		rec = performRoutesRequest(http.MethodGet, permalinkRouteTarget(guide.ID), "", pageIDRouteParams(guide.ID), nil, deps.routes.handleResolvePermalink)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))

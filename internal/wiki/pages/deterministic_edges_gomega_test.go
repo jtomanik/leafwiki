@@ -202,10 +202,6 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		_, err = requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: "",
-			FindByPath: func(FindByPathInput) (*FindByPathOutput, error) {
-				ginkgo.Fail("section-only inactive README fallback should not query a page route")
-				return nil, nil
-			},
 		})
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 

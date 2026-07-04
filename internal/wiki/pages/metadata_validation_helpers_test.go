@@ -89,10 +89,7 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 	})
 
 	ginkgo.It("handles metadata enrichment and patch no-op edges", func() {
-		EnrichPageMetadata(nil, func(tree.PageID) (string, error) {
-			ginkgo.Fail("readPageRaw should not be called for a nil API page")
-			return "", nil
-		})
+		EnrichPageMetadata(nil, nil)
 
 		page := &dto.Page{Node: &dto.Node{ID: "page-1"}}
 		EnrichPageMetadata(page, func(tree.PageID) (string, error) {
