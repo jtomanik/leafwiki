@@ -9,7 +9,7 @@ import (
 	"github.com/perber/wiki/internal/core/excerpt"
 )
 
-var _ = ginkgo.Describe("tag page excerpt extraction", func() {
+var _ = ginkgo.Describe("tag page excerpt extraction", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns plain body text after frontmatter", func() {
 		raw := "---\ntitle: Hello\n---\n\nThis is the page body."
 

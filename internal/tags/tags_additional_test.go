@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.Describe("TagsService page index deletion", func() {
+var _ = ginkgo.Describe("TagsService page index deletion", ginkgo.Label("unit"), func() {
 	ginkgo.It("deletes both tags and excerpts for a page", func() {
 		store := newTestStore()
 		service := NewTagsService(store)
@@ -25,7 +25,7 @@ var _ = ginkgo.Describe("TagsService page index deletion", func() {
 	})
 })
 
-var _ = ginkgo.Describe("selection-aware tag suggestions", func() {
+var _ = ginkgo.Describe("selection-aware tag suggestions", ginkgo.Label("unit"), func() {
 	ginkgo.It("suggests additive tags for pages matching the selected tags", func() {
 		store := newTestStore()
 		Expect(store.SetTagsForPage("page-1", []string{"go", "react", "testing"})).To(Succeed())
@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("selection-aware tag suggestions", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tag normalization", func() {
+var _ = ginkgo.Describe("tag normalization", ginkgo.Label("unit"), func() {
 	ginkgo.It("normalizes mixed interface slices and ignores non-string values", func() {
 		got := normalizeTags([]interface{}{" Go ", 42, "go", "", "RUST", nil})
 		Expect(got).To(Equal([]string{"go", "rust"}))
@@ -70,7 +70,7 @@ var _ = ginkgo.Describe("tag normalization", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore duplicate tag writes", func() {
+var _ = ginkgo.Describe("TagsStore duplicate tag writes", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores duplicate input tags only once for a page", func() {
 		store := newTestStore()
 		Expect(store.SetTagsForPage("page-1", []string{"go", "go", "rust"})).To(Succeed())

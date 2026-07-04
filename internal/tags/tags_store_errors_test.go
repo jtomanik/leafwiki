@@ -14,7 +14,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-var _ = ginkgo.Describe("TagsStore error and recovery branches", func() {
+var _ = ginkgo.Describe("TagsStore error and recovery branches", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns wrapped database open errors", func() {
 		previousOpen := openTagsDB
 		openErr := errors.New("open failed")

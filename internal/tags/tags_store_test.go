@@ -10,7 +10,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("TagsStore database lifecycle", func() {
+var _ = ginkgo.Describe("TagsStore database lifecycle", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates the tag database inside the storage directory", func() {
 		tmp := tempTagsDir()
 
@@ -33,7 +33,7 @@ var _ = ginkgo.Describe("TagsStore database lifecycle", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore page tag writes", func() {
+var _ = ginkgo.Describe("TagsStore page tag writes", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores tags for a page", func() {
 		store := newTestStore()
 
@@ -78,7 +78,7 @@ var _ = ginkgo.Describe("TagsStore page tag writes", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore page tag deletion", func() {
+var _ = ginkgo.Describe("TagsStore page tag deletion", ginkgo.Label("unit"), func() {
 	ginkgo.It("removes tags for the requested page", func() {
 		store := newTestStore()
 
@@ -109,7 +109,7 @@ var _ = ginkgo.Describe("TagsStore page tag deletion", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore tag listing", func() {
+var _ = ginkgo.Describe("TagsStore tag listing", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns an empty list when no tags are stored", func() {
 		store := newTestStore()
 
@@ -229,7 +229,7 @@ var _ = ginkgo.Describe("TagsStore tag listing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore tag filtering", func() {
+var _ = ginkgo.Describe("TagsStore tag filtering", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns pages that have all requested tags", func() {
 		store := newTestStore()
 
@@ -293,7 +293,7 @@ var _ = ginkgo.Describe("TagsStore tag filtering", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore tags by page", func() {
+var _ = ginkgo.Describe("TagsStore tags by page", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns tags for the requested pages", func() {
 		store := newTestStore()
 
@@ -330,7 +330,7 @@ var _ = ginkgo.Describe("TagsStore tags by page", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore clearing", func() {
+var _ = ginkgo.Describe("TagsStore clearing", ginkgo.Label("unit"), func() {
 	ginkgo.It("removes all tag entries", func() {
 		store := newTestStore()
 
@@ -355,7 +355,7 @@ var _ = ginkgo.Describe("TagsStore clearing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore page index writes", func() {
+var _ = ginkgo.Describe("TagsStore page index writes", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores tags and excerpts together", func() {
 		store := newTestStore()
 
@@ -397,7 +397,7 @@ var _ = ginkgo.Describe("TagsStore page index writes", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore page index deletion", func() {
+var _ = ginkgo.Describe("TagsStore page index deletion", ginkgo.Label("unit"), func() {
 	ginkgo.It("removes both tags and excerpt metadata", func() {
 		store := newTestStore()
 
@@ -420,7 +420,7 @@ var _ = ginkgo.Describe("TagsStore page index deletion", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsStore excerpts by page", func() {
+var _ = ginkgo.Describe("TagsStore excerpts by page", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns excerpts for requested pages", func() {
 		store := newTestStore()
 
@@ -455,7 +455,7 @@ var _ = ginkgo.Describe("TagsStore excerpts by page", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tag page ID fixtures", func() {
+var _ = ginkgo.Describe("tag page ID fixtures", ginkgo.Label("unit"), func() {
 	ginkgo.It("builds typed page IDs for shared tag queries", func() {
 		Expect(testPageIDs("page-1", "page-2")).To(Equal([]tree.PageID{
 			newFixturePageID("page-1"),

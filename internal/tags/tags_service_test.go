@@ -7,7 +7,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("tag extraction from page frontmatter", func() {
+var _ = ginkgo.Describe("tag extraction from page frontmatter", ginkgo.Label("unit"), func() {
 	ginkgo.It("reads block-list tag syntax", func() {
 		content := "---\ntags:\n  - react\n  - typescript\n---\n\n# Page"
 
@@ -93,7 +93,7 @@ var _ = ginkgo.Describe("tag extraction from page frontmatter", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsService tree indexing", func() {
+var _ = ginkgo.Describe("TagsService tree indexing", ginkgo.Label("unit"), func() {
 	ginkgo.It("builds a queryable tag index for pages with tags", func() {
 		svc, ts := setupTagsService()
 
@@ -206,7 +206,7 @@ var _ = ginkgo.Describe("TagsService tree indexing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("TagsService page content indexing", func() {
+var _ = ginkgo.Describe("TagsService page content indexing", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores extracted tags and excerpt together", func() {
 		svc, _ := setupTagsService()
 
