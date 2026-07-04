@@ -39,7 +39,7 @@ func createPageWithFrontmatter(treeSvc *tree.TreeService, title, slug, raw strin
 	return page
 }
 
-var _ = ginkgo.Describe("tag indexing side effect", func() {
+var _ = ginkgo.Describe("tag indexing side effect", ginkgo.Label("integration"), func() {
 	ginkgo.When("a page is created with tag frontmatter", func() {
 		ginkgo.It("indexes the page under each declared tag", func() {
 			treeSvc, tagsSvc, effect := setupTagsEffectTest()

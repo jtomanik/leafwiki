@@ -25,7 +25,7 @@ func setupPropertiesEffectTest() (*tree.TreeService, *properties.PropertiesServi
 	return treeSvc, svc, NewPropertiesSideEffect(svc, nil)
 }
 
-var _ = ginkgo.Describe("property indexing side effect", func() {
+var _ = ginkgo.Describe("property indexing side effect", ginkgo.Label("integration"), func() {
 	ginkgo.When("a page is created with property frontmatter", func() {
 		ginkgo.It("indexes the page under each declared property", func() {
 			treeSvc, propsSvc, effect := setupPropertiesEffectTest()

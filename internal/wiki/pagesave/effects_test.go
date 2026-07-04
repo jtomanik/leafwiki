@@ -18,7 +18,7 @@ import (
 
 var _ = ginkgo.Describe("page save side effects", func() {
 	ginkgo.Describe("constructor defaults", func() {
-		ginkgo.It("assigns the default logger to link indexing", func() {
+		ginkgo.It("assigns the default logger to link indexing", ginkgo.Label("integration"), func() {
 			dir := tempPagesaveDir()
 			treeService := tree.NewTreeService(dir)
 			store, err := links.NewLinksStore(dir)
@@ -32,7 +32,7 @@ var _ = ginkgo.Describe("page save side effects", func() {
 			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
 		})
 
-		ginkgo.It("assigns the default logger to search indexing", func() {
+		ginkgo.It("assigns the default logger to search indexing", ginkgo.Label("integration"), func() {
 			dir := tempPagesaveDir()
 			treeService := tree.NewTreeService(dir)
 			index, err := search.NewSQLiteIndex(dir)
@@ -46,20 +46,20 @@ var _ = ginkgo.Describe("page save side effects", func() {
 			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
 		})
 
-		ginkgo.It("assigns the default logger to tag indexing", func() {
+		ginkgo.It("assigns the default logger to tag indexing", ginkgo.Label("unit"), func() {
 			effect := NewTagsSideEffect(nil, nil)
 
 			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
 		})
 
-		ginkgo.It("assigns the default logger to property indexing", func() {
+		ginkgo.It("assigns the default logger to property indexing", ginkgo.Label("unit"), func() {
 			effect := NewPropertiesSideEffect(nil, nil)
 
 			Expect(effect.log).To(BeIdenticalTo(slog.Default()))
 		})
 	})
 
-	ginkgo.Describe("link indexing", func() {
+	ginkgo.Describe("link indexing", ginkgo.Label("integration"), func() {
 		ginkgo.It("records outgoing markdown links for created pages", func() {
 			_, treeService, linkService, effect := setupLinkSideEffect()
 			source := createMarkdownPage(treeService, "Source Page", "source-page", "[Target](/target-page)")
@@ -75,7 +75,7 @@ var _ = ginkgo.Describe("page save side effects", func() {
 		})
 	})
 
-	ginkgo.Describe("orchestration", func() {
+	ginkgo.Describe("orchestration", ginkgo.Label("unit"), func() {
 		ginkgo.It("returns required effect errors before running best-effort effects", func() {
 			expected := errors.New("required sync failed")
 			required := &failingRequiredEffect{err: expected}
@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("page save side effects", func() {
 		})
 	})
 
-	ginkgo.Describe("workspace sync", func() {
+	ginkgo.Describe("workspace sync", ginkgo.Label("unit"), func() {
 		ginkgo.It("maps MCP page mutations to MCP sync source and actor metadata", func() {
 			syncer := &captureWorkspaceSyncer{}
 			effect := NewWorkspaceSyncSideEffect(syncer, nil)

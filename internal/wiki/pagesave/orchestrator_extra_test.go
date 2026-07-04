@@ -12,7 +12,7 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-var _ = ginkgo.Describe("page save side-effect orchestration", func() {
+var _ = ginkgo.Describe("page save side-effect orchestration", ginkgo.Label("unit"), func() {
 	ginkgo.It("runs required and best-effort effects in registration order", func() {
 		required := &failingRequiredEffect{}
 		bestEffort := &countingSideEffect{}

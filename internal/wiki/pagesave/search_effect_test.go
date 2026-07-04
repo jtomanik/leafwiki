@@ -77,7 +77,7 @@ func haveNoSearchHits() types.GomegaMatcher {
 	}))
 }
 
-var _ = ginkgo.Describe("search indexing side effect", func() {
+var _ = ginkgo.Describe("search indexing side effect", ginkgo.Label("integration"), func() {
 	ginkgo.When("search bootstrap runs", func() {
 		ginkgo.It("indexes existing pages in the tree", func() {
 			treeSvc, index, effect := setupSearchTest()

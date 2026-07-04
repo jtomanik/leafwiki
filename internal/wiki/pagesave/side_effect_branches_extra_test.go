@@ -21,11 +21,11 @@ import (
 )
 
 var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", func() {
-	ginkgo.It("treats search bootstrap as a no-op when no index is configured", func() {
+	ginkgo.It("treats search bootstrap as a no-op when no index is configured", ginkgo.Label("unit"), func() {
 		Expect(NewSearchIndexSideEffect(nil, nil, nil).IndexAllPages()).To(Succeed())
 	})
 
-	ginkgo.It("returns search bootstrap tree walk errors", func() {
+	ginkgo.It("returns search bootstrap tree walk errors", ginkgo.Label("integration"), func() {
 		_, _, index, _ := setupSearchSideEffect()
 		walkFailedErr := errors.New("walk failed")
 		effect := &SearchIndexSideEffect{
@@ -36,7 +36,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 		Expect(effect.IndexAllPages()).To(MatchError(walkFailedErr))
 	})
 
-	ginkgo.It("applies link index updates across update, move, restore, and delete event shapes", func() {
+	ginkgo.It("applies link index updates across update, move, restore, and delete event shapes", ginkgo.Label("integration"), func() {
 		_, treeService, linkService, effect := setupLinkSideEffect()
 		source := createMarkdownPage(treeService, "Source", "source", "[Target](/target)")
 		affected := createMarkdownPage(treeService, "Affected", "affected", "[Other](/other)")
@@ -86,7 +86,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 		})
 	})
 
-	ginkgo.It("logs link index write failures without panicking", func() {
+	ginkgo.It("logs link index write failures without panicking", ginkgo.Label("integration"), func() {
 		dir, treeService, _, effect := setupLinkSideEffect()
 		page := createMarkdownPage(treeService, "Broken Links", "broken-links", "[Missing](/missing)")
 		dropSQLiteTables(filepath.Join(dir, "links.db"), "links")
@@ -120,7 +120,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 		}).NotTo(Panic())
 	})
 
-	ginkgo.It("indexes search fallback pages and exposes deterministic search index failures", func() {
+	ginkgo.It("indexes search fallback pages and exposes deterministic search index failures", ginkgo.Label("integration"), func() {
 		dir, treeService, index, effect := setupSearchSideEffect()
 		page := createMarkdownPage(treeService, "Search Fallback", "search-fallback", "needle fallback content")
 
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 		}).NotTo(Panic())
 	})
 
-	ginkgo.It("updates properties from fallback pages and logs write failures", func() {
+	ginkgo.It("updates properties from fallback pages and logs write failures", ginkgo.Label("integration"), func() {
 		dir, treeService, service, effect := setupPropertiesSideEffect()
 		page := createRawPage(treeService, "Properties Fallback", "properties-fallback", "---\nstatus: staged\n---\n\nBody")
 
@@ -182,7 +182,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 		}).NotTo(Panic())
 	})
 
-	ginkgo.It("updates tags from fallback pages and logs write failures", func() {
+	ginkgo.It("updates tags from fallback pages and logs write failures", ginkgo.Label("integration"), func() {
 		dir, treeService, service, effect := setupTagsSideEffect()
 		page := createRawPage(treeService, "Tags Fallback", "tags-fallback", "---\ntags:\n  - branch\n---\n\nBody")
 
