@@ -13,8 +13,7 @@ var _ = ginkgo.Describe("semantic path helpers", ginkgo.Label("unit"), func() {
 
 		Expect(path.Clean()).To(Equal(MarkdownPath("docs/guide/index.md")))
 		Expect(path.Clean().Ext()).To(Equal(".md"))
-		Expect(path.Clean().IsIndexFile()).To(BeTrue())
-		Expect(path.Clean().IsMarkdown()).To(BeTrue())
+		Expect(path.Clean()).To(matchMarkdownPathSemantics(markdownPathIndexFile, markdownPathFormatMarkdown))
 		Expect(path.Clean().RoutePath()).To(Equal(RoutePath("docs/guide")))
 		Expect(path.Clean().SourceDir()).To(Equal(MarkdownPath("docs/guide")))
 		Expect(path.Clean().FilesystemPath()).To(Equal("docs/guide/index.md"))
@@ -24,7 +23,7 @@ var _ = ginkgo.Describe("semantic path helpers", ginkgo.Label("unit"), func() {
 		root := RoutePathFromString("/")
 		route := RoutePathFromString("/Docs/Guide/")
 
-		Expect(root.Clean().IsRoot()).To(BeTrue())
+		Expect(root.Clean()).To(matchRoutePathKind(routePathRoot))
 		Expect(root.WikiPath()).To(Equal("/"))
 		Expect(root.Child("docs")).To(Equal(RoutePath("docs")))
 		Expect(root.MarkdownContentPath(NodeKindSection)).To(Equal(MarkdownPath("index.md")))

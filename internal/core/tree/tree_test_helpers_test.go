@@ -45,6 +45,168 @@ type pageLookupResult struct {
 	Err  error
 }
 
+type treeErrorRecognition string
+
+const (
+	treeErrorRecognized   treeErrorRecognition = "recognized"
+	treeErrorUnrecognized treeErrorRecognition = "unrecognized"
+)
+
+type treeLookupState string
+
+const (
+	treeLookupExisting    treeLookupState = "existing"
+	treeLookupMissing     treeLookupState = "missing"
+	treeLookupUnavailable treeLookupState = "unavailable"
+)
+
+type sectionIndexPathObservation struct {
+	Path  string
+	State treeLookupState
+}
+
+type workspaceContentPathObservation struct {
+	Path  string
+	State treeLookupState
+	Err   error
+}
+
+type workspaceMarkdownRouteState string
+
+const (
+	workspaceMarkdownRouteSkipped workspaceMarkdownRouteState = "skipped"
+	workspaceMarkdownRouteActive  workspaceMarkdownRouteState = "active"
+)
+
+type workspaceMarkdownRouteObservation struct {
+	State  workspaceMarkdownRouteState
+	Reason string
+}
+
+type pathLookupObservation struct {
+	State    treeLookupState
+	Segments []PathSegment
+}
+
+type ensurePathResultState string
+
+const (
+	ensurePathResultExistingUnchanged ensurePathResultState = "existing without created nodes"
+	ensurePathResultExistingCreated   ensurePathResultState = "existing with created nodes"
+	ensurePathResultMissing           ensurePathResultState = "missing"
+	ensurePathResultUnavailable       ensurePathResultState = "unavailable"
+)
+
+type ensurePathResultObservation struct {
+	State ensurePathResultState
+	Page  *PageNode
+}
+
+type pathSegmentState string
+
+const (
+	pathSegmentExisting pathSegmentState = "existing"
+	pathSegmentMissing  pathSegmentState = "missing"
+)
+
+type pathSegmentObservation struct {
+	State pathSegmentState
+	ID    PageID
+}
+
+type pageVersionBypassState string
+
+const (
+	pageVersionBypassUnchecked pageVersionBypassState = "unchecked bypass sentinel"
+	pageVersionNormal          pageVersionBypassState = "normal page version"
+)
+
+type markdownPathRole string
+
+const (
+	markdownPathIndexFile markdownPathRole = "index markdown file"
+	markdownPathLeafFile  markdownPathRole = "leaf markdown file"
+)
+
+type markdownPathFormat string
+
+const (
+	markdownPathFormatMarkdown markdownPathFormat = "markdown"
+	markdownPathFormatOther    markdownPathFormat = "non-markdown"
+)
+
+type markdownPathObservation struct {
+	Role   markdownPathRole
+	Format markdownPathFormat
+}
+
+type routePathKind string
+
+const (
+	routePathRoot routePathKind = "root route"
+	routePathLeaf routePathKind = "leaf route"
+)
+
+type missingContentErrorState string
+
+const (
+	missingContentErrorRecognized   missingContentErrorState = "recognized missing content error"
+	missingContentErrorUnrecognized missingContentErrorState = "unrecognized content error"
+)
+
+type childSlugState string
+
+const (
+	childSlugAvailable childSlugState = "child slug available"
+	childSlugTaken     childSlugState = "child slug taken"
+)
+
+type childMembershipState string
+
+const (
+	childMembershipPresent childMembershipState = "child membership present"
+	childMembershipAbsent  childMembershipState = "child membership absent"
+)
+
+type childMembershipTraversal string
+
+const (
+	childMembershipDirect    childMembershipTraversal = "direct child"
+	childMembershipRecursive childMembershipTraversal = "recursive descendant"
+)
+
+type fileInfoKind string
+
+const (
+	fileInfoDirectory fileInfoKind = "directory"
+	fileInfoFile      fileInfoKind = "file"
+)
+
+type treeServiceLoadState string
+
+const (
+	treeServiceLoaded    treeServiceLoadState = "loaded"
+	treeServiceNotLoaded treeServiceLoadState = "not loaded"
+)
+
+type treeServiceLoadObservation struct {
+	Reported treeServiceLoadState
+	Root     treeServiceLoadState
+}
+
+type treeServicePageState string
+
+const (
+	treeServicePagesUnavailable treeServicePageState = "pages unavailable before load"
+	treeServicePagesEmpty       treeServicePageState = "loaded tree has no pages"
+	treeServicePagesPresent     treeServicePageState = "loaded tree has pages"
+)
+
+type treeServicePageObservation struct {
+	Reported treeServicePageState
+	Root     treeServicePageState
+}
+
 var errExpectedFrontmatter = errors.New("expected frontmatter")
 var errExpectedSectionIndex = errors.New("expected section index")
 var errExpectedContentMatch = errors.New("expected content match")
@@ -216,6 +378,258 @@ func cleanPathsDiffer(pathA string, pathB string) error {
 	return nil
 }
 
+func sectionIndexPathObservationFrom(actual sectionIndexPathLookup) sectionIndexPathObservation {
+	state := treeLookupMissing
+	if actual.Exists {
+		state = treeLookupExisting
+	}
+	return sectionIndexPathObservation{
+		Path:  actual.Path,
+		State: state,
+	}
+}
+
+func workspaceContentPathObservationFrom(actual workspaceContentPathLookup) workspaceContentPathObservation {
+	state := treeLookupMissing
+	if actual.Exists {
+		state = treeLookupExisting
+	}
+	return workspaceContentPathObservation{
+		Path:  actual.Path,
+		State: state,
+		Err:   actual.Err,
+	}
+}
+
+func workspaceMarkdownRouteObservationFrom(actual WorkspaceMarkdownRoute) workspaceMarkdownRouteObservation {
+	if actual.Skip {
+		return workspaceMarkdownRouteObservation{
+			State:  workspaceMarkdownRouteSkipped,
+			Reason: actual.SkipReason,
+		}
+	}
+	return workspaceMarkdownRouteObservation{State: workspaceMarkdownRouteActive}
+}
+
+func pathLookupObservationFrom(actual *PathLookup) pathLookupObservation {
+	if actual == nil {
+		return pathLookupObservation{State: treeLookupUnavailable}
+	}
+	state := treeLookupMissing
+	if actual.Exists {
+		state = treeLookupExisting
+	}
+	return pathLookupObservation{
+		State:    state,
+		Segments: actual.Segments,
+	}
+}
+
+func ensurePathResultObservationFrom(actual *EnsurePathResult) ensurePathResultObservation {
+	if actual == nil {
+		return ensurePathResultObservation{State: ensurePathResultUnavailable}
+	}
+	if !actual.Exists {
+		return ensurePathResultObservation{State: ensurePathResultMissing, Page: actual.Page}
+	}
+	if len(actual.Created) == 0 {
+		return ensurePathResultObservation{State: ensurePathResultExistingUnchanged, Page: actual.Page}
+	}
+	return ensurePathResultObservation{State: ensurePathResultExistingCreated, Page: actual.Page}
+}
+
+func pathSegmentObservationFrom(segment PathSegment) pathSegmentObservation {
+	if segment.Exists && segment.ID != nil {
+		return pathSegmentObservation{
+			State: pathSegmentExisting,
+			ID:    *segment.ID,
+		}
+	}
+	return pathSegmentObservation{State: pathSegmentMissing}
+}
+
+func pageVersionBypassStateFrom(version PageVersion) pageVersionBypassState {
+	if version.IsUnchecked() {
+		return pageVersionBypassUnchecked
+	}
+	return pageVersionNormal
+}
+
+func matchPageVersionBypassState(state pageVersionBypassState) types.GomegaMatcher {
+	return WithTransform(pageVersionBypassStateFrom, Equal(state))
+}
+
+func markdownPathObservationFrom(path MarkdownPath) markdownPathObservation {
+	role := markdownPathLeafFile
+	if path.IsIndexFile() {
+		role = markdownPathIndexFile
+	}
+	format := markdownPathFormatOther
+	if path.IsMarkdown() {
+		format = markdownPathFormatMarkdown
+	}
+	return markdownPathObservation{
+		Role:   role,
+		Format: format,
+	}
+}
+
+func matchMarkdownPathSemantics(role markdownPathRole, format markdownPathFormat) types.GomegaMatcher {
+	return WithTransform(markdownPathObservationFrom, Equal(markdownPathObservation{
+		Role:   role,
+		Format: format,
+	}))
+}
+
+func routePathKindFrom(path RoutePath) routePathKind {
+	if path.IsRoot() {
+		return routePathRoot
+	}
+	return routePathLeaf
+}
+
+func matchRoutePathKind(kind routePathKind) types.GomegaMatcher {
+	return WithTransform(routePathKindFrom, Equal(kind))
+}
+
+func matchMissingContentErrorState(isMissing func(error) bool, state missingContentErrorState) types.GomegaMatcher {
+	return WithTransform(func(err error) missingContentErrorState {
+		if isMissing(err) {
+			return missingContentErrorRecognized
+		}
+		return missingContentErrorUnrecognized
+	}, Equal(state))
+}
+
+func haveChildSlugState(slug Slug, state childSlugState) types.GomegaMatcher {
+	return WithTransform(func(node *PageNode) childSlugState {
+		if node != nil && node.ChildAlreadyExists(slug) {
+			return childSlugTaken
+		}
+		return childSlugAvailable
+	}, Equal(state))
+}
+
+func haveChildMembership(childID PageID, traversal childMembershipTraversal, state childMembershipState) types.GomegaMatcher {
+	return WithTransform(func(node *PageNode) childMembershipState {
+		recursive := traversal == childMembershipRecursive
+		if node != nil && node.IsChildOf(childID, recursive) {
+			return childMembershipPresent
+		}
+		return childMembershipAbsent
+	}, Equal(state))
+}
+
+func matchFileInfoKind(kind fileInfoKind) types.GomegaMatcher {
+	return WithTransform(func(info os.FileInfo) fileInfoKind {
+		if info != nil && info.IsDir() {
+			return fileInfoDirectory
+		}
+		return fileInfoFile
+	}, Equal(kind))
+}
+
+type metadataTimestampState string
+
+const (
+	metadataTimestampRecorded metadataTimestampState = "recorded"
+	metadataTimestampMissing  metadataTimestampState = "missing"
+)
+
+func metadataTimestampStateFrom(actual time.Time) metadataTimestampState {
+	if actual.IsZero() {
+		return metadataTimestampMissing
+	}
+	return metadataTimestampRecorded
+}
+
+func haveRecordedMetadataTimestamps() types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("CreatedAt", WithTransform(metadataTimestampStateFrom, Equal(metadataTimestampRecorded))),
+		HaveField("UpdatedAt", WithTransform(metadataTimestampStateFrom, Equal(metadataTimestampRecorded))),
+	)
+}
+
+func haveRecordedCreatedAt() types.GomegaMatcher {
+	return HaveField("CreatedAt", WithTransform(metadataTimestampStateFrom, Equal(metadataTimestampRecorded)))
+}
+
+func matchReconstructedNode(kind NodeKind, id types.GomegaMatcher) types.GomegaMatcher {
+	matchers := []types.GomegaMatcher{
+		HaveField("Kind", Equal(kind)),
+		HaveField("Metadata", haveRecordedCreatedAt()),
+	}
+	if id != nil {
+		matchers = append(matchers, HaveField("ID", id))
+	}
+
+	return SatisfyAll(
+		Not(BeNil()),
+		WithTransform(func(actual *PageNode) PageNode {
+			if actual == nil {
+				return PageNode{}
+			}
+			return *actual
+		}, SatisfyAll(matchers...)),
+	)
+}
+
+func treeServiceLoadObservationFrom(svc *TreeService) treeServiceLoadObservation {
+	if svc == nil {
+		return treeServiceLoadObservation{
+			Reported: treeServiceNotLoaded,
+			Root:     treeServiceNotLoaded,
+		}
+	}
+	reported := treeServiceNotLoaded
+	if svc.IsLoaded() {
+		reported = treeServiceLoaded
+	}
+	root := treeServiceNotLoaded
+	if svc.GetTree() != nil {
+		root = treeServiceLoaded
+	}
+	return treeServiceLoadObservation{
+		Reported: reported,
+		Root:     root,
+	}
+}
+
+func haveTreeServiceLoadState(state treeServiceLoadState) types.GomegaMatcher {
+	return WithTransform(treeServiceLoadObservationFrom, Equal(treeServiceLoadObservation{
+		Reported: state,
+		Root:     state,
+	}))
+}
+
+func treeServicePageObservationFrom(svc *TreeService) treeServicePageObservation {
+	if svc == nil || !svc.IsLoaded() {
+		return treeServicePageObservation{
+			Reported: treeServicePagesUnavailable,
+			Root:     treeServicePagesUnavailable,
+		}
+	}
+	reported := treeServicePagesEmpty
+	if svc.HasPages() {
+		reported = treeServicePagesPresent
+	}
+	root := treeServicePagesEmpty
+	if tree := svc.GetTree(); tree != nil && len(tree.Children) > 0 {
+		root = treeServicePagesPresent
+	}
+	return treeServicePageObservation{
+		Reported: reported,
+		Root:     root,
+	}
+}
+
+func haveTreeServicePageState(state treeServicePageState) types.GomegaMatcher {
+	return WithTransform(treeServicePageObservationFrom, Equal(treeServicePageObservation{
+		Reported: state,
+		Root:     state,
+	}))
+}
+
 func pointToValue[T any](matcher types.GomegaMatcher) types.GomegaMatcher {
 	return SatisfyAll(
 		Not(BeNil()),
@@ -230,15 +644,21 @@ func pointToValue[T any](matcher types.GomegaMatcher) types.GomegaMatcher {
 }
 
 func matchErrorAs(target any) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return errors.As(err, target), nil
-	}).WithMessage("match error type")
+	return WithTransform(func(err error) treeErrorRecognition {
+		if errors.As(err, target) {
+			return treeErrorRecognized
+		}
+		return treeErrorUnrecognized
+	}, Equal(treeErrorRecognized))
 }
 
 func matchErrorIs(target error) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		return errors.Is(err, target), nil
-	}).WithMessage("match error sentinel")
+	return WithTransform(func(err error) treeErrorRecognition {
+		if errors.Is(err, target) {
+			return treeErrorRecognized
+		}
+		return treeErrorUnrecognized
+	}, Equal(treeErrorRecognized))
 }
 
 func matchPathError() types.GomegaMatcher {
@@ -254,43 +674,33 @@ func matchSymlinkLoopError() types.GomegaMatcher {
 }
 
 func matchExistingSectionIndexPath(path string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual sectionIndexPathLookup) (bool, error) {
-		return actual.Path == path && actual.Exists, nil
-	}).WithMessage("resolve an existing section index path")
+	return WithTransform(sectionIndexPathObservationFrom, Equal(sectionIndexPathObservation{
+		Path:  path,
+		State: treeLookupExisting,
+	}))
 }
 
 func matchMissingSectionIndexPath(path string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual sectionIndexPathLookup) (bool, error) {
-		return actual.Path == path && !actual.Exists, nil
-	}).WithMessage("resolve a missing section index path")
+	return WithTransform(sectionIndexPathObservationFrom, Equal(sectionIndexPathObservation{
+		Path:  path,
+		State: treeLookupMissing,
+	}))
 }
 
 func matchExistingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual workspaceContentPathLookup) (bool, error) {
-		pathOK, pathErr := path.Match(actual.Path)
-		if pathErr != nil || !pathOK {
-			return false, pathErr
-		}
-		errOK, matchErr := err.Match(actual.Err)
-		if matchErr != nil || !errOK {
-			return false, matchErr
-		}
-		return actual.Exists, nil
-	}).WithMessage("resolve an existing workspace content path")
+	return WithTransform(workspaceContentPathObservationFrom, SatisfyAll(
+		HaveField("Path", path),
+		HaveField("State", Equal(treeLookupExisting)),
+		HaveField("Err", err),
+	))
 }
 
 func matchMissingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual workspaceContentPathLookup) (bool, error) {
-		pathOK, pathErr := path.Match(actual.Path)
-		if pathErr != nil || !pathOK {
-			return false, pathErr
-		}
-		errOK, matchErr := err.Match(actual.Err)
-		if matchErr != nil || !errOK {
-			return false, matchErr
-		}
-		return !actual.Exists, nil
-	}).WithMessage("resolve a missing workspace content path")
+	return WithTransform(workspaceContentPathObservationFrom, SatisfyAll(
+		HaveField("Path", path),
+		HaveField("State", Equal(treeLookupMissing)),
+		HaveField("Err", err),
+	))
 }
 
 func matchContentComparison(matches types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
@@ -396,36 +806,31 @@ func matchResolvedNode(kind NodeKind, hasContent bool, filePath types.GomegaMatc
 }
 
 func matchSkippedWorkspaceMarkdownRoute(reason string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual WorkspaceMarkdownRoute) (bool, error) {
-		return actual.Skip && actual.SkipReason == reason, nil
-	}).WithMessage("skip workspace markdown route")
+	return WithTransform(workspaceMarkdownRouteObservationFrom, Equal(workspaceMarkdownRouteObservation{
+		State:  workspaceMarkdownRouteSkipped,
+		Reason: reason,
+	}))
 }
 
 func matchMissingPathLookup(segments types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual *PathLookup) (bool, error) {
-		if actual == nil || actual.Exists {
-			return false, nil
-		}
-		return segments.Match(actual.Segments)
-	}).WithMessage("describe missing path lookup")
+	return WithTransform(pathLookupObservationFrom, SatisfyAll(
+		HaveField("State", Equal(treeLookupMissing)),
+		HaveField("Segments", segments),
+	))
 }
 
 func matchExistingPathLookup(segments types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual *PathLookup) (bool, error) {
-		if actual == nil || !actual.Exists {
-			return false, nil
-		}
-		return segments.Match(actual.Segments)
-	}).WithMessage("describe existing path lookup")
+	return WithTransform(pathLookupObservationFrom, SatisfyAll(
+		HaveField("State", Equal(treeLookupExisting)),
+		HaveField("Segments", segments),
+	))
 }
 
 func matchExistingEnsurePathResult(page types.GomegaMatcher) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual *EnsurePathResult) (bool, error) {
-		if actual == nil || !actual.Exists || len(actual.Created) != 0 {
-			return false, nil
-		}
-		return page.Match(actual.Page)
-	}).WithMessage("return an existing ensured path without creating nodes")
+	return WithTransform(ensurePathResultObservationFrom, SatisfyAll(
+		HaveField("State", Equal(ensurePathResultExistingUnchanged)),
+		HaveField("Page", page),
+	))
 }
 
 func haveChildPageIDs(ids ...PageID) types.GomegaMatcher {
@@ -449,17 +854,16 @@ func haveChildPositions(positions ...int) types.GomegaMatcher {
 }
 
 func matchExistingPathSegment(id PageID) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(segment PathSegment) (bool, error) {
-		return segment.Exists &&
-			segment.ID != nil &&
-			*segment.ID == id, nil
-	}).WithMessage("describe an existing path segment")
+	return WithTransform(pathSegmentObservationFrom, Equal(pathSegmentObservation{
+		State: pathSegmentExisting,
+		ID:    id,
+	}))
 }
 
 func matchMissingPathSegment() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(segment PathSegment) (bool, error) {
-		return !segment.Exists && segment.ID == nil, nil
-	}).WithMessage("describe a missing path segment")
+	return WithTransform(pathSegmentObservationFrom, Equal(pathSegmentObservation{
+		State: pathSegmentMissing,
+	}))
 }
 
 func matchRootSection() types.GomegaMatcher {

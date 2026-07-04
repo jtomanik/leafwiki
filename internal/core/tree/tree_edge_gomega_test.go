@@ -67,10 +67,10 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 		docs.Children = []*PageNode{guide}
 		root.Children = []*PageNode{docs}
 
-		Expect(docs.ChildAlreadyExists("docs")).To(BeFalse())
-		Expect(docs.ChildAlreadyExists("GUIDE")).To(BeTrue())
-		Expect(root.IsChildOf(newFixturePageID("guide"), false)).To(BeFalse())
-		Expect(root.IsChildOf(newFixturePageID("guide"), true)).To(BeTrue())
+		Expect(docs).To(haveChildSlugState("docs", childSlugAvailable))
+		Expect(docs).To(haveChildSlugState("GUIDE", childSlugTaken))
+		Expect(root).To(haveChildMembership(newFixturePageID("guide"), childMembershipDirect, childMembershipAbsent))
+		Expect(root).To(haveChildMembership(newFixturePageID("guide"), childMembershipRecursive, childMembershipPresent))
 		Expect(root.CalculatePath()).To(BeEmpty())
 		Expect((&PageNode{ID: newFixturePageID("orphan"), Slug: "orphan"}).CalculateRoutePath()).To(Equal(RoutePathFromString("orphan")))
 

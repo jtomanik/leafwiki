@@ -33,9 +33,9 @@ var _ = ginkgo.Describe("semantic page value wrappers", ginkgo.Label("unit"), fu
 
 var _ = ginkgo.Describe("page version bypass sentinel", ginkgo.Label("unit"), func() {
 	ginkgo.It("stays internal to tree operations", func() {
-		Expect(pageVersionUnchecked.IsUnchecked()).To(BeTrue())
+		Expect(pageVersionUnchecked).To(matchPageVersionBypassState(pageVersionBypassUnchecked))
 		got := newFixturePageVersion(versionUnchecked)
-		Expect(got.IsUnchecked()).To(BeFalse())
+		Expect(got).To(matchPageVersionBypassState(pageVersionNormal))
 		Expect(got).To(BeEmpty())
 
 	})

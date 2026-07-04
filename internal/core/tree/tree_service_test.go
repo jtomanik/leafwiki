@@ -957,7 +957,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		Expect(filepath.Join(tmpDir, "root", "welcome.md")).To(beMissingTreePath())
 		info, err := os.Stat(filepath.Join(tmpDir, "root", ".order.json"))
 		Expect(err).To(Succeed())
-		Expect(info.IsDir()).To(BeTrue())
+		Expect(info).To(matchFileInfoKind(fileInfoDirectory))
 		reloaded := NewTreeService(tmpDir)
 		{
 			err := reloaded.LoadTree()
@@ -3799,43 +3799,21 @@ leafwiki_title: Page Two
 
 		// Verify metadata was backfilled for all nodes
 		tree := svc.GetTree()
-		Expect(tree.Metadata.
-			CreatedAt.
-			IsZero()).To(BeFalse(), "expected root metadata CreatedAt to be backfilled, got zero")
-		Expect(tree.Metadata.
-			UpdatedAt.
-			IsZero()).To(BeFalse(), "expected root metadata UpdatedAt to be backfilled, got zero")
+		Expect(tree.Metadata).To(haveRecordedMetadataTimestamps(), "expected root metadata timestamps to be backfilled")
 
 		// Check root metadata
 
 		// Find and verify page1
 		page1 := findChildBySlug(tree, "page1")
-		Expect(page1.Metadata.
-			CreatedAt.
-			IsZero()).To(BeFalse(), "expected page1 metadata CreatedAt to be backfilled, got zero")
-		Expect(page1.Metadata.
-			UpdatedAt.
-			IsZero()).To(BeFalse(), "expected page1 metadata UpdatedAt to be backfilled, got zero")
+		Expect(page1.Metadata).To(haveRecordedMetadataTimestamps(), "expected page1 metadata timestamps to be backfilled")
 
 		// Find and verify section1
 		section1 := findChildBySlug(tree, "section1")
-		Expect(section1.Metadata.
-			CreatedAt.
-			IsZero(),
-		).To(BeFalse(), "expected section1 metadata CreatedAt to be backfilled, got zero")
-		Expect(section1.Metadata.
-			UpdatedAt.
-			IsZero(),
-		).To(BeFalse(), "expected section1 metadata UpdatedAt to be backfilled, got zero")
+		Expect(section1.Metadata).To(haveRecordedMetadataTimestamps(), "expected section1 metadata timestamps to be backfilled")
 
 		// Find and verify page2 (child of section1)
 		page2 := findChildBySlug(section1, "page2")
-		Expect(page2.Metadata.
-			CreatedAt.
-			IsZero()).To(BeFalse(), "expected page2 metadata CreatedAt to be backfilled, got zero")
-		Expect(page2.Metadata.
-			UpdatedAt.
-			IsZero()).To(BeFalse(), "expected page2 metadata UpdatedAt to be backfilled, got zero")
+		Expect(page2.Metadata).To(haveRecordedMetadataTimestamps(), "expected page2 metadata timestamps to be backfilled")
 
 	})
 })
@@ -3878,14 +3856,7 @@ leafwiki_title: README
 			HaveField("ID", Equal(newFixturePageID("readme-page"))),
 			HaveField("Title", Equal("README")),
 		), "expected readme page metadata after reload, got %#v", readme)
-		Expect(readme.Metadata.
-			CreatedAt.
-			IsZero()).
-			To(BeFalse(), "expected persisted metadata CreatedAt to not be zero")
-		Expect(readme.Metadata.
-			UpdatedAt.
-			IsZero()).
-			To(BeFalse(), "expected persisted metadata UpdatedAt to not be zero")
+		Expect(readme.Metadata).To(haveRecordedMetadataTimestamps(), "expected persisted metadata timestamps to not be zero")
 
 		// Verify metadata was persisted
 
@@ -4052,52 +4023,23 @@ leafwiki_title: Basic Guide
 
 		// Verify structure
 		intro := findChildBySlug(tree, "intro")
-		Expect(intro.Kind).To(Equal(NodeKindPage),
-			"expected intro to be a page, got %q",
-
-			intro.Kind,
-		)
+		Expect(intro).To(matchReconstructedNode(NodeKindPage, nil), "expected intro to be reconstructed as a page with metadata")
 
 		docs := findChildBySlug(tree, "docs")
-		Expect(docs).To(SatisfyAll(
-			HaveField("Kind", Equal(NodeKindSection)),
-			HaveField("ID", Equal(newFixturePageID("docs-section"))),
-		), "expected docs to reload as the frontmatter-backed section, got %#v", docs)
+		Expect(docs).To(matchReconstructedNode(NodeKindSection, Equal(newFixturePageID("docs-section"))),
+			"expected docs to reload as the frontmatter-backed section with metadata")
 
 		gettingStarted := findChildBySlug(docs, "getting-started")
-		Expect(gettingStarted.
-			Kind).To(Equal(
-			NodeKindPage,
-		), "expected getting-started to be a page, got %q",
-
-			gettingStarted.Kind)
+		Expect(gettingStarted).To(matchReconstructedNode(NodeKindPage, nil),
+			"expected getting-started to be reconstructed as a page with metadata")
 
 		guides := findChildBySlug(docs, "guides")
-		Expect(guides.Kind).
-			To(Equal(NodeKindSection), "expected guides to be a section, got %q",
-
-				guides.
-					Kind)
+		Expect(guides).To(matchReconstructedNode(NodeKindSection, nil),
+			"expected guides to be reconstructed as a section with metadata")
 
 		basic := findChildBySlug(guides, "basic")
-		Expect(basic.Kind).To(Equal(NodeKindPage),
-			"expected basic to be a page, got %q",
-
-			basic.Kind,
-		)
-		Expect(intro.Metadata.
-			CreatedAt.
-			IsZero()).To(BeFalse(), "expected intro to have metadata")
-		Expect(docs.Metadata.
-			CreatedAt.
-			IsZero()).To(BeFalse(), "expected docs to have metadata")
-		Expect(guides.Metadata.
-			CreatedAt.
-			IsZero()).
-			To(BeFalse(), "expected guides to have metadata")
-		Expect(basic.Metadata.
-			CreatedAt.
-			IsZero()).To(BeFalse(), "expected basic to have metadata")
+		Expect(basic).To(matchReconstructedNode(NodeKindPage, nil),
+			"expected basic to be reconstructed as a page with metadata")
 
 		// Verify all nodes have metadata
 
@@ -4361,17 +4303,15 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 // ─── IsLoaded ─────────────────────────────────────────────────────────────────
 
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
-	ginkgo.It("is loaded returns false before load", func() {
+	ginkgo.It("reports an unloaded tree before LoadTree runs", func() {
 		svc := NewTreeService(tempTreeDir())
-		Expect(svc.IsLoaded()).To(BeFalse(),
-			"expected IsLoaded to return false before LoadTree is called",
-		)
+		Expect(svc).To(haveTreeServiceLoadState(treeServiceNotLoaded))
 
 	})
 })
 
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
-	ginkgo.It("is loaded returns true after load", func() {
+	ginkgo.It("reports a loaded tree after LoadTree succeeds", func() {
 		tmpDir := tempTreeDir()
 		{
 			err := saveSchema(tmpDir, CurrentSchemaVersion)
@@ -4387,7 +4327,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 				err)
 		}
-		Expect(svc.IsLoaded()).To(BeTrue(), "expected IsLoaded to return true after LoadTree")
+		Expect(svc).To(haveTreeServiceLoadState(treeServiceLoaded))
 
 	})
 })
@@ -4395,17 +4335,15 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 // ─── HasPages ─────────────────────────────────────────────────────────────────
 
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
-	ginkgo.It("has pages returns false before load", func() {
+	ginkgo.It("reports page content as unavailable before LoadTree runs", func() {
 		svc := NewTreeService(tempTreeDir())
-		Expect(svc.HasPages()).To(BeFalse(),
-			"expected HasPages to return false before LoadTree is called",
-		)
+		Expect(svc).To(haveTreeServicePageState(treeServicePagesUnavailable))
 
 	})
 })
 
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
-	ginkgo.It("has pages returns false for empty tree", func() {
+	ginkgo.It("reports no page content for an empty loaded tree", func() {
 		tmpDir := tempTreeDir()
 		{
 			err := saveSchema(tmpDir, CurrentSchemaVersion)
@@ -4421,15 +4359,13 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 				err)
 		}
-		Expect(svc.HasPages()).To(BeFalse(),
-			"expected HasPages to return false for empty tree",
-		)
+		Expect(svc).To(haveTreeServicePageState(treeServicePagesEmpty))
 
 	})
 })
 
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
-	ginkgo.It("has pages returns true when pages exist", func() {
+	ginkgo.It("reports page content after creating a page", func() {
 		tmpDir := tempTreeDir()
 		{
 			err := saveSchema(tmpDir, CurrentSchemaVersion)
@@ -4452,7 +4388,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 				err)
 		}
-		Expect(svc.HasPages()).To(BeTrue(), "expected HasPages to return true after creating a page")
+		Expect(svc).To(haveTreeServicePageState(treeServicePagesPresent))
 
 	})
 })

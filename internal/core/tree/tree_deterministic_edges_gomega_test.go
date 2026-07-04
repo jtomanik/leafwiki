@@ -221,9 +221,9 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 			"Root":                 Not(BeNil()),
 			"CurrentSchemaVersion": Equal(CurrentSchemaVersion),
 		}))
-		Expect(deps.IsMissingContentErr(os.ErrNotExist)).To(BeTrue())
-		Expect(deps.IsMissingContentErr(ErrFileNotFound)).To(BeTrue())
-		Expect(deps.IsMissingContentErr(errors.New("other"))).To(BeFalse())
+		Expect(os.ErrNotExist).To(matchMissingContentErrorState(deps.IsMissingContentErr, missingContentErrorRecognized))
+		Expect(ErrFileNotFound).To(matchMissingContentErrorState(deps.IsMissingContentErr, missingContentErrorRecognized))
+		Expect(errors.New("other")).To(matchMissingContentErrorState(deps.IsMissingContentErr, missingContentErrorUnrecognized))
 		Expect(deps.SaveSchema(CurrentSchemaVersion)).To(Succeed())
 	})
 
