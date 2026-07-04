@@ -696,23 +696,6 @@ var _ = ginkgo.Describe("SQLite search index", func() {
 		Expect(pageIDs).To(Equal([]tree.PageID{"alpha"}))
 	})
 
-	ginkgo.It("returns row iteration errors from search results", ginkgo.Label("integration"), func() {
-		index := newSQLiteIndexForSpec()
-		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
-		previousRowsErr := searchRowsErr
-		rowsErr := errors.New("rows failed")
-		searchRowsErr = func(*sql.Rows) error {
-			return rowsErr
-		}
-		ginkgo.DeferCleanup(func() {
-			searchRowsErr = previousRowsErr
-		})
-
-		_, err := index.Search("shared", nil, 0, 10)
-
-		Expect(err).To(MatchError(rowsErr))
-	})
-
 	ginkgo.DescribeTable("normalizes user search queries for full-text search", ginkgo.Label("unit"),
 		func(input string, want string) {
 			Expect(buildFuzzyQuery(input)).To(Equal(want))

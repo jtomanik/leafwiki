@@ -508,19 +508,6 @@ func brandingMultipartBody(filename string, fileContent []byte) (*bytes.Buffer, 
 	return &body, writer.FormDataContentType()
 }
 
-func performBrandingCSRFRequest(router http.Handler, method string, path string, body io.Reader, contentType string) *httptest.ResponseRecorder {
-	ginkgo.GinkgoHelper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(method, path, body)
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	req.Header.Set("X-CSRF-Token", "test-csrf-token")
-	req.AddCookie(&http.Cookie{Name: "leafwiki_csrf", Value: "test-csrf-token"})
-	router.ServeHTTP(rec, req)
-	return rec
-}
-
 type fakeBrandingService struct {
 	config    *corebranding.BrandingConfigResponse
 	getErr    error

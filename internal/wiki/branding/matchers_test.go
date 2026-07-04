@@ -25,12 +25,6 @@ func HaveBrandingStructuredError(status int, code sharederrors.ErrorCode) types.
 	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
 }
 
-type brandingValidationErrorExpectation struct {
-	Field     brandingValidationField
-	Code      sharederrors.FieldErrorCode
-	MessageID sharederrors.MessageID
-}
-
 type brandingValidationErrorObservation struct {
 	Status int
 	Error  string

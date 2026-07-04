@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -17,10 +18,11 @@ import (
 const doc = "checks LeafWiki i18n catalog source policy"
 
 var Analyzer = &analysis.Analyzer{
-	Name:     "i18ncatalog",
-	Doc:      doc,
-	Requires: []*analysis.Analyzer{inspect.Analyzer},
-	Run:      run,
+	Name:       "i18ncatalog",
+	Doc:        doc,
+	Requires:   []*analysis.Analyzer{inspect.Analyzer},
+	ResultType: reflect.TypeOf(struct{}{}),
+	Run:        run,
 }
 
 func run(pass *analysis.Pass) (any, error) {
@@ -41,7 +43,7 @@ func run(pass *analysis.Pass) (any, error) {
 			}
 		}
 	}
-	return nil, nil
+	return struct{}{}, nil
 }
 
 func checkGinPayload(pass *analysis.Pass, lit *ast.CompositeLit) {

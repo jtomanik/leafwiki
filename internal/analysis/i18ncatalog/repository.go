@@ -549,7 +549,7 @@ func checkE2ELocalizedProse(repoRoot string, catalog map[string]catalogEntry) []
 		}
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return nil
+			return readErr
 		}
 		content := string(raw)
 		for _, assertion := range e2eLocalizedAssertions(content) {

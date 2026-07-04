@@ -655,105 +655,6 @@ func listAssetsViaAPI(router http.Handler, pageID string) []string {
 	return resp.Files
 }
 
-func uploadAssetViaAPI(router http.Handler, pageID, filename, content string) string {
-	GinkgoHelper()
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	part, err := writer.CreateFormFile("file", filename)
-	Expect(err).NotTo(HaveOccurred(), "CreateFormFile failed: %v", err)
-	{
-
-		_, err := part.Write([]byte(content))
-		Expect(err).NotTo(HaveOccurred(), "Write(asset payload) failed: %v", err)
-	}
-	{
-
-		err := writer.Close()
-		Expect(err).NotTo(HaveOccurred(), "Close(writer) failed: %v", err)
-	}
-
-	loginBody := `{"identifier": "admin", "password": "admin"}`
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
-	Expect(loginRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on login, got %d - %s", loginRec.Code, loginRec.Body.String())
-
-	loginRes := loginRec.Result()
-	wrapCloseWithErrorCheck(loginRes.Body.Close)
-
-	cookies := loginRes.Cookies()
-	csrfToken := loginRec.Header().Get("X-CSRF-Token")
-	if csrfToken == "" {
-		for _, c := range cookies {
-			if c.Name == "leafwiki_csrf" || c.Name == "__Host-leafwiki_csrf" {
-				csrfToken = c.Value
-				break
-			}
-		}
-	}
-	Expect(csrfToken).NotTo(BeEmpty(), "Expected CSRF token after login, got none")
-
-	uploadReq := httptest.NewRequest(http.MethodPost, "/api/pages/"+pageID+"/assets", body)
-	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
-	uploadReq.Header.Set("X-CSRF-Token", csrfToken)
-	for _, cookie := range cookies {
-		uploadReq.AddCookie(cookie)
-	}
-
-	uploadRec := httptest.NewRecorder()
-	router.ServeHTTP(uploadRec, uploadReq)
-	Expect(uploadRec).To(HaveHTTPStatus(http.StatusCreated), "Expected 201 Created on upload, got %d - %s", uploadRec.Code, uploadRec.Body.String())
-
-	var uploadResp map[string]string
-	{
-		err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp)
-		Expect(err).NotTo(HaveOccurred(), "Unmarshal(upload asset response) failed: %v", err)
-	}
-
-	return uploadResp["file"]
-}
-
-func getLatestRevisionViaAPI(router http.Handler, pageID string) map[string]any {
-	GinkgoHelper()
-
-	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+pageID+"/revisions/latest", nil)
-	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-
-	var rev map[string]any
-	{
-		err := json.Unmarshal(rec.Body.Bytes(), &rev)
-		Expect(err).NotTo(HaveOccurred(), "Unmarshal(latest revision response) failed: %v", err)
-	}
-
-	return rev
-}
-
-func getAdminUserIDViaAPI(router http.Handler) string {
-	GinkgoHelper()
-
-	rec := authenticatedRequest(router, http.MethodGet, "/api/users", nil)
-	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
-
-	var users []map[string]any
-	{
-		err := json.Unmarshal(rec.Body.Bytes(), &users)
-		Expect(err).NotTo(HaveOccurred(), "Unmarshal(users response) failed: %v", err)
-	}
-
-	for _, user := range users {
-		if role, _ := user["role"].(string); role == "admin" {
-			if id, _ := user["id"].(string); id != "" {
-				return id
-			}
-		}
-	}
-	Fail(fmt.Sprint("admin user not found"))
-	return ""
-}
-
 func writePageMarkdownForTest(w *wiki.Wiki, page *apiPageDTO, raw string) {
 	GinkgoHelper()
 
@@ -4110,8 +4011,6 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
 
 		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"not-found-id"}`))
-		fmt.Fprintf(GinkgoWriter, "Response: %s", rec.Body.String())
-		fmt.Fprintf(GinkgoWriter, "Response Code: %d", rec.Code)
 		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
 
 	})

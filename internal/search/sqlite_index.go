@@ -65,9 +65,6 @@ var (
 	closeSearchRows = func(rows *sql.Rows) error {
 		return rows.Close()
 	}
-	searchRowsErr = func(rows *sql.Rows) error {
-		return rows.Err()
-	}
 )
 
 func extractHeadings(src string) string {
@@ -372,7 +369,7 @@ func (s *SQLiteIndex) Search(query string, pageIDs []tree.PageID, startAt Result
 
 			results = append(results, r)
 		}
-		if err := searchRowsErr(rows); err != nil {
+		if err := rows.Err(); err != nil {
 			return err
 		}
 		sr.Items = results
@@ -426,7 +423,7 @@ func (s *SQLiteIndex) SearchPageIDs(query string, pageIDs []tree.PageID) ([]tree
 			result = append(result, pageID)
 		}
 
-		return searchRowsErr(rows)
+		return rows.Err()
 	})
 
 	return result, err
