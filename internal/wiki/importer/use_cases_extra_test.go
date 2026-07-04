@@ -51,7 +51,7 @@ var _ = ginkgo.Describe("importer use cases", func() {
 		out, err := uc.Execute(context.Background(), CreateImportPlanInput{File: strings.NewReader("not a zip")})
 
 		Expect(out).To(BeNil())
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(zip.ErrFormat))
 	})
 
 	ginkgo.It("returns current-plan lookup errors after successful plan creation", func() {
