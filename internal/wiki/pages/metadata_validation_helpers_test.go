@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -428,24 +427,61 @@ func markdownLineParseStateFor(matched bool) markdownLineParseState {
 }
 
 func HaveReadmeMarkdownFallbackRoutes(pageRoute string, sectionRoute string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(path string) (bool, error) {
-		gotPageRoute, gotSectionRoute, matched := ReadmeMarkdownPathFallbackRoutes(path)
-		return matched && gotPageRoute == pageRoute && gotSectionRoute == sectionRoute, nil
-	})
+	return WithTransform(readmeMarkdownFallbackRouteObservationFor, Equal(readmeMarkdownFallbackRouteObservation{
+		State:        readmeMarkdownFallbackRouteMatched,
+		PageRoute:    pageRoute,
+		SectionRoute: sectionRoute,
+	}))
 }
 
 func BeIgnoredByReadmeMarkdownFallbackRoutes() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(path string) (bool, error) {
-		pageRoute, sectionRoute, matched := ReadmeMarkdownPathFallbackRoutes(path)
-		return !matched && pageRoute == "" && sectionRoute == "", nil
-	})
+	return WithTransform(readmeMarkdownFallbackRouteObservationFor, Equal(readmeMarkdownFallbackRouteObservation{
+		State: readmeMarkdownFallbackRouteIgnored,
+	}))
+}
+
+type readmeMarkdownFallbackRouteState uint8
+
+const (
+	readmeMarkdownFallbackRouteIgnored readmeMarkdownFallbackRouteState = iota
+	readmeMarkdownFallbackRouteMatched
+)
+
+type readmeMarkdownFallbackRouteObservation struct {
+	State        readmeMarkdownFallbackRouteState
+	PageRoute    string
+	SectionRoute string
+}
+
+func readmeMarkdownFallbackRouteObservationFor(path string) readmeMarkdownFallbackRouteObservation {
+	pageRoute, sectionRoute, matched := ReadmeMarkdownPathFallbackRoutes(path)
+	if !matched {
+		return readmeMarkdownFallbackRouteObservation{State: readmeMarkdownFallbackRouteIgnored}
+	}
+	return readmeMarkdownFallbackRouteObservation{
+		State:        readmeMarkdownFallbackRouteMatched,
+		PageRoute:    pageRoute,
+		SectionRoute: sectionRoute,
+	}
 }
 
 func ResolveCatalogMessage() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(messageID sharederrors.MessageID) (bool, error) {
-		rendered := localization.English.Render(messageID, "")
-		return !rendered.Missing && rendered.Err == nil, nil
-	}).WithMessage("resolve a catalog message")
+	return WithTransform(catalogMessageResolutionFor, Equal(catalogMessageResolved))
+}
+
+type catalogMessageResolution uint8
+
+const (
+	catalogMessageMissing catalogMessageResolution = iota
+	catalogMessageResolved
+)
+
+func catalogMessageResolutionFor(messageID sharederrors.MessageID) catalogMessageResolution {
+	rendered := localization.English.Render(messageID, "")
+	if rendered.Missing || rendered.Err != nil {
+		return catalogMessageMissing
+	}
+	return catalogMessageResolved
 }
 
 func HaveExistingRoutePathLookup(path tree.RoutePath) types.GomegaMatcher {
@@ -479,30 +515,59 @@ func routePathLookupStateFor(lookup tree.PathLookup) routePathLookupState {
 }
 
 func HavePageOnlyReadmeMarkdownFallback(pageRoute string, sectionRoute string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(input ReadmeMarkdownPathFallbackInput) (bool, error) {
-		return input.PageRoute == pageRoute &&
-			input.SectionRoute == sectionRoute &&
-			input.TryPage &&
-			!input.TrySection, nil
-	}).WithMessage("describe page-only README markdown fallback")
+	return WithTransform(readmeMarkdownFallbackAttemptObservationFor, Equal(readmeMarkdownFallbackAttemptObservation{
+		State:        readmeMarkdownFallbackAttemptPageOnly,
+		PageRoute:    pageRoute,
+		SectionRoute: sectionRoute,
+	}))
 }
 
 func HavePageAndSectionReadmeMarkdownFallback(pageRoute string, sectionRoute string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(input ReadmeMarkdownPathFallbackInput) (bool, error) {
-		return input.PageRoute == pageRoute &&
-			input.SectionRoute == sectionRoute &&
-			input.TryPage &&
-			input.TrySection, nil
-	}).WithMessage("describe page-and-section README markdown fallback")
+	return WithTransform(readmeMarkdownFallbackAttemptObservationFor, Equal(readmeMarkdownFallbackAttemptObservation{
+		State:        readmeMarkdownFallbackAttemptPageAndSection,
+		PageRoute:    pageRoute,
+		SectionRoute: sectionRoute,
+	}))
 }
 
 func HaveSectionReadmeMarkdownFallback(pageRoute string, sectionRoute string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(input ReadmeMarkdownPathFallbackInput) (bool, error) {
-		return input.PageRoute == pageRoute &&
-			input.SectionRoute == sectionRoute &&
-			!input.TryPage &&
-			input.TrySection, nil
-	}).WithMessage("describe section README markdown fallback")
+	return WithTransform(readmeMarkdownFallbackAttemptObservationFor, Equal(readmeMarkdownFallbackAttemptObservation{
+		State:        readmeMarkdownFallbackAttemptSectionOnly,
+		PageRoute:    pageRoute,
+		SectionRoute: sectionRoute,
+	}))
+}
+
+type readmeMarkdownFallbackAttemptState uint8
+
+const (
+	readmeMarkdownFallbackAttemptNone readmeMarkdownFallbackAttemptState = iota
+	readmeMarkdownFallbackAttemptPageOnly
+	readmeMarkdownFallbackAttemptSectionOnly
+	readmeMarkdownFallbackAttemptPageAndSection
+)
+
+type readmeMarkdownFallbackAttemptObservation struct {
+	State        readmeMarkdownFallbackAttemptState
+	PageRoute    string
+	SectionRoute string
+}
+
+func readmeMarkdownFallbackAttemptObservationFor(input ReadmeMarkdownPathFallbackInput) readmeMarkdownFallbackAttemptObservation {
+	state := readmeMarkdownFallbackAttemptNone
+	switch {
+	case input.TryPage && input.TrySection:
+		state = readmeMarkdownFallbackAttemptPageAndSection
+	case input.TryPage:
+		state = readmeMarkdownFallbackAttemptPageOnly
+	case input.TrySection:
+		state = readmeMarkdownFallbackAttemptSectionOnly
+	}
+	return readmeMarkdownFallbackAttemptObservation{
+		State:        state,
+		PageRoute:    input.PageRoute,
+		SectionRoute: input.SectionRoute,
+	}
 }
 
 func HavePageSaveContentChange() types.GomegaMatcher {
@@ -546,17 +611,18 @@ func pageSaveChangeStateFor(changed bool) pageSaveChangeState {
 }
 
 func HavePageErrorDetail(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(err error) (bool, error) {
-		detail, gotStatus, matched := PageErrorDetailForError(err)
-		return matched &&
-			gotStatus == status &&
-			detail.Code == code &&
-			detail.MessageID == sharederrors.MessageIDForCode(code), nil
-	})
+	return WithTransform(pageErrorDetailObservationFor, Equal(pageErrorDetailObservation{
+		Resolution: pageErrorDetailResolved,
+		Status:     status,
+		Code:       code,
+		MessageID:  sharederrors.MessageIDForCode(code),
+	}))
 }
 
 func BeIgnoredByPageErrorDetail() types.GomegaMatcher {
-	return WithTransform(pageErrorDetailResolutionFor, Equal(pageErrorDetailIgnored))
+	return WithTransform(pageErrorDetailObservationFor, Equal(pageErrorDetailObservation{
+		Resolution: pageErrorDetailIgnored,
+	}))
 }
 
 type pageErrorDetailResolution uint8
@@ -566,12 +632,24 @@ const (
 	pageErrorDetailResolved
 )
 
-func pageErrorDetailResolutionFor(err error) pageErrorDetailResolution {
-	_, _, matched := PageErrorDetailForError(err)
-	if matched {
-		return pageErrorDetailResolved
+type pageErrorDetailObservation struct {
+	Resolution pageErrorDetailResolution
+	Status     int
+	Code       sharederrors.ErrorCode
+	MessageID  sharederrors.MessageID
+}
+
+func pageErrorDetailObservationFor(err error) pageErrorDetailObservation {
+	detail, status, matched := PageErrorDetailForError(err)
+	if !matched {
+		return pageErrorDetailObservation{Resolution: pageErrorDetailIgnored}
 	}
-	return pageErrorDetailIgnored
+	return pageErrorDetailObservation{
+		Resolution: pageErrorDetailResolved,
+		Status:     status,
+		Code:       detail.Code,
+		MessageID:  detail.MessageID,
+	}
 }
 
 func HavePageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
