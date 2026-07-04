@@ -4,11 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -33,6 +31,31 @@ var (
 type indexEntryMapCounts struct {
 	PageCount  int
 	AssetCount int
+}
+
+type rewriteContentDisposition int
+
+const (
+	rewriteContentUnchanged rewriteContentDisposition = iota
+	rewriteContentUpdated
+)
+
+type rewriteObservation struct {
+	Content     string
+	Disposition rewriteContentDisposition
+	Issues      []Issue
+}
+
+func observeRewriteResult(result RewriteResult) rewriteObservation {
+	disposition := rewriteContentUnchanged
+	if result.Changed {
+		disposition = rewriteContentUpdated
+	}
+	return rewriteObservation{
+		Content:     result.Content,
+		Disposition: disposition,
+		Issues:      result.Issues,
+	}
 }
 
 func haveEmptyIndexEntryMaps() types.GomegaMatcher {
@@ -82,28 +105,27 @@ func matchRootSection(canonicalHref string) types.GomegaMatcher {
 }
 
 func matchRewriteUpdatesContent(content string, issues ...Issue) types.GomegaMatcher {
-	expectedIssues := append([]Issue(nil), issues...)
-	return gcustom.MakeMatcher(func(result RewriteResult) (bool, error) {
-		return result.Content == content &&
-			result.Changed &&
-			rewriteIssuesMatch(result.Issues, expectedIssues), nil
-	}).WithMessage("rewrite updates content")
+	return matchRewriteResult(content, rewriteContentUpdated, issues...)
 }
 
 func matchRewriteLeavesContentUnchanged(content string, issues ...Issue) types.GomegaMatcher {
-	expectedIssues := append([]Issue(nil), issues...)
-	return gcustom.MakeMatcher(func(result RewriteResult) (bool, error) {
-		return result.Content == content &&
-			!result.Changed &&
-			rewriteIssuesMatch(result.Issues, expectedIssues), nil
-	}).WithMessage("rewrite leaves content unchanged")
+	return matchRewriteResult(content, rewriteContentUnchanged, issues...)
 }
 
-func rewriteIssuesMatch(actual []Issue, expected []Issue) bool {
-	if len(expected) == 0 {
-		return len(actual) == 0
+func matchRewriteResult(content string, disposition rewriteContentDisposition, issues ...Issue) types.GomegaMatcher {
+	return WithTransform(observeRewriteResult, gstruct.MatchAllFields(gstruct.Fields{
+		"Content":     Equal(content),
+		"Disposition": Equal(disposition),
+		"Issues":      matchRewriteIssues(issues...),
+	}))
+}
+
+func matchRewriteIssues(issues ...Issue) types.GomegaMatcher {
+	expectedIssues := append([]Issue(nil), issues...)
+	if len(expectedIssues) == 0 {
+		return BeEmpty()
 	}
-	return reflect.DeepEqual(actual, expected)
+	return Equal(expectedIssues)
 }
 
 func matchLinkOccurrenceHref(href string) types.GomegaMatcher {
@@ -255,12 +277,15 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 		Expect(ScanInlineDestinations("[unterminated", InlineScanOptions{})).To(BeEmpty())
 		Expect(ScanInlineDestinations("[Label](", InlineScanOptions{})).To(BeEmpty())
 
-		usage := referenceUsage{imageLabels: map[string]struct{}{"img": {}}, linkLabels: map[string]struct{}{}}
-		Expect(usage.imageOnly("")).To(BeFalse())
-		Expect(usage.imageOnly("img")).To(BeTrue())
-
 		imageOnlyReference := "[img]: /assets/logo.png"
-		Expect(scanReferenceDefinitions(imageOnlyReference, nil, usage)).To(BeEmpty())
+		imageOnlyUsage := referenceUsage{imageLabels: map[string]struct{}{"img": {}}, linkLabels: map[string]struct{}{}}
+		Expect(scanReferenceDefinitions(imageOnlyReference, nil, imageOnlyUsage)).To(BeEmpty())
+
+		linkedReferenceUsage := referenceUsage{
+			imageLabels: map[string]struct{}{"img": {}},
+			linkLabels:  map[string]struct{}{"img": {}},
+		}
+		Expect(scanReferenceDefinitions(imageOnlyReference, nil, linkedReferenceUsage)).To(ConsistOf(matchLinkOccurrenceHref("/assets/logo.png")))
 
 		_, err := parseReferenceDefinitionLineResult("[empty]:   ", 0, len("[empty]:   "))
 		Expect(err).To(MatchError(errReferenceDefinitionRejected))
