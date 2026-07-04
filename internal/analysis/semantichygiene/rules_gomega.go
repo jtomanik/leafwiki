@@ -39,6 +39,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if isEqualZeroMatcherCall(call) {
 		ctx.report(ruleGomegaEqualZero, call, gomegaEqualZeroDiagnostic())
 	}
+	if isEqualBooleanLiteralMatcherCall(call) {
+		ctx.report(ruleGomegaBooleanLiteral, call, gomegaBooleanLiteralEqualDiagnostic())
+	}
 	assertion, ok := gomegaAssertionFromCall(ctx, call)
 	if !ok {
 		return
@@ -1875,6 +1878,14 @@ func isEqualZeroMatcherCall(call *ast.CallExpr) bool {
 	}
 	lit, ok := unparenExpr(call.Args[0]).(*ast.BasicLit)
 	return ok && lit.Kind == token.INT && lit.Value == "0"
+}
+
+func isEqualBooleanLiteralMatcherCall(call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "Equal") || len(call.Args) != 1 {
+		return false
+	}
+	ident, ok := unparenExpr(call.Args[0]).(*ast.Ident)
+	return ok && (ident.Name == "true" || ident.Name == "false")
 }
 
 func assertionUsesRepeatedFieldAssertion(ctx *analysisContext, assertion gomegaAssertion) bool {

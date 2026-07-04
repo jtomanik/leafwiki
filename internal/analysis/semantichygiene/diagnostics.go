@@ -162,6 +162,10 @@ func gomegaBooleanLiteralMatcherDiagnostic() string {
 	return "use semantic Gomega assertions instead of forcing pass/fail with boolean literals"
 }
 
+func gomegaBooleanLiteralEqualDiagnostic() string {
+	return "use BeTrue/BeFalse instead of Equal(true/false) for boolean values"
+}
+
 func gomegaCommaOKAssertionDiagnostic() string {
 	return "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
 }

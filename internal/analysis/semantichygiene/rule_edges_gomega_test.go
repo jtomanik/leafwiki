@@ -1401,6 +1401,42 @@ func TestCLIBehavior() {
 			))
 		})
 
+		ginkgo.It("reports boolean literal Equal matchers inside structured matcher values", func() {
+			h := newRuleHarness("/repo/internal/wiki/pages/routes_handlers_gomega_test.go", "github.com/perber/wiki/internal/wiki/pages", `package pages
+
+type assertion struct{}
+type Fields map[string]any
+func Expect(actual any) assertion { return assertion{} }
+func (assertion) To(matcher any, extra ...any) {}
+func Equal(actual any) any { return nil }
+func MatchFields(options any, fields Fields) any { return nil }
+
+type pathLookup struct {
+	Exists bool
+	Visible bool
+}
+
+func matchExistingRoutePathLookup() any {
+	return MatchFields(nil, Fields{
+		"Exists": Equal(true),
+		"Visible": Equal(false),
+	})
+}
+
+func TestRouteLookup() {
+	Expect(pathLookup{Exists: true}).To(matchExistingRoutePathLookup())
+}
+`)
+			for _, call := range h.findCalls("Equal") {
+				checkGomegaSemanticMatcher(h.ctx, call)
+			}
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.boolean-literal: use BeTrue/BeFalse instead of Equal(true/false) for boolean values",
+				"semh:gomega.boolean-literal: use BeTrue/BeFalse instead of Equal(true/false) for boolean values",
+			))
+		})
+
 		ginkgo.It("reports os.IsNotExist hidden behind WithTransform boolean matchers", func() {
 			h := newRuleHarness("/repo/internal/wiki/wiki_test.go", "github.com/perber/wiki/internal/wiki", `package wiki
 
