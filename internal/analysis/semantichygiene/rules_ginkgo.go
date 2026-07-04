@@ -270,6 +270,9 @@ func hasMigratedIdentifierFragment(field string) bool {
 	if isGoCodeSymbolFragment(field) {
 		return true
 	}
+	if isExportedCodeIdentifierFragment(field) {
+		return true
+	}
 	if strings.Contains(field, "_") {
 		parts := strings.FieldsFunc(field, func(r rune) bool {
 			return r == '_'
@@ -279,6 +282,42 @@ func hasMigratedIdentifierFragment(field string) bool {
 		}
 	}
 	return isLowerCamelIdentifierFragment(field)
+}
+
+func isExportedCodeIdentifierFragment(field string) bool {
+	field = trimGinkgoNamePunctuation(field)
+	if !isGoIdentifierLike(field) || !isExportedIdentifierFragment(field) || !hasCamelCaseWordBoundary(field) {
+		return false
+	}
+	for _, suffix := range []string{
+		"UseCase",
+		"Routes",
+		"Router",
+		"Middleware",
+		"Handler",
+		"Service",
+		"Store",
+		"Repository",
+		"DTO",
+		"Config",
+		"Command",
+	} {
+		if strings.HasSuffix(field, suffix) && len(field) > len(suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCamelCaseWordBoundary(field string) bool {
+	previousLower := false
+	for _, r := range field {
+		if r >= 'A' && r <= 'Z' && previousLower {
+			return true
+		}
+		previousLower = r >= 'a' && r <= 'z'
+	}
+	return false
 }
 
 func isGoCodeSymbolFragment(field string) bool {

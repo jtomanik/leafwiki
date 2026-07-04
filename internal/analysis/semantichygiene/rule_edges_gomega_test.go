@@ -688,6 +688,33 @@ var _ = ginkgo.Describe("wikid process supervision", func() {
 			))
 		})
 
+		ginkgo.It("reports Ginkgo spec names that preserve exported Go identifier fragments", func() {
+			h := newRuleHarness("/repo/internal/wiki/auth/use_cases_test.go", "github.com/perber/wiki/internal/wiki/auth", `package auth
+
+type bddDSL struct{}
+var ginkgo bddDSL
+func (bddDSL) Describe(text string, body func()) bool { return true }
+func (bddDSL) It(text string, body func()) bool { return true }
+
+var _ = ginkgo.Describe("auth use cases", func() {
+	ginkgo.It("GetUsersUseCase and GetUserByIDUseCase return public users", func() {})
+})
+`)
+			call := h.findCall("It")
+			h.ctx.pass.TypesInfo.Uses[call.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(
+				token.NoPos,
+				types.NewPackage("github.com/onsi/ginkgo/v2", "ginkgo"),
+				"It",
+				types.NewSignatureType(nil, nil, nil, nil, nil, false),
+			)
+
+			checkGinkgoSpecQualityCall(h.ctx, call)
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				`semh:ginkgo.test-name: Ginkgo node name "GetUsersUseCase and GetUserByIDUseCase return public users" preserves a migrated testing.T name; describe observable behavior instead`,
+			))
+		})
+
 		ginkgo.It("reports helper behavior names as vague migration residue", func() {
 			h := newRuleHarness("/repo/internal/wikid/wikid_helpers_test.go", "github.com/perber/wiki/internal/wikid", `package wikid
 
