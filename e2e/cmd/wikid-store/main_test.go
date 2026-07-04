@@ -31,7 +31,7 @@ var (
 	errWikidStoreReplaceFailed  = errors.New("replace failed")
 )
 
-var _ = ginkgo.Describe("wikid-store command", func() {
+var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 	ginkgo.It("default seams read process args and create concrete stores", func() {
 		Expect(wikidStoreArgs()).NotTo(BeNil())
 		Expect(newRegistryStore("/tmp/wikid.db")).To(BeAssignableToTypeOf(wikid.NewRegistryStore("")))
