@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var _ = ginkgo.Describe("go-i18n rollout plan traceability", func() {
+var _ = ginkgo.Describe("go-i18n rollout plan traceability", ginkgo.Label("integration"), func() {
 	ginkgo.It("maps every rollout scenario to repository evidence", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		planPath := filepath.Join(repoRoot, "docs", "plans", "go-i18n-rollout.PLAN.md")
@@ -141,7 +141,7 @@ func goI18nRolloutEvidenceResult(title string) (canonicalPlanEvidence, error) {
 	return evidence, nil
 }
 
-var _ = ginkgo.Describe("go-i18n public documentation", func() {
+var _ = ginkgo.Describe("go-i18n public documentation", ginkgo.Label("integration"), func() {
 	ginkgo.It("preserves the English-only rollout limits and compatibility fields", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "i18n.md"))

@@ -7,24 +7,18 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/onsi/gomega/gcustom"
+	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 )
 
 func haveCanonicalPlanScenarioMapping() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(mapping canonicalPlanScenarioCoverage) (bool, error) {
-		return mapping.title != "" && mapping.evidence.file != "" && mapping.evidence.text != "", nil
-	}).WithMessage("describe a canonical plan scenario with evidence")
+	return WithTransform(canonicalPlanScenarioMappingStateFor, Equal(planScenarioMappingComplete))
 }
 
 func existInCanonicalPlanEvidenceFile(repoRoot string, title string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(evidence canonicalPlanEvidence) (bool, error) {
-		raw, err := os.ReadFile(filepath.Join(repoRoot, evidence.file))
-		if err != nil {
-			return false, fmt.Errorf("scenario %q evidence file %s cannot be read: %w", title, evidence.file, err)
-		}
-		return strings.Contains(string(raw), evidence.text), nil
-	}).WithMessage("exist in the mapped canonical plan evidence file")
+	return WithTransform(func(evidence canonicalPlanEvidence) planEvidenceReference {
+		return planEvidenceReference{title: title, file: evidence.file, text: evidence.text}
+	}, matchPlanEvidenceFile(repoRoot))
 }
 
 func canonicalPlanEvidenceForTitle(evidenceByTitle map[string]canonicalPlanEvidence, title string) (canonicalPlanEvidence, error) {
@@ -36,19 +30,13 @@ func canonicalPlanEvidenceForTitle(evidenceByTitle map[string]canonicalPlanEvide
 }
 
 func haveMarkdownLinkRootPrefixScenarioMapping() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(mapping markdownLinkRootPrefixScenarioCoverage) (bool, error) {
-		return mapping.title != "" && mapping.evidence.file != "" && mapping.evidence.text != "", nil
-	}).WithMessage("describe a markdown link root prefix scenario with evidence")
+	return WithTransform(markdownLinkRootPrefixScenarioMappingStateFor, Equal(planScenarioMappingComplete))
 }
 
 func existInMarkdownLinkRootPrefixEvidenceFile(repoRoot string, title string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(evidence markdownLinkRootPrefixEvidence) (bool, error) {
-		raw, err := os.ReadFile(filepath.Join(repoRoot, evidence.file))
-		if err != nil {
-			return false, fmt.Errorf("scenario %q evidence file %s cannot be read: %w", title, evidence.file, err)
-		}
-		return strings.Contains(string(raw), evidence.text), nil
-	}).WithMessage("exist in the mapped markdown link root prefix evidence file")
+	return WithTransform(func(evidence markdownLinkRootPrefixEvidence) planEvidenceReference {
+		return planEvidenceReference{title: title, file: evidence.file, text: evidence.text}
+	}, matchPlanEvidenceFile(repoRoot))
 }
 
 func markdownLinkRootPrefixEvidenceForTitle(evidenceByTitle map[string]markdownLinkRootPrefixEvidence, title string) (markdownLinkRootPrefixEvidence, error) {
@@ -57,6 +45,81 @@ func markdownLinkRootPrefixEvidenceForTitle(evidenceByTitle map[string]markdownL
 		return markdownLinkRootPrefixEvidence{}, fmt.Errorf("plan scenario %q has no automated-test evidence mapping", title)
 	}
 	return evidence, nil
+}
+
+type planScenarioMappingState string
+
+const (
+	planScenarioMappingComplete            planScenarioMappingState = "scenario maps to repository evidence"
+	planScenarioMappingMissingTitle        planScenarioMappingState = "scenario mapping is missing a plan title"
+	planScenarioMappingMissingEvidenceFile planScenarioMappingState = "scenario mapping is missing an evidence file"
+	planScenarioMappingMissingEvidenceText planScenarioMappingState = "scenario mapping is missing evidence text"
+)
+
+func canonicalPlanScenarioMappingStateFor(mapping canonicalPlanScenarioCoverage) planScenarioMappingState {
+	return planScenarioMappingStateFor(mapping.title, mapping.evidence.file, mapping.evidence.text)
+}
+
+func markdownLinkRootPrefixScenarioMappingStateFor(mapping markdownLinkRootPrefixScenarioCoverage) planScenarioMappingState {
+	return planScenarioMappingStateFor(mapping.title, mapping.evidence.file, mapping.evidence.text)
+}
+
+func planScenarioMappingStateFor(title string, evidenceFile string, evidenceText string) planScenarioMappingState {
+	switch {
+	case strings.TrimSpace(title) == "":
+		return planScenarioMappingMissingTitle
+	case strings.TrimSpace(evidenceFile) == "":
+		return planScenarioMappingMissingEvidenceFile
+	case strings.TrimSpace(evidenceText) == "":
+		return planScenarioMappingMissingEvidenceText
+	default:
+		return planScenarioMappingComplete
+	}
+}
+
+type planEvidenceReference struct {
+	title string
+	file  string
+	text  string
+}
+
+type planEvidenceFileMatcher struct {
+	repoRoot string
+}
+
+func matchPlanEvidenceFile(repoRoot string) types.GomegaMatcher {
+	return planEvidenceFileMatcher{repoRoot: repoRoot}
+}
+
+func (matcher planEvidenceFileMatcher) Match(actual any) (bool, error) {
+	reference, ok := actual.(planEvidenceReference)
+	if !ok {
+		return false, fmt.Errorf("plan evidence file matcher expects planEvidenceReference, got %T", actual)
+	}
+	if strings.TrimSpace(reference.file) == "" || strings.TrimSpace(reference.text) == "" {
+		return false, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(matcher.repoRoot, reference.file))
+	if err != nil {
+		return false, nil
+	}
+	return ContainSubstring(reference.text).Match(string(raw))
+}
+
+func (matcher planEvidenceFileMatcher) FailureMessage(actual any) string {
+	reference, ok := actual.(planEvidenceReference)
+	if !ok {
+		return fmt.Sprintf("Expected a plan evidence reference, got %T", actual)
+	}
+	return fmt.Sprintf("Expected plan scenario %q evidence file %q to contain mapped evidence %q", reference.title, reference.file, reference.text)
+}
+
+func (matcher planEvidenceFileMatcher) NegatedFailureMessage(actual any) string {
+	reference, ok := actual.(planEvidenceReference)
+	if !ok {
+		return fmt.Sprintf("Expected a plan evidence reference not to match, got %T", actual)
+	}
+	return fmt.Sprintf("Expected plan scenario %q evidence file %q not to contain mapped evidence %q", reference.title, reference.file, reference.text)
 }
 
 func markdownLinkRootPrefixFocusedCommandLines(plan string) []string {

@@ -51,7 +51,7 @@ func mlrpEvidence(file string, text string) markdownLinkRootPrefixEvidence {
 	return markdownLinkRootPrefixEvidence{file: file, text: text}
 }
 
-var _ = ginkgo.Describe("markdown link root prefix plan traceability", func() {
+var _ = ginkgo.Describe("markdown link root prefix plan traceability", ginkgo.Label("integration"), func() {
 	ginkgo.It("maps every plan scenario title to automated evidence", func() {
 		repoRoot := markdownLinkRootPrefixPlanRepoRoot()
 		planTitles := markdownLinkRootPrefixPlanScenarioTitles(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
@@ -79,7 +79,7 @@ var _ = ginkgo.Describe("markdown link root prefix plan traceability", func() {
 	})
 })
 
-var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", func() {
+var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", ginkgo.Label("integration"), func() {
 	ginkgo.It("sets the markdown link root prefix environment for every focused command", func() {
 		repoRoot := markdownLinkRootPrefixPlanRepoRoot()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "markdown-link-root-prefix.PLAN.md"))
@@ -137,7 +137,7 @@ var _ = ginkgo.Describe("markdown link root prefix focused E2E commands", func()
 	})
 })
 
-var _ = ginkgo.Describe("markdown link root prefix documentation", func() {
+var _ = ginkgo.Describe("markdown link root prefix documentation", ginkgo.Label("integration"), func() {
 	ginkgo.It("keeps MCP route paths separate from Markdown href examples", func() {
 		repoRoot := markdownLinkRootPrefixPlanRepoRoot()
 		docChecks := []struct {

@@ -99,7 +99,7 @@ func evidence(file string, text string) canonicalPlanEvidence {
 	return canonicalPlanEvidence{file: file, text: text}
 }
 
-var _ = ginkgo.Describe("canonical Markdown link plan traceability", func() {
+var _ = ginkgo.Describe("canonical Markdown link plan traceability", ginkgo.Label("integration"), func() {
 	ginkgo.It("maps every plan scenario title to automated evidence", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		planTitles := canonicalPlanScenarioTitles(filepath.Join(repoRoot, "docs", "plans", "canonical_markdown_links.PLAN.md"))

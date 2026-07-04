@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-var _ = ginkgo.Describe("Fosite OAuth migration documentation", func() {
+var _ = ginkgo.Describe("Fosite OAuth migration documentation", ginkgo.Label("integration"), func() {
 	ginkgo.It("points the migration plan at the implemented verifier location", func() {
 		repoRoot := fositeOAuthMigrationRepoRoot()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "plans", "fosite-oauth-migration.PLAN.md"))

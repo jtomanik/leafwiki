@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var _ = ginkgo.Describe("historical plan warnings", func() {
+var _ = ginkgo.Describe("historical plan warnings", ginkgo.Label("integration"), func() {
 	ginkgo.It("marks removed workspace-sync environment examples as historical", func() {
 		repoRoot := markdownLinkRootPrefixPlanRepoRoot()
 		plans, err := filepath.Glob(filepath.Join(repoRoot, "docs", "plans", "*.PLAN.md"))

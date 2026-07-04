@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var _ = ginkgo.Describe("repo-local LeafWiki skill documentation", func() {
+var _ = ginkgo.Describe("repo-local LeafWiki skill documentation", ginkgo.Label("integration"), func() {
 	ginkgo.It("keeps the llmwiki skill installable with context-first guidance", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "skills", "llmwiki", "SKILL.md"))
@@ -21,7 +21,7 @@ var _ = ginkgo.Describe("repo-local LeafWiki skill documentation", func() {
 	})
 })
 
-var _ = ginkgo.Describe("workspace-root documentation links", func() {
+var _ = ginkgo.Describe("workspace-root documentation links", ginkgo.Label("integration"), func() {
 	ginkgo.It("keeps active docs README links relative to the wiki root", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "README.md"))
@@ -43,7 +43,7 @@ var _ = ginkgo.Describe("workspace-root documentation links", func() {
 	})
 })
 
-var _ = ginkgo.Describe("historical plan visibility", func() {
+var _ = ginkgo.Describe("historical plan visibility", ginkgo.Label("integration"), func() {
 	ginkgo.It("marks duplicate visible plan copies as superseded by their canonical plans", func() {
 		repoRoot := canonicalPlanRepoRoot()
 		for _, tc := range []struct {
