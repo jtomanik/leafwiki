@@ -48,12 +48,12 @@ var _ = Describe("trusted proxy parsing", func() {
 
 	It("rejects invalid IP entries", func() {
 		_, err := authmw.ParseTrustedProxies("not-an-ip")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(authmw.ErrInvalidTrustedProxy))
 	})
 
 	It("rejects invalid CIDR entries", func() {
 		_, err := authmw.ParseTrustedProxies("999.0.0.0/8")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(authmw.ErrInvalidTrustedProxy))
 	})
 
 	It("matches trusted remote addresses after removing the port", func() {
