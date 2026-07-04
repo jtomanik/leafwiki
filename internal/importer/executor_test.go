@@ -86,7 +86,7 @@ func writeTmp(dir, rel, content string) {
 	importerWriteFile(dir, rel, content)
 }
 
-var _ = ginkgo.Describe("stale import execution", func() {
+var _ = ginkgo.Describe("stale import execution", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns a stale-plan error without an execution result", func() {
 		w := &fakeExecWiki{hash: "new"}
 		plan := &PlanResult{TreeHash: "old"}
@@ -100,7 +100,7 @@ var _ = ginkgo.Describe("stale import execution", func() {
 	})
 })
 
-var _ = ginkgo.Describe("created page execution with source frontmatter", func() {
+var _ = ginkgo.Describe("created page execution with source frontmatter", ginkgo.Label("unit"), func() {
 	ginkgo.It("writes canonical metadata and drops importer-owned legacy fields", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "a.md", "---\naliases:\n  - x\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: X\n---\n\n# Heading\nBody")
@@ -158,7 +158,7 @@ var _ = ginkgo.Describe("created page execution with source frontmatter", func()
 	})
 })
 
-var _ = ginkgo.Describe("created page execution with distinct metadata fields", func() {
+var _ = ginkgo.Describe("created page execution with distinct metadata fields", ginkgo.Label("unit"), func() {
 	ginkgo.It("preserves distinct imported frontmatter fields", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "a.md", "---\nalpha: first\nbeta: second\nnested:\n  key: value\n---\n\nBody")
@@ -199,7 +199,7 @@ var _ = ginkgo.Describe("created page execution with distinct metadata fields", 
 	})
 })
 
-var _ = ginkgo.Describe("skipped import items", func() {
+var _ = ginkgo.Describe("skipped import items", ginkgo.Label("unit"), func() {
 	ginkgo.It("records skipped items without touching wiki content", func() {
 		tmp := importerTempDir()
 		w := &fakeExecWiki{hash: "h1"}
@@ -224,7 +224,7 @@ var _ = ginkgo.Describe("skipped import items", func() {
 	})
 })
 
-var _ = ginkgo.Describe("create execution when path creation fails", func() {
+var _ = ginkgo.Describe("create execution when path creation fails", ginkgo.Label("unit"), func() {
 	ginkgo.It("records create failures without updating page content", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "a.md", "Body")
@@ -252,7 +252,7 @@ var _ = ginkgo.Describe("create execution when path creation fails", func() {
 	})
 })
 
-var _ = ginkgo.Describe("execution of unsupported plan actions", func() {
+var _ = ginkgo.Describe("execution of unsupported plan actions", ginkgo.Label("unit"), func() {
 	ginkgo.It("records unsupported plan actions as skipped item errors", func() {
 		tmp := importerTempDir()
 		w := &fakeExecWiki{hash: "h1"}
@@ -272,7 +272,7 @@ var _ = ginkgo.Describe("execution of unsupported plan actions", func() {
 	})
 })
 
-var _ = ginkgo.Describe("folder index import ordering", func() {
+var _ = ginkgo.Describe("folder index import ordering", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates folder indexes before child pages", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Ordner/index.md", `---
@@ -308,7 +308,7 @@ title: Ordner
 })
 
 // - Importer migrates old route-style page link to .md
-var _ = ginkgo.Describe("import execution link rewriting", func() {
+var _ = ginkgo.Describe("import execution link rewriting", ginkgo.Label("unit"), func() {
 	ginkgo.It("rewrites imported markdown links to created wiki routes", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Guides/index.md", "# Guides")
@@ -364,7 +364,7 @@ var _ = ginkgo.Describe("import execution link rewriting", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution metadata preservation", func() {
+var _ = ginkgo.Describe("import execution metadata preservation", ginkgo.Label("unit"), func() {
 	ginkgo.It("preserves metadata links while rewriting body links", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
@@ -416,7 +416,7 @@ var _ = ginkgo.Describe("import execution metadata preservation", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution asset uploads", func() {
+var _ = ginkgo.Describe("import execution asset uploads", ginkgo.Label("unit"), func() {
 	ginkgo.It("uploads referenced assets and rewrites hrefs to asset URLs", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
@@ -454,7 +454,7 @@ var _ = ginkgo.Describe("import execution asset uploads", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution non-image asset wiki links", func() {
+var _ = ginkgo.Describe("import execution non-image asset wiki links", ginkgo.Label("unit"), func() {
 	ginkgo.It("rewrites non-image wiki asset links with file labels", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
@@ -485,7 +485,7 @@ var _ = ginkgo.Describe("import execution non-image asset wiki links", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution wiki-link basename resolution", func() {
+var _ = ginkgo.Describe("import execution wiki-link basename resolution", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolves unique basename wiki links and leaves ambiguous names unchanged", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Home.md", strings.Join([]string{
@@ -532,7 +532,7 @@ var _ = ginkgo.Describe("import execution wiki-link basename resolution", func()
 	})
 })
 
-var _ = ginkgo.Describe("import execution wiki-link path suffix resolution", func() {
+var _ = ginkgo.Describe("import execution wiki-link path suffix resolution", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolves wiki-link path suffixes to imported pages", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "knowledge-main/tools/kubernetes/resources/StatefulSet.md", strings.Join([]string{
@@ -573,7 +573,7 @@ var _ = ginkgo.Describe("import execution wiki-link path suffix resolution", fun
 	})
 })
 
-var _ = ginkgo.Describe("import execution unresolved wiki links", func() {
+var _ = ginkgo.Describe("import execution unresolved wiki links", ginkgo.Label("unit"), func() {
 	ginkgo.It("generates fallback hrefs for unresolved wiki links", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Home.md", strings.Join([]string{
@@ -612,7 +612,7 @@ var _ = ginkgo.Describe("import execution unresolved wiki links", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution code-block link preservation", func() {
+var _ = ginkgo.Describe("import execution code-block link preservation", ginkgo.Label("unit"), func() {
 	ginkgo.It("leaves code block links unchanged while rewriting real links", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
@@ -669,7 +669,7 @@ var _ = ginkgo.Describe("import execution code-block link preservation", func() 
 	})
 })
 
-var _ = ginkgo.Describe("import execution Windows-style import paths", func() {
+var _ = ginkgo.Describe("import execution Windows-style import paths", ginkgo.Label("unit"), func() {
 	ginkgo.It("normalizes Windows-style import link separators", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{
@@ -717,7 +717,7 @@ var _ = ginkgo.Describe("import execution Windows-style import paths", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution Windows drive-letter links", func() {
+var _ = ginkgo.Describe("import execution Windows drive-letter links", ginkgo.Label("unit"), func() {
 	ginkgo.It("leaves Windows drive-letter links unchanged", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Guides/Setup.md", strings.Join([]string{

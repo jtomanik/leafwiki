@@ -140,7 +140,7 @@ func fakeMissingPathSegment(slug string, kind tree.NodeKind) tree.PathSegment {
 	}
 }
 
-var _ = ginkgo.Describe("import plan creation for markdown pages", func() {
+var _ = ginkgo.Describe("import plan creation for markdown pages", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates page plan items from markdown headings", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "My Page.md", "# Hello\n\nbody")
@@ -170,7 +170,7 @@ var _ = ginkgo.Describe("import plan creation for markdown pages", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan creation for folder index sections", func() {
+var _ = ginkgo.Describe("import plan creation for folder index sections", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates section plan items for folder indexes", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Guides/index.md", "---\ntitle: Guides\n---\n\n# Ignored")
@@ -194,7 +194,7 @@ var _ = ginkgo.Describe("import plan creation for folder index sections", func()
 	})
 })
 
-var _ = ginkgo.Describe("import plan creation for README folder fallbacks", func() {
+var _ = ginkgo.Describe("import plan creation for README folder fallbacks", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates section plan items for README folder fallbacks", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Guides/README.md", "# Guides")
@@ -222,6 +222,7 @@ type nonExactReadmeCase struct {
 }
 
 var _ = ginkgo.DescribeTable("import plan creation for non-exact README filenames",
+	ginkgo.Label("unit"),
 	func(tt nonExactReadmeCase) {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, tt.sourcePath.FilesystemPath(), "# Readme Page")
@@ -243,7 +244,7 @@ var _ = ginkgo.DescribeTable("import plan creation for non-exact README filename
 	ginkgo.Entry("Guides/Readme.md", nonExactReadmeCase{sourcePath: newFixtureWorkspaceSourcePath("Guides/Readme.md"), wantPath: "docs/guides/readme"}),
 )
 
-var _ = ginkgo.Describe("import plan creation beside existing sections", func() {
+var _ = ginkgo.Describe("import plan creation beside existing sections", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates page items beside existing sections", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "sync.md", "# Sync Page")
@@ -288,7 +289,7 @@ var _ = ginkgo.Describe("import plan creation beside existing sections", func() 
 })
 
 // - README.md as normal page keeps its filesystem casing in generated links
-var _ = ginkgo.Describe("import plan creation with mixed-case index files", func() {
+var _ = ginkgo.Describe("import plan creation with mixed-case index files", ginkgo.Label("unit"), func() {
 	ginkgo.It("preserves mixed-case README child pages beside index sections", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Guides/index.MD", "# Guides")
@@ -315,7 +316,7 @@ var _ = ginkgo.Describe("import plan creation with mixed-case index files", func
 	})
 })
 
-var _ = ginkgo.Describe("import plan title selection", func() {
+var _ = ginkgo.Describe("import plan title selection", ginkgo.Label("unit"), func() {
 	ginkgo.It("prefers source leafwiki titles over fallback titles", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Guide.md", "---\nleafwiki_title: Preferred Title\ntitle: Fallback Title\n---\n\n# Heading")
@@ -339,6 +340,7 @@ type titleFallbackCase struct {
 }
 
 var _ = ginkgo.DescribeTable("import title fallback selection",
+	ginkgo.Label("unit"),
 	func(tt titleFallbackCase) {
 		mdFile, err := markdown.NewMarkdownFileFromRaw(`C:\Users\johnjkr\AppData\Local\Temp\import-1280817455\1999-07-23 - Memo to Staff.md`, tt.content)
 		Expect(err).To(Succeed())
@@ -361,7 +363,7 @@ var _ = ginkgo.DescribeTable("import title fallback selection",
 	}),
 )
 
-var _ = ginkgo.Describe("import plan existing page detection", func() {
+var _ = ginkgo.Describe("import plan existing page detection", ginkgo.Label("unit"), func() {
 	ginkgo.It("skips existing pages with their existing IDs", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "a.md", "# A")
@@ -398,7 +400,7 @@ var _ = ginkgo.Describe("import plan existing page detection", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan source file errors", func() {
+var _ = ginkgo.Describe("import plan source file errors", ginkgo.Label("unit"), func() {
 	ginkgo.It("records errors for missing source files", func() {
 		tmp := importerTempDir()
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
@@ -414,7 +416,7 @@ var _ = ginkgo.Describe("import plan source file errors", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan directory source errors", func() {
+var _ = ginkgo.Describe("import plan directory source errors", ginkgo.Label("unit"), func() {
 	ginkgo.It("records errors when a source path is a directory", func() {
 		tmp := importerTempDir()
 		Expect(os.MkdirAll(filepath.Join(tmp, "dir"), 0o755)).To(Succeed())
@@ -432,7 +434,7 @@ var _ = ginkgo.Describe("import plan directory source errors", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan malformed lookup errors", func() {
+var _ = ginkgo.Describe("import plan malformed lookup errors", ginkgo.Label("unit"), func() {
 	ginkgo.It("records malformed lookup responses as plan errors", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "x.md", "# X")
@@ -457,7 +459,7 @@ var _ = ginkgo.Describe("import plan malformed lookup errors", func() {
 
 // ---- Title extraction -------------------------------------------------------
 
-var _ = ginkgo.Describe("import plan title extraction failures", func() {
+var _ = ginkgo.Describe("import plan title extraction failures", ginkgo.Label("unit"), func() {
 	ginkgo.It("falls back to filenames when title extraction fails", func() {
 		tmp := importerTempDir()
 		abs := importerWriteFile(tmp, "unreadable.md", "# Title")
@@ -482,7 +484,7 @@ var _ = ginkgo.Describe("import plan title extraction failures", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan source directory normalization", func() {
+var _ = ginkgo.Describe("import plan source directory normalization", ginkgo.Label("unit"), func() {
 	ginkgo.It("normalizes source directories into target route paths", func() {
 		// "My Guides/Intro.md" -> "my-guides/intro" via centralized SlugService creation normalization.
 		tmp := importerTempDir()
@@ -501,7 +503,7 @@ var _ = ginkgo.Describe("import plan source directory normalization", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan reserved slug normalization", func() {
+var _ = ginkgo.Describe("import plan reserved slug normalization", ginkgo.Label("unit"), func() {
 	ginkgo.It("avoids reserved target slugs by suffixing them", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Reference/API.md", "# API")
@@ -522,7 +524,7 @@ var _ = ginkgo.Describe("import plan reserved slug normalization", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan invalid source directory segments", func() {
+var _ = ginkgo.Describe("import plan invalid source directory segments", ginkgo.Label("unit"), func() {
 	ginkgo.It("reports invalid source directory segments as plan errors", func() {
 		// Import path normalization still rejects segments that collapse to an empty slug.
 		// A segment like "!!!" normalizes to "", so planning should report an error.
@@ -544,7 +546,7 @@ var _ = ginkgo.Describe("import plan invalid source directory segments", func() 
 	})
 })
 
-var _ = ginkgo.Describe("import plan root index fallback titles", func() {
+var _ = ginkgo.Describe("import plan root index fallback titles", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses the root index filename when title extraction fails", func() {
 		// Test case for root-level index.md with empty TargetBasePath and markdown loading failure
 		// When wikiPath is empty, path.Base("") returns ".", which is not meaningful.
@@ -574,7 +576,7 @@ var _ = ginkgo.Describe("import plan root index fallback titles", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan folder index and sibling pages", func() {
+var _ = ginkgo.Describe("import plan folder index and sibling pages", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates section and sibling page items for folder imports", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Ordner/index.md", `---
@@ -611,7 +613,7 @@ title: Ordner
 	})
 })
 
-var _ = ginkgo.Describe("import plan folder markdown without index", func() {
+var _ = ginkgo.Describe("import plan folder markdown without index", ginkgo.Label("unit"), func() {
 	ginkgo.It("creates folder markdown as pages when no index exists", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Ordner/Ordner.md", "# Unterseite")
@@ -632,7 +634,7 @@ var _ = ginkgo.Describe("import plan folder markdown without index", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan uppercase index sections", func() {
+var _ = ginkgo.Describe("import plan uppercase index sections", ginkgo.Label("unit"), func() {
 	ginkgo.It("treats uppercase index files as section indexes", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "Guides/index.MD", `---

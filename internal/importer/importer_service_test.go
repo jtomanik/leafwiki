@@ -54,7 +54,7 @@ func waitForExecutionStatus(is *ImporterService, want ExecutionStatus) *CurrentP
 
 // --- Tests ------------------------------------------------------------------
 
-var _ = ginkgo.Describe("import plan creation persistence", func() {
+var _ = ginkgo.Describe("import plan creation persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores created folder import plans", func() {
 		tmp := importerTempDir()
 		mustWrite(tmp, "a.md", "# A\nbody")
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("import plan creation persistence", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan workspace replacement", func() {
+var _ = ginkgo.Describe("import plan workspace replacement", ginkgo.Label("unit"), func() {
 	ginkgo.It("removes the previous workspace when replacing a planned import", func() {
 		// old workspace with a marker file
 		oldWS := importerTempDir()
@@ -111,7 +111,7 @@ var _ = ginkgo.Describe("import plan workspace replacement", func() {
 	})
 })
 
-var _ = ginkgo.Describe("current import plan reads without a plan", func() {
+var _ = ginkgo.Describe("current import plan reads without a plan", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns a no-plan error when no current plan is stored", func() {
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
 		is := newServiceWithFakeWiki(w)
@@ -122,7 +122,7 @@ var _ = ginkgo.Describe("current import plan reads without a plan", func() {
 	})
 })
 
-var _ = ginkgo.Describe("current import plan clearing", func() {
+var _ = ginkgo.Describe("current import plan clearing", ginkgo.Label("unit"), func() {
 	ginkgo.It("clears stored plans and rejects later reads", func() {
 		tmp := importerTempDir()
 		mustWrite(tmp, "a.md", "# A")
@@ -140,7 +140,7 @@ var _ = ginkgo.Describe("current import plan clearing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution without a current plan", func() {
+var _ = ginkgo.Describe("import execution without a current plan", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects execution without a current plan", func() {
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
 		is := newServiceWithFakeWiki(w)
@@ -151,7 +151,7 @@ var _ = ginkgo.Describe("import execution without a current plan", func() {
 	})
 })
 
-var _ = ginkgo.Describe("background import execution", func() {
+var _ = ginkgo.Describe("background import execution", ginkgo.Label("unit"), func() {
 	ginkgo.It("starts execution asynchronously and records completion progress", func() {
 		ws := importerTempDir()
 		mustWrite(ws, "a.md", "# A\nbody")
@@ -199,7 +199,7 @@ var _ = ginkgo.Describe("background import execution", func() {
 	})
 })
 
-var _ = ginkgo.Describe("current import plan clearing while execution is running", func() {
+var _ = ginkgo.Describe("current import plan clearing while execution is running", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects clearing while execution is running", func() {
 		ws := importerTempDir()
 		mustWrite(ws, "a.md", "# A\nbody")
@@ -230,7 +230,7 @@ var _ = ginkgo.Describe("current import plan clearing while execution is running
 	})
 })
 
-var _ = ginkgo.Describe("import cancellation between items", func() {
+var _ = ginkgo.Describe("import cancellation between items", ginkgo.Label("unit"), func() {
 	ginkgo.It("requests cancellation and records canceled progress", func() {
 		ws := importerTempDir()
 		mustWrite(ws, "a.md", "# A\nbody")
@@ -276,7 +276,7 @@ var _ = ginkgo.Describe("import cancellation between items", func() {
 	})
 })
 
-var _ = ginkgo.Describe("persisted running import resumption", func() {
+var _ = ginkgo.Describe("persisted running import resumption", ginkgo.Label("unit"), func() {
 	ginkgo.It("resumes running imports and completes remaining items", func() {
 		workspaceRoot := importerTempDir()
 		mustWrite(workspaceRoot, "a.md", "# A\nbody")
@@ -331,7 +331,7 @@ var _ = ginkgo.Describe("persisted running import resumption", func() {
 	})
 })
 
-var _ = ginkgo.Describe("resumed import with changed tree hash", func() {
+var _ = ginkgo.Describe("resumed import with changed tree hash", ginkgo.Label("unit"), func() {
 	ginkgo.It("fails resumed imports when the tree hash changed", func() {
 		workspaceRoot := importerTempDir()
 		mustWrite(workspaceRoot, "a.md", "# A\nbody")
@@ -390,7 +390,7 @@ var _ = ginkgo.Describe("resumed import with changed tree hash", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import service execution with source frontmatter", func() {
+var _ = ginkgo.Describe("import service execution with source frontmatter", ginkgo.Label("unit"), func() {
 	ginkgo.It("writes canonical metadata and drops importer-owned legacy fields", func() {
 		ws := importerTempDir()
 		mustWrite(ws, "a.md", "---\naliases:\n  - x\ncustom_key: keep-me\nleafwiki_id: source-id\nleafwiki_title: Source Title\ntitle: X\n---\n\n# Heading\nBody")
@@ -430,7 +430,7 @@ var _ = ginkgo.Describe("import service execution with source frontmatter", func
 	})
 })
 
-var _ = ginkgo.Describe("import service execution with stale plan", func() {
+var _ = ginkgo.Describe("import service execution with stale plan", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects stale plan execution", func() {
 		ws := importerTempDir()
 		mustWrite(ws, "a.md", "# A")
@@ -449,7 +449,7 @@ var _ = ginkgo.Describe("import service execution with stale plan", func() {
 	})
 })
 
-var _ = ginkgo.Describe("markdown entry discovery", func() {
+var _ = ginkgo.Describe("markdown entry discovery", ginkgo.Label("unit"), func() {
 	ginkgo.It("finds markdown entries recursively and ignores non-markdown files", func() {
 		base := importerTempDir()
 		mustWrite(base, "a.md", "x")
@@ -479,7 +479,7 @@ var _ = ginkgo.Describe("markdown entry discovery", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import plan creation with target base path", func() {
+var _ = ginkgo.Describe("import plan creation with target base path", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores target base path and applies it to planned items", func() {
 		tmp := importerTempDir()
 		mustWrite(tmp, "a.md", "# A\nbody")
@@ -504,7 +504,7 @@ var _ = ginkgo.Describe("import plan creation with target base path", func() {
 	})
 })
 
-var _ = ginkgo.Describe("markdown entry extension matching", func() {
+var _ = ginkgo.Describe("markdown entry extension matching", ginkgo.Label("unit"), func() {
 	ginkgo.It("includes markdown files with mixed-case extensions", func() {
 		base := importerTempDir()
 		mustWrite(base, "a.MD", "x")

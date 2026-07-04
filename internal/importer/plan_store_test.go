@@ -10,7 +10,7 @@ import (
 	"github.com/onsi/gomega/gstruct"
 )
 
-var _ = ginkgo.Describe("plan store snapshots", func() {
+var _ = ginkgo.Describe("plan store snapshots", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns a cloned plan with execution status", func() {
 		s := NewPlanStore()
 		plan := &StoredPlan{ExecutionStatus: ExecutionStatusPlanned}
@@ -24,7 +24,7 @@ var _ = ginkgo.Describe("plan store snapshots", func() {
 	})
 })
 
-var _ = ginkgo.Describe("empty plan store reads", func() {
+var _ = ginkgo.Describe("empty plan store reads", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns an error when no plan is stored", func() {
 		s := NewPlanStore()
 
@@ -34,7 +34,7 @@ var _ = ginkgo.Describe("empty plan store reads", func() {
 	})
 })
 
-var _ = ginkgo.Describe("plan store cloned payload reads", func() {
+var _ = ginkgo.Describe("plan store cloned payload reads", ginkgo.Label("unit"), func() {
 	ginkgo.It("returns a cloned stored plan payload", func() {
 		s := NewPlanStore()
 		plan := &StoredPlan{
@@ -51,7 +51,7 @@ var _ = ginkgo.Describe("plan store cloned payload reads", func() {
 	})
 })
 
-var _ = ginkgo.Describe("plan store clearing", func() {
+var _ = ginkgo.Describe("plan store clearing", ginkgo.Label("unit"), func() {
 	ginkgo.It("clears the current plan and makes later reads empty", func() {
 		s := NewPlanStore()
 		plan := &StoredPlan{}
@@ -66,7 +66,7 @@ var _ = ginkgo.Describe("plan store clearing", func() {
 	})
 })
 
-var _ = ginkgo.Describe("persistent plan store state", func() {
+var _ = ginkgo.Describe("persistent plan store state", ginkgo.Label("unit"), func() {
 	ginkgo.It("reloads persisted execution user state from disk", func() {
 		stateFile := filepath.Join(importerTempDir(), "current-plan.json")
 		store := NewPlanStore(stateFile)
@@ -87,7 +87,7 @@ var _ = ginkgo.Describe("persistent plan store state", func() {
 	})
 })
 
-var _ = ginkgo.Describe("persistent plan store load failures", func() {
+var _ = ginkgo.Describe("persistent plan store load failures", ginkgo.Label("unit"), func() {
 	ginkgo.It("reports unavailable state for invalid persisted JSON", func() {
 		stateFile := filepath.Join(importerTempDir(), "current-plan.json")
 		Expect(os.WriteFile(stateFile, []byte("{invalid"), 0o644)).To(Succeed())
@@ -99,7 +99,7 @@ var _ = ginkgo.Describe("persistent plan store load failures", func() {
 	})
 })
 
-var _ = ginkgo.Describe("execution start with unavailable plan payload", func() {
+var _ = ginkgo.Describe("execution start with unavailable plan payload", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects execution start when the stored plan has no payload", func() {
 		store := NewPlanStore()
 		Expect(store.Set(&StoredPlan{
@@ -113,7 +113,7 @@ var _ = ginkgo.Describe("execution start with unavailable plan payload", func() 
 	})
 })
 
-var _ = ginkgo.Describe("execution progress persistence", func() {
+var _ = ginkgo.Describe("execution progress persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("persists execution progress fields", func() {
 		store := NewPlanStore()
 		Expect(store.Set(&StoredPlan{

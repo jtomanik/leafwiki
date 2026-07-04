@@ -127,7 +127,7 @@ func integImportedFrontmatterResult(raw string) (markdown.Frontmatter, string, e
 	return fm, body, nil
 }
 
-var _ = ginkgo.Describe("import execution writes migrated frontmatter", func() {
+var _ = ginkgo.Describe("import execution writes migrated frontmatter", ginkgo.Label("integration"), func() {
 	ginkgo.It("imports markdown with canonical metadata and preserved custom fields", func() {
 		ws := integTempDir()
 		integMustWrite(ws, "Imported.md", "---\naliases:\n  - alpha\ncustom_key: keep-me\nleafwiki_id: source-id\ntitle: Imported Title\n---\n\n# Imported Title\nBody")
@@ -170,7 +170,7 @@ var _ = ginkgo.Describe("import execution writes migrated frontmatter", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution indexes metadata", func() {
+var _ = ginkgo.Describe("import execution indexes metadata", ginkgo.Label("integration"), func() {
 	ginkgo.It("indexes imported tags and properties", func() {
 		ws := integTempDir()
 		integMustWrite(ws, "Imported.md", "---\ntags:\n  - React\n  - docs\nstatus: published\nowner: alice\npriority: 3\nowners:\n  - alice\n---\n\n# Imported Title\nBody")
@@ -220,7 +220,7 @@ var _ = ginkgo.Describe("import execution indexes metadata", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import execution rewrites links and uploads assets", func() {
+var _ = ginkgo.Describe("import execution rewrites links and uploads assets", ginkgo.Label("integration"), func() {
 	ginkgo.It("rewrites imported links and uploads referenced assets", func() {
 		ws := integTempDir()
 		integMustWrite(ws, "Guides/index.md", "# Guides")
@@ -269,7 +269,7 @@ var _ = ginkgo.Describe("import execution rewrites links and uploads assets", fu
 	})
 })
 
-var _ = ginkgo.Describe("import execution for link asset fixture packages", func() {
+var _ = ginkgo.Describe("import execution for link asset fixture packages", ginkgo.Label("integration"), func() {
 	ginkgo.It("imports the link-asset fixture package with expected routes and assets", func() {
 		ws := integCopyFixtureToTemp("link-assets-package")
 
@@ -322,7 +322,7 @@ var _ = ginkgo.Describe("import execution for link asset fixture packages", func
 	})
 })
 
-var _ = ginkgo.Describe("import execution for nested LeafWiki fixture packages", func() {
+var _ = ginkgo.Describe("import execution for nested LeafWiki fixture packages", ginkgo.Label("integration"), func() {
 	ginkgo.It("imports nested LeafWiki fixture pages with metadata and links", func() {
 		ws := integCopyFixtureToTemp("leafwiki-nested-package")
 
@@ -394,7 +394,7 @@ var _ = ginkgo.Describe("import execution for nested LeafWiki fixture packages",
 	})
 })
 
-var _ = ginkgo.Describe("import execution for Obsidian wiki-link fixture packages", func() {
+var _ = ginkgo.Describe("import execution for Obsidian wiki-link fixture packages", ginkgo.Label("integration"), func() {
 	ginkgo.It("imports Obsidian wiki-link fixtures with expected canonical links", func() {
 		ws := integCopyFixtureToTemp("obsidian-wikilinks-package")
 

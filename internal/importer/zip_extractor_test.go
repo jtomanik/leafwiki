@@ -14,7 +14,7 @@ func removeExtractedZipWorkspace(ws *ZipWorkspace) {
 	Expect(ws.Cleanup()).To(Succeed())
 }
 
-var _ = ginkgo.Describe("zip workspace extraction", func() {
+var _ = ginkgo.Describe("zip workspace extraction", ginkgo.Label("unit"), func() {
 	ginkgo.It("extracts the fixture archive with expected markdown files", func() {
 		currentDir, err := os.Getwd()
 		Expect(err).To(Succeed())
@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("zip workspace extraction", func() {
 	})
 })
 
-var _ = ginkgo.Describe("zip workspace cleanup", func() {
+var _ = ginkgo.Describe("zip workspace cleanup", ginkgo.Label("unit"), func() {
 	ginkgo.It("removes the extracted workspace root", func() {
 		currentDir, err := os.Getwd()
 		Expect(err).To(Succeed())

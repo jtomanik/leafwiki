@@ -20,7 +20,7 @@ type contentTransformCase struct {
 	want       string
 }
 
-var _ = ginkgo.Describe("import content link rewriting", func() {
+var _ = ginkgo.Describe("import content link rewriting", ginkgo.Label("unit"), func() {
 	for _, tt := range contentTransformCases() {
 		tt := tt
 		ginkgo.It(tt.name, func() {
@@ -225,7 +225,7 @@ func contentTransformCases() []contentTransformCase {
 	}
 }
 
-var _ = ginkgo.Describe("import content link formatting", func() {
+var _ = ginkgo.Describe("import content link formatting", ginkgo.Label("unit"), func() {
 	ginkgo.It("rewrites formatted markdown links to imported page and section routes", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -251,7 +251,7 @@ var _ = ginkgo.Describe("import content link formatting", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import content generated wiki links", func() {
+var _ = ginkgo.Describe("import content generated wiki links", ginkgo.Label("unit"), func() {
 	ginkgo.It("applies the markdown root prefix to generated link hrefs", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "Note.md", "# Note")
@@ -269,7 +269,7 @@ var _ = ginkgo.Describe("import content generated wiki links", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import content source path matching", func() {
+var _ = ginkgo.Describe("import content source path matching", ginkgo.Label("unit"), func() {
 	ginkgo.It("rewrites only case-exact source path matches", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -293,7 +293,7 @@ var _ = ginkgo.Describe("import content source path matching", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import content suffix matching", func() {
+var _ = ginkgo.Describe("import content suffix matching", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolves exact suffix matches while preserving case mismatches", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -317,7 +317,7 @@ var _ = ginkgo.Describe("import content suffix matching", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import content basename wiki-link matching", func() {
+var _ = ginkgo.Describe("import content basename wiki-link matching", ginkgo.Label("unit"), func() {
 	ginkgo.It("rewrites only case-exact basename wiki links", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -341,7 +341,7 @@ var _ = ginkgo.Describe("import content basename wiki-link matching", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import content markdown page links", func() {
+var _ = ginkgo.Describe("import content markdown page links", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolves section index files without inventing markdown page links", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -365,7 +365,7 @@ var _ = ginkgo.Describe("import content markdown page links", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import content same-route page and section links", func() {
+var _ = ginkgo.Describe("import content same-route page and section links", ginkgo.Label("unit"), func() {
 	ginkgo.It("distinguishes page and section hrefs for shared routes", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -391,7 +391,7 @@ var _ = ginkgo.Describe("import content same-route page and section links", func
 	})
 })
 
-var _ = ginkgo.Describe("import content suffix fallback formatting", func() {
+var _ = ginkgo.Describe("import content suffix fallback formatting", ginkgo.Label("unit"), func() {
 	ginkgo.It("formats suffix matches as page hrefs", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -417,7 +417,7 @@ var _ = ginkgo.Describe("import content suffix fallback formatting", func() {
 	})
 })
 
-var _ = ginkgo.Describe("import content README folder fallbacks", func() {
+var _ = ginkgo.Describe("import content README folder fallbacks", ginkgo.Label("unit"), func() {
 	ginkgo.It("rewrites README folder references to section hrefs", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
@@ -442,7 +442,7 @@ var _ = ginkgo.Describe("import content README folder fallbacks", func() {
 })
 
 // - Reference-style link definitions are rewritten
-var _ = ginkgo.Describe("import content reference definitions", func() {
+var _ = ginkgo.Describe("import content reference definitions", ginkgo.Label("unit"), func() {
 	ginkgo.It("rewrites reference definitions while preserving titles and image assets", func() {
 		tmp := importerTempDir()
 		writeTmp(tmp, "current.md", "# Current")
