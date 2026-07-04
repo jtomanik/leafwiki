@@ -178,6 +178,10 @@ func gomegaBooleanStateStringDiagnostic() string {
 	return "do not convert boolean variables into string states for assertions; assert the semantic value or outcome directly"
 }
 
+func gomegaMatcherFactoryBooleanErrorGateDiagnostic() string {
+	return "matcher factory captures boolean state while matching error semantics; assert the semantic result directly or split into explicit domain matchers"
+}
+
 func gomegaControlStatusMatcherDiagnostic() string {
 	return "assert project daemon control errors with MatchError or a domain matcher instead of IsControlStatus with boolean matchers"
 }

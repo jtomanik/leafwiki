@@ -362,6 +362,7 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 		return
 	}
 	checkGomegaMatcherFactoryGenericHaveOccurred(ctx, fn)
+	checkGomegaMatcherFactoryBooleanErrorGate(ctx, fn)
 	if fn.Type.Params == nil || !gomegaMatcherFactoryName(fn.Name.Name) {
 		return
 	}
@@ -386,6 +387,113 @@ func checkGomegaMatcherFactorySignature(ctx *analysisContext, fn *ast.FuncDecl) 
 			}
 		}
 	}
+}
+
+func checkGomegaMatcherFactoryBooleanErrorGate(ctx *analysisContext, fn *ast.FuncDecl) {
+	boolParams := matcherFactoryBoolParams(ctx, fn)
+	if len(boolParams) == 0 || !matcherFactoryCombinesBoolParamWithErrorPredicate(ctx, fn.Body, boolParams) {
+		return
+	}
+	ctx.report(ruleGomegaProxyBoolean, fn.Name, gomegaMatcherFactoryBooleanErrorGateDiagnostic())
+}
+
+func matcherFactoryBoolParams(ctx *analysisContext, fn *ast.FuncDecl) map[types.Object]bool {
+	if fn.Type.Params == nil {
+		return nil
+	}
+	params := map[types.Object]bool{}
+	for _, field := range fn.Type.Params.List {
+		if !isBoolType(ctx.pass.TypesInfo.TypeOf(field.Type)) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			if object := ctx.pass.TypesInfo.Defs[name]; object != nil {
+				params[object] = true
+			}
+		}
+	}
+	return params
+}
+
+func matcherFactoryCombinesBoolParamWithErrorPredicate(ctx *analysisContext, body *ast.BlockStmt, boolParams map[types.Object]bool) bool {
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		expr, ok := node.(ast.Expr)
+		if !ok {
+			return true
+		}
+		if exprTreeContainsObject(ctx, expr, boolParams) && exprTreeContainsErrorPredicate(ctx, expr) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func exprTreeContainsObject(ctx *analysisContext, expr ast.Expr, objects map[types.Object]bool) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		ident, ok := node.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		object := ctx.pass.TypesInfo.Uses[ident]
+		if object == nil {
+			object = ctx.pass.TypesInfo.Defs[ident]
+		}
+		if objects[object] {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func exprTreeContainsErrorPredicate(ctx *analysisContext, expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found || node == nil {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if callIsErrorPredicate(ctx, call) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func callIsErrorPredicate(ctx *analysisContext, call *ast.CallExpr) bool {
+	packagePath, name := calleePackageAndName(ctx, call)
+	if packagePath == "errors" && (name == "Is" || name == "As") {
+		return true
+	}
+	if len(call.Args) == 0 {
+		return false
+	}
+	if typeImplementsError(ctx.pass.TypesInfo.TypeOf(call.Args[0])) {
+		canonical := canonicalName(name)
+		return strings.HasPrefix(canonical, "is") && strings.Contains(canonical, "error") ||
+			strings.HasSuffix(canonical, "error") ||
+			strings.Contains(canonical, "status")
+	}
+	return false
 }
 
 func checkGomegaMatcherFactoryGenericHaveOccurred(ctx *analysisContext, fn *ast.FuncDecl) {
