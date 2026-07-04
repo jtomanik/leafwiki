@@ -16,7 +16,7 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.Describe("project daemon deterministic edges", func() {
+var _ = ginkgo.Describe("project daemon configuration, descriptor, and registry behavior", func() {
 	ginkgo.It("canonicalizes missing project paths and redacts config mismatch secrets", ginkgo.Label("integration"), func() {
 		baseDir := tempProjectdaemonDir()
 		dataDir := filepath.Join(baseDir, "missing", "data")

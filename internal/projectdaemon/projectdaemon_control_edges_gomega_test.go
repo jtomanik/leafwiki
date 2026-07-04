@@ -19,8 +19,8 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.Describe("project daemon deterministic edges", func() {
-	ginkgo.It("handles control client and control error parsing edge cases", ginkgo.Label("integration"), func() {
+var _ = ginkgo.Describe("project daemon control, configuration, and descriptor failures", func() {
+	ginkgo.It("handles control client tokens and structured error parsing", ginkgo.Label("integration"), func() {
 		Expect(&ControlHTTPError{StatusCode: http.StatusTeapot}).To(haveControlStatus(http.StatusTeapot))
 		Expect(parsedControlErrorBodyForSpec([]byte(`{"error":{"code":"daemon_control_unauthorized","messageId":"errors.daemon.control_unauthorized","message":" unauthorized "}}`))).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Code":      Equal(errCodeDaemonControlUnauthorized),
@@ -178,7 +178,7 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() {
 		Expect(resolved).To(Equal(filepath.Clean(string(filepath.Separator))))
 	})
 
-	ginkgo.It("reports descriptor atomic-write failure branches", ginkgo.Label("integration"), func() {
+	ginkgo.It("reports descriptor atomic-write failures for each write step", ginkgo.Label("integration"), func() {
 		tmp := tempProjectdaemonDir()
 		desc := &Descriptor{SchemaVersion: DescriptorSchemaVersion}
 

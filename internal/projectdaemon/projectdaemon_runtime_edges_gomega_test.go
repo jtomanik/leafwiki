@@ -16,7 +16,7 @@ import (
 	"github.com/perber/wiki/internal/agenthooks"
 )
 
-var _ = ginkgo.Describe("project daemon deterministic edges", func() {
+var _ = ginkgo.Describe("project daemon registry expiry and control API failures", func() {
 	ginkgo.It("uses registry fallback timestamps and prunes from expiry-loop ticks", ginkgo.Label("unit"), func() {
 		now := time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)
 		presenceChanges := make(chan int, 2)
