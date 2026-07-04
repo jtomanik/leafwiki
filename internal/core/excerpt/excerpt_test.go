@@ -248,7 +248,7 @@ var _ = Describe("excerpt boundary behavior", func() {
 		Expect(PlainTextFromMarkdown("plain **markdown**")).To(Equal("plain **markdown**"))
 	})
 
-	It("getFenceState leaves current state unchanged when a marker capture is empty", func() {
+	It("keeps the current fence state when a malformed fence marker is empty", func() {
 		previous := fencePattern
 		fencePattern = regexp.MustCompile(`(?P<marker>)`)
 		DeferCleanup(func() {
