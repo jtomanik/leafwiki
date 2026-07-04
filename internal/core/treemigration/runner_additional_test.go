@@ -201,7 +201,7 @@ func tempMigrationScratchDir() string {
 	return path
 }
 
-var _ = ginkgo.Describe("tree migration helper behavior", func() {
+var _ = ginkgo.Describe("tree migration metadata backfill", func() {
 	ginkgo.It("uses filesystem timestamps for missing metadata while preserving author identity", func() {
 		tmp := tempMigrationScratchDir()
 		path := filepath.Join(tmp, "page.md")
