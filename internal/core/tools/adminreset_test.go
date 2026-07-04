@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
+	"modernc.org/sqlite"
 
 	"github.com/perber/wiki/internal/core/auth"
 )
@@ -43,6 +44,13 @@ func matchPersistedAdminUser() types.GomegaMatcher {
 		"Email": Equal(resetAdminEmail),
 		"Role":  Equal(auth.RoleAdmin),
 	}))
+}
+
+func matchAdminStoreOpenSQLiteError() types.GomegaMatcher {
+	return WithTransform(func(err error) bool {
+		var sqliteErr *sqlite.Error
+		return errors.As(err, &sqliteErr)
+	}, BeTrue())
 }
 
 var _ = ginkgo.Describe("admin password reset", func() {
@@ -132,7 +140,7 @@ var _ = ginkgo.Describe("admin password reset", func() {
 
 		adminUser, err := ResetAdminPassword(storageFile)
 
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(matchAdminStoreOpenSQLiteError())
 		Expect(adminUser).To(BeNil())
 	})
 
