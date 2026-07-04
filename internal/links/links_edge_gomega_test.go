@@ -8,7 +8,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdownlinks"
@@ -128,55 +127,154 @@ func matchUnappliedRewriteRule() types.GomegaMatcher {
 }
 
 func matchUnchangedLinkDestination(destination string, messageID sharederrors.MessageID) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result rewrittenLinkDestinationResult) (bool, error) {
-		if result.Destination != destination || result.Changed {
-			return false, nil
-		}
-		return testmatchers.HaveMessageID(messageID).Match(result.Warning)
-	}).WithMessage("leave a link destination unchanged with warning")
+	return WithTransform(rewriteDestinationObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Destination":      Equal(destination),
+		"State":            Equal(rewriteDestinationUnchanged),
+		"WarningMessageID": Equal(messageID),
+	}))
 }
 
 func matchRewrittenLinkDestination(destination string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result rewrittenLinkDestinationResult) (bool, error) {
-		return result.Destination == destination &&
-			result.Changed &&
-			result.Warning == nil, nil
-	}).WithMessage("rewrite a link destination")
+	return WithTransform(rewriteDestinationObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Destination":      Equal(destination),
+		"State":            Equal(rewriteDestinationChanged),
+		"WarningMessageID": Equal(sharederrors.MessageID("")),
+	}))
 }
 
 func matchUnchangedLinkDestinationWithoutWarning(destination string) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(result rewrittenLinkDestinationResult) (bool, error) {
-		return result.Destination == destination &&
-			!result.Changed &&
-			result.Warning == nil, nil
-	}).WithMessage("leave a link destination unchanged without warning")
+	return WithTransform(rewriteDestinationObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Destination":      Equal(destination),
+		"State":            Equal(rewriteDestinationUnchanged),
+		"WarningMessageID": Equal(sharederrors.MessageID("")),
+	}))
+}
+
+type rewriteDestinationState uint8
+
+const (
+	rewriteDestinationUnchanged rewriteDestinationState = iota
+	rewriteDestinationChanged
+)
+
+type rewriteDestinationObservation struct {
+	Destination      string
+	State            rewriteDestinationState
+	WarningMessageID sharederrors.MessageID
+}
+
+func rewriteDestinationObservationFor(result rewrittenLinkDestinationResult) rewriteDestinationObservation {
+	state := rewriteDestinationUnchanged
+	if result.Changed {
+		state = rewriteDestinationChanged
+	}
+	var messageID sharederrors.MessageID
+	if result.Warning != nil {
+		messageID = result.Warning.MessageID
+	}
+	return rewriteDestinationObservation{
+		Destination:      result.Destination,
+		State:            state,
+		WarningMessageID: messageID,
+	}
 }
 
 func matchBrokenStoredBacklink(fromPageID tree.PageID) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(backlink Backlink) (bool, error) {
-		return backlink.FromPageID == fromPageID && backlink.Broken, nil
-	}).WithMessage("describe a broken stored backlink")
+	return WithTransform(storedBacklinkObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"FromPageID": Equal(fromPageID),
+		"State":      Equal(linkResolutionBroken),
+	}))
 }
 
 func matchHealedStoredBacklink(fromPageID tree.PageID, toPageID tree.PageID, targetKind TargetKind) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(backlink Backlink) (bool, error) {
-		return backlink.FromPageID == fromPageID &&
-			backlink.ToPageID == toPageID &&
-			backlink.ToKind == targetKind &&
-			!backlink.Broken, nil
-	}).WithMessage("describe a healed stored backlink")
+	return WithTransform(storedBacklinkObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"FromPageID": Equal(fromPageID),
+		"ToPageID":   Equal(toPageID),
+		"ToKind":     Equal(targetKind),
+		"State":      Equal(linkResolutionResolved),
+	}))
+}
+
+type storedBacklinkObservation struct {
+	FromPageID tree.PageID
+	ToPageID   tree.PageID
+	ToKind     TargetKind
+	State      linkResolutionState
+}
+
+func storedBacklinkObservationFor(backlink Backlink) storedBacklinkObservation {
+	state := linkResolutionResolved
+	if backlink.Broken {
+		state = linkResolutionBroken
+	}
+	return storedBacklinkObservation{
+		FromPageID: backlink.FromPageID,
+		ToPageID:   backlink.ToPageID,
+		ToKind:     backlink.ToKind,
+		State:      state,
+	}
+}
+
+type wikiDestinationExtension uint8
+
+const (
+	wikiDestinationCanonicalOrNonWiki wikiDestinationExtension = iota
+	wikiDestinationExtensionless
+)
+
+func wikiDestinationExtensionFor(destination string) wikiDestinationExtension {
+	if isExtensionlessWikiDestination(destination) {
+		return wikiDestinationExtensionless
+	}
+	return wikiDestinationCanonicalOrNonWiki
+}
+
+type linksTableSchema struct {
+	ColumnNames       []string
+	PrimaryKeyColumns []string
+}
+
+func linksTableSchemaFor(columns []linksTableColumn) linksTableSchema {
+	schema := linksTableSchema{
+		ColumnNames:       make([]string, 0, len(columns)),
+		PrimaryKeyColumns: make([]string, 0, len(columns)),
+	}
+	for _, column := range columns {
+		schema.ColumnNames = append(schema.ColumnNames, column.Name)
+		if column.PK > 0 {
+			schema.PrimaryKeyColumns = append(schema.PrimaryKeyColumns, column.Name)
+		}
+	}
+	return schema
+}
+
+func matchKindAwareLinksTableSchema() types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ColumnNames":       ContainElement("to_kind"),
+		"PrimaryKeyColumns": ContainElements("from_page_id", "to_path", "to_kind"),
+	})
+}
+
+type rewriteRuleKindEligibility uint8
+
+const (
+	rewriteRuleKindEligible rewriteRuleKindEligibility = iota
+	rewriteRuleKindRejected
+)
+
+func rewriteRuleKindEligibilityFor(rule RewriteRule, targetKind TargetKind) rewriteRuleKindEligibility {
+	if rewriteRuleMatchesExactKind(rule, targetKind) {
+		return rewriteRuleKindEligible
+	}
+	return rewriteRuleKindRejected
 }
 
 func matchTreePageContentError() types.GomegaMatcher {
-	return Satisfy(func(err error) bool {
-		return errors.Is(err, tree.ErrGetPageContent)
-	})
+	return MatchError(tree.ErrGetPageContent)
 }
 
 func matchLinksError(target error) types.GomegaMatcher {
-	return Satisfy(func(err error) bool {
-		return errors.Is(err, target)
-	})
+	return MatchError(target)
 }
 
 func linksStoreWithExecError(err error) *LinksStore {
@@ -218,8 +316,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 
 		columns, err := store.linksTableColumns()
 		Expect(err).NotTo(HaveOccurred())
-		Expect(linksTableKindAware(columns)).To(BeTrue())
-		Expect(linksTableHasColumn(columns, "to_kind")).To(BeTrue())
+		Expect(linksTableSchemaFor(columns)).To(matchKindAwareLinksTableSchema())
 		Expect(store).To(HaveOutgoingKindsForPage(newFixturePageID("legacy-source"), defaultStoredTargetKind))
 	})
 
@@ -316,9 +413,9 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(base).To(BeEmpty())
 		Expect(suffix).To(BeEmpty())
 
-		Expect(isExtensionlessWikiDestination("docs/page")).To(BeTrue())
-		Expect(isExtensionlessWikiDestination("docs/page/")).To(BeFalse())
-		Expect(isExtensionlessWikiDestination("docs/page.md?x=1")).To(BeFalse())
+		Expect(wikiDestinationExtensionFor("docs/page")).To(Equal(wikiDestinationExtensionless))
+		Expect(wikiDestinationExtensionFor("docs/page/")).To(Equal(wikiDestinationCanonicalOrNonWiki))
+		Expect(wikiDestinationExtensionFor("docs/page.md?x=1")).To(Equal(wikiDestinationCanonicalOrNonWiki))
 
 		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenPage), "docs/page")).To(Equal(TargetKindPage))
 		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenLink), "docs/section/")).To(Equal(TargetKindSection))
@@ -368,7 +465,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 			OutputKind: TargetKindPage,
 		}})).To(matchUnappliedRewriteRule())
 
-		Expect(rewriteRuleMatchesExactKind(RewriteRule{Kind: TargetKindPage}, "")).To(BeFalse())
+		Expect(rewriteRuleKindEligibilityFor(RewriteRule{Kind: TargetKindPage}, "")).To(Equal(rewriteRuleKindRejected))
 	})
 
 	It("uses the in-memory markdown index fallback for loaded trees", Label("integration"), func() {
@@ -561,7 +658,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 			Broken:         true,
 		}}))
 
-		Expect(isExtensionlessWikiDestination("docs/page#heading")).To(BeTrue())
+		Expect(wikiDestinationExtensionFor("docs/page#heading")).To(Equal(wikiDestinationExtensionless))
 		Expect(markdownLinkIndexForTreeWithOptions(nil, markdownlinks.Options{})).NotTo(BeNil())
 
 		restoreIndex := setLinksSeam(&newMarkdownLinkIndexFromRoot, func(string) (*markdownlinks.Index, error) {

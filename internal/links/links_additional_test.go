@@ -24,7 +24,7 @@ var _ = ginkgo.Describe("RewriteMarkdownLinks", ginkgo.Label("unit"), func() {
 	})
 })
 
-var _ = ginkgo.Describe("LinkService store mutations", ginkgo.Label("integration"), func() {
+var _ = ginkgo.Describe("stored link index mutations", ginkgo.Label("integration"), func() {
 	ginkgo.It("deletes outgoing links for a source page", ginkgo.Label("integration"), func() {
 		store := newAdditionalLinksStore()
 		service := NewLinkService("", nil, store)
