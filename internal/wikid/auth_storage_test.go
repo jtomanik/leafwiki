@@ -5,73 +5,59 @@ import (
 	"path/filepath"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.It("TestAuthStorageOpensFreshStoresUnderWikidAuthRoot", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := t.TempDir()
+var _ = ginkgo.Describe("wikid auth storage", func() {
+	ginkgo.It("opens fresh stores under the wikid auth root and removes legacy root databases", func() {
+		dataDir := wikidTestTempDir()
 
-	stores, err := OpenAuthStores(dataDir)
-	if err != nil {
-		t.Fatalf("OpenAuthStores failed: %v", err)
-	}
-	ginkgo.DeferCleanup(stores.Close)
+		stores, err := OpenAuthStores(dataDir)
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(func() {
+			Expect(stores.Close()).To(Succeed())
+		})
 
-	paths := AuthStoragePaths(dataDir)
-	for _, path := range []string{paths.UsersDB, paths.SessionsDB, paths.APIKeysDB} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected wikid auth DB %s to exist: %v", path, err)
+		paths := AuthStoragePaths(dataDir)
+		for _, path := range []string{paths.UsersDB, paths.SessionsDB, paths.APIKeysDB} {
+			_, err := os.Stat(path)
+			Expect(err).To(Succeed())
 		}
-	}
-	for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
-		if _, err := os.Stat(filepath.Join(dataDir, name)); !os.IsNotExist(err) {
-			t.Fatalf("legacy auth DB %s stat err = %v, want not exist", name, err)
+		for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
+			_, err := os.Stat(filepath.Join(dataDir, name))
+			Expect(err).To(MatchError(os.ErrNotExist))
 		}
-	}
-})
+	})
 
-var _ = ginkgo.It("TestAuthStoragePathsUseGlobalWikidDirWhenDataRootIsLeafwiki", func() {
-	t := ginkgo.GinkgoT()
-	globalRoot := filepath.Join(t.TempDir(), ".leafwiki")
+	ginkgo.It("uses the global wikid directory when the data root is the LeafWiki home", func() {
+		globalRoot := filepath.Join(wikidTestTempDir(), ".leafwiki")
 
-	paths := AuthStoragePaths(globalRoot)
+		paths := AuthStoragePaths(globalRoot)
 
-	if got, want := paths.AuthDir, filepath.Join(globalRoot, "wikid", "auth"); got != want {
-		t.Fatalf("AuthDir = %q, want %q", got, want)
-	}
-	if got, want := paths.OAuthDir, filepath.Join(globalRoot, "wikid", "oauth"); got != want {
-		t.Fatalf("OAuthDir = %q, want %q", got, want)
-	}
-})
+		Expect(paths).To(SatisfyAll(
+			HaveField("AuthDir", Equal(filepath.Join(globalRoot, "wikid", "auth"))),
+			HaveField("OAuthDir", Equal(filepath.Join(globalRoot, "wikid", "oauth"))),
+		))
+	})
 
-var _ = ginkgo.It("TestCleanupLegacyAuthDBsDeletesOnlyKnownRootFiles", func() {
-	t := ginkgo.GinkgoT()
-	dataDir := t.TempDir()
-	for _, name := range []string{"users.db", "sessions.db", "api_keys.db", "pages.db"} {
-		if err := os.WriteFile(filepath.Join(dataDir, name), []byte(name), 0o600); err != nil {
-			t.Fatalf("write %s: %v", name, err)
+	ginkgo.It("deletes only legacy auth databases from the data root", func() {
+		dataDir := wikidTestTempDir()
+		for _, name := range []string{"users.db", "sessions.db", "api_keys.db", "pages.db"} {
+			Expect(os.WriteFile(filepath.Join(dataDir, name), []byte(name), 0o600)).To(Succeed())
 		}
-	}
-	paths := AuthStoragePaths(dataDir)
-	if err := os.MkdirAll(paths.AuthDir, 0o755); err != nil {
-		t.Fatalf("create wikid auth root: %v", err)
-	}
-	if err := os.WriteFile(paths.UsersDB, []byte("new users"), 0o600); err != nil {
-		t.Fatalf("write new users db: %v", err)
-	}
+		paths := AuthStoragePaths(dataDir)
+		Expect(os.MkdirAll(paths.AuthDir, 0o755)).To(Succeed())
+		Expect(os.WriteFile(paths.UsersDB, []byte("new users"), 0o600)).To(Succeed())
 
-	if err := CleanupLegacyAuthDBs(dataDir); err != nil {
-		t.Fatalf("CleanupLegacyAuthDBs failed: %v", err)
-	}
+		Expect(CleanupLegacyAuthDBs(dataDir)).To(Succeed())
 
-	for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
-		if _, err := os.Stat(filepath.Join(dataDir, name)); !os.IsNotExist(err) {
-			t.Fatalf("legacy auth DB %s stat err = %v, want not exist", name, err)
+		for _, name := range []string{"users.db", "sessions.db", "api_keys.db"} {
+			_, err := os.Stat(filepath.Join(dataDir, name))
+			Expect(err).To(MatchError(os.ErrNotExist))
 		}
-	}
-	for _, path := range []string{filepath.Join(dataDir, "pages.db"), paths.UsersDB} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected unrelated/new file %s to remain: %v", path, err)
+		for _, path := range []string{filepath.Join(dataDir, "pages.db"), paths.UsersDB} {
+			_, err := os.Stat(path)
+			Expect(err).To(Succeed())
 		}
-	}
+	})
 })

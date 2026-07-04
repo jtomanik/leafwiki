@@ -12,13 +12,11 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.Describe("wikid helper coverage", func() {
-	ginkgo.It("GrantStore.Save replaces persisted grants", func() {
-		t := ginkgo.GinkgoT()
-		layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-		if _, err := NewRegistryService(NewRegistryStore(layout.DBPath), layout).BootstrapHome(); err != nil {
-			t.Fatalf("BootstrapHome failed: %v", err)
-		}
+var _ = ginkgo.Describe("wikid support stores and supervisors", func() {
+	ginkgo.It("replaces persisted grants when saving a complete grant document", func() {
+		layout := GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
+		_, err := NewRegistryService(NewRegistryStore(layout.DBPath), layout).BootstrapHome()
+		Expect(err).To(Succeed())
 		store := NewGrantStore(layout.DBPath)
 
 		Expect(store.Upsert(Grant{Subject: "user:old", WorkspaceID: HomeWorkspaceID, Role: GrantRoleViewer})).To(Succeed())
@@ -30,11 +28,11 @@ var _ = ginkgo.Describe("wikid helper coverage", func() {
 		})).To(Succeed())
 
 		doc, err := store.Load()
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(doc.Grants).To(Equal([]Grant{{Subject: "user:new", WorkspaceID: HomeWorkspaceID, Role: GrantRoleAdmin}}))
 	})
 
-	ginkgo.It("Supervisor.Roles returns a snapshot of marked roles", func() {
+	ginkgo.It("returns marked daemon roles as an immutable runtime snapshot", func() {
 		now := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
 		supervisor := NewSupervisor(SupervisorOptions{Now: func() time.Time { return now }})
 
@@ -54,7 +52,7 @@ var _ = ginkgo.Describe("wikid helper coverage", func() {
 		))
 	})
 
-	ginkgo.It("WorkspaceSupervisor marks starting/status entries and returns statuses ordered by workspace ID", func() {
+	ginkgo.It("returns workspace process states ordered by workspace identity", func() {
 		now := time.Date(2026, 6, 25, 11, 0, 0, 0, time.UTC)
 		supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{Now: func() time.Time { return now }})
 
@@ -76,7 +74,7 @@ var _ = ginkgo.Describe("wikid helper coverage", func() {
 	})
 })
 
-var _ = ginkgo.DescribeTable("joinBasePathForPrivateControlPlane",
+var _ = ginkgo.DescribeTable("private control-plane base path joining",
 	func(basePath string, requestPath string, want string) {
 		Expect(joinBasePathForPrivateControlPlane(basePath, requestPath)).To(Equal(want))
 	},

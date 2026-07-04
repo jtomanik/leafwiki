@@ -3,351 +3,223 @@ package wikid
 import (
 	"context"
 	"encoding/json"
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
+
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.It("TestPrivateWorkspaceAPIListsGrantedWorkspaces", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
-	home, err := registry.BootstrapHome()
-	if err != nil {
-		t.Fatalf("BootstrapHome failed: %v", err)
-	}
-	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
-		DisplayName: "Alpha",
-		DataDir:     filepath.Join(t.TempDir(), "alpha-data"),
-		RootDir:     filepath.Join(t.TempDir(), "alpha-root"),
-	})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace failed: %v", err)
-	}
-	grants := NewGrantStore(layout.DBPath)
-	if err := grants.Upsert(Grant{Subject: "user:1", WorkspaceID: home.ID, Role: GrantRoleViewer}); err != nil {
-		t.Fatalf("grant home: %v", err)
-	}
-	if err := grants.Upsert(Grant{Subject: "user:2", WorkspaceID: alpha.ID, Role: GrantRoleViewer}); err != nil {
-		t.Fatalf("grant alpha to other user: %v", err)
-	}
-	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-		Registry: registry,
-		Grants:   grants,
-		Subject: func(*http.Request) (WorkspaceSubject, error) {
-			return WorkspaceSubject{Subject: "user:1"}, nil
-		},
-		Supervisor: NewWorkspaceSupervisor(WorkspaceSupervisorOptions{}),
-	})
+type privateWorkspaceAPIFixture struct {
+	layout     Layout
+	registry   *RegistryService
+	grants     *GrantStore
+	supervisor *WorkspaceSupervisor
+}
 
-	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces", nil)
+func newPrivateWorkspaceAPIFixture() privateWorkspaceAPIFixture {
+	ginkgo.GinkgoHelper()
+	layout := GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
+	return privateWorkspaceAPIFixture{
+		layout:     layout,
+		registry:   NewRegistryService(NewRegistryStore(layout.DBPath), layout),
+		grants:     NewGrantStore(layout.DBPath),
+		supervisor: NewWorkspaceSupervisor(WorkspaceSupervisorOptions{}),
+	}
+}
+
+func (fixture privateWorkspaceAPIFixture) bootstrapHomeWorkspace() WorkspaceRecord {
+	ginkgo.GinkgoHelper()
+	home, err := fixture.registry.BootstrapHome()
+	Expect(err).To(Succeed())
+	return home
+}
+
+func (fixture privateWorkspaceAPIFixture) registerWorkspace(displayName string, markdownLinkRootPrefix string) WorkspaceRecord {
+	ginkgo.GinkgoHelper()
+	workspace, err := fixture.registry.RegisterWorkspace(RegisterWorkspaceRequest{
+		DisplayName:            displayName,
+		DataDir:                filepath.Join(wikidTestTempDir(), displayName+"-data"),
+		RootDir:                filepath.Join(wikidTestTempDir(), displayName+"-root"),
+		MarkdownLinkRootPrefix: markdownLinkRootPrefix,
+	})
+	Expect(err).To(Succeed())
+	return workspace
+}
+
+func (fixture privateWorkspaceAPIFixture) grantWorkspace(subject string, workspaceID workspaceid.WorkspaceID, role GrantRole) {
+	ginkgo.GinkgoHelper()
+	Expect(fixture.grants.Upsert(Grant{Subject: subject, WorkspaceID: workspaceID, Role: role})).To(Succeed())
+}
+
+func (fixture privateWorkspaceAPIFixture) privateWorkspaceAPI(subject WorkspaceSubject, ensure func(context.Context, WorkspaceRecord) (WorkspaceStatus, error)) http.Handler {
+	ginkgo.GinkgoHelper()
+	return NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
+		Registry:   fixture.registry,
+		Grants:     fixture.grants,
+		Supervisor: fixture.supervisor,
+		Subject: func(*http.Request) (WorkspaceSubject, error) {
+			return subject, nil
+		},
+		Ensure: ensure,
+	})
+}
+
+func recordPrivateWorkspaceAPIResponse(api http.Handler, method string, path string) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
+	req := httptest.NewRequest(method, path, nil)
 	rec := httptest.NewRecorder()
 	api.ServeHTTP(rec, req)
+	return rec
+}
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	for _, leaked := range []string{"dataDir", "rootDir", home.DataDir, home.RootDir} {
-		if strings.Contains(body, leaked) {
-			t.Fatalf("response leaked workspace path field %q: %s", leaked, body)
-		}
-	}
-	var out WorkspaceListResponse
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(out.Workspaces) != 1 || out.Workspaces[0].ID != home.ID || out.Workspaces[0].Role != GrantRoleViewer {
-		t.Fatalf("workspaces = %#v, want only granted home", out.Workspaces)
-	}
-})
-
-var _ = ginkgo.It("TestPrivateWorkspaceAPIListsWorkspaceMarkdownLinkRootPrefix", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
-	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
-		DisplayName:            "Alpha",
-		DataDir:                filepath.Join(t.TempDir(), "alpha-data"),
-		RootDir:                filepath.Join(t.TempDir(), "alpha-root"),
-		MarkdownLinkRootPrefix: "docs/",
-	})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace failed: %v", err)
-	}
-	grants := NewGrantStore(layout.DBPath)
-	if err := grants.Upsert(Grant{Subject: "user:1", WorkspaceID: alpha.ID, Role: GrantRoleViewer}); err != nil {
-		t.Fatalf("grant alpha: %v", err)
-	}
-	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-		Registry: registry,
-		Grants:   grants,
-		Subject: func(*http.Request) (WorkspaceSubject, error) {
-			return WorkspaceSubject{Subject: "user:1"}, nil
-		},
-		Supervisor: NewWorkspaceSupervisor(WorkspaceSupervisorOptions{}),
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces", nil)
+func recordPrivateWorkspaceActionResponse(api http.Handler, method string, workspaceID workspaceid.WorkspaceID, action string) *httptest.ResponseRecorder {
+	ginkgo.GinkgoHelper()
+	req := httptest.NewRequest(method, PrivateWorkspacesPrefix+"/"+workspaceID.String()+"/"+action, nil)
 	rec := httptest.NewRecorder()
 	api.ServeHTTP(rec, req)
+	return rec
+}
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
-	}
-	var out WorkspaceListResponse
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(out.Workspaces) != 1 || out.Workspaces[0].ID != alpha.ID {
-		t.Fatalf("workspaces = %#v, want granted alpha", out.Workspaces)
-	}
-	if out.Workspaces[0].MarkdownLinkRootPrefix != "/docs" {
-		t.Fatalf("markdown link root prefix = %q, want /docs", out.Workspaces[0].MarkdownLinkRootPrefix)
-	}
-})
+func decodePrivateWorkspaceAPIResponse[T any](rec *httptest.ResponseRecorder) T {
+	ginkgo.GinkgoHelper()
+	var out T
+	Expect(json.Unmarshal(rec.Body.Bytes(), &out)).To(Succeed())
+	return out
+}
 
-var _ = ginkgo.It("TestPrivateWorkspaceAPIAdminListsAndEnsuresRegisteredWorkspacesWithoutStoredGrants", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
-	home, err := registry.BootstrapHome()
-	if err != nil {
-		t.Fatalf("BootstrapHome failed: %v", err)
-	}
-	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
-		DisplayName: "Alpha",
-		DataDir:     filepath.Join(t.TempDir(), "alpha-data"),
-		RootDir:     filepath.Join(t.TempDir(), "alpha-root"),
+func matchWorkspaceListItem(workspace WorkspaceRecord, role GrantRole, markdownLinkRootPrefix string) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":                     Equal(workspace.ID),
+		"Role":                   Equal(role),
+		"MarkdownLinkRootPrefix": Equal(markdownLinkRootPrefix),
+		"DataDir":                BeZero(),
+		"RootDir":                BeZero(),
 	})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace failed: %v", err)
-	}
-	grants := NewGrantStore(layout.DBPath)
-	supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{})
-	var ensured workspaceid.WorkspaceID
-	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-		Registry:   registry,
-		Grants:     grants,
-		Supervisor: supervisor,
-		Subject: func(*http.Request) (WorkspaceSubject, error) {
-			return WorkspaceSubject{Subject: "user:admin", Role: GrantRoleAdmin}, nil
-		},
-		Ensure: func(_ context.Context, workspace WorkspaceRecord) (WorkspaceStatus, error) {
+}
+
+var _ = ginkgo.Describe("private workspace API", func() {
+	ginkgo.It("lists only workspaces granted to the authenticated subject", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		home := fixture.bootstrapHomeWorkspace()
+		alpha := fixture.registerWorkspace("Alpha", "")
+		fixture.grantWorkspace("user:1", home.ID, GrantRoleViewer)
+		fixture.grantWorkspace("user:2", alpha.ID, GrantRoleViewer)
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:1"}, nil)
+
+		rec := recordPrivateWorkspaceAPIResponse(api, http.MethodGet, PrivateWorkspacesPrefix)
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		out := decodePrivateWorkspaceAPIResponse[WorkspaceListResponse](rec)
+		Expect(out.Workspaces).To(ConsistOf(matchWorkspaceListItem(home, GrantRoleViewer, "")))
+	})
+
+	ginkgo.It("normalizes markdown link root prefixes on granted workspace listings", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		alpha := fixture.registerWorkspace("Alpha", "docs/")
+		fixture.grantWorkspace("user:1", alpha.ID, GrantRoleViewer)
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:1"}, nil)
+
+		rec := recordPrivateWorkspaceAPIResponse(api, http.MethodGet, PrivateWorkspacesPrefix)
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		out := decodePrivateWorkspaceAPIResponse[WorkspaceListResponse](rec)
+		Expect(out.Workspaces).To(ConsistOf(matchWorkspaceListItem(alpha, GrantRoleViewer, "/docs")))
+	})
+
+	ginkgo.It("lets administrators list and start registered workspaces without stored grants", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		home := fixture.bootstrapHomeWorkspace()
+		alpha := fixture.registerWorkspace("Alpha", "")
+		var ensured workspaceid.WorkspaceID
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:admin", Role: GrantRoleAdmin}, func(_ context.Context, workspace WorkspaceRecord) (WorkspaceStatus, error) {
 			ensured = workspace.ID
-			supervisor.MarkReady(workspace.ID, 321, "http://127.0.0.1:42001")
-			return supervisor.Status(workspace.ID), nil
-		},
+			fixture.supervisor.MarkReady(workspace.ID, 321, "http://127.0.0.1:42001")
+			return fixture.supervisor.Status(workspace.ID), nil
+		})
+
+		listRec := recordPrivateWorkspaceAPIResponse(api, http.MethodGet, PrivateWorkspacesPrefix)
+
+		Expect(listRec).To(HaveHTTPStatus(http.StatusOK))
+		list := decodePrivateWorkspaceAPIResponse[WorkspaceListResponse](listRec)
+		Expect(list.Workspaces).To(ConsistOf(
+			matchWorkspaceListItem(home, GrantRoleAdmin, ""),
+			matchWorkspaceListItem(alpha, GrantRoleAdmin, ""),
+		))
+
+		ensureRec := recordPrivateWorkspaceActionResponse(api, http.MethodPost, alpha.ID, "ensure")
+
+		Expect(ensureRec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(ensured).To(Equal(alpha.ID))
+		stored, err := fixture.grants.GrantsForSubject("user:admin")
+		Expect(err).To(Succeed())
+		Expect(stored).To(BeEmpty())
 	})
 
-	listReq := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces", nil)
-	listRec := httptest.NewRecorder()
-	api.ServeHTTP(listRec, listReq)
-
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list status = %d: %s", listRec.Code, listRec.Body.String())
-	}
-	var list WorkspaceListResponse
-	if err := json.NewDecoder(listRec.Body).Decode(&list); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
-	if len(list.Workspaces) != 2 {
-		t.Fatalf("workspaces = %#v, want home and alpha", list.Workspaces)
-	}
-	for _, workspace := range list.Workspaces {
-		if workspace.ID != home.ID && workspace.ID != alpha.ID {
-			t.Fatalf("unexpected workspace in admin list: %#v", workspace)
-		}
-		if workspace.Role != GrantRoleAdmin {
-			t.Fatalf("workspace %q role = %q, want admin", workspace.ID, workspace.Role)
-		}
-	}
-
-	ensureReq := httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/"+alpha.ID.String()+"/ensure", nil)
-	ensureRec := httptest.NewRecorder()
-	api.ServeHTTP(ensureRec, ensureReq)
-
-	if ensureRec.Code != http.StatusOK {
-		t.Fatalf("ensure status = %d: %s", ensureRec.Code, ensureRec.Body.String())
-	}
-	if ensured != alpha.ID {
-		t.Fatalf("ensured workspace = %q, want %q", ensured, alpha.ID)
-	}
-	stored, err := grants.GrantsForSubject("user:admin")
-	if err != nil {
-		t.Fatalf("GrantsForSubject failed: %v", err)
-	}
-	if len(stored) != 0 {
-		t.Fatalf("stored admin grants = %#v, want none", stored)
-	}
-})
-
-var _ = ginkgo.It("TestPrivateWorkspaceAPIEnsureStartsGrantedWorkspace", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
-	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
-		DisplayName:            "Alpha",
-		DataDir:                filepath.Join(t.TempDir(), "alpha-data"),
-		RootDir:                filepath.Join(t.TempDir(), "alpha-root"),
-		MarkdownLinkRootPrefix: "docs/",
-	})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace failed: %v", err)
-	}
-	grants := NewGrantStore(layout.DBPath)
-	if err := grants.Upsert(Grant{Subject: "user:1", WorkspaceID: alpha.ID, Role: GrantRoleEditor}); err != nil {
-		t.Fatalf("grant alpha: %v", err)
-	}
-	supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{})
-	var ensured workspaceid.WorkspaceID
-	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-		Registry:   registry,
-		Grants:     grants,
-		Supervisor: supervisor,
-		Subject: func(*http.Request) (WorkspaceSubject, error) {
-			return WorkspaceSubject{Subject: "user:1"}, nil
-		},
-		Ensure: func(_ context.Context, workspace WorkspaceRecord) (WorkspaceStatus, error) {
+	ginkgo.It("starts granted workspaces and returns the public running status", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		alpha := fixture.registerWorkspace("Alpha", "docs/")
+		fixture.grantWorkspace("user:1", alpha.ID, GrantRoleEditor)
+		var ensured workspaceid.WorkspaceID
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:1"}, func(_ context.Context, workspace WorkspaceRecord) (WorkspaceStatus, error) {
 			ensured = workspace.ID
-			supervisor.MarkReady(workspace.ID, 123, "http://127.0.0.1:41001")
-			return supervisor.Status(workspace.ID), nil
-		},
+			fixture.supervisor.MarkReady(workspace.ID, 123, "http://127.0.0.1:41001")
+			return fixture.supervisor.Status(workspace.ID), nil
+		})
+
+		rec := recordPrivateWorkspaceActionResponse(api, http.MethodPost, alpha.ID, "ensure")
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(ensured).To(Equal(alpha.ID))
+		out := decodePrivateWorkspaceAPIResponse[WorkspaceStatusResponse](rec)
+		Expect(out).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Workspace": matchWorkspaceListItem(alpha, GrantRoleEditor, "/docs"),
+			"Status": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"WorkspaceID": Equal(alpha.ID),
+				"State":       Equal(WorkspaceStateRunning),
+				"URL":         Equal("http://127.0.0.1:41001"),
+			}),
+		}))
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/"+alpha.ID.String()+"/ensure", nil)
-	rec := httptest.NewRecorder()
-	api.ServeHTTP(rec, req)
+	ginkgo.It("returns a localized denial for workspaces not granted to the subject", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		alpha := fixture.registerWorkspace("Alpha", "")
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:1"}, nil)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	for _, leaked := range []string{"dataDir", "rootDir", alpha.DataDir, alpha.RootDir} {
-		if strings.Contains(body, leaked) {
-			t.Fatalf("response leaked workspace path field %q: %s", leaked, body)
-		}
-	}
-	if ensured != alpha.ID {
-		t.Fatalf("ensured workspace = %q, want %q", ensured, alpha.ID)
-	}
-	var out WorkspaceStatusResponse
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if out.Status.State != WorkspaceStateRunning || out.Status.URL == "" {
-		t.Fatalf("status response = %#v", out.Status)
-	}
-	if out.Workspace.MarkdownLinkRootPrefix != "/docs" {
-		t.Fatalf("markdown link root prefix = %q, want /docs", out.Workspace.MarkdownLinkRootPrefix)
-	}
-})
+		rec := recordPrivateWorkspaceActionResponse(api, http.MethodGet, alpha.ID, "status")
 
-var _ = ginkgo.It("TestPrivateWorkspaceAPIRejectsUngrantedWorkspace", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
-	alpha, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
-		DisplayName: "Alpha",
-		DataDir:     filepath.Join(t.TempDir(), "alpha-data"),
-		RootDir:     filepath.Join(t.TempDir(), "alpha-root"),
-	})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace failed: %v", err)
-	}
-	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-		Registry:   registry,
-		Grants:     NewGrantStore(layout.DBPath),
-		Supervisor: NewWorkspaceSupervisor(WorkspaceSupervisorOptions{}),
-		Subject: func(*http.Request) (WorkspaceSubject, error) {
-			return WorkspaceSubject{Subject: "user:1"}, nil
-		},
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusForbidden, ErrCodeWorkspaceGrantDenied, sharederrors.MessageIDForCode(ErrCodeWorkspaceGrantDenied)))
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces/"+alpha.ID.String()+"/status", nil)
-	rec := httptest.NewRecorder()
-	api.ServeHTTP(rec, req)
+	ginkgo.It("returns not found for unknown workspace status requests", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		fixture.bootstrapHomeWorkspace()
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:1"}, nil)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Error struct {
-			Code      string `json:"code"`
-			MessageID string `json:"messageId"`
-			Message   string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode structured grant denial: %v; body=%q", err, rec.Body.String())
-	}
-	if body.Error.Code != "workspace_grant_denied" || body.Error.MessageID != "errors.workspace.grant_denied" {
-		t.Fatalf("structured error = %#v, want workspace_grant_denied/errors.workspace.grant_denied", body.Error)
-	}
-	if !strings.Contains(body.Error.Message, "workspace access denied") {
-		t.Fatalf("message = %q, want workspace access denied", body.Error.Message)
-	}
-})
+		rec := recordPrivateWorkspaceAPIResponse(api, http.MethodGet, PrivateWorkspacesPrefix+"/missing/status")
 
-var _ = ginkgo.It("TestPrivateWorkspaceAPIReturnsNotFoundForUnknownWorkspace", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
-	if _, err := registry.BootstrapHome(); err != nil {
-		t.Fatalf("BootstrapHome failed: %v", err)
-	}
-	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-		Registry:   registry,
-		Grants:     NewGrantStore(layout.DBPath),
-		Supervisor: NewWorkspaceSupervisor(WorkspaceSupervisorOptions{}),
-		Subject: func(*http.Request) (WorkspaceSubject, error) {
-			return WorkspaceSubject{Subject: "user:1"}, nil
-		},
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/__leafwiki/workspaces/missing/status", nil)
-	rec := httptest.NewRecorder()
-	api.ServeHTTP(rec, req)
+	ginkgo.It("rejects invalid workspace identifiers before starting a workspace", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		home := fixture.bootstrapHomeWorkspace()
+		fixture.grantWorkspace("user:1", home.ID, GrantRoleEditor)
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:1"}, func(_ context.Context, workspace WorkspaceRecord) (WorkspaceStatus, error) {
+			fixture.supervisor.MarkReady(workspace.ID, 999, "http://127.0.0.1:49999")
+			return fixture.supervisor.Status(workspace.ID), nil
+		})
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-})
+		rec := recordPrivateWorkspaceAPIResponse(api, http.MethodPost, PrivateWorkspacesPrefix+"/%20home/ensure")
 
-var _ = ginkgo.It("TestPrivateWorkspaceAPIRejectsInvalidWorkspaceIDBeforeLookup", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
-	home, err := registry.BootstrapHome()
-	if err != nil {
-		t.Fatalf("BootstrapHome failed: %v", err)
-	}
-	grants := NewGrantStore(layout.DBPath)
-	if err := grants.Upsert(Grant{Subject: "user:1", WorkspaceID: home.ID, Role: GrantRoleEditor}); err != nil {
-		t.Fatalf("grant home: %v", err)
-	}
-	api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-		Registry:   registry,
-		Grants:     grants,
-		Supervisor: NewWorkspaceSupervisor(WorkspaceSupervisorOptions{}),
-		Subject: func(*http.Request) (WorkspaceSubject, error) {
-			return WorkspaceSubject{Subject: "user:1"}, nil
-		},
-		Ensure: func(context.Context, WorkspaceRecord) (WorkspaceStatus, error) {
-			t.Fatalf("invalid workspace ID unexpectedly reached ensure")
-			return WorkspaceStatus{}, nil
-		},
+		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 	})
-
-	req := httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/%20home/ensure", nil)
-	rec := httptest.NewRecorder()
-	api.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 for invalid workspace ID: %s", rec.Code, rec.Body.String())
-	}
 })

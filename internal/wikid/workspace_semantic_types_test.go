@@ -2,100 +2,108 @@ package wikid
 
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"path/filepath"
 	"time"
 
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.It("TestWorkspaceRuntimeModelsCarrySemanticWorkspaceID", func() {
-	t := ginkgo.GinkgoT()
-	workspaceID := workspaceid.WorkspaceID("home")
+type registryWorkspaceLookupOutcome uint8
 
-	doc := RegistryDocument{
-		SchemaVersion: RegistrySchemaVersion,
-		Workspaces: []WorkspaceRecord{{
-			ID: workspaceID,
-		}},
+const (
+	registryWorkspaceResolved registryWorkspaceLookupOutcome = iota + 1
+	registryWorkspaceAbsent
+)
+
+type registryWorkspaceLookupResult struct {
+	Outcome   registryWorkspaceLookupOutcome
+	Workspace WorkspaceRecord
+}
+
+func lookupRegistryWorkspace(doc RegistryDocument, workspaceID workspaceid.WorkspaceID) registryWorkspaceLookupResult {
+	ginkgo.GinkgoHelper()
+
+	workspace, ok := doc.Workspace(workspaceID)
+	if ok {
+		return registryWorkspaceLookupResult{Outcome: registryWorkspaceResolved, Workspace: workspace}
 	}
-	if got, ok := doc.Workspace(workspaceID); !ok || got.ID != workspaceID {
-		t.Fatalf("workspace lookup = %#v, ok=%v", got, ok)
-	}
+	return registryWorkspaceLookupResult{Outcome: registryWorkspaceAbsent}
+}
 
-	grant := Grant{Subject: "user:1", WorkspaceID: workspaceID, Role: GrantRoleViewer}
-	var _ workspaceid.WorkspaceID = grant.WorkspaceID
+var _ = ginkgo.Describe("wikid workspace semantic typing", func() {
+	ginkgo.It("preserves typed workspace identifiers across registry, grant, and supervisor models", func() {
+		workspaceID := workspaceid.WorkspaceID("home")
 
-	supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{})
-	supervisor.MarkReady(workspaceID, 123, "http://127.0.0.1:41001")
-	status := supervisor.Status(workspaceID)
-	if status.WorkspaceID != workspaceID || status.State != WorkspaceStateRunning {
-		t.Fatalf("supervisor status = %#v, want typed workspace ID to remain running", status)
-	}
-})
+		doc := RegistryDocument{
+			SchemaVersion: RegistrySchemaVersion,
+			Workspaces: []WorkspaceRecord{{
+				ID: workspaceID,
+			}},
+		}
+		Expect(lookupRegistryWorkspace(doc, workspaceID)).To(SatisfyAll(
+			HaveField("Outcome", Equal(registryWorkspaceResolved)),
+			HaveField("Workspace", HaveField("ID", Equal(workspaceID))),
+		))
 
-var _ = ginkgo.It("TestRegistryStoreRejectsWorkspaceIDWhitespaceBeforeNormalization", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	store := NewRegistryStore(layout.DBPath)
-	now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
+		grant := Grant{Subject: "user:1", WorkspaceID: workspaceID, Role: GrantRoleViewer}
+		var _ workspaceid.WorkspaceID = grant.WorkspaceID
 
-	_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
-		ID:          workspaceid.WorkspaceID(" docs "),
-		DisplayName: "Docs",
-		DataDir:     filepath.Join(t.TempDir(), "docs-data"),
-		RootDir:     filepath.Join(t.TempDir(), "docs-root"),
-		CreatedAt:   now(),
-		UpdatedAt:   now(),
-	}, now, nil)
-	if code := workspaceid.WorkspaceIDErrorCode(err); code != workspaceid.ErrCodeWorkspaceIDWhitespace {
-		t.Fatalf("RegisterWorkspaceWithResultAndGrants error code = %q, want %q (err=%v)", code, workspaceid.ErrCodeWorkspaceIDWhitespace, err)
-	}
-
-	doc, loadErr := store.Load()
-	if loadErr != nil {
-		t.Fatalf("Load failed: %v", loadErr)
-	}
-	if len(doc.Workspaces) != 0 {
-		t.Fatalf("workspaces after rejected padded ID registration = %#v, want none", doc.Workspaces)
-	}
-})
-
-var _ = ginkgo.It("TestRegistryStoreRejectsSeededGrantWorkspaceIDWhitespaceBeforeNormalization", func() {
-	t := ginkgo.GinkgoT()
-	layout := GlobalLayout(filepath.Join(t.TempDir(), ".leafwiki"))
-	store := NewRegistryStore(layout.DBPath)
-	now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
-
-	_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
-		ID:          workspaceid.WorkspaceID("docs"),
-		DisplayName: "Docs",
-		DataDir:     filepath.Join(t.TempDir(), "docs-data"),
-		RootDir:     filepath.Join(t.TempDir(), "docs-root"),
-		CreatedAt:   now(),
-		UpdatedAt:   now(),
-	}, now, func(registration RegisterWorkspaceResult) ([]Grant, error) {
-		return []Grant{{
-			Subject:     "user:agent",
-			WorkspaceID: decodeWorkspaceIDForTest(t, " "+registration.Workspace.ID.StorageKey()+" "),
-			Role:        GrantRoleViewer,
-		}}, nil
+		supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{})
+		supervisor.MarkReady(workspaceID, 123, "http://127.0.0.1:41001")
+		Expect(supervisor.Status(workspaceID)).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"WorkspaceID": Equal(workspaceID),
+			"State":       Equal(WorkspaceStateRunning),
+		}))
 	})
-	if code := workspaceid.WorkspaceIDErrorCode(err); code != workspaceid.ErrCodeWorkspaceIDWhitespace {
-		t.Fatalf("RegisterWorkspaceWithResultAndGrants seeded grant error code = %q, want %q (err=%v)", code, workspaceid.ErrCodeWorkspaceIDWhitespace, err)
-	}
 
-	doc, loadErr := store.Load()
-	if loadErr != nil {
-		t.Fatalf("Load failed: %v", loadErr)
-	}
-	if len(doc.Workspaces) != 0 {
-		t.Fatalf("workspaces after rejected seeded grant = %#v, want rollback", doc.Workspaces)
-	}
-	grants, loadErr := NewGrantStore(layout.DBPath).Load()
-	if loadErr != nil {
-		t.Fatalf("Load grants failed: %v", loadErr)
-	}
-	if len(grants.Grants) != 0 {
-		t.Fatalf("grants after rejected seeded grant = %#v, want rollback", grants.Grants)
-	}
+	ginkgo.It("rejects registry records whose workspace ID contains whitespace before normalization", func() {
+		layout := GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
+		store := NewRegistryStore(layout.DBPath)
+		now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
+
+		_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
+			ID:          workspaceid.WorkspaceID(" docs "),
+			DisplayName: "Docs",
+			DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
+			RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
+			CreatedAt:   now(),
+			UpdatedAt:   now(),
+		}, now, nil)
+		Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDWhitespace)))
+
+		doc, loadErr := store.Load()
+		Expect(loadErr).To(Succeed())
+		Expect(doc.Workspaces).To(BeEmpty())
+	})
+
+	ginkgo.It("rolls back registry and grant writes when seeded grants contain whitespace workspace IDs", func() {
+		layout := GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
+		store := NewRegistryStore(layout.DBPath)
+		now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
+
+		_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
+			ID:          workspaceid.WorkspaceID("docs"),
+			DisplayName: "Docs",
+			DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
+			RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
+			CreatedAt:   now(),
+			UpdatedAt:   now(),
+		}, now, func(registration RegisterWorkspaceResult) ([]Grant, error) {
+			return []Grant{{
+				Subject:     "user:agent",
+				WorkspaceID: mustDecodeWorkspaceID(" " + registration.Workspace.ID.StorageKey() + " "),
+				Role:        GrantRoleViewer,
+			}}, nil
+		})
+		Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDWhitespace)))
+
+		doc, loadErr := store.Load()
+		Expect(loadErr).To(Succeed())
+		Expect(doc.Workspaces).To(BeEmpty())
+		grants, loadErr := NewGrantStore(layout.DBPath).Load()
+		Expect(loadErr).To(Succeed())
+		Expect(grants.Grants).To(BeEmpty())
+	})
 })

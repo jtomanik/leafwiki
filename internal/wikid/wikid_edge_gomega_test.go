@@ -34,10 +34,10 @@ const (
 	wikidWorkspaceUpdateBlockedFixture = "workspace update blocked"
 )
 
-var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
+var _ = ginkgo.Describe("wikid persistence and private route edge behavior", func() {
 	ginkgo.Describe("auth storage", func() {
 		ginkgo.It("joins legacy cleanup errors and propagates auth directory setup failures", func() {
-			dataDir := ginkgo.GinkgoT().TempDir()
+			dataDir := wikidTestTempDir()
 			legacyUsersDB := filepath.Join(dataDir, "users.db")
 			Expect(os.Mkdir(legacyUsersDB, 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(legacyUsersDB, "child"), []byte("x"), 0o644)).To(Succeed())
@@ -45,12 +45,12 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(CleanupLegacyAuthDBs(dataDir)).To(MatchError(syscall.ENOTEMPTY))
 			Expect(OpenAuthStores(dataDir)).Error().To(MatchError(syscall.ENOTEMPTY))
 
-			blockedAuthDirData := ginkgo.GinkgoT().TempDir()
+			blockedAuthDirData := wikidTestTempDir()
 			Expect(os.Mkdir(filepath.Join(blockedAuthDirData, ".leafwiki"), 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(blockedAuthDirData, ".leafwiki", "wikid"), []byte("x"), 0o644)).To(Succeed())
 			Expect(OpenAuthStores(blockedAuthDirData)).Error().To(MatchError(syscall.ENOTDIR))
 
-			blockedOAuthDirData := ginkgo.GinkgoT().TempDir()
+			blockedOAuthDirData := wikidTestTempDir()
 			wikidDir := filepath.Join(blockedOAuthDirData, ".leafwiki", "wikid")
 			Expect(os.MkdirAll(filepath.Join(wikidDir, "auth"), 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(wikidDir, "oauth"), []byte("x"), 0o644)).To(Succeed())
@@ -70,7 +70,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidNewUserStore = func(string) (*coreauth.UserStore, error) {
 				return nil, userStoreErr
 			}
-			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(userStoreErr))
+			Expect(OpenAuthStores(wikidTestTempDir())).Error().To(MatchError(userStoreErr))
 
 			restore()
 			restore = captureWikidAuthSeams()
@@ -79,7 +79,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidNewSessionStore = func(string) (*coreauth.SessionStore, error) {
 				return nil, sessionStoreErr
 			}
-			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(sessionStoreErr))
+			Expect(OpenAuthStores(wikidTestTempDir())).Error().To(MatchError(sessionStoreErr))
 
 			restore()
 			restore = captureWikidAuthSeams()
@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidNewAPIKeyStore = func(string) (*coreauth.APIKeyStore, error) {
 				return nil, apiKeyStoreErr
 			}
-			Expect(OpenAuthStores(ginkgo.GinkgoT().TempDir())).Error().To(MatchError(apiKeyStoreErr))
+			Expect(OpenAuthStores(wikidTestTempDir())).Error().To(MatchError(apiKeyStoreErr))
 		})
 	})
 
@@ -128,7 +128,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 		})
 
 		ginkgo.It("canonicalizes paths through existing symlink ancestors and missing suffixes", func() {
-			root := ginkgo.GinkgoT().TempDir()
+			root := wikidTestTempDir()
 			realDir := filepath.Join(root, "real")
 			linkDir := filepath.Join(root, "link")
 			Expect(os.Mkdir(realDir, 0o755)).To(Succeed())
@@ -197,11 +197,11 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 		ginkgo.It("returns open errors before loading or mutating stores", func() {
 			badPath := wikidDBPathInsideFile()
 
-			Expect(NewRegistryStore(badPath).Load()).Error().To(HaveOccurred())
-			Expect(NewRegistryStore(badPath).Save(NewRegistryDocument())).To(HaveOccurred())
-			Expect(NewGrantStore(badPath).Load()).Error().To(HaveOccurred())
-			Expect(NewGrantStore(badPath).Save(NewGrantDocument())).To(HaveOccurred())
-			Expect(NewGrantStore(badPath).GrantsForSubject("user:1")).Error().To(HaveOccurred())
+			Expect(NewRegistryStore(badPath).Load()).Error().To(MatchError(syscall.ENOTDIR))
+			Expect(NewRegistryStore(badPath).Save(NewRegistryDocument())).To(MatchError(syscall.ENOTDIR))
+			Expect(NewGrantStore(badPath).Load()).Error().To(MatchError(syscall.ENOTDIR))
+			Expect(NewGrantStore(badPath).Save(NewGrantDocument())).To(MatchError(syscall.ENOTDIR))
+			Expect(NewGrantStore(badPath).GrantsForSubject("user:1")).Error().To(MatchError(syscall.ENOTDIR))
 		})
 
 		ginkgo.It("deletes stale registry rows when saving an empty document", func() {
@@ -209,8 +209,8 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			_, err := registry.RegisterWorkspace(RegisterWorkspaceRequest{
 				DisplayName: "Docs",
-				DataDir:     filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-data"),
-				RootDir:     filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-root"),
+				DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
+				RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -221,7 +221,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(loaded.Workspaces).To(BeEmpty())
 		})
 
-		ginkgo.It("covers grant save and replacement validation branches", func() {
+		ginkgo.It("rejects invalid grant documents and subject replacement inputs", func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := registry.BootstrapHome()
@@ -232,7 +232,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(store.Save(GrantDocument{
 				SchemaVersion: GrantSchemaVersion,
 				Grants:        []Grant{{Subject: "user:missing", WorkspaceID: "missing", Role: GrantRoleViewer}},
-			})).To(HaveOccurred())
+			})).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 			Expect(store.ReplaceSubjectGrants(" \t ", nil)).To(MatchError(ErrGrantSubjectRequired))
 			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{Subject: "user:2", WorkspaceID: home.ID, Role: GrantRoleViewer}})).To(MatchError(ErrGrantSubjectMismatch))
 			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{WorkspaceID: home.ID, Role: GrantRole("owner")}})).To(MatchError(ErrUnknownGrantRole))
@@ -253,15 +253,15 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 		})
 
 		ginkgo.It("reports invalid persisted grant rows while loading and listing grants", func() {
-			Expect(loadGrantDocument(context.Background(), closedSQLiteDB())).Error().To(HaveOccurred())
+			Expect(loadGrantDocument(context.Background(), closedSQLiteDB())).Error().To(MatchError(wikidClosedDatabaseError()))
 
 			scanDB := rawGrantDB()
-			Expect(execRawSQL(scanDB, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES (NULL, 'home', 'viewer')`)).To(Succeed())
-			Expect(loadGrantDocument(context.Background(), scanDB)).Error().To(HaveOccurred())
+			Expect(execRawSQL(scanDB, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES ('', 'home', 'viewer')`)).To(Succeed())
+			Expect(loadGrantDocument(context.Background(), scanDB)).Error().To(MatchError(ErrGrantSubjectRequired))
 
 			badIDDB := rawGrantDB()
 			Expect(execRawSQL(badIDDB, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES ('user:1', 'bad/id', 'viewer')`)).To(Succeed())
-			Expect(loadGrantDocument(context.Background(), badIDDB)).Error().To(HaveOccurred())
+			Expect(loadGrantDocument(context.Background(), badIDDB)).Error().To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 
 			badRoleDB := rawGrantDB()
 			Expect(execRawSQL(badRoleDB, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES ('user:1', 'home', 'owner')`)).To(Succeed())
@@ -271,20 +271,20 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			db := mustOpenInitializedWikidDB(layout.DBPath)
 			Expect(execRawSQL(db, `INSERT INTO workspaces (id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at) VALUES ('bad/id', 'Bad', '/tmp/bad-data', '/tmp/bad-root', '', '2026-06-27T12:00:00Z', '2026-06-27T12:00:00Z')`)).To(Succeed())
 			Expect(execRawSQL(db, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES ('user:1', 'bad/id', 'viewer')`)).To(Succeed())
-			Expect(NewGrantStore(layout.DBPath).GrantsForSubject("user:1")).Error().To(HaveOccurred())
+			Expect(NewGrantStore(layout.DBPath).GrantsForSubject("user:1")).Error().To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 
 			queryErrorLayout := newWikidEdgeLayout()
 			queryErrorDB := rawSQLiteDBAt(queryErrorLayout.DBPath)
 			Expect(execRawSQL(queryErrorDB, `CREATE TABLE workspace_grants (subject TEXT, workspace_id TEXT)`)).To(Succeed())
 			Expect(queryErrorDB.Close()).To(Succeed())
-			Expect(NewGrantStore(queryErrorLayout.DBPath).GrantsForSubject("user:1")).Error().To(HaveOccurred())
+			Expect(NewGrantStore(queryErrorLayout.DBPath).GrantsForSubject("user:1")).Error().To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 			scanErrorLayout := newWikidEdgeLayout()
 			scanErrorDB := rawSQLiteDBAt(scanErrorLayout.DBPath)
 			Expect(execRawSQL(scanErrorDB, `CREATE TABLE workspace_grants (subject TEXT, workspace_id TEXT, role TEXT)`)).To(Succeed())
-			Expect(execRawSQL(scanErrorDB, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES ('user:1', NULL, 'viewer')`)).To(Succeed())
+			Expect(execRawSQL(scanErrorDB, `INSERT INTO workspace_grants (subject, workspace_id, role) VALUES ('user:1', 'bad/id', 'viewer')`)).To(Succeed())
 			Expect(scanErrorDB.Close()).To(Succeed())
-			Expect(NewGrantStore(scanErrorLayout.DBPath).GrantsForSubject("user:1")).Error().To(HaveOccurred())
+			Expect(NewGrantStore(scanErrorLayout.DBPath).GrantsForSubject("user:1")).Error().To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 
 			grantRowsErr := errors.New("grant rows failed")
 			Expect(grantsForSubjectRows(errRows{err: grantRowsErr})).Error().To(MatchError(grantRowsErr))
@@ -315,8 +315,8 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				WorkspaceRecord{
 					ID:          "docs",
 					DisplayName: "Docs",
-					DataDir:     filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-data"),
-					RootDir:     filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-root"),
+					DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
+					RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
 					CreatedAt:   time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
 					UpdatedAt:   time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
 				},
@@ -339,8 +339,8 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			workspace := WorkspaceRecord{
 				ID:          "docs",
 				DisplayName: "Docs",
-				DataDir:     filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-data"),
-				RootDir:     filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-root"),
+				DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
+				RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
 				CreatedAt:   time.Now().UTC(),
 				UpdatedAt:   time.Now().UTC(),
 			}
@@ -352,8 +352,8 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(err).To(MatchError(callbackErr))
 
 			workspace.ID = "docs-two"
-			workspace.DataDir = filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-two-data")
-			workspace.RootDir = filepath.Join(ginkgo.GinkgoT().TempDir(), "docs-two-root")
+			workspace.DataDir = filepath.Join(wikidTestTempDir(), "docs-two-data")
+			workspace.RootDir = filepath.Join(wikidTestTempDir(), "docs-two-root")
 			_, err = store.RegisterWorkspaceWithResultAndGrants(workspace, time.Now, func(RegisterWorkspaceResult) ([]Grant, error) {
 				return []Grant{{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer}}, nil
 			})
@@ -393,10 +393,10 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 		})
 
 		ginkgo.It("reports invalid direct store registration inputs before opening a transaction", func() {
-			store := NewRegistryStore(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))
+			store := NewRegistryStore(filepath.Join(wikidTestTempDir(), "wikid.db"))
 
 			_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{ID: "bad/id"}, time.Now, nil)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 
 			_, err = store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
 				ID:                     HomeWorkspaceID,
@@ -412,7 +412,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := service.BootstrapHome()
 			Expect(err).NotTo(HaveOccurred())
-			updated, err := service.BootstrapHomeWorkspace(filepath.Join(ginkgo.GinkgoT().TempDir(), "new-data"), filepath.Join(ginkgo.GinkgoT().TempDir(), "new-root"))
+			updated, err := service.BootstrapHomeWorkspace(filepath.Join(wikidTestTempDir(), "new-data"), filepath.Join(wikidTestTempDir(), "new-root"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 				"ID":      Equal(home.ID),
@@ -420,14 +420,14 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			}))
 
 			badService := NewRegistryService(NewRegistryStore(wikidDBPathInsideFile()), Layout{})
-			Expect(badService.BootstrapHome()).Error().To(HaveOccurred())
-			Expect(badService.RegisterWorkspace(RegisterWorkspaceRequest{DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "data"), RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "root")})).Error().To(HaveOccurred())
-			Expect(badService.ListWorkspaces()).Error().To(HaveOccurred())
-			Expect(badService.Workspace(HomeWorkspaceID)).Error().To(HaveOccurred())
+			Expect(badService.BootstrapHome()).Error().To(MatchError(syscall.ENOTDIR))
+			Expect(badService.RegisterWorkspace(RegisterWorkspaceRequest{DataDir: filepath.Join(wikidTestTempDir(), "data"), RootDir: filepath.Join(wikidTestTempDir(), "root")})).Error().To(MatchError(syscall.ENOTDIR))
+			Expect(badService.ListWorkspaces()).Error().To(MatchError(syscall.ENOTDIR))
+			Expect(badService.Workspace(HomeWorkspaceID)).Error().To(MatchError(syscall.ENOTDIR))
 			Expect(service.RegisterWorkspaceWithResultAndGrants(RegisterWorkspaceRequest{
 				DisplayName:            "Bad Prefix",
-				DataDir:                filepath.Join(ginkgo.GinkgoT().TempDir(), "bad-prefix-data"),
-				RootDir:                filepath.Join(ginkgo.GinkgoT().TempDir(), "bad-prefix-root"),
+				DataDir:                filepath.Join(wikidTestTempDir(), "bad-prefix-data"),
+				RootDir:                filepath.Join(wikidTestTempDir(), "bad-prefix-root"),
 				MarkdownLinkRootPrefix: "../docs",
 			}, nil)).Error().To(MatchError(markdownlinks.ErrMarkdownLinkRootPrefixTraversal))
 		})
@@ -436,27 +436,27 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			layout := newWikidEdgeLayout()
 			service := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			record, err := service.workspaceRecordForRequest(RegisterWorkspaceRequest{
-				DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "data"),
-				RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "root"),
+				DataDir: filepath.Join(wikidTestTempDir(), "data"),
+				RootDir: filepath.Join(wikidTestTempDir(), "root"),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(record.DisplayName).To(Equal("Workspace"))
 			Expect(record.ID.StorageKey()).To(HavePrefix("workspace-"))
 
-			blocker := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-dir")
+			blocker := filepath.Join(wikidTestTempDir(), "not-a-dir")
 			Expect(os.WriteFile(blocker, []byte("x"), 0o644)).To(Succeed())
-			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(blocker, "data"), RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "root")})
+			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(blocker, "data"), RootDir: filepath.Join(wikidTestTempDir(), "root")})
 			Expect(err).To(MatchError(syscall.ENOTDIR))
-			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "data"), RootDir: filepath.Join(blocker, "root")})
+			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(wikidTestTempDir(), "data"), RootDir: filepath.Join(blocker, "root")})
 			Expect(err).To(MatchError(syscall.ENOTDIR))
-			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "data"), RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "root"), MarkdownLinkRootPrefix: "../docs"})
+			_, err = service.workspaceRecordForRequest(RegisterWorkspaceRequest{DataDir: filepath.Join(wikidTestTempDir(), "data"), RootDir: filepath.Join(wikidTestTempDir(), "root"), MarkdownLinkRootPrefix: "../docs"})
 			Expect(err).To(MatchError(markdownlinks.ErrMarkdownLinkRootPrefixTraversal))
 
 			_, err = service.BootstrapHome()
 			Expect(err).NotTo(HaveOccurred())
-			_, err = service.RegisterWorkspace(RegisterWorkspaceRequest{DisplayName: "Same", DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "b-data"), RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "b-root")})
+			_, err = service.RegisterWorkspace(RegisterWorkspaceRequest{DisplayName: "Same", DataDir: filepath.Join(wikidTestTempDir(), "b-data"), RootDir: filepath.Join(wikidTestTempDir(), "b-root")})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = service.RegisterWorkspace(RegisterWorkspaceRequest{DisplayName: "same", DataDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "a-data"), RootDir: filepath.Join(ginkgo.GinkgoT().TempDir(), "a-root")})
+			_, err = service.RegisterWorkspace(RegisterWorkspaceRequest{DisplayName: "same", DataDir: filepath.Join(wikidTestTempDir(), "a-data"), RootDir: filepath.Join(wikidTestTempDir(), "a-root")})
 			Expect(err).NotTo(HaveOccurred())
 			workspaces, err := service.ListWorkspaces()
 			Expect(err).NotTo(HaveOccurred())
@@ -464,11 +464,11 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 		})
 
 		ginkgo.It("reports invalid persisted registry rows while loading workspaces", func() {
-			Expect(loadRegistryDocument(context.Background(), closedSQLiteDB())).Error().To(HaveOccurred())
+			Expect(loadRegistryDocument(context.Background(), closedSQLiteDB())).Error().To(MatchError(wikidClosedDatabaseError()))
 
 			scanDB := rawRegistryDB()
-			Expect(execRawSQL(scanDB, `INSERT INTO workspaces (id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at) VALUES ('home', NULL, '/tmp/data', '/tmp/root', '', '2026-06-27T12:00:00Z', '2026-06-27T12:00:00Z')`)).To(Succeed())
-			Expect(loadRegistryDocument(context.Background(), scanDB)).Error().To(HaveOccurred())
+			Expect(execRawSQL(scanDB, `INSERT INTO workspaces (id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at) VALUES ('home', 'Home', '', '/tmp/root', '', '2026-06-27T12:00:00Z', '2026-06-27T12:00:00Z')`)).To(Succeed())
+			Expect(loadRegistryDocument(context.Background(), scanDB)).Error().To(MatchError(ErrWorkspaceDataDirRequired))
 
 			createdAtDB := rawRegistryDB()
 			Expect(execRawSQL(createdAtDB, `INSERT INTO workspaces (id, display_name, data_dir, root_dir, markdown_link_root_prefix, created_at, updated_at) VALUES ('home', 'Home', '/tmp/data', '/tmp/root', '', 'bad-time', '2026-06-27T12:00:00Z')`)).To(Succeed())
@@ -496,10 +496,10 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				SchemaVersion: RegistrySchemaVersion,
 				Workspaces:    []WorkspaceRecord{testWorkspaceRecord("edge-save")},
 			})
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 			err = upsertWorkspace(context.Background(), conn, WorkspaceRecord{ID: "bad/id", DataDir: "/tmp/data", RootDir: "/tmp/root"})
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 		})
 
 		ginkgo.It("surfaces registry transaction load and upsert failures", func() {
@@ -510,14 +510,14 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			_, err := NewRegistryStore(badSchemaLayout.DBPath).Update(func(doc RegistryDocument) (RegistryDocument, error) {
 				return doc, nil
 			})
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 			registerLoadLayout := newWikidEdgeLayout()
 			registerLoadDB := rawSQLiteDBAt(registerLoadLayout.DBPath)
 			Expect(execRawSQL(registerLoadDB, `CREATE TABLE workspaces (id TEXT)`)).To(Succeed())
 			Expect(registerLoadDB.Close()).To(Succeed())
 			_, err = NewRegistryStore(registerLoadLayout.DBPath).RegisterWorkspaceWithResultAndGrants(testWorkspaceRecord("load-fail"), time.Now, nil)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 			insertFailLayout := newWikidEdgeLayout()
 			insertFailDB := mustOpenInitializedWikidDB(insertFailLayout.DBPath)
@@ -565,8 +565,8 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 				tc := tc
 				ginkgo.By(tc.name)
 				api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{
-					Registry: NewRegistryService(NewRegistryStore(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db")), Layout{}),
-					Grants:   NewGrantStore(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db")),
+					Registry: NewRegistryService(NewRegistryStore(filepath.Join(wikidTestTempDir(), "wikid.db")), Layout{}),
+					Grants:   NewGrantStore(filepath.Join(wikidTestTempDir(), "wikid.db")),
 					Subject:  tc.subject,
 				})
 
@@ -815,7 +815,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			_, err := openWikidDB(wikidDBPathInsideFile())
 			Expect(err).To(MatchError(syscall.ENOTDIR))
 
-			dirPath := filepath.Join(ginkgo.GinkgoT().TempDir(), "as-directory")
+			dirPath := filepath.Join(wikidTestTempDir(), "as-directory")
 			Expect(os.Mkdir(dirPath, 0o755)).To(Succeed())
 			_, err = openWikidDB(dirPath)
 			Expect(err).To(MatchError(syscall.EISDIR))
@@ -828,7 +828,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidOpenFile = func(string, int, os.FileMode) (wikidCloseFile, error) {
 				return closeErrorFile{err: closeErr}, nil
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(closeErr))
+			Expect(openWikidDB(filepath.Join(wikidTestTempDir(), "wikid.db"))).Error().To(MatchError(closeErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
@@ -837,7 +837,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidChmod = func(string, os.FileMode) error {
 				return chmodErr
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(chmodErr))
+			Expect(openWikidDB(filepath.Join(wikidTestTempDir(), "wikid.db"))).Error().To(MatchError(chmodErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
@@ -846,7 +846,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidSQLOpen = func(string, string) (*sql.DB, error) {
 				return nil, sqlOpenErr
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(sqlOpenErr))
+			Expect(openWikidDB(filepath.Join(wikidTestTempDir(), "wikid.db"))).Error().To(MatchError(sqlOpenErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
@@ -855,7 +855,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidInitializeWikidDB = func(*sql.DB) error {
 				return initErr
 			}
-			Expect(openWikidDB(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"))).Error().To(MatchError(initErr))
+			Expect(openWikidDB(filepath.Join(wikidTestTempDir(), "wikid.db"))).Error().To(MatchError(initErr))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
@@ -868,7 +868,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 		})
 
 		ginkgo.It("rolls back immediate transactions when callbacks fail", func() {
-			path := filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db")
+			path := filepath.Join(wikidTestTempDir(), "wikid.db")
 			callbackErr := errors.New("callback failed")
 
 			err := withWikidImmediateTx(path, func(context.Context, *sql.Conn) error {
@@ -882,14 +882,14 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			restore := captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
 			wikidOpenWikidDB = func(string) (*sql.DB, error) {
-				db, err := sql.Open("sqlite", filepath.Join(ginkgo.GinkgoT().TempDir(), "closed.db"))
+				db, err := sql.Open("sqlite", filepath.Join(wikidTestTempDir(), "closed.db"))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(db.Close()).To(Succeed())
 				return db, nil
 			}
-			Expect(withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
+			Expect(withWikidImmediateTx(filepath.Join(wikidTestTempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
 				return nil
-			})).To(HaveOccurred())
+			})).To(MatchError(wikidClosedDatabaseError()))
 
 			restore()
 			restore = captureWikidSQLiteSeams()
@@ -899,17 +899,17 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidExecSQLiteWithLockRetry = func(context.Context, wikidSQLiteExecer, string, ...any) (sql.Result, error) {
 				return nil, beginErr
 			}
-			Expect(withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
+			Expect(withWikidImmediateTx(filepath.Join(wikidTestTempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
 				return nil
 			})).To(MatchError(beginErr))
 
 			restore()
-			err := withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(ctx context.Context, conn *sql.Conn) error {
+			err := withWikidImmediateTx(filepath.Join(wikidTestTempDir(), "wikid.db"), func(ctx context.Context, conn *sql.Conn) error {
 				_, rollbackErr := conn.ExecContext(ctx, "ROLLBACK")
 				Expect(rollbackErr).NotTo(HaveOccurred())
 				return nil
 			})
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 			restore = captureWikidSQLiteSeams()
 			ginkgo.DeferCleanup(restore)
@@ -917,7 +917,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidCloseConn = func(*sql.Conn) error {
 				return connCloseErr
 			}
-			Expect(withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
+			Expect(withWikidImmediateTx(filepath.Join(wikidTestTempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
 				return nil
 			})).To(MatchError(connCloseErr))
 
@@ -928,7 +928,7 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			wikidCloseDB = func(*sql.DB) error {
 				return dbCloseErr
 			}
-			Expect(withWikidImmediateTx(filepath.Join(ginkgo.GinkgoT().TempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
+			Expect(withWikidImmediateTx(filepath.Join(wikidTestTempDir(), "wikid.db"), func(context.Context, *sql.Conn) error {
 				return nil
 			})).To(MatchError(dbCloseErr))
 		})
@@ -961,26 +961,26 @@ var _ = ginkgo.Describe("wikid deterministic edge coverage", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(parsed.Location()).To(Equal(time.UTC))
 			Expect(parsed).To(BeTemporally("==", timestamp.UTC()))
-			Expect(parseWikidTime("not-a-time")).Error().To(HaveOccurred())
+			Expect(parseWikidTime("not-a-time")).Error().To(matchWikidTimeParseError())
 		})
 	})
 })
 
 func newWikidEdgeLayout() Layout {
 	ginkgo.GinkgoHelper()
-	return GlobalLayout(filepath.Join(ginkgo.GinkgoT().TempDir(), ".leafwiki"))
+	return GlobalLayout(filepath.Join(wikidTestTempDir(), ".leafwiki"))
 }
 
 func wikidDBPathInsideFile() string {
 	ginkgo.GinkgoHelper()
-	parentFile := filepath.Join(ginkgo.GinkgoT().TempDir(), "not-a-dir")
+	parentFile := filepath.Join(wikidTestTempDir(), "not-a-dir")
 	Expect(os.WriteFile(parentFile, []byte("x"), 0o644)).To(Succeed())
 	return filepath.Join(parentFile, "wikid.db")
 }
 
 func rawSQLiteDB() *sql.DB {
 	ginkgo.GinkgoHelper()
-	db, err := sql.Open("sqlite", filepath.Join(ginkgo.GinkgoT().TempDir(), "raw.db"))
+	db, err := sql.Open("sqlite", filepath.Join(wikidTestTempDir(), "raw.db"))
 	Expect(err).NotTo(HaveOccurred())
 	ginkgo.DeferCleanup(func() {
 		Expect(db.Close()).To(Succeed())
@@ -1020,10 +1020,17 @@ func rawRegistryDB() *sql.DB {
 
 func closedSQLiteDB() *sql.DB {
 	ginkgo.GinkgoHelper()
-	db, err := sql.Open("sqlite", filepath.Join(ginkgo.GinkgoT().TempDir(), "closed.db"))
+	db, err := sql.Open("sqlite", filepath.Join(wikidTestTempDir(), "closed.db"))
 	Expect(err).NotTo(HaveOccurred())
 	Expect(db.Close()).To(Succeed())
 	return db
+}
+
+func wikidClosedDatabaseError() error {
+	ginkgo.GinkgoHelper()
+	db := closedSQLiteDB()
+	_, err := db.Conn(context.Background())
+	return err
 }
 
 func mustOpenInitializedWikidDB(path string) *sql.DB {

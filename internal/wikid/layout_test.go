@@ -1,29 +1,24 @@
 package wikid
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"path/filepath"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-var _ = ginkgo.It("TestGlobalLayoutPaths", func() {
-	t := ginkgo.GinkgoT()
-	homeDir := filepath.Join(t.TempDir(), ".leafwiki")
+var _ = ginkgo.Describe("global wikid layout", func() {
+	ginkgo.It("derives registry, runtime, and home workspace paths under the LeafWiki home directory", func() {
+		homeDir := filepath.Join(wikidTestTempDir(), ".leafwiki")
 
-	layout := GlobalLayout(homeDir)
+		layout := GlobalLayout(homeDir)
 
-	if layout.HomeDir != homeDir {
-		t.Fatalf("HomeDir = %q, want %q", layout.HomeDir, homeDir)
-	}
-	if layout.WikidDir != filepath.Join(homeDir, "wikid") {
-		t.Fatalf("WikidDir = %q", layout.WikidDir)
-	}
-	if layout.RuntimeDir != filepath.Join(homeDir, "runtime") {
-		t.Fatalf("RuntimeDir = %q", layout.RuntimeDir)
-	}
-	if layout.DBPath != filepath.Join(homeDir, "wikid", "wikid.db") {
-		t.Fatalf("DBPath = %q", layout.DBPath)
-	}
-	if layout.HomeRootDir != filepath.Join(homeDir, "root") {
-		t.Fatalf("HomeRootDir = %q", layout.HomeRootDir)
-	}
+		Expect(layout).To(SatisfyAll(
+			HaveField("HomeDir", Equal(homeDir)),
+			HaveField("WikidDir", Equal(filepath.Join(homeDir, "wikid"))),
+			HaveField("RuntimeDir", Equal(filepath.Join(homeDir, "runtime"))),
+			HaveField("DBPath", Equal(filepath.Join(homeDir, "wikid", "wikid.db"))),
+			HaveField("HomeRootDir", Equal(filepath.Join(homeDir, "root"))),
+		))
+	})
 })
