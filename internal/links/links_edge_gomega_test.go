@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/markdownlinks"
@@ -92,40 +93,55 @@ func rewriteRelativeLinkForPathChangeResult(sourcePath tree.RoutePath, newSource
 }
 
 func matchAppliedRewriteRule(path tree.RoutePath) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Path":    Equal(path),
-		"Applied": BeTrue(),
-	})
+	return gcustom.MakeMatcher(func(result appliedRewriteRuleResult) (bool, error) {
+		return result.Path == path && result.Applied, nil
+	}).WithMessage("apply a rewrite rule")
 }
 
 func matchUnappliedRewriteRule() types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Applied": BeFalse(),
-	})
+	return gcustom.MakeMatcher(func(result appliedRewriteRuleResult) (bool, error) {
+		return !result.Applied, nil
+	}).WithMessage("leave a rewrite rule unapplied")
 }
 
 func matchUnchangedLinkDestination(destination string, messageID sharederrors.MessageID) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Destination": Equal(destination),
-		"Changed":     BeFalse(),
-		"Warning":     testmatchers.HaveMessageID(messageID),
-	})
+	return gcustom.MakeMatcher(func(result rewrittenLinkDestinationResult) (bool, error) {
+		if result.Destination != destination || result.Changed {
+			return false, nil
+		}
+		return testmatchers.HaveMessageID(messageID).Match(result.Warning)
+	}).WithMessage("leave a link destination unchanged with warning")
 }
 
 func matchRewrittenLinkDestination(destination string) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Destination": Equal(destination),
-		"Changed":     BeTrue(),
-		"Warning":     BeNil(),
-	})
+	return gcustom.MakeMatcher(func(result rewrittenLinkDestinationResult) (bool, error) {
+		return result.Destination == destination &&
+			result.Changed &&
+			result.Warning == nil, nil
+	}).WithMessage("rewrite a link destination")
 }
 
 func matchUnchangedLinkDestinationWithoutWarning(destination string) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Destination": Equal(destination),
-		"Changed":     BeFalse(),
-		"Warning":     BeNil(),
-	})
+	return gcustom.MakeMatcher(func(result rewrittenLinkDestinationResult) (bool, error) {
+		return result.Destination == destination &&
+			!result.Changed &&
+			result.Warning == nil, nil
+	}).WithMessage("leave a link destination unchanged without warning")
+}
+
+func matchBrokenStoredBacklink(fromPageID tree.PageID) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(backlink Backlink) (bool, error) {
+		return backlink.FromPageID == fromPageID && backlink.Broken, nil
+	}).WithMessage("describe a broken stored backlink")
+}
+
+func matchHealedStoredBacklink(fromPageID tree.PageID, toPageID tree.PageID, targetKind TargetKind) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(backlink Backlink) (bool, error) {
+		return backlink.FromPageID == fromPageID &&
+			backlink.ToPageID == toPageID &&
+			backlink.ToKind == targetKind &&
+			!backlink.Broken, nil
+	}).WithMessage("describe a healed stored backlink")
 }
 
 func matchTreePageContentError() types.GomegaMatcher {
@@ -229,20 +245,16 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(service.MarkIncomingLinksBrokenForPage(newFixturePageID("target-page"))).To(Succeed())
 		brokenPage, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(brokenPage).To(ConsistOf(matchBacklink(gstruct.Fields{
-			"FromPageID": Equal(newFixturePageID("source-page")),
-			"Broken":     BeTrue(),
-		})))
+		Expect(brokenPage).To(ConsistOf(matchBrokenStoredBacklink(newFixturePageID("source-page"))))
 
 		Expect(store.HealLinksForPath("/docs/topic", newFixturePageID("healed-page"))).To(Succeed())
 		healed, err := store.GetBacklinksForPage(newFixturePageID("healed-page"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(healed).To(ConsistOf(matchBacklink(gstruct.Fields{
-			"FromPageID": Equal(newFixturePageID("source-page")),
-			"ToPageID":   Equal(newFixturePageID("healed-page")),
-			"ToKind":     Equal(TargetKindPage),
-			"Broken":     BeFalse(),
-		})))
+		Expect(healed).To(ConsistOf(matchHealedStoredBacklink(
+			newFixturePageID("source-page"),
+			newFixturePageID("healed-page"),
+			TargetKindPage,
+		)))
 
 		Expect(service.MarkLinksBrokenForPath("docs/topic")).To(Succeed())
 		allBroken, err := store.GetBrokenIncomingForPath("/docs/topic")

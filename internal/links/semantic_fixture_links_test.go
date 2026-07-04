@@ -2,6 +2,7 @@ package links
 
 import (
 	"github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/tree"
@@ -20,19 +21,19 @@ func newFixtureUserID[T ~string](raw T) tree.UserID {
 }
 
 func matchResolvedTargetLink(pageID tree.PageID, targetPath string) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"TargetPageID":   gomega.Equal(pageID),
-		"TargetPagePath": gomega.Equal(targetPath),
-		"Broken":         gomega.BeFalse(),
-	})
+	return gcustom.MakeMatcher(func(link TargetLink) (bool, error) {
+		return link.TargetPageID == pageID &&
+			link.TargetPagePath == targetPath &&
+			!link.Broken, nil
+	}).WithMessage("describe a resolved target link")
 }
 
 func matchBrokenTargetLink(targetPath string) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"TargetPageID":   gomega.BeEmpty(),
-		"TargetPagePath": gomega.Equal(targetPath),
-		"Broken":         gomega.BeTrue(),
-	})
+	return gcustom.MakeMatcher(func(link TargetLink) (bool, error) {
+		return link.TargetPageID == "" &&
+			link.TargetPagePath == targetPath &&
+			link.Broken, nil
+	}).WithMessage("describe a broken target link")
 }
 
 func matchOutgoingResult(count int, outgoings ...any) types.GomegaMatcher {
@@ -50,21 +51,21 @@ func matchBacklinkResult(count int, backlinks ...any) types.GomegaMatcher {
 }
 
 func matchResolvedOutgoingResultItem(fromPageID tree.PageID, toPageID tree.PageID, targetPath tree.RoutePath) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"FromPageID": gomega.Equal(fromPageID),
-		"ToPageID":   gomega.Equal(toPageID),
-		"ToPath":     gomega.Equal(targetPath),
-		"Broken":     gomega.BeFalse(),
-	})
+	return gcustom.MakeMatcher(func(item OutgoingResultItem) (bool, error) {
+		return item.FromPageID == fromPageID &&
+			item.ToPageID == toPageID &&
+			item.ToPath == targetPath &&
+			!item.Broken, nil
+	}).WithMessage("describe a resolved outgoing link")
 }
 
 func matchBrokenOutgoingResultItem(fromPageID tree.PageID, targetPath tree.RoutePath) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"FromPageID": gomega.Equal(fromPageID),
-		"ToPageID":   gomega.BeEmpty(),
-		"ToPath":     gomega.Equal(targetPath),
-		"Broken":     gomega.BeTrue(),
-	})
+	return gcustom.MakeMatcher(func(item OutgoingResultItem) (bool, error) {
+		return item.FromPageID == fromPageID &&
+			item.ToPageID == "" &&
+			item.ToPath == targetPath &&
+			item.Broken, nil
+	}).WithMessage("describe a broken outgoing link")
 }
 
 func matchOutgoingResultItemTitle(title string) types.GomegaMatcher {
@@ -88,12 +89,22 @@ func matchBacklinkResultItemFromKind(fromKind tree.NodeKind) types.GomegaMatcher
 }
 
 func matchBrokenBacklink(fromPageID tree.PageID) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"FromPageID": gomega.Equal(fromPageID),
-		"ToPageID":   gomega.BeEmpty(),
-		"FromTitle":  gomega.Not(gomega.BeEmpty()),
-		"Broken":     gomega.BeTrue(),
-	})
+	return gcustom.MakeMatcher(func(actual any) (bool, error) {
+		switch item := actual.(type) {
+		case Backlink:
+			return item.FromPageID == fromPageID &&
+				item.ToPageID == "" &&
+				item.FromTitle != "" &&
+				item.Broken, nil
+		case BacklinkResultItem:
+			return item.FromPageID == fromPageID &&
+				item.ToPageID == "" &&
+				item.FromTitle != "" &&
+				item.Broken, nil
+		default:
+			return false, nil
+		}
+	}).WithMessage("describe a broken backlink")
 }
 
 func matchBacklinkTitle(title string) types.GomegaMatcher {
