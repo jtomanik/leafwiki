@@ -49,13 +49,13 @@ var _ = ginkgo.Describe("link errors", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, ErrCodeLinkInternalError, sharederrors.MessageIDForCode(ErrCodeLinkInternalError)))
 	})
 
-	ginkgo.It("linkErrorStatus maps known link error codes", func() {
+	ginkgo.It("assigns HTTP status classes to missing unavailable and unknown link failures", func() {
 		Expect(linkErrorStatus(ErrCodeLinkPageNotFound)).To(Equal(http.StatusNotFound))
 		Expect(linkErrorStatus(ErrCodeLinkUnavailable)).To(Equal(http.StatusServiceUnavailable))
 		Expect(linkErrorStatus("unknown")).To(Equal(http.StatusInternalServerError))
 	})
 
-	ginkgo.It("respondWithLinkStatusError emits structured localized detail", func() {
+	ginkgo.It("returns structured localized detail for explicit link status failures", func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
