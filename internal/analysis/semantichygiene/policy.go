@@ -18,6 +18,7 @@ const (
 	ruleSemanticStringLeak                 ruleID = "semantic.string-leak"
 	ruleDirectCast                         ruleID = "semantic.direct-cast"
 	ruleSemanticUncheckedConstructor       ruleID = "semantic.unchecked-constructor"
+	ruleSemanticFixtureRuntimeConstructor  ruleID = "semantic.fixture-runtime-constructor"
 	ruleSemanticRawSignature               ruleID = "semantic.raw-signature"
 	ruleSemanticRawField                   ruleID = "semantic.raw-field"
 	ruleSemanticRawPrimitive               ruleID = "semantic.raw-primitive"
@@ -124,6 +125,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleSemanticStringLeak:                 hardRule(ruleSemanticStringLeak),
 	ruleDirectCast:                         hardRule(ruleDirectCast),
 	ruleSemanticUncheckedConstructor:       hardRule(ruleSemanticUncheckedConstructor),
+	ruleSemanticFixtureRuntimeConstructor:  hardRule(ruleSemanticFixtureRuntimeConstructor),
 	ruleSemanticRawSignature:               hardRule(ruleSemanticRawSignature),
 	ruleSemanticRawField:                   hardRule(ruleSemanticRawField),
 	ruleSemanticRawPrimitive:               hardRule(ruleSemanticRawPrimitive),
@@ -1896,6 +1898,10 @@ func isAllowedFixtureDirectCastContext(filename string, funcName string) bool {
 	if !(isTestFile(filename) || strings.Contains(filename, "/e2e/") || strings.Contains(filename, "/testdata/")) {
 		return false
 	}
+	return isFixtureFunctionName(funcName)
+}
+
+func isFixtureFunctionName(funcName string) bool {
 	canonicalFuncName := canonicalName(funcName)
 	return strings.HasPrefix(canonicalFuncName, "buildfixture") ||
 		strings.HasPrefix(canonicalFuncName, "makefixture") ||

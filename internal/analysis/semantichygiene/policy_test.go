@@ -66,6 +66,7 @@ var _ = ginkgo.Describe("policy helpers", func() {
 			ginkgo.Entry("semantic string leak", ruleID("semantic.string-leak"), false, waiverScopeNone),
 			ginkgo.Entry("semantic direct cast", ruleID("semantic.direct-cast"), false, waiverScopeNone),
 			ginkgo.Entry("semantic unchecked constructor", ruleID("semantic.unchecked-constructor"), false, waiverScopeNone),
+			ginkgo.Entry("semantic fixture runtime constructor", ruleID("semantic.fixture-runtime-constructor"), false, waiverScopeNone),
 			ginkgo.Entry("semantic raw signature", ruleID("semantic.raw-signature"), false, waiverScopeNone),
 			ginkgo.Entry("semantic raw field", ruleID("semantic.raw-field"), false, waiverScopeNone),
 			ginkgo.Entry("semantic raw primitive", ruleID("semantic.raw-primitive"), false, waiverScopeNone),

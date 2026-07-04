@@ -42,6 +42,7 @@ func run(pass *analysis.Pass) (any, error) {
 			checkStringConversionLeak(ctx, n)
 			checkDirectCast(ctx, n)
 			checkUncheckedConstructorCall(ctx, n)
+			checkFixtureSemanticConstructorCall(ctx, n)
 			checkMessagePassthroughCall(ctx, n)
 			checkGomegaSemanticMatcher(ctx, n)
 			checkGomegaAsyncAssertion(ctx, n)

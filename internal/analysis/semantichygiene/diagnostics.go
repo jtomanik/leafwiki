@@ -50,6 +50,10 @@ func uncheckedConstructorDiagnostic(funcName string, typeName string) string {
 	return fmt.Sprintf("unchecked constructor %s creates %s from primitive in internal code; use a parser or narrow derived-value helper", funcName, typeName)
 }
 
+func fixtureRuntimeConstructorDiagnostic(funcName string) string {
+	return fmt.Sprintf("fixture semantic constructor %s receives runtime string; fixture constructors should only wrap static test values", funcName)
+}
+
 func messageFieldDiagnostic(fieldName string, typeName string) string {
 	return fmt.Sprintf("message-bearing struct %s exposes %s string without MessageID; add a catalog-backed MessageID", typeName, fieldName)
 }

@@ -2,6 +2,8 @@ package semantichygiene
 
 import (
 	"go/ast"
+	"go/constant"
+	"go/token"
 	"strings"
 )
 
@@ -34,6 +36,38 @@ func checkUncheckedConstructorCall(ctx *analysisContext, call *ast.CallExpr) {
 		return
 	}
 	ctx.report(ruleSemanticUncheckedConstructor, call, uncheckedConstructorDiagnostic(funcName, typeName))
+}
+
+func checkFixtureSemanticConstructorCall(ctx *analysisContext, call *ast.CallExpr) {
+	funcName := callName(call)
+	if len(call.Args) == 0 || !isFixtureFunctionName(funcName) {
+		return
+	}
+	if !isAllowedFixtureConstructorCallFile(ctx.filename(call.Pos())) {
+		return
+	}
+	if _, ok := semanticTypeNameOf(ctx.pass.TypesInfo.TypeOf(call)); !ok {
+		return
+	}
+	for _, arg := range call.Args {
+		if !isStringType(ctx.pass, arg) || isStaticFixtureStringArg(ctx, arg) {
+			continue
+		}
+		ctx.report(ruleSemanticFixtureRuntimeConstructor, call, fixtureRuntimeConstructorDiagnostic(funcName))
+		return
+	}
+}
+
+func isAllowedFixtureConstructorCallFile(filename string) bool {
+	return isTestFile(filename) || strings.Contains(filename, "/e2e/")
+}
+
+func isStaticFixtureStringArg(ctx *analysisContext, arg ast.Expr) bool {
+	if lit, ok := unparenExpr(arg).(*ast.BasicLit); ok {
+		return lit.Kind == token.STRING
+	}
+	value := ctx.pass.TypesInfo.Types[arg].Value
+	return value != nil && value.Kind() == constant.String
 }
 
 func callHasPrimitiveArg(ctx *analysisContext, call *ast.CallExpr) bool {

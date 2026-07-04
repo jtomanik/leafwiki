@@ -424,6 +424,11 @@ func TestRepoTestFixturesAndWireAssertionsAreAllowed(t *testing.T) {
 	assertWireError("page_not_found") // want "raw stable contract literal \"page_not_found\" used in test assertion code; use the typed constant or semantic helper"
 }
 
+func TestRepoTestRuntimeFixtureSemanticConstructorIsRejected(t *testing.T) {
+	rawPageID := FromBody("page-2")
+	_ = buildFixturePageID(rawPageID) // want "fixture semantic constructor buildFixturePageID receives runtime string; fixture constructors should only wrap static test values"
+}
+
 func TestRepoTestSemanticShortcutsAreRejected(t *testing.T) {
 	rawPageID := "page-3"
 	pageID := PageID(rawPageID)       // want "direct cast to semantic type PageID outside parser or boundary"
