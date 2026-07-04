@@ -2259,6 +2259,28 @@ func plain() string { return "hello world" }
 			Expect(pkgName).To(BeEmpty())
 			Expect(calleeName).To(BeEmpty())
 		})
+
+		ginkgo.It("reports raw runtime role health wire literals in test fixtures", func() {
+			h := newRuleHarness("/repo/internal/wiki/wiki_test.go", "github.com/perber/wiki/internal/wiki", `package wiki
+
+type runtimeRoleHealthWireCheck struct {
+	Key   string
+	State string
+}
+
+var workspacedRoleCrashedHealth = runtimeRoleHealthWireCheck{
+	Key:   "role_workspaced",
+	State: "crashed",
+}
+`)
+			checkStableLiteral(h.ctx, h.findLiteral("role_workspaced"))
+			checkStableLiteral(h.ctx, h.findLiteral("crashed"))
+
+			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:contract.raw-literal: raw stable contract literal \"role_workspaced\" used in test assertion code; use the typed constant or semantic helper",
+				"semh:contract.raw-literal: raw stable contract literal \"crashed\" used in test assertion code; use the typed constant or semantic helper",
+			))
+		})
 	})
 
 	ginkgo.Describe("rule branches", func() {

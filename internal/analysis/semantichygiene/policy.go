@@ -1057,7 +1057,99 @@ func isStableTestContractLiteral(ctx *analysisContext, lit *ast.BasicLit, value 
 			isTestTrailerIndexLiteralContext(ctx, lit) ||
 			isTestContractLiteralContext(ctx, lit)
 	}
+	if isRuntimeRoleHealthWireLiteral(value) && isRuntimeRoleHealthWireLiteralContext(ctx, lit) {
+		return true
+	}
 	return isStableMessageLikeLiteral(value) && isTestContractLiteralContext(ctx, lit)
+}
+
+func isRuntimeRoleHealthWireLiteral(value string) bool {
+	switch value {
+	case "role_wikid",
+		"role_frontd",
+		"role_workspaced",
+		"role_unknown",
+		"crashed",
+		"degraded",
+		"failed",
+		"indexing",
+		"missing",
+		"not_applicable",
+		"ok",
+		"restarting",
+		"starting",
+		"stopped",
+		"unknown":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRuntimeRoleHealthWireLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
+	fieldSignal := false
+	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.KeyValueExpr:
+			if containsNode(n.Value, lit) && isRuntimeRoleHealthWireFieldName(keyName(n.Key)) {
+				fieldSignal = true
+			}
+		case *ast.CompositeLit:
+			if nameSuggestsRuntimeRoleHealth(exprName(n.Type)) {
+				return true
+			}
+		case *ast.AssignStmt:
+			if assignStmtValueNameSuggestsRuntimeRoleHealth(n, lit) {
+				return true
+			}
+		case *ast.ValueSpec:
+			if valueSpecNameSuggestsRuntimeRoleHealth(n, lit) {
+				return true
+			}
+		case *ast.CallExpr:
+			if fieldSignal && nameSuggestsRuntimeRoleHealth(callName(n)) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return fieldSignal && nameSuggestsRuntimeRoleHealth(n.Name.Name)
+		}
+	}
+	return false
+}
+
+func isRuntimeRoleHealthWireFieldName(name string) bool {
+	switch canonicalName(name) {
+	case "key", "state", "status", "health", "rolehealth":
+		return true
+	default:
+		return false
+	}
+}
+
+func assignStmtValueNameSuggestsRuntimeRoleHealth(stmt *ast.AssignStmt, lit *ast.BasicLit) bool {
+	for i, rhs := range stmt.Rhs {
+		if containsNode(rhs, lit) && i < len(stmt.Lhs) {
+			return nameSuggestsRuntimeRoleHealth(exprName(stmt.Lhs[i]))
+		}
+	}
+	return false
+}
+
+func valueSpecNameSuggestsRuntimeRoleHealth(spec *ast.ValueSpec, lit *ast.BasicLit) bool {
+	for i, value := range spec.Values {
+		if containsNode(value, lit) && i < len(spec.Names) {
+			return nameSuggestsRuntimeRoleHealth(spec.Names[i].Name)
+		}
+	}
+	return false
+}
+
+func nameSuggestsRuntimeRoleHealth(name string) bool {
+	canonical := canonicalName(name)
+	return strings.Contains(canonical, "rolehealth") ||
+		strings.Contains(canonical, "runtimehealth") ||
+		strings.Contains(canonical, "healthwire") ||
+		strings.Contains(canonical, "healthcheck")
 }
 
 func isTestAssertionLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
