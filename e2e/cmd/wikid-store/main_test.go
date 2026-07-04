@@ -283,7 +283,7 @@ var _ = ginkgo.Describe("wikid-store command", func() {
 			Expect(stderr.String()).To(ContainSubstring(wantErr))
 		},
 		ginkgo.Entry("usage", nil, "usage: wikid-store"),
-		ginkgo.Entry("parse", []string{"read-registry", "--unknown"}, "parse flags:"),
+		ginkgo.Entry("rejects unknown read-registry flags", []string{"read-registry", "--unknown"}, "parse flags:"),
 		ginkgo.Entry("global data dir", []string{"read-registry"}, "--global-data-dir is required"),
 		ginkgo.Entry("unknown command", []string{"nope", "--global-data-dir", "/tmp/global"}, `unknown command "nope"`),
 	)
