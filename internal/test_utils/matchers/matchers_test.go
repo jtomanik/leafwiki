@@ -1,6 +1,7 @@
 package matchers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,7 @@ const (
 	testBodyField  ValidationField        = "body"
 )
 
-var _ = ginkgo.Describe("semantic test matchers", func() {
+var _ = ginkgo.Describe("semantic test matchers", ginkgo.Label("unit"), func() {
 	ginkgo.It("matches localized errors by typed code and message ID", func() {
 		err := sharederrors.NewLocalizedErrorFromCode(testErrorCode, errors.New("store unavailable"))
 
@@ -48,11 +49,15 @@ var _ = ginkgo.Describe("semantic test matchers", func() {
 		rec := httptest.NewRecorder()
 		rec.Header().Set("X-Request-Id", "req-1")
 		rec.WriteHeader(http.StatusNotFound)
-		_, err := rec.Write([]byte(`{"error":{"code":"page_not_found","messageId":"errors.page.not_found","message":"Page not found"}}`))
+		detail := sharederrors.NewLocalizedErrorDetailFromCode(testErrorCode)
+		payload := map[string]any{"error": detail}
+		body, err := json.Marshal(payload)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = rec.Write(body)
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(`"code":"page_not_found"`)))
+		Expect(rec).To(HaveHTTPBody(MatchJSON(body)))
 		Expect(rec).To(HaveHTTPHeaderWithValue("X-Request-Id", "req-1"))
 		Expect(rec).To(HaveHTTPStructuredError(http.StatusNotFound, testErrorCode, testMessageID))
 	})
