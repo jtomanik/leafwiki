@@ -17,7 +17,7 @@ import (
 )
 
 var _ = Describe("branding service edge cases", func() {
-	It("accepts a trimmed site name at the maximum length", func() {
+	It("accepts a trimmed site name at the maximum length", Label("integration"), func() {
 		svc, dir := newTestBrandingService()
 		exactName := strings.Repeat("x", 100)
 
@@ -28,7 +28,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(cfg.SiteName).To(Equal(exactName))
 	})
 
-	It("allows common text whitespace in site names", func() {
+	It("allows common text whitespace in site names", Label("integration"), func() {
 		svc, dir := newTestBrandingService()
 		validName := "LeafWiki\tDocs\nTeam\rEdition"
 
@@ -39,7 +39,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(cfg.SiteName).To(Equal(validName))
 	})
 
-	It("accepts uppercase logo extensions and stores the normalized logo filename", func() {
+	It("accepts uppercase logo extensions and stores the normalized logo filename", Label("integration"), func() {
 		svc, dir := newTestBrandingService()
 
 		tmp, err := os.CreateTemp(tempBrandingDir(), "logo-*.PNG")
@@ -56,7 +56,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(filepath.Join(dir, "branding", "logo.png")).To(BeAnExistingFile())
 	})
 
-	It("accepts favicon uploads exactly at the configured size limit", func() {
+	It("accepts favicon uploads exactly at the configured size limit", Label("integration"), func() {
 		svc, dir := newTestBrandingService()
 		svc.brandingConfig.BrandingConstraints.MaxFaviconSize = 10
 
@@ -77,7 +77,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(cfg.FaviconFile).To(Equal("favicon.ico"))
 	})
 
-	It("returns the package branding assets directory", func() {
+	It("returns the package branding assets directory", Label("integration"), func() {
 		svc, dir := newTestBrandingService()
 
 		got := svc.GetBrandingAssetsDir()
@@ -85,7 +85,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(got).To(Equal(want))
 	})
 
-	It("returns marshal errors from branding store saves", func() {
+	It("returns marshal errors from branding store saves", Label("unit"), func() {
 		store := NewBrandingStore(tempBrandingDir())
 		marshalErr := stderrors.New("marshal failed")
 		originalMarshalIndent := brandingMarshalIndent
@@ -101,7 +101,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(err).To(MatchError(marshalErr))
 	})
 
-	It("reports invalid persisted branding config during service startup", func() {
+	It("reports invalid persisted branding config during service startup", Label("integration"), func() {
 		dir := tempBrandingDir()
 		Expect(os.WriteFile(filepath.Join(dir, "branding.json"), []byte("{broken json"), 0644)).To(Succeed())
 
@@ -109,7 +109,7 @@ var _ = Describe("branding service edge cases", func() {
 		Expect(err).To(Satisfy(wrapsJSONSyntaxError))
 	})
 
-	Describe("branding persistence failure behavior", func() {
+	Describe("branding persistence failure behavior", Label("integration"), func() {
 		It("reports branding asset directory creation errors during service startup", func() {
 			storageFile := filepath.Join(tempBrandingDir(), "storage")
 			Expect(os.WriteFile(storageFile, []byte("not a directory"), 0o600)).To(Succeed())

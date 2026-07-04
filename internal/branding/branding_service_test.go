@@ -62,7 +62,7 @@ func HavePositiveBrandingUploadConstraints() types.GomegaMatcher {
 	)
 }
 
-var _ = Describe("branding service", func() {
+var _ = Describe("branding service", Label("integration"), func() {
 	It("leaves the persisted logo reference empty when no logo is configured", func() {
 		svc, dir := newTestBrandingService()
 

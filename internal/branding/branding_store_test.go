@@ -17,7 +17,7 @@ func matchBrandingConstraints(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
-var _ = Describe("branding store", func() {
+var _ = Describe("branding store", Label("integration"), func() {
 	It("loads the default branding config when no persisted config exists", func() {
 		dir := tempBrandingDir()
 		store := NewBrandingStore(dir)
@@ -77,9 +77,7 @@ var _ = Describe("branding store", func() {
 		Expect(store.Save(cfg)).To(Succeed())
 
 		p := filepath.Join(dir, "branding.json")
-		info, err := os.Stat(p)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(info.IsDir()).To(BeFalse())
+		Expect(p).To(BeAnExistingFile())
 
 		// Basic sanity: file contains our siteName
 		b, err := os.ReadFile(p)
