@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -325,6 +326,42 @@ func haveNullAPIKeyLifecycleMetadata() types.GomegaMatcher {
 		HaveKeyWithValue("lastUsedAt", BeNil()),
 		HaveKeyWithValue("revokedAt", BeNil()),
 	)
+}
+
+func publishLinkRefactorEnabled() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(config map[string]any) (bool, error) {
+		return config["enableLinkRefactor"] == true, nil
+	}).WithMessage("publish enabled link refactor config")
+}
+
+func publishWorkspaceSyncDisabled() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(config map[string]any) (bool, error) {
+		return config["enableWorkspaceSync"] == false, nil
+	}).WithMessage("publish disabled workspace sync config")
+}
+
+func reportWorkspaceSyncEnabledStatus() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(status map[string]any) (bool, error) {
+		lastCommitHash, _ := status["lastCommitHash"].(string)
+		return status["enabled"] == true && lastCommitHash != "", nil
+	}).WithMessage("report enabled workspace sync status")
+}
+
+func matchExplicitContentSectionNode(path tree.RoutePath, contentPath tree.MarkdownPath) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(node *apiPageDTO) (bool, error) {
+		return node != nil &&
+			tree.RoutePathFromString(node.Path) == path &&
+			tree.MarkdownPathFromString(node.ContentPath) == contentPath &&
+			!node.ReadmeFallback, nil
+	}).WithMessage("serve an explicit content-backed section node")
+}
+
+func matchReadmeFallbackSectionNode(path tree.RoutePath) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(node *apiPageDTO) (bool, error) {
+		return node != nil &&
+			tree.RoutePathFromString(node.Path) == path &&
+			node.ReadmeFallback, nil
+	}).WithMessage("serve a README fallback section node")
 }
 
 type apiPageDTO struct {
@@ -1075,7 +1112,7 @@ var _ = Describe("HTTP router", func() {
 			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
 		}
 
-		Expect(resp).To(HaveKeyWithValue("enableLinkRefactor", BeTrue()), "Expected enableLinkRefactor=true in config response, got %v", resp)
+		Expect(resp).To(publishLinkRefactorEnabled(), "Expected enableLinkRefactor=true in config response, got %v", resp)
 
 	})
 })
@@ -1139,7 +1176,7 @@ var _ = Describe("HTTP router", func() {
 			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
 		}
 
-		Expect(resp).To(HaveKeyWithValue("enableWorkspaceSync", BeFalse()), "Expected enableWorkspaceSync=false in config response, got %v", resp)
+		Expect(resp).To(publishWorkspaceSyncDisabled(), "Expected enableWorkspaceSync=false in config response, got %v", resp)
 
 	})
 })
@@ -1196,10 +1233,7 @@ var _ = Describe("HTTP router", func() {
 			err := json.Unmarshal(rec.Body.Bytes(), &resp)
 			Expect(err).NotTo(HaveOccurred(), "decode status: %v", err)
 		}
-		Expect(resp).To(SatisfyAll(
-			HaveKeyWithValue("enabled", BeTrue()),
-			HaveKeyWithValue("lastCommitHash", Not(BeEmpty())),
-		), "workspace sync status response = %#v", resp)
+		Expect(resp).To(reportWorkspaceSyncEnabledStatus(), "workspace sync status response = %#v", resp)
 
 	})
 })
@@ -3726,14 +3760,12 @@ var _ = Describe("HTTP router", func() {
 		router := createRouterTestInstance(w)
 
 		root := getTreeViaAPI(router)
-		Expect(root.Children).To(ContainElement(SatisfyAll(
-			HaveField("Path", "docs"),
-			HaveField("ContentPath", "docs/INDEX.MD"),
-			HaveField("ReadmeFallback", BeFalse()),
+		Expect(root.Children).To(ContainElement(matchExplicitContentSectionNode(
+			tree.RoutePath("docs"),
+			tree.MarkdownPath("docs/INDEX.MD"),
 		)), "docs section missing from tree: %#v", root.Children)
-		Expect(root.Children).To(ContainElement(SatisfyAll(
-			HaveField("Path", "guides"),
-			HaveField("ReadmeFallback", BeTrue()),
+		Expect(root.Children).To(ContainElement(matchReadmeFallbackSectionNode(
+			tree.RoutePath("guides"),
 		)), "guides section missing from tree: %#v", root.Children)
 
 	})
