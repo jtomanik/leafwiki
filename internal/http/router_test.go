@@ -22,7 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
@@ -329,39 +329,192 @@ func haveNullAPIKeyLifecycleMetadata() types.GomegaMatcher {
 }
 
 func publishLinkRefactorEnabled() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(config map[string]any) (bool, error) {
-		return config["enableLinkRefactor"] == true, nil
-	}).WithMessage("publish enabled link refactor config")
+	return WithTransform(routerConfigObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"LinkRefactor": Equal(configFeatureEnabled),
+	}))
 }
 
 func publishWorkspaceSyncDisabled() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(config map[string]any) (bool, error) {
-		return config["enableWorkspaceSync"] == false, nil
-	}).WithMessage("publish disabled workspace sync config")
+	return WithTransform(routerConfigObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"WorkspaceSync": Equal(configFeatureDisabled),
+	}))
 }
 
 func reportWorkspaceSyncEnabledStatus() types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(status map[string]any) (bool, error) {
-		lastCommitHash, _ := status["lastCommitHash"].(string)
-		return status["enabled"] == true && lastCommitHash != "", nil
-	}).WithMessage("report enabled workspace sync status")
+	return WithTransform(workspaceSyncStatusObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":          Equal(workspaceSyncStatusEnabled),
+		"LastCommitHash": Not(BeEmpty()),
+	}))
 }
 
 func matchExplicitContentSectionNode(path tree.RoutePath, contentPath tree.MarkdownPath) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(node *apiPageDTO) (bool, error) {
-		return node != nil &&
-			tree.RoutePathFromString(node.Path) == path &&
-			tree.MarkdownPathFromString(node.ContentPath) == contentPath &&
-			!node.ReadmeFallback, nil
-	}).WithMessage("serve an explicit content-backed section node")
+	return WithTransform(apiSectionNodeObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Presence":    Equal(apiSectionNodePresent),
+		"Path":        Equal(path),
+		"ContentPath": Equal(contentPath),
+		"Source":      Equal(apiSectionContentExplicit),
+	}))
 }
 
 func matchReadmeFallbackSectionNode(path tree.RoutePath) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(node *apiPageDTO) (bool, error) {
-		return node != nil &&
-			tree.RoutePathFromString(node.Path) == path &&
-			node.ReadmeFallback, nil
-	}).WithMessage("serve a README fallback section node")
+	return WithTransform(apiSectionNodeObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Presence": Equal(apiSectionNodePresent),
+		"Path":     Equal(path),
+		"Source":   Equal(apiSectionContentReadmeFallback),
+	}))
+}
+
+type configFeatureState uint8
+
+const (
+	configFeatureDisabled configFeatureState = iota
+	configFeatureEnabled
+)
+
+type routerConfigObservation struct {
+	LinkRefactor  configFeatureState
+	WorkspaceSync configFeatureState
+}
+
+func routerConfigObservationFor(config map[string]any) routerConfigObservation {
+	return routerConfigObservation{
+		LinkRefactor:  configFeatureStateFor(config["enableLinkRefactor"]),
+		WorkspaceSync: configFeatureStateFor(config["enableWorkspaceSync"]),
+	}
+}
+
+func configFeatureStateFor(value any) configFeatureState {
+	if enabled, ok := value.(bool); ok && enabled {
+		return configFeatureEnabled
+	}
+	return configFeatureDisabled
+}
+
+type workspaceSyncStatusState uint8
+
+const (
+	workspaceSyncStatusDisabled workspaceSyncStatusState = iota
+	workspaceSyncStatusEnabled
+)
+
+type workspaceSyncStatusObservation struct {
+	State          workspaceSyncStatusState
+	LastCommitHash string
+}
+
+func workspaceSyncStatusObservationFor(status map[string]any) workspaceSyncStatusObservation {
+	state := workspaceSyncStatusDisabled
+	if enabled, ok := status["enabled"].(bool); ok && enabled {
+		state = workspaceSyncStatusEnabled
+	}
+	lastCommitHash, _ := status["lastCommitHash"].(string)
+	return workspaceSyncStatusObservation{State: state, LastCommitHash: lastCommitHash}
+}
+
+type apiSectionNodePresence uint8
+
+const (
+	apiSectionNodeMissing apiSectionNodePresence = iota
+	apiSectionNodePresent
+)
+
+type apiSectionContentSource uint8
+
+const (
+	apiSectionContentExplicit apiSectionContentSource = iota
+	apiSectionContentReadmeFallback
+)
+
+type apiSectionNodeObservation struct {
+	Presence    apiSectionNodePresence
+	Path        tree.RoutePath
+	ContentPath tree.MarkdownPath
+	Source      apiSectionContentSource
+}
+
+func apiSectionNodeObservationFor(node *apiPageDTO) apiSectionNodeObservation {
+	if node == nil {
+		return apiSectionNodeObservation{Presence: apiSectionNodeMissing}
+	}
+	source := apiSectionContentExplicit
+	if node.ReadmeFallback {
+		source = apiSectionContentReadmeFallback
+	}
+	return apiSectionNodeObservation{
+		Presence:    apiSectionNodePresent,
+		Path:        tree.RoutePathFromString(node.Path),
+		ContentPath: tree.MarkdownPathFromString(node.ContentPath),
+		Source:      source,
+	}
+}
+
+type frontendSubFSBootstrapState uint8
+
+const (
+	frontendSubFSBootstrapReady frontendSubFSBootstrapState = iota
+	frontendSubFSBootstrapPanicked
+)
+
+type frontendSubFSBootstrapObservation struct {
+	State         frontendSubFSBootstrapState
+	FailedDir     string
+	Err           error
+	RequestedDirs []string
+}
+
+func frontendSubFSBootstrapObservationFor(failures map[string]error) frontendSubFSBootstrapObservation {
+	GinkgoHelper()
+
+	previous := httpinternal.EmbedFrontend
+	httpinternal.EmbedFrontend = "true"
+	defer func() {
+		httpinternal.EmbedFrontend = previous
+	}()
+
+	requestedDirs := []string{}
+	var failedDir string
+	var failedErr error
+	restoreSubFS := httpinternal.SetFrontendSubFSForTest(func(_ fs.FS, dir string) (fs.FS, error) {
+		requestedDirs = append(requestedDirs, dir)
+		if err, fail := failures[dir]; fail && err != nil {
+			failedDir = dir
+			failedErr = err
+			return nil, err
+		}
+		if dir == "dist" {
+			return fstest.MapFS{
+				"index.html": &fstest.MapFile{Data: []byte("<html><head></head><body></body></html>")},
+			}, nil
+		}
+		return fstest.MapFS{}, nil
+	})
+	defer restoreSubFS()
+
+	state := frontendSubFSBootstrapReady
+	func() {
+		defer func() {
+			if recover() != nil {
+				state = frontendSubFSBootstrapPanicked
+			}
+		}()
+		httpinternal.NewRouter(nil, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{DisableRequestLog: true})
+	}()
+
+	return frontendSubFSBootstrapObservation{
+		State:         state,
+		FailedDir:     failedDir,
+		Err:           failedErr,
+		RequestedDirs: requestedDirs,
+	}
+}
+
+func matchFrontendSubFSPanic(failedDir string, errMatcher types.GomegaMatcher, requestedDirs types.GomegaMatcher) types.GomegaMatcher {
+	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"State":         Equal(frontendSubFSBootstrapPanicked),
+		"FailedDir":     Equal(failedDir),
+		"Err":           errMatcher,
+		"RequestedDirs": requestedDirs,
+	})
 }
 
 type apiPageDTO struct {
@@ -5296,41 +5449,19 @@ var _ = Describe("router edge behavior", func() {
 	})
 
 	It("panics when the embedded frontend dist filesystem cannot be opened", Label("integration"), func() {
-		previous := httpinternal.EmbedFrontend
-		httpinternal.EmbedFrontend = "true"
-		DeferCleanup(func() {
-			httpinternal.EmbedFrontend = previous
-		})
-		DeferCleanup(httpinternal.SetFrontendSubFSForTest(func(_ fs.FS, _ string) (fs.FS, error) {
-			return nil, errors.New("dist unavailable")
-		}))
+		distUnavailableErr := errors.New("dist unavailable")
 
-		Expect(func() {
-			httpinternal.NewRouter(nil, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{DisableRequestLog: true})
-		}).To(PanicWith(ContainSubstring("failed to create sub FS: dist unavailable")))
+		Expect(frontendSubFSBootstrapObservationFor(map[string]error{
+			"dist": distUnavailableErr,
+		})).To(matchFrontendSubFSPanic("dist", Equal(distUnavailableErr), Equal([]string{"dist"})))
 	})
 
 	It("panics when the embedded frontend static filesystem cannot be opened", Label("integration"), func() {
-		previous := httpinternal.EmbedFrontend
-		httpinternal.EmbedFrontend = "true"
-		DeferCleanup(func() {
-			httpinternal.EmbedFrontend = previous
-		})
-		var requestedDirs []string
-		DeferCleanup(httpinternal.SetFrontendSubFSForTest(func(_ fs.FS, dir string) (fs.FS, error) {
-			requestedDirs = append(requestedDirs, dir)
-			if dir == "dist" {
-				return fstest.MapFS{
-					"index.html": &fstest.MapFile{Data: []byte("<html><head></head><body></body></html>")},
-				}, nil
-			}
-			return nil, errors.New("static unavailable")
-		}))
+		staticUnavailableErr := errors.New("static unavailable")
 
-		Expect(func() {
-			httpinternal.NewRouter(nil, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{DisableRequestLog: true})
-		}).To(PanicWith(ContainSubstring("failed to create sub FS: static unavailable")))
-		Expect(requestedDirs).To(Equal([]string{"dist", "dist/static"}))
+		Expect(frontendSubFSBootstrapObservationFor(map[string]error{
+			"dist/static": staticUnavailableErr,
+		})).To(matchFrontendSubFSPanic("dist/static", Equal(staticUnavailableErr), Equal([]string{"dist", "dist/static"})))
 	})
 
 	It("returns 404 when the embedded SPA index cannot be read", Label("integration"), func() {
