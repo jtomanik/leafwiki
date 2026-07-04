@@ -76,8 +76,8 @@ var _ = ginkgo.Describe("web presence registry", func() {
 		user := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeView}, user, nil)).To(Succeed())
 
-		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString(""), Mode: SessionModeView}, user, nil)).To(HaveOccurred())
-		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-2"), Mode: SessionModeFromString("invalid")}, user, nil)).To(HaveOccurred())
+		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString(""), Mode: SessionModeView}, user, nil)).To(matchPresenceErrorCode(ErrCodePresenceSessionIDRequired))
+		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-2"), Mode: SessionModeFromString("invalid")}, user, nil)).To(matchPresenceErrorCode(ErrCodePresenceModeInvalid))
 		sessions := registry.List(&coreauth.User{Role: coreauth.RoleAdmin})
 		Expect(sessions).To(HaveExactElements(matchPresenceSession(gstruct.Fields{
 			"SessionID": Equal(WebSessionIDFromString("tab-1")),
@@ -102,7 +102,7 @@ var _ = ginkgo.Describe("web presence registry", func() {
 		other := &coreauth.User{ID: "editor-2", Username: "Editor Two", Role: coreauth.RoleEditor}
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("shared-tab"), Mode: SessionModeView}, editor, nil)).To(Succeed())
 
-		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("shared-tab"), Mode: SessionModeEdit}, other, nil)).To(HaveOccurred())
+		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("shared-tab"), Mode: SessionModeEdit}, other, nil)).To(matchPresenceErrorCode(ErrCodePresenceSessionUserMismatch))
 		Expect(registry.Remove(WebSessionIDFromString("shared-tab"), other)).To(BeFalse())
 
 		sessions := registry.List(&coreauth.User{Role: coreauth.RoleAdmin})
@@ -135,7 +135,7 @@ var _ = ginkgo.Describe("web presence registry", func() {
 
 	ginkgo.It("preserves registry defaults, rejects invalid JSON modes, ignores missing removals, and lists sessions in tab order", func() {
 		var mode SessionMode
-		Expect(json.Unmarshal([]byte(`{"mode":"view"}`), &mode)).To(HaveOccurred())
+		Expect(json.Unmarshal([]byte(`{"mode":"view"}`), &mode)).To(BeAssignableToTypeOf(&json.UnmarshalTypeError{}))
 		registry := NewWebPresenceRegistry(0, nil)
 		Expect(registry).To(matchPresenceRegistryDefaults())
 		user := &coreauth.User{ID: "editor-1", Username: "Editor One", Email: "editor@example.test", Role: coreauth.RoleEditor}
@@ -235,7 +235,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusBadRequest, ErrCodePresenceInvalidRequest, sharederrors.MessageIDForCode(ErrCodePresenceInvalidRequest)))
 	})
 
-	ginkgo.It("handleHeartbeat returns early without a user and accepts valid heartbeats", func() {
+	ginkgo.It("forbids anonymous heartbeats and records authenticated heartbeat requests", func() {
 		gin.SetMode(gin.TestMode)
 		registry := NewWebPresenceRegistry(time.Minute, nil)
 		routes := NewRoutes(RoutesConfig{Registry: registry})
@@ -262,13 +262,13 @@ var _ = ginkgo.Describe("presence routes", func() {
 		))
 	})
 
-	ginkgo.It("handleDeleteSession returns early without a user", func() {
+	ginkgo.It("forbids anonymous session deletion requests", func() {
 		rec := exerciseDeleteSession(NewRoutes(RoutesConfig{Registry: NewWebPresenceRegistry(time.Minute, nil)}), "tab-1", nil)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 	})
 
-	ginkgo.It("resolvePage resolves by page ID and route path", func() {
+	ginkgo.It("resolves page references by page identity or route path", func() {
 		treeService, pageID := setupPresenceTree()
 		routes := NewRoutes(RoutesConfig{TreeService: treeService})
 
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 		Expect(pageRefForPage(&tree.Page{})).To(BeNil())
 	})
 
-	ginkgo.It("handleDeleteSession returns OK and removes only the owner session", func() {
+	ginkgo.It("acknowledges session deletion while removing only the owner session", func() {
 		registry := NewWebPresenceRegistry(time.Minute, nil)
 		owner := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
 		other := &coreauth.User{ID: "editor-2", Username: "Editor Two", Role: coreauth.RoleEditor}
