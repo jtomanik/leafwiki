@@ -18,6 +18,7 @@ const (
 	testPageVersionConflictMessageID   sharederrors.MessageID = "errors.page.version_conflict"
 	testAuthInvalidCredentialsCode     sharederrors.ErrorCode = "auth_invalid_credentials"
 	testAuthInvalidCredentialsMsgID    sharederrors.MessageID = "errors.auth.invalid_credentials"
+	testUnknownCode                    sharederrors.ErrorCode = "unknown"
 	testUnknownMessageID               sharederrors.MessageID = "errors.unknown"
 	testCustomMissingCode              sharederrors.ErrorCode = "custom_missing"
 	testCustomMissingMessageID         sharederrors.MessageID = "errors.custom.missing"
@@ -130,8 +131,8 @@ var _ = Describe("localized error derived contracts", func() {
 	It("maps empty, un-namespaced, and namespaced codes to message IDs", func() {
 		Expect(sharederrors.MessageIDForCode("")).To(BeEmpty())
 		Expect(sharederrors.MessageIDForCode("  ")).To(BeEmpty())
-		Expect(sharederrors.MessageIDForCode("unknown")).To(Equal(testUnknownMessageID))
-		Expect(sharederrors.MessageIDForCode(testAuthInvalidCredentialsCode)).To(Equal(testAuthInvalidCredentialsMsgID))
+		Expect(sharederrors.NewLocalizedErrorDetail(testUnknownCode, "", "")).To(testmatchers.HaveStructuredError(testUnknownCode, testUnknownMessageID))
+		Expect(sharederrors.NewLocalizedErrorDetail(testAuthInvalidCredentialsCode, "", "")).To(testmatchers.HaveStructuredError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
 	})
 
 	It("nil localized errors have empty Error text and no wrapped cause", func() {
@@ -141,15 +142,16 @@ var _ = Describe("localized error derived contracts", func() {
 		Expect(err.Unwrap()).To(Succeed())
 	})
 
-	It("localized errors include the cause in Error text when present", func() {
+	It("localized errors keep their structured identity while wrapping a cause", func() {
 		cause := stderrors.New("root cause")
 		err := sharederrors.NewLocalizedError(testCustomMissingCode, testVisibleLocalizedMessage, testVisibleLocalizedMessage, cause)
 
 		Expect(err).To(MatchError(cause))
-		Expect(err).To(HaveLocalizedErrorText(localizedErrorTextExpectation{
+		Expect(err).To(testmatchers.MatchLocalizedError(testCustomMissingCode, testCustomMissingMessageID))
+		Expect(err).To(HaveLocalizedRendering(localizedRenderingExpectation{
 			MessageID: testCustomMissingMessageID,
-			Text:      testVisibleLocalizedMessage,
-			Cause:     cause,
+			Message:   testVisibleLocalizedMessage,
+			Template:  testVisibleLocalizedMessage,
 		}))
 	})
 

@@ -44,33 +44,6 @@ type localizedRenderingExpectation struct {
 	Template  string
 }
 
-type localizedErrorTextExpectation struct {
-	MessageID sharederrors.MessageID
-	Text      string
-	Cause     error
-}
-
-func HaveLocalizedErrorText(expected localizedErrorTextExpectation) types.GomegaMatcher {
-	return gcustom.MakeMatcher(func(actual error) (bool, error) {
-		if actual == nil {
-			return false, nil
-		}
-		localized, ok := sharederrors.AsLocalizedError(actual)
-		if !ok {
-			return false, nil
-		}
-		return localized.MessageID == expected.MessageID &&
-			actual.Error() == localizedErrorText(expected), nil
-	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} have localized error text\n{{format .Data 1}}", expected)
-}
-
-func localizedErrorText(expected localizedErrorTextExpectation) string {
-	if expected.Cause == nil {
-		return expected.Text
-	}
-	return fmt.Sprintf("%s: %s", expected.Text, expected.Cause.Error())
-}
-
 func HaveLocalizedRendering(expected localizedRenderingExpectation) types.GomegaMatcher {
 	return gcustom.MakeMatcher(func(actual any) (bool, error) {
 		got, ok, err := renderedLocalizedFields(actual)
