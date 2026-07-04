@@ -10,7 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("committed localization catalog", func() {
+var _ = Describe("committed localization catalog", Label("unit"), func() {
 	It("contains every production message ID constant", func() {
 		root := repoRoot()
 		catalog, err := committedCatalog()

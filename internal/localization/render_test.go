@@ -104,6 +104,27 @@ func (id stringMessageID) String() string {
 	return string(id)
 }
 
+type catalogRendererState string
+
+const (
+	catalogRendererUnavailable catalogRendererState = "renderer unavailable"
+	catalogRendererReady       catalogRendererState = "renderer ready"
+)
+
+type catalogMessagePresence string
+
+const (
+	catalogMessageNotConsulted catalogMessagePresence = "catalog message not consulted"
+	catalogMessageAvailable    catalogMessagePresence = "catalog message available"
+	catalogMessageAbsent       catalogMessagePresence = "catalog message absent"
+)
+
+type catalogMessageLookupObservation struct {
+	MessageID CatalogMessageID
+	Renderer  catalogRendererState
+	Message   catalogMessagePresence
+}
+
 var _ = Describe("localization fallback and catalog validation contracts", Label("unit"), func() {
 	It("nil renderer falls back using positional template data", func() {
 		var renderer *Renderer
@@ -380,9 +401,43 @@ func matchMissingRenderResult(fields gstruct.Fields) types.GomegaMatcher {
 
 func missCatalogMessage(id string) types.GomegaMatcher {
 	GinkgoHelper()
-	return gcustom.MakeMatcher(func(renderer *Renderer) (bool, error) {
-		return renderer == nil || !renderer.hasCatalogID(id), nil
-	}).WithMessage("miss catalog message ID")
+	messageID := CatalogMessageID(id)
+	return WithTransform(func(renderer *Renderer) catalogMessageLookupObservation {
+		return catalogMessageLookup(renderer, messageID)
+	}, SatisfyAny(
+		Equal(catalogMessageLookupObservation{
+			MessageID: messageID,
+			Renderer:  catalogRendererUnavailable,
+			Message:   catalogMessageNotConsulted,
+		}),
+		Equal(catalogMessageLookupObservation{
+			MessageID: messageID,
+			Renderer:  catalogRendererReady,
+			Message:   catalogMessageAbsent,
+		}),
+	))
+}
+
+func catalogMessageLookup(renderer *Renderer, id CatalogMessageID) catalogMessageLookupObservation {
+	if renderer == nil {
+		return catalogMessageLookupObservation{
+			MessageID: id,
+			Renderer:  catalogRendererUnavailable,
+			Message:   catalogMessageNotConsulted,
+		}
+	}
+	if renderer.hasCatalogID(id.String()) {
+		return catalogMessageLookupObservation{
+			MessageID: id,
+			Renderer:  catalogRendererReady,
+			Message:   catalogMessageAvailable,
+		}
+	}
+	return catalogMessageLookupObservation{
+		MessageID: id,
+		Renderer:  catalogRendererReady,
+		Message:   catalogMessageAbsent,
+	}
 }
 
 func matchMissingCatalogMessage(id string) types.GomegaMatcher {
