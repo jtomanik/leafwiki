@@ -12,7 +12,7 @@ import (
 	"github.com/yuin/goldmark/renderer"
 )
 
-var _ = Describe("excerpt generation from content", func() {
+var _ = Describe("excerpt generation from content", Label("unit"), func() {
 	It("extracts plain body text after frontmatter", func() {
 		raw := "---\ntitle: Hello\n---\n\nThis is the page body."
 
@@ -119,7 +119,7 @@ var _ = Describe("excerpt generation from content", func() {
 	})
 })
 
-var _ = Describe("markdown normalization", func() {
+var _ = Describe("markdown normalization", Label("unit"), func() {
 	It("preserves shoutout labels while removing fence markers", func() {
 		body := strings.Join([]string{
 			"::: info",
@@ -158,7 +158,7 @@ var _ = Describe("markdown normalization", func() {
 	})
 })
 
-var _ = Describe("excerpt boundary behavior", func() {
+var _ = Describe("excerpt boundary behavior", Label("unit"), func() {
 	It("FromContent falls back to raw content when frontmatter parsing fails", func() {
 		raw := "---\ntitle: [unterminated\n---\n\nBody after invalid frontmatter."
 
