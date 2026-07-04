@@ -34,10 +34,10 @@ var _ = ginkgo.Describe("links store persistence", func() {
 
 		pageIDs := make([]tree.PageID, 0, maxOutgoingLinksQueryArgs+5)
 		for i := 0; i < maxOutgoingLinksQueryArgs+5; i++ {
-			pageID := newFixturePageID(fmt.Sprintf("page-%d", i))
+			pageID := tree.PageIDFromString(fmt.Sprintf("page-%d", i))
 			pageIDs = append(pageIDs, pageID)
 			Expect(store.AddLinks(pageID, fmt.Sprintf("Title %s", pageID), []TargetLink{{
-				TargetPageID:   newFixturePageID(fmt.Sprintf("target-%s", pageID)),
+				TargetPageID:   tree.PageIDFromString(fmt.Sprintf("target-%s", pageID)),
 				TargetPagePath: fmt.Sprintf("target/%s", pageID),
 			}})).To(Succeed())
 		}

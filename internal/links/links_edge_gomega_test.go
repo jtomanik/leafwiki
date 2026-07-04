@@ -682,10 +682,10 @@ func createLoadedLinksPage(treeService *tree.TreeService, title string, slug str
 	GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode(newFixtureUserID("links-tester"), nil, title, newFixtureSlug(slug), &kind)
+	pageID, err := treeService.CreateNode(newFixtureUserID("links-tester"), nil, title, tree.SlugFromString(slug), &kind)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(pageID).NotTo(BeNil())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("links-tester"), *pageID, title, newFixtureSlug(slug), &content, false)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("links-tester"), *pageID, title, tree.SlugFromString(slug), &content, false)).To(Succeed())
 
 	page, err := treeService.GetPage(*pageID)
 	Expect(err).NotTo(HaveOccurred())

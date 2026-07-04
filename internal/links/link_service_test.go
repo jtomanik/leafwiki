@@ -180,7 +180,7 @@ var _ = ginkgo.Describe("target link resolution", func() {
 		ts, page1ID, page2ID := setupTreeForLinksTest()
 
 		// current page: docs/page1
-		page1, err := ts.GetPage(newFixturePageID(page1ID))
+		page1, err := ts.GetPage(page1ID)
 		Expect(err).NotTo(HaveOccurred())
 		currentPath := page1.CalculatePath() // should be "docs/page1"
 
@@ -189,19 +189,19 @@ var _ = ginkgo.Describe("target link resolution", func() {
 
 		targets := resolveTargetLinks(ts, tree.RoutePathFromString(currentPath), links)
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID(page2ID), "/docs/page2")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(page2ID, "/docs/page2")))
 	})
 
 	// - Canonical .md page link indexes as outgoing link
 	ginkgo.It("resolves canonical relative page markdown links from the source file directory", func() {
 		ts, page1ID, page2ID := setupTreeForLinksTest()
 
-		page1, err := ts.GetPage(newFixturePageID(page1ID))
+		page1, err := ts.GetPage(page1ID)
 		Expect(err).NotTo(HaveOccurred())
 
 		targets := resolveTargetLinks(ts, page1.CalculateRoutePath(), []string{"./page2.md"})
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID(page2ID), "/docs/page2")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(page2ID, "/docs/page2")))
 	})
 
 	// - Relative section links are resolved from the source file directory
@@ -371,7 +371,7 @@ leafwiki_title: Nested Sibling
 	ginkgo.It("returns broken targets with normalized paths for missing destinations", func() {
 		ts, page1ID, _ := setupTreeForLinksTest()
 
-		page1, err := ts.GetPage(newFixturePageID(page1ID))
+		page1, err := ts.GetPage(page1ID)
 		Expect(err).NotTo(HaveOccurred())
 		currentPath := page1.CalculatePath()
 
@@ -391,7 +391,7 @@ leafwiki_title: Nested Sibling
 	ginkgo.It("ignores asset destinations during target resolution", func() {
 		ts, page1ID, _ := setupTreeForLinksTest()
 
-		page1, err := ts.GetPage(newFixturePageID(page1ID))
+		page1, err := ts.GetPage(page1ID)
 		Expect(err).NotTo(HaveOccurred())
 
 		targets := resolveTargetLinks(ts, page1.CalculateRoutePath(), []string{
@@ -429,15 +429,15 @@ func createSimpleLinkedPages(ts *tree.TreeService) (pageAID, pageBID tree.PageID
 	Expect(err).NotTo(HaveOccurred())
 	pageBID = *bIDPtr
 
-	aPage, err := ts.GetPage(newFixturePageID(pageAID))
+	aPage, err := ts.GetPage(pageAID)
 	Expect(err).NotTo(HaveOccurred())
 	contentA := "Link to B: [Go to B](/b.md)"
-	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(aPage.ID), aPage.Title, newFixtureSlug(aPage.Slug), &contentA, false)).To(Succeed())
+	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), aPage.ID, aPage.Title, aPage.Slug, &contentA, false)).To(Succeed())
 
-	bPage, err := ts.GetPage(newFixturePageID(pageBID))
+	bPage, err := ts.GetPage(pageBID)
 	Expect(err).NotTo(HaveOccurred())
 	contentB := "# Page B\nNo outgoing links."
-	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(bPage.ID), bPage.Title, newFixtureSlug(bPage.Slug), &contentB, false)).To(Succeed())
+	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), bPage.ID, bPage.Title, bPage.Slug, &contentB, false)).To(Succeed())
 
 	return pageAID, pageBID
 }
@@ -449,11 +449,11 @@ var _ = ginkgo.Describe("link service indexing", func() {
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		data, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
+		data, err := svc.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(data).To(matchBacklinkResult(1,
-			matchBacklinkResultItem(newFixturePageID(pageAID), newFixturePageID(pageBID)),
+			matchBacklinkResultItem(pageAID, pageBID),
 		))
 	})
 })
@@ -659,14 +659,14 @@ var _ = ginkgo.Describe("link service reindexing", func() {
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		aPage, err := ts.GetPage(newFixturePageID(pageAID))
+		aPage, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		var noLinks = "No more links."
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(aPage.ID), aPage.Title, newFixtureSlug(aPage.Slug), &noLinks, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), aPage.ID, aPage.Title, aPage.Slug, &noLinks, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		data, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
+		data, err := svc.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(data.Backlinks).To(HaveLen(0))
@@ -678,15 +678,15 @@ var _ = ginkgo.Describe("single-page link updates", func() {
 		svc, ts, _ := setupLinkService()
 		pageAID, pageBID := createSimpleLinkedPages(ts)
 
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(svc.UpdateLinksForPage(pageA, pageA.Content)).To(Succeed())
 
-		dataB, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
+		dataB, err := svc.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(dataB.Backlinks).To(HaveLen(1))
 
-		dataA, err := svc.GetBacklinksForPage(newFixturePageID(pageAID))
+		dataA, err := svc.GetBacklinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(dataA.Backlinks).To(HaveLen(0))
 
@@ -702,7 +702,7 @@ var _ = ginkgo.Describe("link clearing", func() {
 
 		Expect(svc.ClearLinks()).To(Succeed())
 
-		data, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
+		data, err := svc.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(data.Backlinks).To(HaveLen(0))
 
@@ -716,14 +716,14 @@ var _ = ginkgo.Describe("outgoing link queries", func() {
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		result, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
+		result, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 
-		pageB, err := ts.GetPage(newFixturePageID(pageBID))
+		pageB, err := ts.GetPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(matchOutgoingResult(1,
 			SatisfyAll(
-				matchResolvedOutgoingResultItem(newFixturePageID(pageAID), newFixturePageID(pageBID), tree.RoutePath("/b")),
+				matchResolvedOutgoingResultItem(pageAID, pageBID, tree.RoutePath("/b")),
 				matchOutgoingResultItemTitle(pageB.Title),
 			),
 		))
@@ -739,15 +739,15 @@ var _ = ginkgo.Describe("outgoing link queries for pages without links", func() 
 		Expect(err).NotTo(HaveOccurred())
 		lonelyID := *aIDPtr
 
-		page, err := ts.GetPage(newFixturePageID(lonelyID))
+		page, err := ts.GetPage(lonelyID)
 		Expect(err).NotTo(HaveOccurred())
 
 		var noLinks = "Just some text, no links."
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), page.Title, newFixtureSlug(page.Slug), &noLinks, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), page.ID, page.Title, page.Slug, &noLinks, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		result, err := svc.GetOutgoingLinksForPage(newFixturePageID(lonelyID))
+		result, err := svc.GetOutgoingLinksForPage(lonelyID)
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(result).To(matchOutgoingResult(0))
@@ -767,24 +767,24 @@ var _ = ginkgo.Describe("asset link filtering during indexing", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pageBID := *bIDPtr
 
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		contentA := "Asset: [Manual](/assets/abc/manual.pdf)\nPage: [Go](/b)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &contentA, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageA.ID, pageA.Title, pageA.Slug, &contentA, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		outgoing, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
+		outgoing, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outgoing).To(matchOutgoingResult(1,
-			matchBrokenOutgoingResultItem(newFixturePageID(pageAID), tree.RoutePath("/b")),
+			matchBrokenOutgoingResultItem(pageAID, tree.RoutePath("/b")),
 		))
 
-		status, err := svc.GetLinkStatusForPage(newFixturePageID(pageAID), "/a")
+		status, err := svc.GetLinkStatusForPage(pageAID, "/a")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(status.Counts).To(matchLinkStatusCounts(0, 0, 0, 1))
 
-		backlinks, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
+		backlinks, err := svc.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(backlinks).To(matchBacklinkResult(0))
 
@@ -798,14 +798,14 @@ var _ = ginkgo.Describe("outgoing result mapping", func() {
 		root := ts.GetTree()
 		Expect(root).NotTo(BeNil())
 
-		outgoings := []Outgoing{{FromPageID: newFixturePageID(page1ID), ToPageID: newFixturePageID(page2ID), ToPath: "/docs/page2", Broken: false, FromTitle: "Page 1"}}
+		outgoings := []Outgoing{{FromPageID: page1ID, ToPageID: page2ID, ToPath: "/docs/page2", Broken: false, FromTitle: "Page 1"}}
 
 		result := toOutgoingLinkResult(ts, outgoings)
-		page2, err := ts.GetPage(newFixturePageID(page2ID))
+		page2, err := ts.GetPage(page2ID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(matchOutgoingResult(1,
 			SatisfyAll(
-				matchResolvedOutgoingResultItem(newFixturePageID(page1ID), newFixturePageID(page2ID), tree.RoutePath("/docs/page2")),
+				matchResolvedOutgoingResultItem(page1ID, page2ID, tree.RoutePath("/docs/page2")),
 				matchOutgoingResultItemTitle(page2.Title),
 			),
 		))
@@ -821,40 +821,40 @@ var _ = ginkgo.Describe("late-created target indexing", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
-		aPage, err := ts.GetPage(newFixturePageID(pageAID))
+		aPage, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToB = "Link to B: [Go](/b.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(aPage.ID), aPage.Title, newFixtureSlug(aPage.Slug), &linkToB, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), aPage.ID, aPage.Title, aPage.Slug, &linkToB, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		out1, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
+		out1, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out1).To(matchOutgoingResult(1,
-			matchBrokenOutgoingResultItem(newFixturePageID(pageAID), tree.RoutePath("/b")),
+			matchBrokenOutgoingResultItem(pageAID, tree.RoutePath("/b")),
 		))
 
 		bIDPtr, err := ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageBID := *bIDPtr
 
-		bPage, err := ts.GetPage(newFixturePageID(pageBID))
+		bPage, err := ts.GetPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		var pageBContent = "# Page B"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(bPage.ID), bPage.Title, newFixtureSlug(bPage.Slug), &pageBContent, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), bPage.ID, bPage.Title, bPage.Slug, &pageBContent, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		out2, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
+		out2, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out2).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(newFixturePageID(pageAID), newFixturePageID(pageBID), tree.RoutePath("/b")),
+			matchResolvedOutgoingResultItem(pageAID, pageBID, tree.RoutePath("/b")),
 		))
 
-		bl, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
+		bl, err := svc.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(bl).To(matchBacklinkResult(1,
-			matchBacklinkResultItem(newFixturePageID(pageAID), newFixturePageID(pageBID)),
+			matchBacklinkResultItem(pageAID, pageBID),
 		))
 
 	})
@@ -868,38 +868,38 @@ var _ = ginkgo.Describe("exact-path link healing", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToB = "Link to B: [Go](/b.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToB, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageA.ID, pageA.Title, pageA.Slug, &linkToB, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		out1, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
+		out1, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out1).To(matchOutgoingResult(1,
-			matchBrokenOutgoingResultItem(newFixturePageID(pageAID), tree.RoutePath("/b")),
+			matchBrokenOutgoingResultItem(pageAID, tree.RoutePath("/b")),
 		))
 
 		bIDPtr, err := ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageBID := *bIDPtr
 
-		pageB, err := ts.GetPage(newFixturePageID(pageBID))
+		pageB, err := ts.GetPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(svc.HealLinksForExactPath(pageB)).To(Succeed())
 
-		out2, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
+		out2, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out2).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(newFixturePageID(pageAID), newFixturePageID(pageBID), tree.RoutePath("/b")),
+			matchResolvedOutgoingResultItem(pageAID, pageBID, tree.RoutePath("/b")),
 		))
 
-		bl, err := svc.GetBacklinksForPage(newFixturePageID(pageBID))
+		bl, err := svc.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(bl).To(matchBacklinkResult(1,
-			matchBacklinkResultItem(newFixturePageID(pageAID), newFixturePageID(pageBID)),
+			matchBacklinkResultItem(pageAID, pageBID),
 		))
 
 	})
@@ -923,20 +923,20 @@ var _ = ginkgo.Describe("broken incoming link queries", func() {
 		pageCID := *cIDPtr
 
 		// Update A and B to link to a non-existent page "/nonexistent"
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToMissing = "Link: [Missing](/nonexistent)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToMissing, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageA.ID, pageA.Title, pageA.Slug, &linkToMissing, false)).To(Succeed())
 
-		pageB, err := ts.GetPage(newFixturePageID(pageBID))
+		pageB, err := ts.GetPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageB.ID), pageB.Title, newFixtureSlug(pageB.Slug), &linkToMissing, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageB.ID, pageB.Title, pageB.Slug, &linkToMissing, false)).To(Succeed())
 
 		// Page C links to a different broken page
-		pageC, err := ts.GetPage(newFixturePageID(pageCID))
+		pageC, err := ts.GetPage(pageCID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToOther = "Link: [Other](/other-missing)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageC.ID), pageC.Title, newFixtureSlug(pageC.Slug), &linkToOther, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageC.ID, pageC.Title, pageC.Slug, &linkToOther, false)).To(Succeed())
 
 		// Index all pages to create broken links
 		Expect(svc.IndexAllPages()).To(Succeed())
@@ -946,8 +946,8 @@ var _ = ginkgo.Describe("broken incoming link queries", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(brokenLinks).To(ConsistOf(
-			matchBrokenBacklink(newFixturePageID(pageAID)),
-			matchBrokenBacklink(newFixturePageID(pageBID)),
+			matchBrokenBacklink(pageAID),
+			matchBrokenBacklink(pageBID),
 		))
 
 	})
@@ -966,16 +966,16 @@ var _ = ginkgo.Describe("broken incoming link filtering", func() {
 		pageBID := *bIDPtr
 
 		// Page A links to "/missing1"
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToMissing1 = "Link: [Missing1](/missing1)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToMissing1, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageA.ID, pageA.Title, pageA.Slug, &linkToMissing1, false)).To(Succeed())
 
 		// Page B links to "/missing2"
-		pageB, err := ts.GetPage(newFixturePageID(pageBID))
+		pageB, err := ts.GetPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToMissing2 = "Link: [Missing2](/missing2)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageB.ID), pageB.Title, newFixtureSlug(pageB.Slug), &linkToMissing2, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageB.ID, pageB.Title, pageB.Slug, &linkToMissing2, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
@@ -983,13 +983,13 @@ var _ = ginkgo.Describe("broken incoming link filtering", func() {
 		broken1, err := store.GetBrokenIncomingForPath("/missing1")
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(broken1).To(ConsistOf(matchBrokenBacklink(newFixturePageID(pageAID))))
+		Expect(broken1).To(ConsistOf(matchBrokenBacklink(pageAID)))
 
 		// Test: Should only return broken links for "/missing2"
 		broken2, err := store.GetBrokenIncomingForPath("/missing2")
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(broken2).To(ConsistOf(matchBrokenBacklink(newFixturePageID(pageBID))))
+		Expect(broken2).To(ConsistOf(matchBrokenBacklink(pageBID)))
 
 	})
 })
@@ -1006,10 +1006,10 @@ var _ = ginkgo.Describe("broken incoming link queries without matching links", f
 		Expect(err).NotTo(HaveOccurred())
 
 		// Page A links to existing Page B (not broken)
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToB = "Link: [To B](/b.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToB, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageA.ID, pageA.Title, pageA.Slug, &linkToB, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
@@ -1048,7 +1048,7 @@ var _ = ginkgo.Describe("broken incoming link ordering", func() {
 			page, err := ts.GetPage(id)
 			Expect(err).NotTo(HaveOccurred())
 			var linkToMissing = "Link: [Missing](/missing)"
-			Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(page.ID), page.Title, newFixtureSlug(page.Slug), &linkToMissing, false)).To(Succeed())
+			Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), page.ID, page.Title, page.Slug, &linkToMissing, false)).To(Succeed())
 		}
 
 		Expect(svc.IndexAllPages()).To(Succeed())
@@ -1075,10 +1075,10 @@ var _ = ginkgo.Describe("broken incoming link healing", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		var linkToB = "Link: [To B](/b.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &linkToB, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageA.ID, pageA.Title, pageA.Slug, &linkToB, false)).To(Succeed())
 
 		// Index - this creates a broken link since B doesn't exist
 		Expect(svc.IndexAllPages()).To(Succeed())
@@ -1093,10 +1093,10 @@ var _ = ginkgo.Describe("broken incoming link healing", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pageBID := *bIDPtr
 
-		pageB, err := ts.GetPage(newFixturePageID(pageBID))
+		pageB, err := ts.GetPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
 		var contentB = "# Page B"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageB.ID), pageB.Title, newFixtureSlug(pageB.Slug), &contentB, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageB.ID, pageB.Title, pageB.Slug, &contentB, false)).To(Succeed())
 
 		// Use HealLinksForExactPath to heal the broken link
 		Expect(svc.HealLinksForExactPath(pageB)).To(Succeed())
@@ -1107,9 +1107,9 @@ var _ = ginkgo.Describe("broken incoming link healing", func() {
 		Expect(brokenAfter).To(HaveLen(0))
 
 		// Verify the link still exists but is not broken
-		backlinks, err := store.GetBacklinksForPage(newFixturePageID(pageBID))
+		backlinks, err := store.GetBacklinksForPage(pageBID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(backlinks).To(ConsistOf(matchBacklinkResultItem(newFixturePageID(pageAID), newFixturePageID(pageBID))))
+		Expect(backlinks).To(ConsistOf(matchBacklinkResultItem(pageAID, pageBID)))
 
 	})
 })
@@ -1121,11 +1121,11 @@ var _ = ginkgo.Describe("extensionless link healing", func() {
 		sourceIDPtr, err := ts.CreateNode("system", nil, "Source", "source", pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		sourceID := *sourceIDPtr
-		source, err := ts.GetPage(newFixturePageID(sourceID))
+		source, err := ts.GetPage(sourceID)
 		Expect(err).NotTo(HaveOccurred())
 		sourceContent := "Link: [Target](/x)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &sourceContent, false)).To(Succeed())
-		source, err = ts.GetPage(newFixturePageID(sourceID))
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), source.ID, source.Title, source.Slug, &sourceContent, false)).To(Succeed())
+		source, err = ts.GetPage(sourceID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(svc.UpdateLinksForPage(source, source.Content)).To(Succeed())
 
@@ -1175,15 +1175,15 @@ var _ = ginkgo.Describe("batch link updates and healing", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pageCID := *cIDPtr
 
-		pageA, err := ts.GetPage(newFixturePageID(pageAID))
+		pageA, err := ts.GetPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		contentA := "Link: [B](/b.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageA.ID), pageA.Title, newFixtureSlug(pageA.Slug), &contentA, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageA.ID, pageA.Title, pageA.Slug, &contentA, false)).To(Succeed())
 
-		pageC, err := ts.GetPage(newFixturePageID(pageCID))
+		pageC, err := ts.GetPage(pageCID)
 		Expect(err).NotTo(HaveOccurred())
 		contentC := "Link: [D](/d.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(pageC.ID), pageC.Title, newFixtureSlug(pageC.Slug), &contentC, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), pageC.ID, pageC.Title, pageC.Slug, &contentC, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
@@ -1199,16 +1199,16 @@ var _ = ginkgo.Describe("batch link updates and healing", func() {
 
 		Expect(svc.UpdateLinksAndHealForPages([]*tree.Page{pageB, pageD})).To(Succeed())
 
-		outA, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageAID))
+		outA, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outA).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(newFixturePageID(pageAID), pageB.ID, tree.RoutePath("/b")),
+			matchResolvedOutgoingResultItem(pageAID, pageB.ID, tree.RoutePath("/b")),
 		))
 
-		outC, err := svc.GetOutgoingLinksForPage(newFixturePageID(pageCID))
+		outC, err := svc.GetOutgoingLinksForPage(pageCID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outC).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(newFixturePageID(pageCID), pageD.ID, tree.RoutePath("/d")),
+			matchResolvedOutgoingResultItem(pageCID, pageD.ID, tree.RoutePath("/d")),
 		))
 
 	})
@@ -1223,7 +1223,7 @@ var _ = ginkgo.Describe("batch healing for extensionless links", func() {
 		source, err := ts.GetPage(*sourceIDPtr)
 		Expect(err).NotTo(HaveOccurred())
 		content := "[Legacy](/target)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &content, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), source.ID, source.Title, source.Slug, &content, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
@@ -1411,10 +1411,10 @@ var _ = ginkgo.Describe("source page reindexing during batch healing", func() {
 		Expect(err).NotTo(HaveOccurred())
 		oldTargetID := *oldTargetIDPtr
 
-		source, err := ts.GetPage(newFixturePageID(sourceID))
+		source, err := ts.GetPage(sourceID)
 		Expect(err).NotTo(HaveOccurred())
 		oldContent := "Link: [Old](/old-target.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &oldContent, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), source.ID, source.Title, source.Slug, &oldContent, false)).To(Succeed())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
@@ -1423,21 +1423,21 @@ var _ = ginkgo.Describe("source page reindexing during batch healing", func() {
 		newTargetID := *newTargetIDPtr
 
 		updatedContent := "Link: [New](/new-target.md)"
-		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), newFixturePageID(source.ID), source.Title, newFixtureSlug(source.Slug), &updatedContent, false)).To(Succeed())
+		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), source.ID, source.Title, source.Slug, &updatedContent, false)).To(Succeed())
 
-		updatedSource, err := ts.GetPage(newFixturePageID(sourceID))
+		updatedSource, err := ts.GetPage(sourceID)
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(svc.UpdateLinksAndHealForPages([]*tree.Page{updatedSource})).To(Succeed())
 
-		oldBacklinks, err := svc.GetBacklinksForPage(newFixturePageID(oldTargetID))
+		oldBacklinks, err := svc.GetBacklinksForPage(oldTargetID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(oldBacklinks).To(matchBacklinkResult(0))
 
-		newBacklinks, err := svc.GetBacklinksForPage(newFixturePageID(newTargetID))
+		newBacklinks, err := svc.GetBacklinksForPage(newTargetID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(newBacklinks).To(matchBacklinkResult(1,
-			matchBacklinkResultItem(newFixturePageID(sourceID), newFixturePageID(newTargetID)),
+			matchBacklinkResultItem(sourceID, newTargetID),
 		))
 
 	})

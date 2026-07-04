@@ -162,7 +162,7 @@ func seedAdditionalLinks(store *LinksStore) error {
 func testAdditionalPageIDs(ids ...string) []tree.PageID {
 	out := make([]tree.PageID, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, newFixturePageID(id))
+		out = append(out, tree.PageIDFromString(id))
 	}
 	return out
 }
