@@ -202,6 +202,8 @@ semantic hygiene and i18n analyzers. Do not run or require a standalone
 ginkgolinter gate unless the supervisor is explicitly debugging that linter.
 
 For an in-progress package slice, the supervisor may use the same config against
-the assigned package path, plus the package's focused `go test`, taxonomy report,
-and `git diff --check`. The unified gate may be red only when the supervising
-thread explicitly accepts the remaining rule counts as follow-up scope.
+the assigned package path, plus the package's focused `go test` and
+`git diff --check`. Taxonomy completeness is part of the unified gate; do not
+use a separate taxonomy report as an acceptance condition. The unified gate may
+be red only when the supervising thread explicitly accepts the remaining rule
+counts as follow-up scope.
