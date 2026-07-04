@@ -3,6 +3,7 @@ package revision
 import (
 	"encoding/json"
 	"errors"
+	. "github.com/onsi/ginkgo/v2"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
@@ -110,7 +110,7 @@ func jsonErrorKindFor(err error) jsonErrorKind {
 }
 
 var _ = Describe("revision edge behavior", func() {
-	It("handles service option and no-op branches explicitly", Label("unit"), func() {
+	It("applies configured revision limits and completes empty page maintenance without records", Label("unit"), func() {
 		service := NewService(revisionTempDir(), nil, nil, ServiceOptions{MaxRevisions: 1})
 
 		Expect(service.maxRevisions).To(Equal(1))

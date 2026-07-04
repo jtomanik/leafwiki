@@ -1,11 +1,12 @@
 package revision
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
 	"os"
 	"path/filepath"
 	"syscall"
 	"time"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
 
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/markdown"
