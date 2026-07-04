@@ -1662,6 +1662,8 @@ func (assertion) To(matcher any, extra ...any) {}
 func BeTrue() any { return nil }
 func BeFalse() any { return nil }
 func HaveField(name string, matcher any) any { return nil }
+type Fields map[string]any
+func MatchFields(_ any, fields Fields) any { return nil }
 func SatisfyAll(matchers ...any) any { return nil }
 
 type CallToolResult struct {
@@ -1673,6 +1675,7 @@ func TestToolResult() {
 	Expect(result.IsError).To(BeFalse())
 	Expect(result).To(HaveField("IsError", BeTrue()))
 	Expect(result).To(SatisfyAll(HaveField("IsError", BeFalse())))
+	Expect(result).To(MatchFields(nil, Fields{"IsError": BeFalse()}))
 }
 `)
 			for _, call := range h.findCalls("To") {
@@ -1680,6 +1683,7 @@ func TestToolResult() {
 			}
 
 			Expect(h.diagnosticMessages()).To(ConsistOf(
+				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",
 				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",
 				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",
 				"semh:gomega.structured-protocol-status: assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean",

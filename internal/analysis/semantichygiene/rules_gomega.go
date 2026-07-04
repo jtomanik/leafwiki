@@ -2793,18 +2793,33 @@ func assertionUsesDirectProtocolStatusBool(ctx *analysisContext, assertion gomeg
 }
 
 func matcherTreeContainsStructuredProtocolStatusBool(expr ast.Expr) bool {
-	call, ok := unparenExpr(expr).(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	if isMatcherNamed(call, "HaveField") && len(call.Args) > 1 {
-		if fieldName, ok := stringLiteralValue(call.Args[0]); ok && fieldName == "IsError" && exprIsBooleanMatcher(call.Args[1]) {
-			return true
+	switch node := unparenExpr(expr).(type) {
+	case *ast.CallExpr:
+		if isMatcherNamed(node, "HaveField") && len(node.Args) > 1 {
+			if fieldName, ok := stringLiteralValue(node.Args[0]); ok && fieldName == "IsError" && exprIsBooleanMatcher(node.Args[1]) {
+				return true
+			}
 		}
-	}
-	for _, arg := range call.Args {
-		if matcherTreeContainsStructuredProtocolStatusBool(arg) {
-			return true
+		for _, arg := range node.Args {
+			if matcherTreeContainsStructuredProtocolStatusBool(arg) {
+				return true
+			}
+		}
+	case *ast.CompositeLit:
+		for _, elt := range node.Elts {
+			keyValue, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				if matcherTreeContainsStructuredProtocolStatusBool(elt) {
+					return true
+				}
+				continue
+			}
+			if fieldName, ok := stringLiteralValue(keyValue.Key); ok && fieldName == "IsError" && exprIsBooleanMatcher(keyValue.Value) {
+				return true
+			}
+			if matcherTreeContainsStructuredProtocolStatusBool(keyValue.Value) {
+				return true
+			}
 		}
 	}
 	return false
