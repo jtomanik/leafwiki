@@ -386,9 +386,8 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return nil, errFixtureReadFailed })
 		path, exists, err := store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
 		failedWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}
-		Expect(failedWorkspaceLookup).To(matchWorkspaceContentPath(
+		Expect(failedWorkspaceLookup).To(matchMissingWorkspaceContentPath(
 			BeEmpty(),
-			false,
 			MatchError(errFixtureReadFailed),
 		))
 
@@ -516,18 +515,16 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 		})
 		sourcePath, exists, err := store.workspaceContentPathForNode(section, "workspaceContent")
 		sectionSourceLookup := workspaceContentPathLookup{Path: sourcePath, Exists: exists, Err: err}
-		Expect(sectionSourceLookup).To(matchWorkspaceContentPath(
+		Expect(sectionSourceLookup).To(matchExistingWorkspaceContentPath(
 			ContainSubstring("index.md"),
-			true,
 			Succeed(),
 		))
 
 		page.WorkspaceSourcePath = "../outside.md"
 		sourcePath, exists, err = store.workspaceContentPathForNode(page, "workspaceContent")
 		outsideSourceLookup := workspaceContentPathLookup{Path: sourcePath, Exists: exists, Err: err}
-		Expect(outsideSourceLookup).To(matchWorkspaceContentPath(
+		Expect(outsideSourceLookup).To(matchMissingWorkspaceContentPath(
 			BeEmpty(),
-			false,
 			matchInvalidOp("workspaceContent"),
 		))
 
@@ -989,9 +986,8 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 		})
 		path, exists, err := store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
 		invalidWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}
-		Expect(invalidWorkspaceLookup).To(matchWorkspaceContentPath(
+		Expect(invalidWorkspaceLookup).To(matchMissingWorkspaceContentPath(
 			BeEmpty(),
-			false,
 			matchInvalidOp("workspaceContent"),
 		))
 
@@ -1000,9 +996,8 @@ var _ = Describe("tree filesystem seam failure behavior", func() {
 		unknownWorkspace.WorkspaceSourcePath = "custom.md"
 		path, exists, err = store.workspaceContentPathForNode(unknownWorkspace, "workspaceContent")
 		unknownWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}
-		Expect(unknownWorkspaceLookup).To(matchWorkspaceContentPath(
+		Expect(unknownWorkspaceLookup).To(matchMissingWorkspaceContentPath(
 			BeEmpty(),
-			false,
 			Succeed(),
 		))
 

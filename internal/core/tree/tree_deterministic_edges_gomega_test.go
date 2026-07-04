@@ -88,15 +88,13 @@ var _ = Describe("deterministic tree edge behavior", func() {
 		defaultIndex, exists, err := store.sectionIndexPathInDir(filepath.Join(rootDir, "missing"))
 		Expect(err).NotTo(HaveOccurred())
 		defaultIndexLookup := sectionIndexPathLookup{Path: defaultIndex, Exists: exists}
-		Expect(defaultIndexLookup).To(matchSectionIndexPath(
-			filepath.Join(rootDir, "missing", "index.md"), false,
-		))
+		Expect(defaultIndexLookup).To(matchMissingSectionIndexPath(filepath.Join(rootDir, "missing", "index.md")))
 
 		notDir := filepath.Join(rootDir, "not-dir")
 		Expect(os.WriteFile(notDir, []byte("file"), 0o644)).To(Succeed())
 		notDirIndex, exists, err := store.sectionIndexPathInDir(notDir)
 		notDirLookup := sectionIndexPathLookup{Path: notDirIndex, Exists: exists}
-		Expect(notDirLookup).To(matchSectionIndexPath(filepath.Join(notDir, "index.md"), false))
+		Expect(notDirLookup).To(matchMissingSectionIndexPath(filepath.Join(notDir, "index.md")))
 		Expect(err).To(matchPathError())
 
 		readmeDir := filepath.Join(rootDir, "readme")
@@ -105,9 +103,7 @@ var _ = Describe("deterministic tree edge behavior", func() {
 		readmePath, exists, err := store.sectionIndexPathInDir(readmeDir)
 		Expect(err).NotTo(HaveOccurred())
 		readmeLookup := sectionIndexPathLookup{Path: readmePath, Exists: exists}
-		Expect(readmeLookup).To(matchSectionIndexPath(
-			filepath.Join(readmeDir, "README.md"), true,
-		))
+		Expect(readmeLookup).To(matchExistingSectionIndexPath(filepath.Join(readmeDir, "README.md")))
 
 		Expect(ensureUniqueReconstructedID(map[PageID]string{}, "", "docs/page.md")).To(MatchError(ErrEmptyLeafwikiID))
 		seenIDs := map[PageID]string{"page-1": "docs/first.md"}

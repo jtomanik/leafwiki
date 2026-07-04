@@ -252,17 +252,32 @@ func matchSymlinkLoopError() types.GomegaMatcher {
 	return matchErrorIs(syscall.ELOOP)
 }
 
-func matchSectionIndexPath(path string, exists bool) types.GomegaMatcher {
+func matchExistingSectionIndexPath(path string) types.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("Path", Equal(path)),
-		HaveField("Exists", Equal(exists)),
+		HaveField("Exists", Equal(true)),
 	)
 }
 
-func matchWorkspaceContentPath(path types.GomegaMatcher, exists bool, err types.GomegaMatcher) types.GomegaMatcher {
+func matchMissingSectionIndexPath(path string) types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("Path", Equal(path)),
+		HaveField("Exists", Equal(false)),
+	)
+}
+
+func matchExistingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("Path", path),
-		HaveField("Exists", Equal(exists)),
+		HaveField("Exists", Equal(true)),
+		HaveField("Err", err),
+	)
+}
+
+func matchMissingWorkspaceContentPath(path types.GomegaMatcher, err types.GomegaMatcher) types.GomegaMatcher {
+	return SatisfyAll(
+		HaveField("Path", path),
+		HaveField("Exists", Equal(false)),
 		HaveField("Err", err),
 	)
 }

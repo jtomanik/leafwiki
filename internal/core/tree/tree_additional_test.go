@@ -97,7 +97,7 @@ var _ = ginkgo.Describe("semantic path helpers", func() {
 	})
 })
 
-var _ = ginkgo.Describe("tree route and section helper behavior", func() {
+var _ = ginkgo.Describe("tree route paths and section content resolution", func() {
 	ginkgo.It("generates a filesystem-style path from page node ancestry", func() {
 		root := &PageNode{ID: RootPageID, Slug: "root", Kind: NodeKindSection}
 		docs := &PageNode{ID: "docs", Slug: "docs", Kind: NodeKindSection, Parent: root}
