@@ -45,7 +45,7 @@ func parseLogRecords(raw string) []map[string]any {
 	return records
 }
 
-var _ = Describe("logging configuration", func() {
+var _ = Describe("logging configuration", Label("unit"), func() {
 	It("defaults file logging to the LeafWiki log path under the data directory", func() {
 		dataDir := filepath.Join(loggingTempDir(), "data")
 
@@ -104,7 +104,7 @@ type resolveErrorCase struct {
 	want  types.GomegaMatcher
 }
 
-var _ = DescribeTable("logging target validation",
+var _ = DescribeTable("logging target validation", Label("unit"),
 	func(tc resolveErrorCase) {
 		_, err := Resolve(tc.input)
 
@@ -130,7 +130,7 @@ var _ = DescribeTable("logging target validation",
 	}),
 )
 
-var _ = Describe("opening loggers", func() {
+var _ = Describe("opening loggers", Label("unit"), func() {
 	It("creates parent directories and appends JSON records to file logs", func() {
 		logPath := filepath.Join(loggingTempDir(), "nested", "leafwiki.log")
 		err := os.WriteFile(logPath, []byte("previous line\n"), 0o600)
@@ -259,7 +259,7 @@ var _ = Describe("opening loggers", func() {
 	})
 })
 
-var _ = Describe("logging fallback behavior", func() {
+var _ = Describe("logging fallback behavior", Label("unit"), func() {
 	It("rejects blank data dir when file logging is required", func() {
 		_, err := Resolve(ConfigInput{Target: "file", TargetSet: true, DataDir: " \t\n "})
 
