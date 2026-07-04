@@ -42,6 +42,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if isEqualBooleanLiteralMatcherCall(call) {
 		ctx.report(ruleGomegaBooleanLiteral, call, gomegaBooleanLiteralEqualDiagnostic())
 	}
+	if matcherCallIsNestedBooleanMatcherValue(ctx, call) {
+		ctx.report(ruleGomegaProxyBoolean, call, gomegaProxyBooleanDiagnostic())
+	}
 	assertion, ok := gomegaAssertionFromCall(ctx, call)
 	if !ok {
 		return
@@ -2408,6 +2411,28 @@ func isBooleanMatcher(matcher *ast.CallExpr) bool {
 func exprIsBooleanMatcher(expr ast.Expr) bool {
 	call, ok := unparenExpr(expr).(*ast.CallExpr)
 	return ok && isBooleanMatcher(call)
+}
+
+func matcherCallIsNestedBooleanMatcherValue(ctx *analysisContext, call *ast.CallExpr) bool {
+	if !isMatcherNamed(call, "BeTrue", "BeFalse", "BeTrueBecause", "BeFalseBecause") {
+		return false
+	}
+	for current := ctx.parent(call); current != nil; current = ctx.parent(current) {
+		parentCall, ok := current.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		if assertion, ok := gomegaAssertionFromCall(ctx, parentCall); ok {
+			return assertion.matcher != call
+		}
+		if assertion, ok := gomegaAsyncAssertionFromCall(parentCall); ok {
+			return assertion.matcher != call
+		}
+		if isKnownGomegaMatcherFactory(parentCall) || typeIsGomegaMatcher(ctx.pass.TypesInfo.TypeOf(parentCall)) {
+			return true
+		}
+	}
+	return false
 }
 
 func matcherCallUsesMatcherValueAsExpected(ctx *analysisContext, call *ast.CallExpr) bool {
