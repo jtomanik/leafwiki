@@ -107,7 +107,7 @@ func (f *fakeWiki) UpdatePage(userID tree.UserID, id tree.PageID, title string, 
 		k = *kind
 	}
 	return &tree.Page{PageNode: &tree.PageNode{
-		ID:    newFixturePageID(id),
+		ID:    tree.PageIDFromString(id),
 		Title: title,
 		Slug:  slug,
 		Kind:  k,
@@ -123,9 +123,9 @@ func newPlannerWithFake(w *fakeWiki) *Planner {
 }
 
 func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, exists bool) tree.PathSegment {
-	pageID := newFixturePageID(id)
+	pageID := tree.PageIDFromString(id)
 	return tree.PathSegment{
-		Slug:   newFixtureSlug(slug),
+		Slug:   tree.SlugFromString(slug),
 		Kind:   &kind,
 		ID:     &pageID,
 		Title:  &title,
@@ -135,7 +135,7 @@ func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, e
 
 func fakeMissingPathSegment(slug string, kind tree.NodeKind) tree.PathSegment {
 	return tree.PathSegment{
-		Slug:   newFixtureSlug(slug),
+		Slug:   tree.SlugFromString(slug),
 		Kind:   &kind,
 		Exists: false,
 	}
@@ -237,7 +237,7 @@ var _ = ginkgo.DescribeTable("import plan creation for non-exact README filename
 		Expect(err).To(Succeed())
 		Expect(res.Items).To(ConsistOf(SatisfyAll(
 			HaveField("Kind", Equal(tree.NodeKindPage)),
-			HaveField("TargetPath", Equal(newFixtureRoutePath(tt.wantPath))),
+			HaveField("TargetPath", Equal(tree.RoutePathFromString(tt.wantPath))),
 		)))
 	},
 	ginkgo.Entry("Guides/readme.md", nonExactReadmeCase{sourcePath: newFixtureWorkspaceSourcePath("Guides/readme.md"), wantPath: "docs/guides/readme"}),
@@ -379,7 +379,7 @@ var _ = ginkgo.Describe("import plan existing page detection", func() {
 					Exists: true,
 					Segments: []tree.PathSegment{
 						{Slug: "docs", Exists: true},
-						{Slug: "a", Exists: true, ID: func() *tree.PageID { id := newFixturePageID(existingID); return &id }(), Kind: &existingKind, Title: &existingTitle},
+						{Slug: "a", Exists: true, ID: func() *tree.PageID { id := tree.PageIDFromString(existingID); return &id }(), Kind: &existingKind, Title: &existingTitle},
 					},
 				},
 			},
@@ -394,7 +394,7 @@ var _ = ginkgo.Describe("import plan existing page detection", func() {
 		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
 			HaveField("Action", Equal(PlanActionSkip)),
 			HaveField("Exists", BeTrue()),
-			HaveField("ExistingID", gstruct.PointTo(Equal(newFixturePageID(existingID)))),
+			HaveField("ExistingID", gstruct.PointTo(Equal(tree.PageIDFromString(existingID)))),
 			HaveField("DesiredSlug", Equal(tree.Slug("a"))),
 		))))
 

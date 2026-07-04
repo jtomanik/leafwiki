@@ -78,7 +78,7 @@ func normalizeSourceCandidateResult(transformer *contentTransformer, candidate s
 	if !ok {
 		return "", errImporterRouteCandidateRejected
 	}
-	return newFixtureRoutePath(route), nil
+	return tree.RoutePathFromString(route), nil
 }
 
 func impliedImportTargetKindResult(href string) (tree.NodeKind, error) {
@@ -138,7 +138,7 @@ func wikiHrefRoutePathResult(transformer *contentTransformer, href string) (tree
 	if !ok {
 		return "", errImporterWikiHrefRouteRejected
 	}
-	return newFixtureRoutePath(got), nil
+	return tree.RoutePathFromString(got), nil
 }
 
 func resolvedAssetPathResult(sourceBasePath string, sourcePath tree.WorkspaceSourcePath, href string) (string, error) {
@@ -200,7 +200,7 @@ func startStoredPlanExecutionResult(store *PlanStore, userID string) (*StoredPla
 func startCurrentPlanExecutionResult(service *ImporterService, userID string) (*CurrentPlanState, error) {
 	ginkgo.GinkgoHelper()
 
-	state, started, err := service.StartCurrentPlanExecution(newFixtureUserID(userID))
+	state, started, err := service.StartCurrentPlanExecution(tree.UserIDFromString(userID))
 	if err != nil {
 		return state, err
 	}
