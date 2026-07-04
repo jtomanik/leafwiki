@@ -515,11 +515,11 @@ func newTestMultipartFile(content []byte) multipart.File {
 }
 
 func assetName(raw string) tree.AssetName {
-	return newFixtureAssetName(raw)
+	return tree.AssetNameFromString(raw)
 }
 
 func siblingAssetName(pageID tree.PageID, filename tree.AssetName) tree.AssetName {
-	return newFixtureAssetName("../" + pageID.MetadataValue() + "/" + filename.Filename())
+	return tree.AssetNameFromString("../" + pageID.MetadataValue() + "/" + filename.Filename())
 }
 
 func (f *testMultipartFile) Close() error {
