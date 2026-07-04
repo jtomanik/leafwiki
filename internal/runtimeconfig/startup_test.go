@@ -72,7 +72,35 @@ func matchCurrentHomeResolutionError() types.GomegaMatcher {
 	})
 }
 
-var _ = Describe("startup config validation", func() {
+type daemonInvocationClassification string
+
+const (
+	daemonInvocationRunsService     daemonInvocationClassification = "runs-daemon-service"
+	daemonInvocationShowsHelp       daemonInvocationClassification = "shows-daemon-help"
+	daemonInvocationUsesRuntimeFlow daemonInvocationClassification = "uses-runtime-flow"
+)
+
+type daemonInvocationCase struct {
+	args []string
+	want daemonInvocationClassification
+}
+
+func matchDaemonInvocationClassification(want daemonInvocationClassification) types.GomegaMatcher {
+	return WithTransform(classifyDaemonInvocation, Equal(want))
+}
+
+func classifyDaemonInvocation(args []string) daemonInvocationClassification {
+	switch {
+	case IsDaemonHelpCommand(args):
+		return daemonInvocationShowsHelp
+	case IsDaemonCommand(args):
+		return daemonInvocationRunsService
+	default:
+		return daemonInvocationUsesRuntimeFlow
+	}
+}
+
+var _ = Describe("startup config validation", Label("unit"), func() {
 	DescribeTable("parses raw flag names",
 		func(arg string, wantName string, wantInline bool, wantOK bool) {
 			name, inline, ok := RawFlagName(arg)
@@ -81,24 +109,24 @@ var _ = Describe("startup config validation", func() {
 			Expect(inline).To(Equal(wantInline))
 			Expect(ok).To(Equal(wantOK))
 		},
-		Entry("positional", "leafwiki.yml", "", false, false),
-		Entry("bare dash", "-", "", false, false),
-		Entry("long flag", "--config", "config", false, true),
-		Entry("long flag with inline value", "--config=leafwiki.yml", "config", true, true),
+		Entry("treats positional config paths as non-flags", "leafwiki.yml", "", false, false),
+		Entry("treats a bare dash as a non-flag token", "-", "", false, false),
+		Entry("parses long flags without inline values", "--config", "config", false, true),
+		Entry("parses long flags with inline values", "--config=leafwiki.yml", "config", true, true),
 		Entry("rejects triple dash", "---config", "", false, false),
 		Entry("rejects empty long flag", "--", "", false, false),
 		Entry("rejects empty short flag", "-=value", "", false, false),
-		Entry("short flag", "-p=8080", "p", true, true),
+		Entry("parses short flags with inline values", "-p=8080", "p", true, true),
 	)
 
 	DescribeTable("identifies invalid bare config path values",
 		func(value string, want bool) {
 			Expect(IsInvalidBareConfigPathValue(value)).To(Equal(want))
 		},
-		Entry("empty", "", true),
-		Entry("whitespace", " \t ", true),
-		Entry("looks like another flag", "--port", true),
-		Entry("path", "leafwiki.yml", false),
+		Entry("rejects empty config path values", "", true),
+		Entry("rejects whitespace-only config path values", " \t ", true),
+		Entry("rejects values that look like another flag", "--port", true),
+		Entry("accepts ordinary config file paths", "leafwiki.yml", false),
 	)
 
 	It("validates raw --config usage before flag parsing", func() {
@@ -118,15 +146,39 @@ var _ = Describe("startup config validation", func() {
 		Expect(ValidateConfigModeArgs([]string{"-p=8080"})).To(MatchError(ConfigFlagMixError{Flag: "-p"}))
 	})
 
-	It("classifies daemon commands and help invocations", func() {
-		Expect(IsDaemonCommand([]string{"daemon"})).To(BeTrue())
-		Expect(IsDaemonCommand([]string{"serve"})).To(BeFalse())
-		Expect(IsDaemonHelpCommand([]string{"daemon", "--help"})).To(BeTrue())
-		Expect(IsDaemonHelpCommand([]string{"daemon", "-h"})).To(BeTrue())
-		Expect(IsDaemonHelpCommand([]string{"daemon", "help"})).To(BeTrue())
-		Expect(IsDaemonHelpCommand([]string{"daemon"})).To(BeFalse())
-		Expect(IsDaemonHelpCommand([]string{"serve", "help"})).To(BeFalse())
-	})
+	DescribeTable("classifies daemon invocations",
+		func(tc daemonInvocationCase) {
+			Expect(tc.args).To(matchDaemonInvocationClassification(tc.want))
+		},
+		Entry("runs the daemon service command", daemonInvocationCase{
+			args: []string{"daemon"},
+			want: daemonInvocationRunsService,
+		}),
+		Entry("keeps regular serve commands in the runtime flow", daemonInvocationCase{
+			args: []string{"serve"},
+			want: daemonInvocationUsesRuntimeFlow,
+		}),
+		Entry("shows daemon help for the long help flag", daemonInvocationCase{
+			args: []string{"daemon", "--help"},
+			want: daemonInvocationShowsHelp,
+		}),
+		Entry("shows daemon help for the short help flag", daemonInvocationCase{
+			args: []string{"daemon", "-h"},
+			want: daemonInvocationShowsHelp,
+		}),
+		Entry("shows daemon help for the help subcommand", daemonInvocationCase{
+			args: []string{"daemon", "help"},
+			want: daemonInvocationShowsHelp,
+		}),
+		Entry("runs the daemon service when no help argument is provided", daemonInvocationCase{
+			args: []string{"daemon"},
+			want: daemonInvocationRunsService,
+		}),
+		Entry("keeps non-daemon help commands in the runtime flow", daemonInvocationCase{
+			args: []string{"serve", "help"},
+			want: daemonInvocationUsesRuntimeFlow,
+		}),
+	)
 
 	It("exposes the supported config and value-taking flag names", func() {
 		Expect(ValueTakingFlagNames()).To(HaveKey("config"))
@@ -136,7 +188,7 @@ var _ = Describe("startup config validation", func() {
 	})
 })
 
-var _ = Describe("YAML startup config", func() {
+var _ = Describe("YAML startup config", Label("unit"), func() {
 	It("applies scalar YAML config values into a flag set", func() {
 		fs := newRuntimeFlagSet()
 		visited := map[string]bool{}
@@ -183,14 +235,14 @@ var _ = Describe("YAML startup config", func() {
 
 			Expect(err).To(matchConfigFileError(tc.reason, tc.key))
 		},
-		Entry("invalid YAML", configFileValidationCase{contents: "host: [", reason: ConfigFileErrorReasonParse}),
-		Entry("non-mapping root", configFileValidationCase{contents: "- host\n", reason: ConfigFileErrorReasonRootMapping}),
-		Entry("non-scalar key", configFileValidationCase{contents: "? [host]\n: 127.0.0.1\n", reason: ConfigFileErrorReasonScalarKey}),
-		Entry("duplicate key", configFileValidationCase{contents: "host: 127.0.0.1\nhost: 0.0.0.0\n", reason: ConfigFileErrorReasonDuplicateKey, key: "host"}),
-		Entry("unknown key", configFileValidationCase{contents: "unknown: value\n", reason: ConfigFileErrorReasonUnknownKey, key: "unknown"}),
-		Entry("sequence value", configFileValidationCase{contents: "host:\n  - 127.0.0.1\n", reason: ConfigFileErrorReasonScalarValue, key: "host"}),
-		Entry("null value", configFileValidationCase{contents: "host: null\n", reason: ConfigFileErrorReasonScalarValue, key: "host"}),
-		Entry("invalid flag value", configFileValidationCase{contents: "disable-auth: nope\n", reason: ConfigFileErrorReasonInvalidFlagValue, key: "disable-auth"}),
+		Entry("reports parse errors for invalid YAML", configFileValidationCase{contents: "host: [", reason: ConfigFileErrorReasonParse}),
+		Entry("rejects non-mapping roots", configFileValidationCase{contents: "- host\n", reason: ConfigFileErrorReasonRootMapping}),
+		Entry("rejects non-scalar keys", configFileValidationCase{contents: "? [host]\n: 127.0.0.1\n", reason: ConfigFileErrorReasonScalarKey}),
+		Entry("rejects duplicate keys", configFileValidationCase{contents: "host: 127.0.0.1\nhost: 0.0.0.0\n", reason: ConfigFileErrorReasonDuplicateKey, key: "host"}),
+		Entry("rejects unknown keys", configFileValidationCase{contents: "unknown: value\n", reason: ConfigFileErrorReasonUnknownKey, key: "unknown"}),
+		Entry("rejects sequence values", configFileValidationCase{contents: "host:\n  - 127.0.0.1\n", reason: ConfigFileErrorReasonScalarValue, key: "host"}),
+		Entry("rejects null values", configFileValidationCase{contents: "host: null\n", reason: ConfigFileErrorReasonScalarValue, key: "host"}),
+		Entry("rejects values that flags cannot parse", configFileValidationCase{contents: "disable-auth: nope\n", reason: ConfigFileErrorReasonInvalidFlagValue, key: "disable-auth"}),
 	)
 
 	It("reports file read errors with the config source", func() {
@@ -200,7 +252,7 @@ var _ = Describe("YAML startup config", func() {
 	})
 })
 
-var _ = Describe("daemon service startup config", func() {
+var _ = Describe("daemon service startup config", Label("unit"), func() {
 	It("resolves default daemon paths from HOME", func() {
 		home := tempRuntimeConfigDir()
 		setRuntimeConfigEnv("HOME", home)

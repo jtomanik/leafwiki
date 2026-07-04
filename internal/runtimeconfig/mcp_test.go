@@ -26,7 +26,7 @@ func matchMCPTransportError(reason MCPTransportErrorReason) types.GomegaMatcher 
 	}))
 }
 
-var _ = Describe("MCP transport parsing", func() {
+var _ = Describe("MCP transport parsing", Label("unit"), func() {
 	It("enables HTTP and stdio transports from a comma-separated runtime setting", func() {
 		got, err := ParseMCPTransports("http,stdio")
 
@@ -40,7 +40,7 @@ type invalidMCPTransportCase struct {
 	reason MCPTransportErrorReason
 }
 
-var _ = DescribeTable("MCP transport validation returns stable reasons for invalid settings",
+var _ = DescribeTable("MCP transport validation returns stable reasons for invalid settings", Label("unit"),
 	func(tc invalidMCPTransportCase) {
 		_, err := ParseMCPTransports(tc.raw)
 
@@ -57,7 +57,7 @@ type validMCPTransportCase struct {
 	want MCPTransports
 }
 
-var _ = DescribeTable("MCP transport parsing accepts empty, single, and mixed runtime settings",
+var _ = DescribeTable("MCP transport parsing accepts empty, single, and mixed runtime settings", Label("unit"),
 	func(tc validMCPTransportCase) {
 		got, err := ParseMCPTransports(tc.raw)
 
@@ -71,7 +71,7 @@ var _ = DescribeTable("MCP transport parsing accepts empty, single, and mixed ru
 	Entry("enables only stdio", validMCPTransportCase{raw: "stdio", want: MCPTransports{Stdio: true}}),
 )
 
-var _ = DescribeTable("MCP transport parsing rejects ambiguous runtime settings",
+var _ = DescribeTable("MCP transport parsing rejects ambiguous runtime settings", Label("unit"),
 	func(tc invalidMCPTransportCase) {
 		_, err := ParseMCPTransports(tc.raw)
 
