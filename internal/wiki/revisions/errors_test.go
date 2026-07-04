@@ -22,7 +22,7 @@ var _ = ginkgo.Describe("revision errors", func() {
 		Expect(revisionErrorStatus(ErrCodeRevisionNotFound)).To(Equal(http.StatusNotFound))
 	})
 
-	ginkgo.It("revisionErrorStatus falls back to an internal error for service failures", func() {
+	ginkgo.It("uses internal server status for service failure errors", func() {
 		Expect(revisionErrorStatus(ErrCodeRevisionInternalError)).To(Equal(http.StatusInternalServerError))
 	})
 
@@ -38,7 +38,7 @@ var _ = ginkgo.Describe("revision errors", func() {
 		Expect(blob).To(MatchError(cause))
 	})
 
-	ginkgo.It("mapRevisionNotFoundError converts os.ErrNotExist and preserves other errors", func() {
+	ginkgo.It("converts missing revision storage reads into not-found errors and preserves other causes", func() {
 		Expect(mapRevisionNotFoundError(nil, "missing", "missing")).To(Succeed())
 
 		mapped := mapRevisionNotFoundError(os.ErrNotExist, "missing", "missing %s", "rev-1")
@@ -48,7 +48,7 @@ var _ = ginkgo.Describe("revision errors", func() {
 		Expect(mapRevisionNotFoundError(other, "missing", "missing")).To(MatchError(other))
 	})
 
-	ginkgo.It("respondWithRevisionError maps localized, missing, and internal errors", func() {
+	ginkgo.It("sends localized missing and internal revision failures with their HTTP status", func() {
 		gin.SetMode(gin.TestMode)
 
 		localizedRec := httptest.NewRecorder()
