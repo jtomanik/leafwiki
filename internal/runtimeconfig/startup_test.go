@@ -111,9 +111,9 @@ var _ = Describe("startup config validation", func() {
 	})
 
 	It("reports mixed config-mode arguments with the displayed flag form", func() {
-		Expect(ConfigFlagMixError{Flag: "--port"}.Flag).To(Equal("--port"))
 		Expect(ValidateConfigModeArgs([]string{"wiki"})).To(Succeed())
 		Expect(ValidateConfigModeArgs([]string{"help"})).To(MatchError(ConfigFlagMixError{Flag: "help"}))
+		Expect(ValidateConfigModeArgs([]string{"--port"})).To(MatchError(ConfigFlagMixError{Flag: "--port"}))
 		Expect(ValidateConfigModeArgs([]string{"--port=8080"})).To(MatchError(ConfigFlagMixError{Flag: "--port"}))
 		Expect(ValidateConfigModeArgs([]string{"-p=8080"})).To(MatchError(ConfigFlagMixError{Flag: "-p"}))
 	})
