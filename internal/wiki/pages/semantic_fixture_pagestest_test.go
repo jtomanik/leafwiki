@@ -6,11 +6,14 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
+	"github.com/perber/wiki/internal/links"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
 func newFixturePageID[T ~string](raw T) tree.PageID {
@@ -53,25 +56,31 @@ func MatchPageLocalizedCode(code sharederrors.ErrorCode) types.GomegaMatcher {
 }
 
 func HaveBrokenOutgoing(path tree.RoutePath) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("ToPath", Equal(path)),
-		HaveField("Broken", BeTrue()),
-		HaveField("ToPageID", BeEmpty()),
-	)
+	return gcustom.MakeMatcher(func(outgoing links.OutgoingResultItem) (bool, error) {
+		return outgoing.ToPath == path &&
+			outgoing.Broken &&
+			outgoing.ToPageID == "", nil
+	}).WithMessage("describe a broken outgoing link")
 }
 
 func HaveHealthyOutgoing(path tree.RoutePath, targetID tree.PageID) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("ToPath", Equal(path)),
-		HaveField("Broken", BeFalse()),
-		HaveField("ToPageID", Equal(targetID)),
-	)
+	return gcustom.MakeMatcher(func(outgoing links.OutgoingResultItem) (bool, error) {
+		return outgoing.ToPath == path &&
+			!outgoing.Broken &&
+			outgoing.ToPageID == targetID, nil
+	}).WithMessage("describe a healthy outgoing link")
 }
 
 func HaveHealthyOutgoingWithAnyTarget(path tree.RoutePath) types.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("ToPath", Equal(path)),
-		HaveField("Broken", BeFalse()),
-		HaveField("ToPageID", Not(BeEmpty())),
-	)
+	return gcustom.MakeMatcher(func(outgoing links.OutgoingResultItem) (bool, error) {
+		return outgoing.ToPath == path &&
+			!outgoing.Broken &&
+			outgoing.ToPageID != "", nil
+	}).WithMessage("describe a healthy outgoing link with any target")
+}
+
+func HavePageSaveContentChange() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
+		return event.ContentChanged, nil
+	}).WithMessage("record a page-save content change")
 }

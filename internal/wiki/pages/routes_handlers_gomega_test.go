@@ -53,10 +53,7 @@ func matchRoutePage(fields gstruct.Fields) types.GomegaMatcher {
 
 func matchExistingRoutePathLookup(path tree.RoutePath) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Path":   Equal(path),
-		"Exists": BeTrue(),
-	})
+	return HaveExistingRoutePathLookup(path)
 }
 
 func matchRoutePermalinkTarget(id tree.PageID, path tree.RoutePath) types.GomegaMatcher {

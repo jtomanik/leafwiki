@@ -19,7 +19,9 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/http/dto"
+	"github.com/perber/wiki/internal/localization"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
 var _ = ginkgo.Describe("metadata and validation helpers", func() {
@@ -246,19 +248,11 @@ var _ = ginkgo.Describe("metadata and validation helpers", func() {
 
 		input, err := requireReadmeMarkdownPathFallbackInput("README.md", "")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"PageRoute":    Equal("README"),
-			"SectionRoute": BeEmpty(),
-			"TryPage":      BeTrue(),
-			"TrySection":   BeTrue(),
-		}))
+		Expect(input).To(HavePageAndSectionReadmeMarkdownFallback("README", ""))
 
 		input, err = requireReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(input).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"TryPage":    BeFalse(),
-			"TrySection": BeTrue(),
-		}))
+		Expect(input).To(HaveSectionReadmeMarkdownFallback("docs/README", "docs"))
 
 		_, err = requireReadmeMarkdownPathFallbackRawInput("docs/README.md", "bad-kind")
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidKind))
@@ -427,6 +421,64 @@ func BeIgnoredByReadmeMarkdownFallbackRoutes() types.GomegaMatcher {
 		pageRoute, sectionRoute, matched := ReadmeMarkdownPathFallbackRoutes(path)
 		return !matched && pageRoute == "" && sectionRoute == "", nil
 	})
+}
+
+func ResolveCatalogMessage() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(messageID sharederrors.MessageID) (bool, error) {
+		rendered := localization.English.Render(messageID, "")
+		return !rendered.Missing && rendered.Err == nil, nil
+	}).WithMessage("resolve a catalog message")
+}
+
+func HaveExistingRoutePathLookup(path tree.RoutePath) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(lookup tree.PathLookup) (bool, error) {
+		return lookup.Exists && lookup.Path == path, nil
+	}).WithMessage("describe an existing route path lookup")
+}
+
+func HavePageOnlyReadmeMarkdownFallback(pageRoute string, sectionRoute string) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(input ReadmeMarkdownPathFallbackInput) (bool, error) {
+		return input.PageRoute == pageRoute &&
+			input.SectionRoute == sectionRoute &&
+			input.TryPage &&
+			!input.TrySection, nil
+	}).WithMessage("describe page-only README markdown fallback")
+}
+
+func HavePageAndSectionReadmeMarkdownFallback(pageRoute string, sectionRoute string) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(input ReadmeMarkdownPathFallbackInput) (bool, error) {
+		return input.PageRoute == pageRoute &&
+			input.SectionRoute == sectionRoute &&
+			input.TryPage &&
+			input.TrySection, nil
+	}).WithMessage("describe page-and-section README markdown fallback")
+}
+
+func HaveSectionReadmeMarkdownFallback(pageRoute string, sectionRoute string) types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(input ReadmeMarkdownPathFallbackInput) (bool, error) {
+		return input.PageRoute == pageRoute &&
+			input.SectionRoute == sectionRoute &&
+			!input.TryPage &&
+			input.TrySection, nil
+	}).WithMessage("describe section README markdown fallback")
+}
+
+func HavePageSaveContentChange() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
+		return event.ContentChanged, nil
+	}).WithMessage("record a page-save content change")
+}
+
+func HavePageSaveSlugChange() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
+		return event.SlugChanged, nil
+	}).WithMessage("record a page-save slug change")
+}
+
+func HavePageSaveTitleChange() types.GomegaMatcher {
+	return gcustom.MakeMatcher(func(event pagesave.PageSaveEvent) (bool, error) {
+		return event.TitleChanged, nil
+	}).WithMessage("record a page-save title change")
 }
 
 func HavePageErrorDetail(status int, code sharederrors.ErrorCode) types.GomegaMatcher {

@@ -195,10 +195,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		fallback, err := requireReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(fallback).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"TryPage":    BeTrue(),
-			"TrySection": BeFalse(),
-		}))
+		Expect(fallback).To(HavePageOnlyReadmeMarkdownFallback("docs/README", "docs"))
 
 		_, err = requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: "",
@@ -330,14 +327,16 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(updated.Page.Title).To(Equal("Renamed"))
-		updatedEvent := matchPageSaveEvent(gstruct.Fields{
-			"Operation":      Equal(pagesave.PageOperationUpdate),
-			"OldPath":        Equal(tree.RoutePath("original")),
-			"ContentChanged": BeTrue(),
-			"SlugChanged":    BeTrue(),
-			"TitleChanged":   BeTrue(),
-			"AffectedPages":  HaveLen(1),
-		})
+		updatedEvent := SatisfyAll(
+			matchPageSaveEvent(gstruct.Fields{
+				"Operation":     Equal(pagesave.PageOperationUpdate),
+				"OldPath":       Equal(tree.RoutePath("original")),
+				"AffectedPages": HaveLen(1),
+			}),
+			HavePageSaveContentChange(),
+			HavePageSaveSlugChange(),
+			HavePageSaveTitleChange(),
+		)
 		Expect(recorder.events).To(HaveExactElements(createdEvent, updatedEvent))
 
 		assetService := assets.NewAssetService(deps.tree.RootDir(), slugger)
@@ -389,11 +388,13 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		page := deps.createPage("Helper", "helper", tree.NodeKindPage, nil)
 		Expect(applyUC.runBulkContentUpdateSideEffects("editor", "test", []*tree.Page{page})).To(Succeed())
-		Expect(recorder.events).To(HaveExactElements(matchPageSaveEvent(gstruct.Fields{
-			"Operation":      Equal(pagesave.PageOperationUpdate),
-			"ContentChanged": BeTrue(),
-			"AffectedPages":  Equal([]*tree.Page{page}),
-		})))
+		Expect(recorder.events).To(HaveExactElements(SatisfyAll(
+			matchPageSaveEvent(gstruct.Fields{
+				"Operation":     Equal(pagesave.PageOperationUpdate),
+				"AffectedPages": Equal([]*tree.Page{page}),
+			}),
+			HavePageSaveContentChange(),
+		)))
 
 		Expect(applyUC.loadPagesByID(nil, "unused")).To(BeEmpty())
 		loaded := applyUC.loadPagesByID([]tree.PageID{page.ID, tree.PageIDFromString("missing")}, "missing")

@@ -1408,8 +1408,8 @@ var _ = ginkgo.Describe("page use case behavior", func() {
 		}
 
 		Expect(capture.events).To(ContainElement(SatisfyAll(
+			HavePageSaveContentChange(),
 			HaveField("Operation", Equal(pagesave.PageOperationUpdate)),
-			HaveField("ContentChanged", BeTrue()),
 			HaveField("After", BeNil()),
 			HaveField("AffectedPages", HaveExactElements(HaveField("ID", Equal(ref.Page.ID)))),
 			HaveField("UserID", Equal(tree.UserIDFromString("mcp-user"))),

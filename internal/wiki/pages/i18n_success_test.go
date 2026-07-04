@@ -9,14 +9,13 @@ import (
 
 type apiSuccessMessageCase struct {
 	messageID sharederrors.MessageID
-	want      string
 }
 
-var _ = ginkgo.DescribeTable("API success message catalog rendering",
+var _ = ginkgo.DescribeTable("API success message catalog resolution",
 	func(tc apiSuccessMessageCase) {
-		Expect(apiSuccessMessage(tc.messageID)).To(Equal(tc.want))
+		Expect(tc.messageID).To(ResolveCatalogMessage())
 	},
-	ginkgo.Entry("delete", apiSuccessMessageCase{messageID: MessageIDAPIPagesDeleteSuccess, want: "Page deleted"}),
-	ginkgo.Entry("move", apiSuccessMessageCase{messageID: MessageIDAPIPagesMoveSuccess, want: "Page moved"}),
-	ginkgo.Entry("sort", apiSuccessMessageCase{messageID: MessageIDAPIPagesSortSuccess, want: "Pages sorted successfully"}),
+	ginkgo.Entry("delete", apiSuccessMessageCase{messageID: MessageIDAPIPagesDeleteSuccess}),
+	ginkgo.Entry("move", apiSuccessMessageCase{messageID: MessageIDAPIPagesMoveSuccess}),
+	ginkgo.Entry("sort", apiSuccessMessageCase{messageID: MessageIDAPIPagesSortSuccess}),
 )
