@@ -10,13 +10,13 @@ import (
 )
 
 var _ = ginkgo.Describe("revision store persistence behavior", func() {
-	ginkgo.It("NewRevisionIDUnchecked preserves the raw commit identifier", func() {
+	ginkgo.It("NewRevisionIDUnchecked preserves the raw commit identifier", ginkgo.Label("unit"), func() {
 		id := RevisionIDFromString(" rev-raw ")
 
 		Expect(id.CommitID()).To(Equal(" rev-raw "))
 	})
 
-	ginkgo.It("PruneRevisions keeps the newest revisions and removes pruned IDs from the index", func() {
+	ginkgo.It("PruneRevisions keeps the newest revisions and removes pruned IDs from the index", ginkgo.Label("integration"), func() {
 		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("page-prune")
 		createdAt := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
@@ -60,7 +60,7 @@ var _ = ginkgo.Describe("revision store persistence behavior", func() {
 		Expect(index).To(HaveKey(newFixtureRevisionID("rev-4").CommitID()))
 	})
 
-	ginkgo.It("PruneRevisions keep count boundaries are no-ops for zero and already-small histories", func() {
+	ginkgo.It("PruneRevisions keep count boundaries are no-ops for zero and already-small histories", ginkgo.Label("integration"), func() {
 		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("page-prune-boundary")
 		revisionID := newFixtureRevisionID("rev-only")
@@ -81,7 +81,7 @@ var _ = ginkgo.Describe("revision store persistence behavior", func() {
 		Expect(rev.ID).To(Equal(revisionID))
 	})
 
-	ginkgo.It("CopyAssetBlobToPath restores a stored asset blob with matching hash and size", func() {
+	ginkgo.It("CopyAssetBlobToPath restores a stored asset blob with matching hash and size", ginkgo.Label("integration"), func() {
 		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		sourcePath := filepath.Join(tmp, "asset.txt")

@@ -6,7 +6,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = ginkgo.Describe("service contract", func() {
+var _ = ginkgo.Describe("service contract", ginkgo.Label("unit"), func() {
 	ginkgo.It("keeps public revision service methods typed with semantic IDs", func() {
 		var _ RevisionID = Revision{}.ID
 		var _ func(*Service, tree.PageID, tree.UserID, string) (*Revision, bool, error) = (*Service).RecordContentUpdate

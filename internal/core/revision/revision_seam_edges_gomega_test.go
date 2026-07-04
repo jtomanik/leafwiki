@@ -16,7 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("revision seam-driven failure behavior", func() {
+var _ = Describe("revision seam-driven failure behavior", Label("integration"), func() {
 	It("preserves idempotent content and manifest writes while propagating write failures", func() {
 		store := NewFSStore(revisionTempDir())
 

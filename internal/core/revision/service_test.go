@@ -75,7 +75,7 @@ func writeLiveAsset[T ~string](storageDir string, pageID T, name, content string
 }
 
 var _ = ginkgo.Describe("service", func() {
-	ginkgo.It("records the first content revision and reuses it when content is unchanged", func() {
+	ginkgo.It("records the first content revision and reuses it when content is unchanged", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		authorID := revisionTestUserID("tester")
@@ -96,7 +96,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(secondRecord).To(haveRecordedRevision(HaveField("ID", rev.ID)))
 	})
 
-	ginkgo.It("records batch content revisions once and preserves no-op histories", func() {
+	ginkgo.It("records batch content revisions once and preserves no-op histories", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID1 := createRevisionTestPage(treeService, "Page 1", "page-1", "hello")
 		pageID2 := createRevisionTestPage(treeService, "Page 2", "page-2", "world")
@@ -133,7 +133,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(revisions2After).To(HaveLen(1))
 	})
 
-	ginkgo.It("preserves per-input errors while recording valid batch pages", func() {
+	ginkgo.It("preserves per-input errors while recording valid batch pages", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID1 := createRevisionTestPage(treeService, "Page 1", "page-1", "hello")
 		pageID2 := createRevisionTestPage(treeService, "Page 2", "page-2", "world")
@@ -161,7 +161,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(revisions2).To(HaveLen(1))
 	})
 
-	ginkgo.It("records duplicate batch page IDs once", func() {
+	ginkgo.It("records duplicate batch page IDs once", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset-a")
@@ -178,7 +178,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(revisions).To(HaveLen(1))
 	})
 
-	ginkgo.It("wraps localized errors with causes and structured details", func() {
+	ginkgo.It("wraps localized errors with causes and structured details", ginkgo.Label("unit"), func() {
 		cause := errors.New("boom")
 		err := sharederrors.NewLocalizedError("code", "message", "template %s", cause, "arg")
 		Expect(err.Error()).NotTo(BeEmpty())
@@ -187,7 +187,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(errors.New("plain")).NotTo(matchLocalizedRevisionErrorDetails(sharederrors.ErrorCode("code"), "arg"))
 	})
 
-	ginkgo.It("exposes revision wrappers and deletes page revision data", func() {
+	ginkgo.It("exposes revision wrappers and deletes page revision data", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
@@ -220,7 +220,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	ginkgo.It("records asset and structure revisions only when state changes", func() {
+	ginkgo.It("records asset and structure revisions only when state changes", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
@@ -242,7 +242,7 @@ var _ = ginkgo.Describe("service", func() {
 			)))
 	})
 
-	ginkgo.It("rejects duplicate, missing, and invalid restore assets", func() {
+	ginkgo.It("rejects duplicate, missing, and invalid restore assets", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 
@@ -260,7 +260,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(err).To(matchRevisionError(os.ErrNotExist))
 	})
 
-	ginkgo.It("records restore revisions with and without live assets", func() {
+	ginkgo.It("records restore revisions with and without live assets", ginkgo.Label("integration"), func() {
 		loggerService := NewService(revisionTempDir(), nil, nil)
 		Expect(loggerService).NotTo(BeNil())
 		Expect(loggerService.log).NotTo(BeNil())
@@ -279,7 +279,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(service.recordRestoreRevision(typedPageID, revisionTestUserID("tester"))).To(Succeed())
 	})
 
-	ginkgo.It("detects live assets and reports persistence mismatches", func() {
+	ginkgo.It("detects live assets and reports persistence mismatches", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
@@ -304,7 +304,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 	})
 
-	ginkgo.It("reports restored asset hash and size mismatches", func() {
+	ginkgo.It("reports restored asset hash and size mismatches", ginkgo.Label("integration"), func() {
 		service, _, _ := newRevisionTestService()
 
 		hash := sha256HexBytes([]byte("asset"))
@@ -321,7 +321,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(service.restoreAssets("page-2", []AssetRef{{Name: "a.txt", SHA256: hash2, SizeBytes: 999}})).To(matchRevisionError(ErrAssetBlobSizeMismatch))
 	})
 
-	ginkgo.It("records structure revisions even when no live assets exist", func() {
+	ginkgo.It("records structure revisions even when no live assets exist", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 
@@ -332,7 +332,7 @@ var _ = ginkgo.Describe("service", func() {
 			)))
 	})
 
-	ginkgo.It("captures live page state and trims revision authors", func() {
+	ginkgo.It("captures live page state and trims revision authors", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset")
@@ -358,7 +358,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("records content and asset changes when the asset set is empty", func() {
+	ginkgo.It("records content and asset changes when the asset set is empty", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 
@@ -379,7 +379,7 @@ var _ = ginkgo.Describe("service", func() {
 			To(haveRecordedRevision(HaveField("Type", RevisionTypeContentUpdate)))
 	})
 
-	ginkgo.It("rehydrates historical content and assets while preserving current route", func() {
+	ginkgo.It("rehydrates historical content and assets while preserving current route", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 
 		sectionKind := tree.NodeKindSection
@@ -429,7 +429,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(latest).To(HaveField("Type", RevisionTypeRestore))
 	})
 
-	ginkgo.It("captures canonical page metadata without legacy extra frontmatter", func() {
+	ginkgo.It("captures canonical page metadata without legacy extra frontmatter", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
@@ -474,7 +474,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("restores historical custom frontmatter while keeping managed fields current", func() {
+	ginkgo.It("restores historical custom frontmatter while keeping managed fields current", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
@@ -540,7 +540,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("restores canonical fields without moving extras into managed fields", func() {
+	ginkgo.It("restores canonical fields without moving extras into managed fields", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
@@ -592,7 +592,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("restores an explicitly empty metadata snapshot", func() {
+	ginkgo.It("restores an explicitly empty metadata snapshot", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
@@ -630,7 +630,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("preserves current custom frontmatter for legacy revisions without metadata snapshots", func() {
+	ginkgo.It("preserves current custom frontmatter for legacy revisions without metadata snapshots", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
@@ -669,7 +669,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("writes canonical metadata from legacy revision extra frontmatter", func() {
+	ginkgo.It("writes canonical metadata from legacy revision extra frontmatter", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
@@ -715,7 +715,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("keeps legacy YAML-looking content in the page body", func() {
+	ginkgo.It("keeps legacy YAML-looking content in the page body", ginkgo.Label("integration"), func() {
 		service, treeService, _ := newRevisionTestService()
 
 		pageKind := tree.NodeKindPage
@@ -754,7 +754,7 @@ var _ = ginkgo.Describe("service", func() {
 			To(haveParsedRevisionFrontmatter(HaveField("ExtraFields", BeEmpty()), Equal(legacyBody)))
 	})
 
-	ginkgo.It("rebuilds missing previous manifests for content and structure revisions", func() {
+	ginkgo.It("rebuilds missing previous manifests for content and structure revisions", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "hello")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset-a")
@@ -778,7 +778,7 @@ var _ = ginkgo.Describe("service", func() {
 			To(haveRecordedRevision(HaveField("AssetManifestHash", firstRev.AssetManifestHash)))
 	})
 
-	ginkgo.It("reports missing and tampered revision artifacts", func() {
+	ginkgo.It("reports missing and tampered revision artifacts", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 
 		pageID1 := createRevisionTestPage(treeService, "Page1", "page1", "hello")
@@ -813,7 +813,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(issues3).To(HaveExactElements(matchRevisionIntegrityIssue(errCodeRevisionIntegrityHashMismatch)))
 	})
 
-	ginkgo.It("compares revision snapshots with content and asset deltas", func() {
+	ginkgo.It("compares revision snapshots with content and asset deltas", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "one")
 		writeLiveAsset(storageDir, pageID, "a.txt", "asset-a")
@@ -840,7 +840,7 @@ var _ = ginkgo.Describe("service", func() {
 		))
 	})
 
-	ginkgo.It("returns stored revision asset blobs after live assets are deleted", func() {
+	ginkgo.It("returns stored revision asset blobs after live assets are deleted", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "one")
 		writeLiveAsset(storageDir, pageID, "image.png", "asset-image")
@@ -860,7 +860,7 @@ var _ = ginkgo.Describe("service", func() {
 		Expect(string(content)).To(Equal("asset-image"))
 	})
 
-	ginkgo.It("returns a localized asset-not-found error for missing manifest entries", func() {
+	ginkgo.It("returns a localized asset-not-found error for missing manifest entries", ginkgo.Label("integration"), func() {
 		service, treeService, storageDir := newRevisionTestService()
 		pageID := createRevisionTestPage(treeService, "Page", "page", "one")
 		writeLiveAsset(storageDir, pageID, "image.png", "asset-image")

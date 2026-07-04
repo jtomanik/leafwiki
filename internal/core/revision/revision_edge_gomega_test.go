@@ -97,7 +97,7 @@ func MatchJSONSyntaxError() types.GomegaMatcher {
 }
 
 var _ = Describe("revision edge behavior", func() {
-	It("handles service option and no-op branches explicitly", func() {
+	It("handles service option and no-op branches explicitly", Label("unit"), func() {
 		service := NewService(revisionTempDir(), nil, nil, ServiceOptions{MaxRevisions: 1})
 
 		Expect(service.maxRevisions).To(Equal(1))
@@ -106,14 +106,14 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(func() { service.pruneAfterSave(newFixturePageID("")) }).NotTo(Panic())
 	})
 
-	It("returns public API errors for missing content inputs", func() {
+	It("returns public API errors for missing content inputs", Label("integration"), func() {
 		service, _, _ := newGomegaRevisionService()
 
 		Expect(failedRevisionRecord(service.RecordContentUpdate(newFixturePageID("missing"), newFixtureUserID("tester"), "missing"))).
 			To(haveRevisionRecordError(MatchError(tree.ErrPageNotFound)))
 	})
 
-	It("prefers canonical metadata hashes and reports metadata marshal failures", func() {
+	It("prefers canonical metadata hashes and reports metadata marshal failures", Label("unit"), func() {
 		Expect(revisionStoredMetadataHash(nil)).To(BeEmpty())
 		Expect(revisionStoredMetadataHash(&Revision{ExtraFrontmatterHash: "legacy-hash"})).To(Equal("legacy-hash"))
 		Expect(revisionStoredMetadataHash(&Revision{PageMetadataHash: "canonical-hash", ExtraFrontmatterHash: "legacy-hash"})).To(Equal("canonical-hash"))
@@ -146,7 +146,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(err).To(MatchJSONUnsupportedTypeError())
 	})
 
-	It("builds restored raw content and rejects invalid metadata inputs", func() {
+	It("builds restored raw content and rejects invalid metadata inputs", Label("unit"), func() {
 		raw, replaceMetadata, err := buildRestoredRawContent(newFixturePageID("page"), " Page ", nil, nil, "body")
 		Expect(restoredBodyOnlyRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContent(Equal("body")))
 
@@ -162,7 +162,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(failedRestoredRawContent(raw, replaceMetadata, err)).To(haveRestoredRawContentError(matchRevisionError(markdown.ErrMetadataParse)))
 	})
 
-	It("reports each revision asset delta type in stable order", func() {
+	It("reports each revision asset delta type in stable order", Label("unit"), func() {
 		deltas := compareRevisionAssets(
 			[]AssetRef{
 				{Name: "modified.txt", SHA256: "old", SizeBytes: 1},
@@ -183,7 +183,7 @@ var _ = Describe("revision edge behavior", func() {
 		}))
 	})
 
-	It("handles empty hashes and malformed store helper paths", func() {
+	It("handles empty hashes and malformed store helper paths", Label("integration"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		Expect(store.ReadContentBlob(" ")).To(BeEmpty())
@@ -219,7 +219,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(index).To(BeEmpty())
 	})
 
-	It("surfaces malformed revision files and indexes", func() {
+	It("surfaces malformed revision files and indexes", Label("integration"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		badListPageID := newFixturePageID("bad-list")
@@ -259,7 +259,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(store.PruneRevisions(pruneBadIndexPageID, 1)).To(MatchJSONSyntaxError())
 	})
 
-	It("validates SaveRevision required fields", func() {
+	It("validates SaveRevision required fields", Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		err := store.SaveRevision(&Revision{
@@ -272,7 +272,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(err).To(MatchError(ErrRevisionCreatedAtRequired))
 	})
 
-	It("validates restored asset copy destinations and blob integrity", func() {
+	It("validates restored asset copy destinations and blob integrity", Label("integration"), func() {
 		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		hash, size := writeStoredAssetBlob(store, []byte("asset"))
@@ -295,7 +295,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(store.CopyAssetBlobToPath(hash, size, existingDirTarget)).To(MatchError(syscall.EEXIST))
 	})
 
-	It("reports missing asset blobs and size mismatches during integrity checks", func() {
+	It("reports missing asset blobs and size mismatches during integrity checks", Label("integration"), func() {
 		service, treeService, _ := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		contentHash, err := service.store.SaveContentBlob([]byte("body"))
@@ -332,7 +332,7 @@ var _ = Describe("revision edge behavior", func() {
 		))
 	})
 
-	It("returns service errors and rebuilds manifest hashes when caches are stale", func() {
+	It("returns service errors and rebuilds manifest hashes when caches are stale", Label("integration"), func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 
 		errs := service.RecordContentUpdates([]*tree.Page{{
@@ -369,7 +369,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(hash).To(Equal(rev.AssetManifestHash))
 	})
 
-	It("defaults asset MIME types and rejects invalid restore asset names", func() {
+	It("defaults asset MIME types and rejects invalid restore asset names", Label("integration"), func() {
 		service, _, _ := newGomegaRevisionService()
 		assetPath := filepath.Join(revisionTempDir(), "asset")
 		Expect(os.WriteFile(assetPath, []byte("asset"), 0o644)).To(Succeed())
@@ -390,7 +390,7 @@ var _ = Describe("revision edge behavior", func() {
 		})).To(MatchError(ErrDuplicateAssetName))
 	})
 
-	It("rolls back content when restore asset rehydration fails", func() {
+	It("rolls back content when restore asset rehydration fails", Label("integration"), func() {
 		service, treeService, _ := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "original")
 		contentHash, err := service.store.SaveContentBlob([]byte("restored"))
@@ -411,7 +411,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(page.Content).To(Equal("original"))
 	})
 
-	It("reports deterministic service and store failure paths", func() {
+	It("reports deterministic service and store failure paths", Label("integration"), func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
@@ -462,7 +462,7 @@ var _ = Describe("revision edge behavior", func() {
 			To(haveRevisionRecordError(rejectRevisionValidation()))
 	})
 
-	It("reports deterministic FSStore edge paths", func() {
+	It("reports deterministic FSStore edge paths", Label("integration"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		fileBackedPageID := newFixturePageID("file-backed")
@@ -520,7 +520,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(invalidStore.saveRevisionIndex(newFixturePageID("page"), nil)).To(MatchError(syscall.ENOTDIR))
 	})
 
-	It("localizes restore, snapshot, comparison, and asset preview failures", func() {
+	It("localizes restore, snapshot, comparison, and asset preview failures", Label("integration"), func() {
 		service, treeService, _ := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
