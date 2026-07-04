@@ -285,17 +285,18 @@ var _ = DescribeTable("filename validation accepts safe asset names",
 	Entry("foo-bar.webp", assetNameCase{filename: assetName("foo-bar.webp")}),
 )
 
-var _ = DescribeTable("filename validation rejects empty, dot, and path names",
-	func(tc assetNameCase) {
-		Expect(validateFilename(tc.filename)).To(HaveOccurred())
+var _ = DescribeTable("asset filename validation returns localized errors for empty, dot, and path names",
+	func(tc invalidAssetOperationCase) {
+		_, err := validateAssetFilename(tc.filename)
+		Expect(err).To(matchLocalizedAssetCode(tc.wantCode))
 	},
-	Entry("empty", assetNameCase{filename: assetName("")}),
-	Entry(".", assetNameCase{filename: assetName(".")}),
-	Entry("..", assetNameCase{filename: assetName("..")}),
-	Entry("../etc/passwd", assetNameCase{filename: assetName("../etc/passwd")}),
-	Entry("../../users.db", assetNameCase{filename: assetName("../../users.db")}),
-	Entry("foo/bar.png", assetNameCase{filename: assetName("foo/bar.png")}),
-	Entry(`foo\bar.png`, assetNameCase{filename: assetName(`foo\bar.png`)}),
+	Entry("empty", invalidAssetOperationCase{filename: assetName(""), wantCode: ErrCodeAssetMissingName}),
+	Entry(".", invalidAssetOperationCase{filename: assetName("."), wantCode: ErrCodeAssetInvalidName}),
+	Entry("..", invalidAssetOperationCase{filename: assetName(".."), wantCode: ErrCodeAssetInvalidName}),
+	Entry("../etc/passwd", invalidAssetOperationCase{filename: assetName("../etc/passwd"), wantCode: ErrCodeAssetInvalidName}),
+	Entry("../../users.db", invalidAssetOperationCase{filename: assetName("../../users.db"), wantCode: ErrCodeAssetInvalidName}),
+	Entry("foo/bar.png", invalidAssetOperationCase{filename: assetName("foo/bar.png"), wantCode: ErrCodeAssetInvalidName}),
+	Entry(`foo\bar.png`, invalidAssetOperationCase{filename: assetName(`foo\bar.png`), wantCode: ErrCodeAssetInvalidName}),
 )
 
 var _ = DescribeTable("asset deletes reject path traversal filenames",
