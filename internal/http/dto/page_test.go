@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 
@@ -29,6 +30,20 @@ func matchAPINodeID(expected tree.PageID) types.GomegaMatcher {
 	return WithTransform(func(raw string) tree.PageID {
 		return tree.PageIDFromString(raw)
 	}, Equal(expected))
+}
+
+func matchReadmeFallbackContentPath(path string) types.GomegaMatcher {
+	GinkgoHelper()
+	return gcustom.MakeMatcher(func(node *Node) (bool, error) {
+		return node != nil && node.ContentPath == path && node.ReadmeFallback, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} expose README fallback content path\n{{format .Data 1}}", path)
+}
+
+func matchDirectContentPath(path string) types.GomegaMatcher {
+	GinkgoHelper()
+	return gcustom.MakeMatcher(func(node *Node) (bool, error) {
+		return node != nil && node.ContentPath == path && !node.ReadmeFallback, nil
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} expose direct content path\n{{format .Data 1}}", path)
 }
 
 func matchPropertyPage(fields gstruct.Fields) types.GomegaMatcher {
@@ -82,16 +97,18 @@ var _ = Describe("page DTO mapping", func() {
 			return "docs/" + node.Slug.FilesystemPath() + ".md", nil
 		})
 
-		Expect(apiNode).To(matchAPINode(gstruct.Fields{
-			"Path":           Equal("docs"),
-			"ContentPath":    Equal("docs/README.md"),
-			"ReadmeFallback": BeTrue(),
-			"Children": ConsistOf(matchAPINode(gstruct.Fields{
-				"ID":             matchAPINodeID(child.ID),
-				"ContentPath":    Equal("docs/intro.md"),
-				"ReadmeFallback": BeFalse(),
-			})),
-		}))
+		Expect(apiNode).To(SatisfyAll(
+			matchAPINode(gstruct.Fields{
+				"Path": Equal("docs"),
+				"Children": ConsistOf(SatisfyAll(
+					matchAPINode(gstruct.Fields{
+						"ID": matchAPINodeID(child.ID),
+					}),
+					matchDirectContentPath("docs/intro.md"),
+				)),
+			}),
+			matchReadmeFallbackContentPath("docs/README.md"),
+		))
 	})
 
 	It("omits content paths when the resolver fails", func() {
