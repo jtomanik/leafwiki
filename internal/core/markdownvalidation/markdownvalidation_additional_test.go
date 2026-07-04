@@ -205,7 +205,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 		}))
 	})
 
-	ginkgo.It("resolveReferencePath resolves relative, parent, absolute, and ignored destinations", func() {
+	ginkgo.It("normalizes relative parent and absolute wiki references while ignoring empty anchors", func() {
 		route := tree.RoutePath("docs/source")
 
 		Expect(resolveReferencePath(route, "target")).To(Equal("/docs/source/target"))
@@ -215,7 +215,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 		Expect(resolveReferencePath(route, "#intro")).To(BeEmpty())
 	})
 
-	ginkgo.It("resolveWorkspaceReferencePath maps markdown file destinations through markdown path semantics", func() {
+	ginkgo.It("maps markdown file references to workspace routes before falling back to route-relative links", func() {
 		relPath := tree.MarkdownPath("docs/source.md")
 		routePath := tree.RoutePath("docs/source")
 
@@ -253,7 +253,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", func() {
 		Expect(resolveReferencePath("", "/")).To(BeEmpty())
 	})
 
-	ginkgo.It("isMarkdownFileDestination detects markdown destinations after cleaning query and fragment", func() {
+	ginkgo.It("recognizes only lowercase markdown file targets after removing query and fragment markers", func() {
 		Expect(isMarkdownFileDestination("page.md#intro")).To(BeTrue())
 		Expect(isMarkdownFileDestination("page.MARKDOWN?view=1")).To(BeFalse())
 		Expect(isMarkdownFileDestination("asset.png")).To(BeFalse())
