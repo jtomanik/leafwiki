@@ -16,6 +16,12 @@ linters:
     - nilnil
     - bodyclose
     - sqlclosecheck
+    - nolintlint
+    - nilnesserr
+    - rowserrcheck
+    - exptostd
+    - gochecksumtype
+    - grouper
   settings:
     custom:
       leafwiki:
