@@ -32,6 +32,19 @@ func matchResolvedConfig(target Target, filePath types.GomegaMatcher, level slog
 	})
 }
 
+func parseLogRecords(raw string) []map[string]any {
+	GinkgoHelper()
+
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	records := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		var entry map[string]any
+		Expect(json.Unmarshal([]byte(line), &entry)).To(Succeed())
+		records = append(records, entry)
+	}
+	return records
+}
+
 var _ = Describe("logging configuration", func() {
 	It("defaults file logging to the LeafWiki log path under the data directory", func() {
 		dataDir := filepath.Join(loggingTempDir(), "data")
@@ -221,10 +234,9 @@ var _ = Describe("opening loggers", func() {
 		log.Print(testLogStdlibMessage)
 
 		Expect(stdout.String()).To(BeEmpty())
-		Expect(strings.Split(strings.TrimSpace(stderr.String()), "\n")).To(HaveLen(2))
-		Expect(stderr.String()).To(SatisfyAll(
-			ContainSubstring(testLogSlogMessage),
-			ContainSubstring(testLogStdlibMessage),
+		Expect(parseLogRecords(stderr.String())).To(ConsistOf(
+			HaveKeyWithValue("msg", testLogSlogMessage),
+			HaveKeyWithValue("msg", testLogStdlibMessage),
 		))
 	})
 
@@ -243,11 +255,7 @@ var _ = Describe("opening loggers", func() {
 		logger.Info(testLogInfoMessage)
 		logger.Error(testLogErrorMessage)
 
-		Expect(strings.Split(strings.TrimSpace(stdout.String()), "\n")).To(HaveLen(1))
-		Expect(stdout.String()).To(SatisfyAll(
-			Not(ContainSubstring(testLogInfoMessage)),
-			ContainSubstring(testLogErrorMessage),
-		))
+		Expect(parseLogRecords(stdout.String())).To(ConsistOf(HaveKeyWithValue("msg", testLogErrorMessage)))
 	})
 })
 
