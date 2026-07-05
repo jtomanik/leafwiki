@@ -20,7 +20,7 @@ type markdownLinkRootPrefixScenarioCoverage struct {
 
 var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenarioCoverage{
 	{"Prefixed absolute page link resolves inside wiki root", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixResolvesPageInsideWikiRoot")},
-	{"Unprefixed absolute page link still resolves but canonicalizes to the configured prefix", mlrpEvidence("internal/workspacesync/service_test.go", "adds the configured root prefix to absolute markdown links without repeat revisions")},
+	{"Unprefixed absolute page link still resolves but canonicalizes to the configured prefix", mlrpEvidence("internal/workspacesync/service_canonical_links_test.go", "adds the configured root prefix to absolute markdown links without repeat revisions")},
 	{"Configured prefix root resolves to the wiki root section", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixResolvesPrefixRootToWikiRoot")},
 	{"Configured prefix distinguishes section and page syntax", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixDistinguishesSectionAndPageSyntax")},
 	{"Relative links ignore the configured prefix", mlrpEvidence("internal/core/markdownlinks/markdownlinks_test.go", "TestResolveCanonicalLink_WithRootPrefixLeavesRelativeLinkUnchanged")},
@@ -29,9 +29,9 @@ var markdownLinkRootPrefixPlanScenarioCoverage = []markdownLinkRootPrefixScenari
 	{"Workspace sync coerces absolute links to the configured prefix", mlrpEvidence("e2e/tests/workspace-sync.spec.ts", "markdown link root prefix rewrites unprefixed absolute links")},
 	{"Generated editor links include the configured prefix", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix autocomplete inserts prefixed page links")},
 	{"Importer and refactor generated absolute links include the configured prefix", mlrpEvidence("internal/importer/content_transformer_test.go", "applies the markdown root prefix to generated link hrefs")},
-	{"CLI env YAML and run wrapper expose the same prefix setting", mlrpEvidence("cmd/leafwiki/main_test.go", "TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars")},
-	{"Daemon identity changes when markdown link root prefix changes", mlrpEvidence("cmd/leafwiki/main_test.go", "TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields")},
-	{"MCP and HTTP config report markdownLinkRootPrefix", mlrpEvidence("internal/wiki/mcp/mcp_integration_test.go", "HaveKeyWithValue(\"markdownLinkRootPrefix\", \"/docs\")")},
+	{"CLI env YAML and run wrapper expose the same prefix setting", mlrpEvidence("cmd/leafwiki/main_04_main_process_test.go", "TestApplyYAMLConfigFile_ResolutionPrecedenceAndExplicitScalars")},
+	{"Daemon identity changes when markdown link root prefix changes", mlrpEvidence("cmd/leafwiki/main_12_main_process_test.go", "TestCompareProjectDaemonConfigForRequestCoversDaemonRelevantFields")},
+	{"MCP and HTTP config report markdownLinkRootPrefix", mlrpEvidence("internal/wiki/mcp/mcp_integration_page_operation_parity_test.go", "HaveKeyWithValue(\"markdownLinkRootPrefix\", \"/docs\")")},
 	{"LeafWiki preview navigates prefixed Markdown hrefs without changing route identity", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix preview click navigates to unprefixed route")},
 	{"Base path and markdown link root prefix remain separate", mlrpEvidence("e2e/tests/page.spec.ts", "markdown link root prefix remains separate from base path")},
 	{"Plan scenarios are covered by automated evidence", mlrpEvidence("internal/plantrace/markdown_link_root_prefix_test.go", "TestMarkdownLinkRootPrefixPlanScenarioTitleAuditIndex")},

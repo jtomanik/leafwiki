@@ -101,7 +101,7 @@ func (matcher planEvidenceFileMatcher) Match(actual any) (bool, error) {
 	}
 	raw, err := os.ReadFile(filepath.Join(matcher.repoRoot, reference.file))
 	if err != nil {
-		return false, nil
+		return false, err
 	}
 	return ContainSubstring(reference.text).Match(string(raw))
 }

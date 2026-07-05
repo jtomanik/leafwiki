@@ -98,7 +98,7 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 		"MCP unknown tool protocol errors are not over-wrapped":
 		return evidence("internal/wiki/mcp/tool_contracts_test.go", "renders descriptions from the catalog"), true
 	case "MCP structured error keeps _meta.error compatibility":
-		return evidence("internal/wiki/mcp/mcp_integration_test.go", "matchMCPStructuredError"), true
+		return evidence("internal/wiki/mcp/mcp_integration_tool_call_helpers_test.go", "matchMCPStructuredError"), true
 	case "CLI help renders catalog-backed text to stdout":
 		return evidence("cmd/leafwiki/main_test.go", "catalog-backed usage line"), true
 	case "run.sh help uses generated catalog text",
@@ -129,7 +129,7 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 	case "Version conflict toast keeps existing semantic assertion pattern":
 		return evidence("e2e/tests/page.spec.ts", "data-error-code', 'page_version_conflict"), true
 	case "Test prose checker rejects behavior tests that assert localized copy":
-		return evidence("internal/analysis/i18ncatalog/repository.go", "E2E behavior tests must assert semantic IDs/status"), true
+		return evidence("internal/analysis/i18ncatalog/repository_external_policy.go", "E2E behavior tests must assert semantic IDs/status"), true
 	case "Catalog extraction is reproducible",
 		"Every emitted message ID has English catalog coverage":
 		return evidence("internal/analysis/i18ncatalog/repository.go", "checkCatalogParity"), true
