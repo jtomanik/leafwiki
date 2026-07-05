@@ -10,7 +10,7 @@ import (
 
 var _ = ginkgo.Describe("policy helpers", ginkgo.Label("unit"), func() {
 	ginkgo.Describe("rule metadata", func() {
-		ginkgo.It("classifies hard semantic rules and the first waivable BDD rule", func() {
+		ginkgo.It("classifies semantic-owned rules as hard diagnostics", func() {
 			Expect(observeRuleMetadata(ruleDirectCast)).To(Equal(ruleMetadataObservation{
 				State: ruleMetadataRegistered,
 				Metadata: ruleMetadata{
@@ -19,24 +19,6 @@ var _ = ginkgo.Describe("policy helpers", ginkgo.Label("unit"), func() {
 					scope:         waiverScopeNone,
 				},
 			}))
-
-			Expect(observeRuleMetadata(ruleGinkgoTopLevelIt)).To(Equal(ruleMetadataObservation{
-				State: ruleMetadataRegistered,
-				Metadata: ruleMetadata{
-					messagePrefix: string(ruleGinkgoTopLevelIt),
-					waivable:      true,
-					scope:         waiverScopeCall,
-				},
-			}))
-		})
-
-		ginkgo.It("requires every waivable rule to have an explicit positive budget", func() {
-			for id, metadata := range allRuleMetadata() {
-				if !metadata.waivable {
-					continue
-				}
-				Expect(classifyWaiverBudget(id)).To(Equal(waiverBudgetPositive), "waivable rule %s should have an explicit positive budget", id)
-			}
 		})
 
 		ginkgo.It("rejects unknown rule IDs", func() {
@@ -69,97 +51,7 @@ var _ = ginkgo.Describe("policy helpers", ginkgo.Label("unit"), func() {
 			ginkgo.Entry("i18n message field", ruleID("i18n.message-field"), false, waiverScopeNone),
 			ginkgo.Entry("i18n message parameter", ruleID("i18n.message-parameter"), false, waiverScopeNone),
 			ginkgo.Entry("contract raw literal", ruleID("contract.raw-literal"), false, waiverScopeNone),
-			ginkgo.Entry("dependency direction", ruleID("dependency.e2e-proxy-internal-import"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo focus", ruleID("ginkgo.focus"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo pending", ruleID("ginkgo.pending"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo flake attempts", ruleID("ginkgo.flake-attempts"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo restricted decorator", ruleID("ginkgo.restricted-decorator"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo taxonomy missing label", ruleID("ginkgo.taxonomy-label.missing"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo taxonomy unknown label", ruleID("ginkgo.taxonomy-label.unknown"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo taxonomy dynamic label", ruleID("ginkgo.taxonomy-label.dynamic"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo taxonomy multiple labels", ruleID("ginkgo.taxonomy-label.multiple"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo container call", ruleID("ginkgo.container-call"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo container state initialization", ruleID("ginkgo.container-state-initialization"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo entry setup value", ruleID("ginkgo.entry-setup-value"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo goroutine recover", ruleID("ginkgo.goroutine-recover"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo blocking receive", ruleID("ginkgo.blocking-receive"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo helper first", ruleID("ginkgo.helper-first"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo global state cleanup", ruleID("ginkgo.global-state-cleanup"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo BDD bucket name rule", ruleID("ginkgo.coverage-name"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo vague name", ruleID("ginkgo.vague-name"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo boolean outcome name", ruleID("ginkgo.boolean-outcome-name"), false, waiverScopeNone),
-			ginkgo.Entry("gomega error string", ruleID("gomega.err-error-string"), false, waiverScopeNone),
-			ginkgo.Entry("gomega raw string match error", ruleID("gomega.raw-string-match-error"), false, waiverScopeNone),
-			ginkgo.Entry("gomega error nil matcher", ruleID("gomega.error-nil-matcher"), false, waiverScopeNone),
-			ginkgo.Entry("gomega generic HaveOccurred", ruleID("gomega.generic-have-occurred"), false, waiverScopeNone),
-			ginkgo.Entry("gomega inline error succeed", ruleID("gomega.inline-error-succeed"), false, waiverScopeNone),
-			ginkgo.Entry("gomega multi return error matcher", ruleID("gomega.multi-return-error-matcher"), false, waiverScopeNone),
-			ginkgo.Entry("gomega strings contains", ruleID("gomega.strings-contains"), false, waiverScopeNone),
-			ginkgo.Entry("gomega LastError not empty", ruleID("gomega.last-error-not-empty"), false, waiverScopeNone),
-			ginkgo.Entry("gomega string predicate", ruleID("gomega.string-predicate"), false, waiverScopeNone),
-			ginkgo.Entry("gomega regexp match string", ruleID("gomega.regexp-match-string"), false, waiverScopeNone),
-			ginkgo.Entry("gomega errors is matcher", ruleID("gomega.errors-is-matcher"), false, waiverScopeNone),
-			ginkgo.Entry("gomega errors as matcher", ruleID("gomega.errors-as-matcher"), false, waiverScopeNone),
-			ginkgo.Entry("gomega os is not exist matcher", ruleID("gomega.os-is-not-exist-matcher"), false, waiverScopeNone),
-			ginkgo.Entry("gomega len equal", ruleID("gomega.len-equal"), false, waiverScopeNone),
-			ginkgo.Entry("gomega binary boolean", ruleID("gomega.binary-boolean"), false, waiverScopeNone),
-			ginkgo.Entry("gomega boolean literal", ruleID("gomega.boolean-literal"), false, waiverScopeNone),
-			ginkgo.Entry("gomega comma-ok assertion", ruleID("gomega.comma-ok-assertion"), false, waiverScopeNone),
-			ginkgo.Entry("gomega ignored semantic boolean", ruleID("gomega.ignored-semantic-boolean"), false, waiverScopeNone),
-			ginkgo.Entry("gomega proxy boolean", ruleID("gomega.proxy-boolean"), false, waiverScopeNone),
-			ginkgo.Entry("gomega control status matcher", ruleID("gomega.control-status-matcher"), false, waiverScopeNone),
-			ginkgo.Entry("gomega map index", ruleID("gomega.map-index"), false, waiverScopeNone),
-			ginkgo.Entry("gomega http status", ruleID("gomega.http-status"), false, waiverScopeNone),
-			ginkgo.Entry("gomega http body", ruleID("gomega.http-body"), false, waiverScopeNone),
-			ginkgo.Entry("gomega repeated http body", ruleID("gomega.repeated-http-body"), false, waiverScopeNone),
-			ginkgo.Entry("gomega http header", ruleID("gomega.http-header"), false, waiverScopeNone),
-			ginkgo.Entry("gomega structured error matcher", ruleID("gomega.structured-error-matcher"), false, waiverScopeNone),
-			ginkgo.Entry("gomega structured protocol key", ruleID("gomega.structured-protocol-key"), false, waiverScopeNone),
-			ginkgo.Entry("gomega structured protocol payload", ruleID("gomega.structured-protocol-payload"), false, waiverScopeNone),
-			ginkgo.Entry("gomega structured protocol status", ruleID("gomega.structured-protocol-status"), false, waiverScopeNone),
-			ginkgo.Entry("gomega async context", ruleID("gomega.async-context"), false, waiverScopeNone),
-			ginkgo.Entry("gomega async boolean", ruleID("gomega.async-boolean"), false, waiverScopeNone),
-			ginkgo.Entry("gomega async negative receive", ruleID("gomega.async-negative-receive"), false, waiverScopeNone),
-			ginkgo.Entry("gomega async bare value", ruleID("gomega.async-bare-value"), false, waiverScopeNone),
-			ginkgo.Entry("gomega async callback expect", ruleID("gomega.async-callback-expect"), false, waiverScopeNone),
-			ginkgo.Entry("gomega helper offset", ruleID("gomega.helper-offset"), false, waiverScopeNone),
-			ginkgo.Entry("ginkgo top-level It", ruleID("ginkgo.top-level-it"), true, waiverScopeCall),
-			ginkgo.Entry("ginkgo wide entry", ruleID("ginkgo.wide-entry"), true, waiverScopeCall),
-			ginkgo.Entry("gomega helper should be matcher", ruleID("gomega.helper-should-be-matcher"), true, waiverScopeDeclaration),
-			ginkgo.Entry("gomega repeated field assertions", ruleID("gomega.repeated-field-assertions"), true, waiverScopeCall),
-			ginkgo.Entry("gomega collection index assertion", ruleID("gomega.collection-index-assertion"), true, waiverScopeCall),
-			ginkgo.Entry("gomega non-empty collection", ruleID("gomega.non-empty-collection"), true, waiverScopeCall),
-			ginkgo.Entry("gomega semantic scalar not empty", ruleID("gomega.semantic-scalar-not-empty"), true, waiverScopeCall),
-			ginkgo.Entry("gomega equal empty", ruleID("gomega.equal-empty"), true, waiverScopeCall),
-			ginkgo.Entry("gomega equal zero", ruleID("gomega.equal-zero"), true, waiverScopeCall),
-			ginkgo.Entry("gomega numeric equivalent", ruleID("gomega.numeric-equivalent"), true, waiverScopeCall),
-			ginkgo.Entry("gomega time equal", ruleID("gomega.time-equal"), true, waiverScopeCall),
-			ginkgo.Entry("gomega matcher as value", ruleID("gomega.matcher-as-value"), false, waiverScopeNone),
-			ginkgo.Entry("gomega positional transform", ruleID("gomega.positional-transform"), false, waiverScopeNone),
-			ginkgo.Entry("gomega positional composite assertion", ruleID("gomega.positional-composite-assertion"), false, waiverScopeNone),
 		)
-
-		ginkgo.It("uses the documented initial waiver budgets", func() {
-			Expect(totalWaiverBudget).To(Equal(10))
-			for _, id := range []ruleID{
-				ruleID("ginkgo.top-level-it"),
-				ruleID("ginkgo.wide-entry"),
-				ruleID("gomega.helper-should-be-matcher"),
-				ruleID("gomega.repeated-field-assertions"),
-				ruleID("gomega.collection-index-assertion"),
-				ruleID("gomega.non-empty-collection"),
-				ruleID("gomega.semantic-scalar-not-empty"),
-				ruleID("gomega.equal-empty"),
-				ruleID("gomega.equal-zero"),
-				ruleID("gomega.numeric-equivalent"),
-				ruleID("gomega.time-equal"),
-			} {
-				Expect(observeWaiverBudget(id)).To(Equal(waiverBudgetObservation{
-					State:  waiverBudgetConfigured,
-					Budget: 3,
-				}), "rule %s should use the initial per-rule budget", id)
-			}
-		})
 	})
 
 	ginkgo.DescribeTable("semantic identifiers canonicalize across naming separators",
@@ -268,7 +160,7 @@ var _ = ginkgo.Describe("policy helpers", ginkgo.Label("unit"), func() {
 			Expect(isAllowedSignatureFile(filename)).To(Equal(signatureAllowed))
 			Expect(isAllowedStructFieldFile(filename)).To(Equal(structAllowed))
 		},
-		ginkgo.Entry("repo test boundary", "/repo/internal/analysis/semantichygiene/testdata/repotests/repo_test.go", true, false),
+		ginkgo.Entry("repo test boundary", "/repo/internal/wiki/page_test.go", true, false),
 		ginkgo.Entry("http dto", "/repo/internal/http/dto/page.go", true, false),
 		ginkgo.Entry("mcp wire types", "/repo/internal/wiki/mcp/types.go", true, false),
 		ginkgo.Entry("markdown serialization", "/repo/internal/core/markdown/metadata.go", true, false),

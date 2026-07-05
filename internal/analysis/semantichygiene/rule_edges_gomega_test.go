@@ -156,44 +156,6 @@ func (h *ruleHarness) findTypeSpec(name string) *ast.TypeSpec {
 	return found
 }
 
-func (h *ruleHarness) findGoStmt() *ast.GoStmt {
-	ginkgo.GinkgoHelper()
-
-	var found *ast.GoStmt
-	ast.Inspect(h.file, func(node ast.Node) bool {
-		if found != nil {
-			return false
-		}
-		stmt, ok := node.(*ast.GoStmt)
-		if ok {
-			found = stmt
-			return false
-		}
-		return true
-	})
-	Expect(found).NotTo(BeNil(), "go statement should exist")
-	return found
-}
-
-func (h *ruleHarness) findBlockingReceive() *ast.UnaryExpr {
-	ginkgo.GinkgoHelper()
-
-	var found *ast.UnaryExpr
-	ast.Inspect(h.file, func(node ast.Node) bool {
-		if found != nil {
-			return false
-		}
-		expr, ok := node.(*ast.UnaryExpr)
-		if ok && expr.Op == token.ARROW {
-			found = expr
-			return false
-		}
-		return true
-	})
-	Expect(found).NotTo(BeNil(), "blocking receive should exist")
-	return found
-}
-
 func (h *ruleHarness) findKeyValue(key string) *ast.KeyValueExpr {
 	ginkgo.GinkgoHelper()
 

@@ -5,7 +5,10 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/perber/wiki/internal/analysis/architecturehygiene"
+	"github.com/perber/wiki/internal/analysis/i18ncatalog"
 	"github.com/perber/wiki/internal/analysis/semantichygiene"
+	"github.com/perber/wiki/internal/analysis/testhygiene"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -15,19 +18,24 @@ func TestLeafwikiVetSuite(t *testing.T) {
 }
 
 var _ = ginkgo.Describe("leafwiki-vet command", ginkgo.Label("unit"), func() {
-	ginkgo.It("delegates to the semantic hygiene analyzer", func() {
-		previous := runSingleChecker
+	ginkgo.It("delegates to the project checker analyzer family set", func() {
+		previous := runCheckers
 		ginkgo.DeferCleanup(func() {
-			runSingleChecker = previous
+			runCheckers = previous
 		})
 
 		var analyzers []*analysis.Analyzer
-		runSingleChecker = func(received *analysis.Analyzer) {
-			analyzers = append(analyzers, received)
+		runCheckers = func(received ...*analysis.Analyzer) {
+			analyzers = append(analyzers, received...)
 		}
 
 		main()
 
-		Expect(analyzers).To(Equal([]*analysis.Analyzer{semantichygiene.Analyzer}))
+		Expect(analyzers).To(Equal([]*analysis.Analyzer{
+			semantichygiene.Analyzer,
+			testhygiene.Analyzer,
+			architecturehygiene.Analyzer,
+			i18ncatalog.Analyzer,
+		}))
 	})
 })

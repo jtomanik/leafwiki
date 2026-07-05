@@ -29,7 +29,6 @@
     "cmd/leafwiki-vet/main_test.go",
     "tools/golangci/leafwiki/plugin.go",
     "tools/golangci/leafwiki/plugin_test.go",
-    "scripts/check-semantic-hygiene.sh",
     "scripts/golangci-lint.sh",
     "scripts/test-golangci-lint.sh",
     ".golangci.leafwiki.yml",

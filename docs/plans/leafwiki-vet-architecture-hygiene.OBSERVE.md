@@ -125,7 +125,8 @@ The split must not accidentally make waiver validation per-family in a way that 
 
 It also reports `register.LoadModeTypesInfo`.
 
-`scripts/check-semantic-hygiene.sh` is now a compatibility wrapper that executes `scripts/golangci-lint.sh`.
+The repo-facing checker path is `scripts/golangci-lint.sh`, which executes the
+custom LeafWiki golangci-lint binary.
 
 `scripts/golangci-lint.sh` builds or reuses `.cache/tools/leafwiki-golangci-lint` and runs the custom golangci-lint binary over:
 
@@ -142,7 +143,7 @@ It also reports `register.LoadModeTypesInfo`.
 - rejection of package arguments
 - rejection of policy-changing flags
 - stale custom binary rebuild behavior
-- compatibility wrapper behavior for `scripts/check-semantic-hygiene.sh`
+- absence of deprecated checker-specific compatibility wrappers
 
 The plan must update both direct vet runner behavior and golangci plugin behavior. Otherwise the checker split can pass locally in one path but regress the repo-facing gate.
 

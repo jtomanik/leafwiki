@@ -1,12 +1,12 @@
 package main
 
 import (
-	"github.com/perber/wiki/internal/analysis/semantichygiene"
-	"golang.org/x/tools/go/analysis/singlechecker"
+	"github.com/perber/wiki/internal/analysis/leafwikivet"
+	"golang.org/x/tools/go/analysis/multichecker"
 )
 
-var runSingleChecker = singlechecker.Main
+var runCheckers = multichecker.Main
 
 func main() {
-	runSingleChecker(semantichygiene.Analyzer)
+	runCheckers(leafwikivet.ProjectAnalyzers()...)
 }

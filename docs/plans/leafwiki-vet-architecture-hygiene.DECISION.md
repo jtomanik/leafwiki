@@ -30,7 +30,9 @@ The target module families are:
 - `architecturehygiene`: import boundaries, dependency direction, black-box E2E boundaries, and later dependency-inversion-shaped checks.
 - `checkerpolicy`: shared rule metadata, diagnostic formatting, waiver parsing, waiver finalization, and helper infrastructure used by policy families.
 
-`cmd/leafwiki-vet` remains the command. `scripts/check-semantic-hygiene.sh` remains a compatibility wrapper during the migration.
+`cmd/leafwiki-vet` remains the command. The checker-specific compatibility
+wrappers are removed; `scripts/golangci-lint.sh` remains the maintained
+repo-facing gate.
 
 ## Key Decisions
 

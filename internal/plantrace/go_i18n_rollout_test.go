@@ -36,13 +36,14 @@ var _ = ginkgo.Describe("go-i18n rollout plan traceability", ginkgo.Label("integ
 
 	})
 
-	ginkgo.It("keeps the catalog compatibility command delegated to golangci-lint", func() {
+	ginkgo.It("keeps the catalog static policy on the canonical golangci-lint gate", func() {
 		repoRoot := canonicalPlanRepoRoot()
-		raw, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "check-i18n-catalog.sh"))
-		Expect(err).NotTo(HaveOccurred(), "read check-i18n-catalog.sh")
+		raw, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "golangci-lint.sh"))
+		Expect(err).NotTo(HaveOccurred(), "read scripts/golangci-lint.sh")
 		Expect(string(raw)).To(SatisfyAll(
-			ContainSubstring("compatibility wrapper"),
-			ContainSubstring("scripts/golangci-lint.sh"),
+			ContainSubstring(".cache/tools/leafwiki-golangci-lint"),
+			ContainSubstring(".golangci.leafwiki.yml"),
+			ContainSubstring("e2e-proxy"),
 			Not(ContainSubstring("go test")),
 			Not(ContainSubstring("python")),
 		))

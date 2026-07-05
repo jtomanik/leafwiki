@@ -120,7 +120,7 @@ malformed workspace path segments as route misses or workspace-not-found results
 instead of returning public validation JSON; that keeps invalid route probing out
 of the API error contract while preserving typed validation in service code.
 
-## Semantic Hygiene Checker
+## LeafWiki Static Policy Checker
 
 Run the local source-policy gate before review:
 
@@ -130,16 +130,23 @@ rtk make lint
 
 The `make lint` target delegates to `scripts/golangci-lint.sh`, which builds or
 reuses the pinned custom `leafwiki-golangci-lint` binary and runs the root Go
-module plus `e2e-proxy`. The custom binary registers the
-`internal/analysis/semantichygiene` and `internal/analysis/i18ncatalog`
-analyzers through the LeafWiki module plugin.
+module plus `e2e-proxy`. The custom binary registers the LeafWiki project
+policy analyzers through the module plugin:
 
-`scripts/check-semantic-hygiene.sh`, `scripts/check-i18n-catalog.sh`, and
-`scripts/check-typed-id-oracles.sh` remain as compatibility wrappers only. They
-delegate to `scripts/golangci-lint.sh` and do not run independent static policy
-reporters.
+- `internal/analysis/semantichygiene` owns semantic-value, typed-boundary,
+  i18n/message, and stable contract literal policy.
+- `internal/analysis/testhygiene` owns LeafWiki-specific Ginkgo, Gomega,
+  taxonomy, BDD readability, raw `ginkgo-linter:ignore-*`, and waiver
+  validation policy.
+- `internal/analysis/architecturehygiene` owns hard project import-boundary
+  rules, including the migrated `dependency.e2e-proxy-internal-import` rule and
+  the six Sentrux import-boundary rows.
+- `internal/analysis/i18ncatalog` remains the i18n catalog analyzer.
 
-The semantic hygiene analyzer checks for:
+The older checker-specific command names have been removed; use
+`scripts/golangci-lint.sh` or `make lint` for this static policy surface.
+
+The semantic hygiene family checks for:
 
 - Semantic values converted with `.String()` before internal calls,
   comparisons, or domain assignments.
@@ -160,12 +167,17 @@ The semantic hygiene analyzer checks for:
   values.
 - Raw stable contract literals for error codes, field validation codes,
   message IDs, validation issue codes, and MCP tool IDs.
-- LeafWiki-specific Ginkgo/Gomega quality rules such as top-level specs,
-  migrated `Test...` node names, `GinkgoT()` adapters inside spec bodies,
-  committed focused/pending nodes, flake retries, unsafe goroutine assertions,
-  blocking receives, wide table rows, and project-specific matcher pressure.
-- Raw `ginkgo-linter:ignore-*` comments, which are not explanation-required or
-  budgeted and therefore cannot bypass the semantic-hygiene waiver model.
+
+The test hygiene family checks LeafWiki-specific Ginkgo/Gomega quality rules
+such as top-level specs, migrated `Test...` node names, `GinkgoT()` adapters
+inside spec bodies, committed focused/pending nodes, flake retries, unsafe
+goroutine assertions, blocking receives, wide table rows, taxonomy labels, and
+project-specific matcher pressure. Raw `ginkgo-linter:ignore-*` comments are
+hard diagnostics and cannot bypass the shared waiver model.
+
+The architecture hygiene family hard-fails import-boundary violations only. It
+does not replace Sentrux cycle, coupling, cyclomatic-complexity, or god-file
+metrics, and Sentrux removal remains deferred.
 
 Checker diagnostics are either errors or waivable diagnostics. Errors are hard
 failures. Waivable diagnostics still fail the checker unless a local waiver
@@ -183,7 +195,8 @@ or value declaration, and next-node waivers apply only to the immediately
 following AST node. One waiver suppresses one diagnostic.
 
 The active v1 waivable rule surface is reviewer-owned policy in
-`internal/analysis/semantichygiene/policy.go`. The current rule IDs and
+`internal/analysis/testhygiene/policy.go`, with waiver parsing/finalization in
+`internal/analysis/checkerpolicy`. The current rule IDs and
 per-rule budgets are:
 
 | Rule ID | Budget | Scope |
@@ -238,7 +251,9 @@ those allowances is reviewer-owned policy work and should be paired with focused
 fixtures before implementers are held to the stricter gate. Product code should
 parse or wrap boundary values before passing them into domain or service code.
 
-Policy changes under `internal/analysis/semantichygiene` are reviewer-owned.
+Policy changes under `internal/analysis/semantichygiene`,
+`internal/analysis/testhygiene`, `internal/analysis/architecturehygiene`, and
+`internal/analysis/checkerpolicy` are reviewer-owned.
 If a new middle-layer boundary is not covered yet, treat that as a checker-owner
 follow-up rather than duplicating semantic policy in shell scripts or product
 code.
@@ -267,10 +282,7 @@ Existing `data-testid` attributes remain for locating stable widgets. Semantic a
 ## Scan Guidance
 
 Use `rtk make lint` or `rtk bash scripts/golangci-lint.sh` as the authoritative
-local static source-policy command. `scripts/check-semantic-hygiene.sh`,
-`scripts/check-i18n-catalog.sh`, and `scripts/check-typed-id-oracles.sh` are
-compatibility wrappers for older command names and delegate directly to the
-golangci-lint gate.
+local static source-policy command.
 
 When a machine-facing contract assertion is too dependent on visible copy,
 prefer a stable code, message ID, typed helper value, or semantic `data-*`

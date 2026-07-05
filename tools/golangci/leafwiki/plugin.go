@@ -6,7 +6,7 @@ import (
 
 	"github.com/golangci/plugin-module-register/register"
 	"github.com/perber/wiki/internal/analysis/i18ncatalog"
-	"github.com/perber/wiki/internal/analysis/semantichygiene"
+	"github.com/perber/wiki/internal/analysis/leafwikivet"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -33,10 +33,9 @@ type plugin struct{}
 var _ register.LinterPlugin = plugin{}
 
 func (plugin) BuildAnalyzers() ([]*analysis.Analyzer, error) {
-	return []*analysis.Analyzer{
-		semantichygiene.Analyzer,
-		i18ncatalog.Analyzer,
-	}, nil
+	analyzers := leafwikivet.PolicyAnalyzers()
+	analyzers = append(analyzers, i18ncatalog.Analyzer)
+	return analyzers, nil
 }
 
 func (plugin) GetLoadMode() string {

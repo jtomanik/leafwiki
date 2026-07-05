@@ -37,7 +37,9 @@ There are two different concepts that should not be conflated:
 1. `leafwiki-vet` as the command and gate surface.
 2. Policy-family modules that implement specific classes of checks.
 
-The command can remain stable while internals split. This is preferable because users and scripts already know `leafwiki-vet` and `scripts/check-semantic-hygiene.sh` as the review surface.
+The command can remain stable while internals split. The repo-facing gate is
+`scripts/golangci-lint.sh`, which builds or reuses the pinned custom
+`leafwiki-golangci-lint` binary and runs the project checker set.
 
 ## Architectural Shape To Prefer
 

@@ -17,3 +17,12 @@ func forbiddenInternalStringInTest(pageID PageID) {
 func forbiddenDirectCastInTest(raw string) PageID {
 	return PageID(raw) // want "direct cast to semantic type PageID outside parser or boundary; use a parser or typed input"
 }
+
+func acceptsErrorCode(code ErrorCode) {}
+
+func forbiddenRawSemanticLiteralsInTest() {
+	acceptsErrorCode("unknown")                 // want "semh:semantic.test-raw-literal: raw string literal passed as ErrorCode in test code; use a semantic fixture/helper value"
+	var assignedPageID PageID = "page-assigned" // want "semh:semantic.test-raw-literal: raw string literal assigned as PageID in test code; use a semantic fixture/helper value"
+	_ = []PageID{"page-sliced"}                 // want "semh:semantic.test-raw-literal: raw string literal assigned as PageID in test code; use a semantic fixture/helper value"
+	_ = assignedPageID
+}

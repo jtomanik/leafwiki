@@ -29,8 +29,7 @@ Deferred stock-linter cleanup order:
 5. `staticcheck`
 
 The i18n/catalog static policy has moved into `internal/analysis/i18ncatalog`.
-`scripts/check-i18n-catalog.sh`, `scripts/check-semantic-hygiene.sh`, and
-`scripts/check-typed-id-oracles.sh` remain only as compatibility wrappers that
-delegate to `scripts/golangci-lint.sh`. Do not reintroduce a sibling shell or
-Python reporter for migrated static policy, and do not replace current findings
-with a lint baseline.
+The checker-specific compatibility commands have been removed; use
+`scripts/golangci-lint.sh` or `make lint` for the maintained static policy gate.
+Do not reintroduce a sibling shell or Python reporter for migrated static
+policy, and do not replace current findings with a lint baseline.

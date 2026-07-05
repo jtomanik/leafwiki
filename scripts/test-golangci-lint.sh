@@ -10,12 +10,21 @@ if [[ -e "$repo_root/.golangci.yml" ]]; then
 	exit 1
 fi
 
+for removed_wrapper in \
+	"$repo_root/scripts/check-semantic-hygiene.sh" \
+	"$repo_root/scripts/check-i18n-catalog.sh" \
+	"$repo_root/scripts/check-typed-id-oracles.sh"; do
+	if [[ -e "$removed_wrapper" ]]; then
+		echo "deprecated checker compatibility wrapper must be removed: $removed_wrapper" >&2
+		exit 1
+	fi
+done
+
 fake_bin="$tmpdir/leafwiki-golangci-lint"
 failing_root_bin="$tmpdir/failing-root-leafwiki-golangci-lint"
 stale_repo="$tmpdir/stale-repo"
 log_file="$tmpdir/invocations.log"
 failure_log_file="$tmpdir/failure-invocations.log"
-rtk_log_file="$tmpdir/rtk.log"
 
 cat >"$fake_bin" <<'FAKE'
 #!/usr/bin/env bash
@@ -174,10 +183,21 @@ if ! grep -Fxq "$expected_proxy" "$failure_log_file"; then
 	exit 1
 fi
 
-mkdir -p "$stale_repo/scripts" "$stale_repo/.cache/tools" "$stale_repo/tools/golangci/leafwiki" "$stale_repo/internal/analysis/semantichygiene" "$stale_repo/e2e-proxy"
+mkdir -p \
+	"$stale_repo/scripts" \
+	"$stale_repo/.cache/tools" \
+	"$stale_repo/tools/golangci/leafwiki" \
+	"$stale_repo/internal/analysis/architecturehygiene" \
+	"$stale_repo/internal/analysis/semantichygiene" \
+	"$stale_repo/internal/analysis/testhygiene" \
+	"$stale_repo/e2e-proxy"
 cp "$repo_root/scripts/golangci-lint.sh" "$stale_repo/scripts/golangci-lint.sh"
 touch "$stale_repo/.golangci.leafwiki.yml" "$stale_repo/.custom-gcl.yml" "$stale_repo/go.mod" "$stale_repo/go.sum"
-touch "$stale_repo/tools/golangci/leafwiki/plugin.go" "$stale_repo/internal/analysis/semantichygiene/analyzer.go"
+touch \
+	"$stale_repo/tools/golangci/leafwiki/plugin.go" \
+	"$stale_repo/internal/analysis/architecturehygiene/analyzer.go" \
+	"$stale_repo/internal/analysis/semantichygiene/analyzer.go" \
+	"$stale_repo/internal/analysis/testhygiene/analyzer.go"
 cat >"$stale_repo/.cache/tools/leafwiki-golangci-lint" <<'STALE_LINTER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -185,7 +205,7 @@ printf 'stale\t%s\t%s\n' "$PWD" "$*" >>"${LEAFWIKI_GOLANGCI_LINT_TEST_LOG:?}"
 STALE_LINTER
 chmod +x "$stale_repo/.cache/tools/leafwiki-golangci-lint"
 touch -t 202001010000 "$stale_repo/.cache/tools/leafwiki-golangci-lint"
-touch "$stale_repo/internal/analysis/semantichygiene/analyzer.go"
+touch "$stale_repo/internal/analysis/architecturehygiene/analyzer.go"
 
 	PATH="$tmpdir:$PATH" \
 		LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$tmpdir/rebuild-invocations.log" \
@@ -195,62 +215,6 @@ touch "$stale_repo/internal/analysis/semantichygiene/analyzer.go"
 if ! grep -Fq "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 custom --verbose" "$tmpdir/rebuild-rtk.log"; then
 	echo "wrapper did not rebuild a stale custom binary" >&2
 	cat "$tmpdir/rebuild-rtk.log" >&2
-	exit 1
-fi
-
-PATH="$tmpdir:$PATH" \
-	LEAFWIKI_GOLANGCI_LINT_BIN="$fake_bin" \
-	LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$log_file" \
-	LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG="$rtk_log_file" \
-	rtk bash "$repo_root/scripts/check-semantic-hygiene.sh"
-
-if ! grep -Fxq "bash $repo_root/scripts/golangci-lint.sh" "$rtk_log_file"; then
-	echo "semantic hygiene wrapper did not invoke the golangci-lint gate" >&2
-	cat "$rtk_log_file" >&2
-	exit 1
-fi
-
-if grep -Fq "check-i18n-catalog.sh" "$rtk_log_file"; then
-	echo "semantic hygiene wrapper must not invoke a second i18n catalog reporter" >&2
-	cat "$rtk_log_file" >&2
-	exit 1
-fi
-
-: >"$rtk_log_file"
-PATH="$tmpdir:$PATH" \
-	LEAFWIKI_GOLANGCI_LINT_BIN="$fake_bin" \
-	LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$log_file" \
-	LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG="$rtk_log_file" \
-	rtk bash "$repo_root/scripts/check-i18n-catalog.sh"
-
-if ! grep -Fxq "bash $repo_root/scripts/golangci-lint.sh" "$rtk_log_file"; then
-	echo "i18n catalog compatibility wrapper did not invoke the golangci-lint gate" >&2
-	cat "$rtk_log_file" >&2
-	exit 1
-fi
-
-if grep -Eq '^(go|python|python3)( |$)' "$rtk_log_file"; then
-	echo "i18n catalog compatibility wrapper must not run independent policy tools" >&2
-	cat "$rtk_log_file" >&2
-	exit 1
-fi
-
-: >"$rtk_log_file"
-PATH="$tmpdir:$PATH" \
-	LEAFWIKI_GOLANGCI_LINT_BIN="$fake_bin" \
-	LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$log_file" \
-	LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG="$rtk_log_file" \
-	rtk bash "$repo_root/scripts/check-typed-id-oracles.sh"
-
-if ! grep -Fxq "bash $repo_root/scripts/golangci-lint.sh" "$rtk_log_file"; then
-	echo "typed-id oracle compatibility wrapper did not invoke the golangci-lint gate" >&2
-	cat "$rtk_log_file" >&2
-	exit 1
-fi
-
-if grep -Fq "check-semantic-hygiene.sh" "$rtk_log_file"; then
-	echo "typed-id oracle compatibility wrapper should delegate directly to golangci-lint" >&2
-	cat "$rtk_log_file" >&2
 	exit 1
 fi
 

@@ -15,12 +15,47 @@ func checkSignature(ctx *analysisContext, fn *ast.FuncDecl) {
 	filename := ctx.filename(fn.Pos())
 	if isTestFile(filename) {
 		checkTestHelperSignature(ctx, fn)
+		checkMatcherFactorySemanticSignature(ctx, fn)
 	}
 	if isAllowedSignatureFile(filename) {
 		return
 	}
 	checkLocalizedProseSinkSignature(ctx, fn)
 	checkSignatureParams(ctx, fn.Name.Name, semanticContextName(fn), fn.Type.Params)
+}
+
+func checkMatcherFactorySemanticSignature(ctx *analysisContext, fn *ast.FuncDecl) {
+	if fn.Type.Params == nil || !funcReturnsGomegaMatcher(fn) {
+		return
+	}
+	isMatcherFactory := gomegaMatcherFactoryName(fn.Name.Name)
+	isRenderedOutputMatcherFactory := gomegaRenderedOutputMatcherFactoryName(fn.Name.Name)
+	if !isMatcherFactory && !isRenderedOutputMatcherFactory {
+		return
+	}
+	for _, field := range fn.Type.Params.List {
+		if !isRawStringCarrier(ctx.pass.TypesInfo.TypeOf(field.Type)) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			if semanticType, ok := semanticTypeForTestHelperParamName(name.Name, fn.Name.Name); ok {
+				if isMatcherFactory {
+					ctx.report(ruleSemanticRawSignature, name, customMatcherSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
+				}
+				continue
+			}
+			if testHelperMessageParamName(name.Name, fn.Name.Name) {
+				ctx.report(ruleI18nMessageParameter, name, customMatcherMessageParameterDiagnostic(fn.Name.Name, name.Name))
+				continue
+			}
+			if testHelperFieldParamName(name.Name, fn.Name.Name) && isMatcherFactory {
+				ctx.report(ruleSemanticRawField, name, customMatcherFieldParameterDiagnostic(fn.Name.Name, name.Name))
+			}
+		}
+	}
 }
 
 func checkTestHelperSignature(ctx *analysisContext, fn *ast.FuncDecl) {

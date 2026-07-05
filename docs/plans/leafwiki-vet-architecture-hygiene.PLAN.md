@@ -38,7 +38,7 @@ Split LeafWiki's current semantic checker into policy-family modules and add a t
 - Waiver policy plan: `docs/plans/semantic-hygiene-waivable-diagnostics.PLAN.md`.
 - Current Sentrux policy source: `.sentrux/rules.toml`.
 - Current repo-facing static gate: `scripts/golangci-lint.sh`.
-- Compatibility wrapper: `scripts/check-semantic-hygiene.sh`.
+- Repo-facing checker wrapper: `scripts/golangci-lint.sh`.
 - Implementation commands should be prefixed with `rtk`.
 
 Prerequisites:
@@ -115,7 +115,7 @@ This plan refactors LeafWiki's static policy checker from one overloaded `semant
 | R8 | Port the Sentrux import-boundary table into `architecturehygiene` as hard dependency rules. |
 | R9 | Keep Sentrux metric constraints and Sentrux removal out of this implementation. |
 | R10 | Add analyzer fixture coverage for every moved and newly introduced architecture rule. |
-| R11 | Preserve `scripts/check-semantic-hygiene.sh` as a compatibility wrapper during this phase. |
+| R11 | Remove deprecated checker-specific compatibility wrappers and keep the canonical repo-facing gate on `scripts/golangci-lint.sh`. |
 | R12 | Update docs so reviewers understand the checker family split and the boundary between Sentrux migration and deferred metric work. |
 
 ## Scope Boundaries
@@ -222,8 +222,7 @@ No runtime access-control behavior changes. This plan changes static analysis an
 graph TD
     Vet["cmd/leafwiki-vet"] --> Suite["LeafWiki checker analyzer set"]
     Golangci["tools/golangci/leafwiki plugin"] --> Suite
-    Wrapper["scripts/check-semantic-hygiene.sh"] --> Gate["scripts/golangci-lint.sh"]
-    Gate --> Golangci
+    Gate["scripts/golangci-lint.sh"] --> Golangci
 
     Suite --> Sem["semantichygiene"]
     Suite --> Test["testhygiene"]
@@ -763,7 +762,8 @@ No E2E runtime tests are required because this plan changes static analysis and 
 - Modify: `scripts/README.md`
 - Modify or add: `docs/todo/*.md` if the repo has an existing suitable Sentrux-removal todo document
 - Modify: `.golangci.leafwiki.yml` description if needed
-- Usually unchanged: `scripts/check-semantic-hygiene.sh`
+- Modify: `scripts/test-golangci-lint.sh`
+- Delete: deprecated checker-specific compatibility wrappers
 
 **Approach:**
 
@@ -773,7 +773,8 @@ No E2E runtime tests are required because this plan changes static analysis and 
   - `testhygiene`
   - `architecturehygiene`
   - `i18ncatalog`
-- State that `scripts/check-semantic-hygiene.sh` is a compatibility wrapper.
+- State that `scripts/golangci-lint.sh` is the maintained static policy command.
+- State that deprecated checker-specific compatibility wrappers have been removed.
 - State that Sentrux boundary rules have moved into architecture hygiene.
 - State that Sentrux metrics and Sentrux removal are deferred.
 - Avoid promising that all architecture quality is now enforced.
@@ -790,7 +791,7 @@ No E2E runtime tests are required because this plan changes static analysis and 
 
 - Documentation review verifies that all analyzer family names match actual package names.
 - Documentation review verifies that deferred Sentrux metrics are not described as ported.
-- Documentation review verifies that compatibility wrapper wording matches `scripts/check-semantic-hygiene.sh`.
+- Documentation review verifies that active docs point reviewers to `scripts/golangci-lint.sh` or `make lint`.
 
 **Verification:**
 
@@ -812,13 +813,12 @@ No E2E runtime tests are required because this plan changes static analysis and 
 - Test: `tools/golangci/leafwiki`
 - Test: `scripts/test-golangci-lint.sh`
 - Gate: `scripts/golangci-lint.sh`
-- Compatibility gate: `scripts/check-semantic-hygiene.sh`
 
 **Approach:**
 
 - Run focused analyzer package tests first.
 - Run command and plugin tests.
-- Run wrapper contract tests.
+- Run the golangci wrapper contract tests.
 - Run the repo-facing static-policy gate.
 - If unrelated inherited diagnostics remain, document them with exact rule families and prove that new architecture fixtures and package-local tests are clean.
 - Keep unrelated dirty files out of the accepted diff.
@@ -836,7 +836,7 @@ No E2E runtime tests are required because this plan changes static analysis and 
 - Focused analyzer tests pass for all four analysis families.
 - Wrapper test still proves root and e2e-proxy module invocation.
 - Repo-facing gate includes architecturehygiene diagnostics.
-- Compatibility wrapper still invokes the golangci gate.
+- Deprecated checker-specific compatibility wrappers are absent.
 - Diff hygiene check passes for the touched files.
 
 **Verification:**
@@ -859,7 +859,6 @@ The implementation should produce fresh evidence for:
 - `rtk go test ./internal/analysis/... ./cmd/leafwiki-vet ./tools/golangci/leafwiki -count=1`
 - `rtk bash scripts/test-golangci-lint.sh`
 - `rtk bash scripts/golangci-lint.sh`
-- `rtk bash scripts/check-semantic-hygiene.sh`
 - `rtk git diff --check -- internal/analysis cmd/leafwiki-vet tools/golangci/leafwiki scripts docs/plans docs/typed-ids.md scripts/README.md .golangci.leafwiki.yml`
 
 If the full static-policy gate is red because of inherited diagnostics outside this implementation, the implementer must capture the exact diagnostics and still prove:

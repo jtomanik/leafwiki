@@ -7,8 +7,10 @@ import (
 	"github.com/golangci/plugin-module-register/register"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/perber/wiki/internal/analysis/architecturehygiene"
 	"github.com/perber/wiki/internal/analysis/i18ncatalog"
 	"github.com/perber/wiki/internal/analysis/semantichygiene"
+	"github.com/perber/wiki/internal/analysis/testhygiene"
 	leafwiki "github.com/perber/wiki/tools/golangci/leafwiki"
 	"golang.org/x/tools/go/analysis"
 )
@@ -28,6 +30,8 @@ var _ = ginkgo.Describe("LeafWiki golangci-lint plugin", ginkgo.Label("unit"), f
 
 		Expect(analyzers).To(Equal([]*analysis.Analyzer{
 			semantichygiene.Analyzer,
+			testhygiene.Analyzer,
+			architecturehygiene.Analyzer,
 			i18ncatalog.Analyzer,
 		}))
 		Expect(plugin.GetLoadMode()).To(Equal(register.LoadModeTypesInfo))
@@ -44,6 +48,8 @@ var _ = ginkgo.Describe("LeafWiki golangci-lint plugin", ginkgo.Label("unit"), f
 		Expect(err).NotTo(HaveOccurred())
 		Expect(analyzers).To(Equal([]*analysis.Analyzer{
 			semantichygiene.Analyzer,
+			testhygiene.Analyzer,
+			architecturehygiene.Analyzer,
 			i18ncatalog.Analyzer,
 		}))
 	})

@@ -33,45 +33,6 @@ func observeRuleMetadata(id ruleID) ruleMetadataObservation {
 	return ruleMetadataObservation{State: ruleMetadataRegistered, Metadata: metadata}
 }
 
-type waiverBudgetRegistrationState uint8
-
-const (
-	waiverBudgetMissing waiverBudgetRegistrationState = iota
-	waiverBudgetConfigured
-)
-
-type waiverBudgetObservation struct {
-	State  waiverBudgetRegistrationState
-	Budget int
-}
-
-func observeWaiverBudget(id ruleID) waiverBudgetObservation {
-	budget, ok := waiverBudgetForRule(id)
-	if !ok {
-		return waiverBudgetObservation{State: waiverBudgetMissing}
-	}
-	return waiverBudgetObservation{State: waiverBudgetConfigured, Budget: budget}
-}
-
-type waiverBudgetHealth uint8
-
-const (
-	waiverBudgetAbsent waiverBudgetHealth = iota
-	waiverBudgetNonPositive
-	waiverBudgetPositive
-)
-
-func classifyWaiverBudget(id ruleID) waiverBudgetHealth {
-	budget := observeWaiverBudget(id)
-	if budget.State != waiverBudgetConfigured {
-		return waiverBudgetAbsent
-	}
-	if budget.Budget <= 0 {
-		return waiverBudgetNonPositive
-	}
-	return waiverBudgetPositive
-}
-
 type semanticTypeLookupState uint8
 
 const (
