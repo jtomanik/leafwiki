@@ -1,0 +1,77 @@
+{
+  "workflow": "docs/plans/planning.aibasic.txt",
+  "planTitle": "leafwiki-vet-architecture-hygiene",
+  "createdAt": "2026-07-05T00:00:00Z",
+  "status": "plan-written",
+  "thread": {
+    "currentThreadId": "019f2f0a-0ccf-76e0-b8e4-4d93bf45dd53",
+    "currentThreadLink": "codex://threads/019f2f0a-0ccf-76e0-b8e4-4d93bf45dd53"
+  },
+  "artifacts": {
+    "observe": "docs/plans/leafwiki-vet-architecture-hygiene.OBSERVE.md",
+    "context": "docs/plans/leafwiki-vet-architecture-hygiene.CONTEXT.md",
+    "decision": "docs/plans/leafwiki-vet-architecture-hygiene.DECISION.md",
+    "plan": "docs/plans/leafwiki-vet-architecture-hygiene.PLAN.md"
+  },
+  "sourceInputs": [
+    "docs/plans/planning.aibasic.txt",
+    "docs/plans/semantic-hygiene-checker.PLAN.md",
+    "docs/plans/semantic-hygiene-waivable-diagnostics.PLAN.md",
+    "docs/plans/golangci-lint-local-gate.PLAN.md",
+    "internal/analysis/semantichygiene/analyzer.go",
+    "internal/analysis/semantichygiene/policy.go",
+    "internal/analysis/semantichygiene/policy_waivers.go",
+    "internal/analysis/semantichygiene/diagnostics.go",
+    "internal/analysis/semantichygiene/rules_dependency.go",
+    "internal/analysis/semantichygiene/analyzer_test.go",
+    "internal/analysis/semantichygiene/testdata/src/github.com/perber/wiki/e2e-proxy/proxy_auth_test.go",
+    "cmd/leafwiki-vet/main.go",
+    "cmd/leafwiki-vet/main_test.go",
+    "tools/golangci/leafwiki/plugin.go",
+    "tools/golangci/leafwiki/plugin_test.go",
+    "scripts/check-semantic-hygiene.sh",
+    "scripts/golangci-lint.sh",
+    "scripts/test-golangci-lint.sh",
+    ".golangci.leafwiki.yml",
+    ".custom-gcl.yml",
+    ".sentrux/rules.toml"
+  ],
+  "steps": [
+    {
+      "name": "Observe",
+      "status": "completed",
+      "artifact": "docs/plans/leafwiki-vet-architecture-hygiene.OBSERVE.md"
+    },
+    {
+      "name": "Orient",
+      "status": "completed",
+      "artifact": "docs/plans/leafwiki-vet-architecture-hygiene.CONTEXT.md"
+    },
+    {
+      "name": "Decide",
+      "status": "completed",
+      "artifact": "docs/plans/leafwiki-vet-architecture-hygiene.DECISION.md"
+    },
+    {
+      "name": "Act",
+      "status": "completed",
+      "artifact": "docs/plans/leafwiki-vet-architecture-hygiene.PLAN.md"
+    }
+  ],
+  "subagents": [],
+  "subagentNote": "The workflow describes observer/explorer subagents, but this run did not spawn agents because the available multi-agent tool requires explicit user authorization for delegation. Research was performed locally in the main thread.",
+  "decisions": [
+    "Use leafwiki-vet as the stable project checker surface.",
+    "Split checker policy into semantichygiene, testhygiene, architecturehygiene, and shared checkerpolicy.",
+    "Move dependency.e2e-proxy-internal-import into architecturehygiene before adding new architecture rules.",
+    "Keep rule IDs and semh:allow waiver syntax stable during this split.",
+    "Port only Sentrux import-boundary rules in this plan.",
+    "Defer Sentrux metrics and Sentrux removal.",
+    "Update both cmd/leafwiki-vet and tools/golangci/leafwiki so direct and repo-facing gates match."
+  ],
+  "validation": {
+    "artifactWrite": "created observe, context, decision, plan, and workflow-state artifacts",
+    "threadCapture": "recorded thread 019f2f0a-0ccf-76e0-b8e4-4d93bf45dd53 and codex thread link",
+    "verification": "documentation-only planning artifacts; validate JSON, scan for incomplete markers, and run git diff whitespace check"
+  }
+}
