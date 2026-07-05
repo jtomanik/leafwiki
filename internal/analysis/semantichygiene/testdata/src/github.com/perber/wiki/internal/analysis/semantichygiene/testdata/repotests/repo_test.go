@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
+	ginkgotypes "github.com/onsi/ginkgo/v2/types"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -63,6 +64,10 @@ type fixtureMCPAPIKey struct {
 
 type pageWireResponse struct {
 	PageID string `json:"pageId"`
+}
+
+type pageDomainNode struct {
+	ID PageID
 }
 
 type bddDSL struct{}
@@ -173,6 +178,8 @@ func BeTemporally(comparator string, compareTo any, threshold ...time.Duration) 
 
 func MatchError(want any, args ...any) any { return nil }
 
+func PanicWith(want any) any { return nil }
+
 func Succeed() any { return nil }
 
 func Receive() any { return nil }
@@ -267,6 +274,9 @@ var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", gink
 			panic("mode assertion failed")
 		}
 	})
+	ginkgo.It("routes requests to the edge proxy", func() {})
+	ginkgo.It("keeps release branches", func() {})
+	ginkgo.It("protects release branches explicitly", func() {})
 	ginkgo.It("allows ordinary content assertions but checks error prose", func() {
 		body := "Bold link"
 		Expect(FromBody(body)).To(Equal("Bold link"))
@@ -280,12 +290,43 @@ var _ = ginkgo.Describe("semantic checker allows natural BDD descriptions", gink
 		func(input string, want string) {},
 		ginkgo.Entry("stable-looking fixture", "workspace_id", "external token"),
 	)
+	ginkgo.DescribeTable("allows filesystem filename rows",
+		func(filename string) {},
+		ginkgo.Entry("repo file", "/repo/internal/analysis/semantichygiene/policy_test.go"),
+	)
+	ginkgo.DescribeTable("allows filesystem filenames rows",
+		func(filenames string) {},
+		ginkgo.Entry("repo file", "/repo/internal/analysis/semantichygiene/rule_edges_gomega_test.go"),
+	)
+	ginkgo.DescribeTable("rejects raw asset filename rows",
+		func(filename string) {},
+		ginkgo.Entry("asset file", "hero.png"), // want "Ginkgo Entry data for filename uses raw string for AssetName; use a semantic fixture value or row struct"
+	)
+	ginkgo.DescribeTable("rejects raw asset filenames rows",
+		func(filenames string) {},
+		ginkgo.Entry("asset files", "hero.png"), // want "Ginkgo Entry data for filenames uses raw string for AssetName; use a semantic fixture value or row struct"
+	)
 	ginkgo.DescribeTable("checks semantic data inside table case structs",
 		func(tc tableContractCase) {},
 		ginkgo.Entry(EntryDescription("semantic payload"), tableContractCase{
 			wantCode:    "page_not_found", // want "raw stable contract literal \"page_not_found\" used in test assertion code; use the typed constant or semantic helper"
 			wantMessage: "Page not found", // want "raw localized prose \"Page not found\" used in test assertion code; assert a semantic code/message ID instead"
 		}),
+	)
+	ginkgo.DescribeTable("rejects raw semantic table entry values",
+		func(pageID PageID, code ErrorCode) {},
+		ginkgo.Entry("raw semantic row", "page-5", "unknown"),                                                      // want "semh:ginkgo.semantic-entry-data: Ginkgo Entry data for pageID uses raw string for PageID; use a semantic fixture value or row struct" "Ginkgo Entry data for code uses raw string for ErrorCode; use a semantic fixture value or row struct"
+		ginkgo.Entry("decorated raw semantic row", ginkgo.Label("unit"), "page-7", "unknown"),                      // want "Ginkgo Entry data for pageID uses raw string for PageID; use a semantic fixture value or row struct" "Ginkgo Entry data for code uses raw string for ErrorCode; use a semantic fixture value or row struct"
+		ginkgo.Entry("semver-decorated raw semantic row", ginkgo.SemVerConstraint(">=1.0.0"), "page-8", "unknown"), // want "Ginkgo Entry data for pageID uses raw string for PageID; use a semantic fixture value or row struct" "Ginkgo Entry data for code uses raw string for ErrorCode; use a semantic fixture value or row struct"
+		ginkgo.Entry("code-location-decorated raw semantic row", ginkgotypes.CodeLocation{}, "page-9", "unknown"),  // want "Ginkgo Entry data for pageID uses raw string for PageID; use a semantic fixture value or row struct" "Ginkgo Entry data for code uses raw string for ErrorCode; use a semantic fixture value or row struct"
+	)
+	ginkgo.DescribeTable("rejects raw semantic table entry values for unnamed callback params",
+		func(PageID, ErrorCode) {},
+		ginkgo.Entry("raw unnamed semantic row", "page-10", "unknown"), // want "Ginkgo Entry data for param1 uses raw string for PageID; use a semantic fixture value or row struct" "Ginkgo Entry data for param2 uses raw string for ErrorCode; use a semantic fixture value or row struct"
+	)
+	ginkgo.DescribeTable("rejects raw primitive semantic table entry values",
+		func(pageID string, code string) {},
+		ginkgo.Entry("raw primitive semantic row", "page-6", "unknown"), // want "Ginkgo Entry data for pageID uses raw string for PageID; use a semantic fixture value or row struct" "Ginkgo Entry data for code uses raw string for ErrorCode; use a semantic fixture value or row struct"
 	)
 	ginkgo.It("checks git revision trailer keys as stable protocol data", func() {
 		trailers := map[string]string{}
@@ -317,9 +358,15 @@ func It(description string, args ...any) bool { return true }
 
 var _ = It("local helper is not a Ginkgo DSL call", func() {})
 
+var _ = ginkgo.Describe("project daemon deterministic edges", func() { // want "Ginkgo node name \"project daemon deterministic edges\" reads like a coverage bucket; describe observable behavior instead"
+	ginkgo.It("canonicalizes missing project paths and redacts config mismatch secrets", ginkgo.Label("integration"), func() {})
+	ginkgo.It("rejects malformed actor context envelopes before trusting workspace identity", ginkgo.Label("unit"), func() {})
+})
+
 var _ = ginkgo.Describe("ginkgo and gomega quality regressions", ginkgo.Label("unit"), func() {
 	ginkgo.Describe("git revision edge coverage", func() {})                           // want "Ginkgo node name \"git revision edge coverage\" reads like a coverage bucket; describe observable behavior instead"
 	ginkgo.It("covers filesystem seam branches", func() {})                            // want "Ginkgo node name \"covers filesystem seam branches\" reads like a coverage bucket; describe observable behavior instead"
+	ginkgo.It("handles service option and no-op branches explicitly", func() {})       // want "Ginkgo node name \"handles service option and no-op branches explicitly\" reads like a coverage bucket; describe observable behavior instead"
 	ginkgo.It("exercises fail-fast startup validation through the exit seam", func() { // want "Ginkgo node name \"exercises fail-fast startup validation through the exit seam\" reads like a coverage bucket; describe observable behavior instead"
 	})
 	ginkgo.It("preserves behavior", func() {})                                               // want "Ginkgo node name \"preserves behavior\" is too vague to document behavior; describe the observable outcome instead"
@@ -354,6 +401,10 @@ var _ = ginkgo.Describe("ginkgo and gomega quality regressions", ginkgo.Label("u
 	ginkgo.DescribeTable("uses row structs for wide entries",
 		func(name string, count int, enabled bool, code string, message string) {},
 		ginkgo.Entry("wide row", "name", 1, true, "code", "message"), // want "use a row struct for Ginkgo table entries with many parameters"
+	)
+	ginkgo.DescribeTable("allows decorated entries with four data columns",
+		func(name string, count int, enabled bool, code string) {},
+		ginkgo.Entry("decorated four-column row", ginkgo.Label("unit"), "name", 1, true, "code"),
 	)
 	ginkgo.DescribeTable("does not capture setup values in entries",
 		func(row behaviorRecord) {},
@@ -438,12 +489,17 @@ func TestRepoTestRuntimeFixtureSemanticConstructorIsRejected(t *testing.T) {
 
 func TestRepoTestSemanticShortcutsAreRejected(t *testing.T) {
 	rawPageID := "page-3"
-	pageID := PageID(rawPageID)       // want "direct cast to semantic type PageID outside parser or boundary"
-	loadInternalPage(pageID.String()) // want "semantic value PageID converted to string before internal call loadInternalPage; make the callee accept PageID"
+	pageID := PageID(rawPageID)                 // want "direct cast to semantic type PageID outside parser or boundary"
+	loadInternalPage(pageID.String())           // want "semantic value PageID converted to string before internal call loadInternalPage; make the callee accept PageID"
+	_ = errorStatus("unknown")                  // want "semh:semantic.test-raw-literal: raw string literal passed as ErrorCode in test code; use a semantic fixture/helper value"
+	_ = pageDomainNode{ID: "page-4"}            // want "raw string literal assigned to PageID field ID in test code; use a semantic fixture/helper value"
+	var assignedPageID PageID = "page-assigned" // want "semh:semantic.test-raw-literal: raw string literal assigned as PageID in test code; use a semantic fixture/helper value"
+	_ = []PageID{"page-sliced"}                 // want "semh:semantic.test-raw-literal: raw string literal assigned as PageID in test code; use a semantic fixture/helper value"
+	_ = assignedPageID
 }
 
 func TestRepoTestGinRouteParamIsHTTPBoundary(t *testing.T) {
-	pageID := PageID("page-1")
+	pageID := PageID("page-1") // want "direct cast to semantic type PageID outside parser or boundary"
 	_ = gin.Param{Key: "pageId", Value: pageID.String()}
 }
 
@@ -465,6 +521,11 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	payload := structuredError{Code: "page_not_found", MessageID: "errors.page.not_found"}
 	status := struct{ LastError string }{}
 	var logOutput strings.Builder
+	var logs strings.Builder
+	parsed := true
+	exitCode := 1
+	result := commandResult{}
+	output := "Usage: leafwiki [command]"
 
 	Expect(err.Error()).To(Equal("boom"))                              // want "assert error values with MatchError instead of matching err.Error\\(\\)"
 	Expect(err.Error()).To(ContainSubstring("boom"))                   // want "assert error values with MatchError instead of matching err.Error\\(\\)"
@@ -490,6 +551,9 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(len(items)).To(BeNumerically(">=", 1)) // want "use HaveLen or a collection matcher instead of asserting len\\(\\) directly"
 	Expect(count == 1).To(BeTrue())               // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
 	Expect(count > 0).To(BeTrue())                // want "use semantic Gomega matchers instead of asserting binary expressions with BeTrue/BeFalse"
+	Expect(parsed).To(BeTrue())                   // want "assert a semantic value or domain outcome instead of proxy boolean variables with boolean matchers"
+	Expect(exitCode).To(Equal(1))                 // want "semh:gomega.raw-status-code: assert process/domain status with a semantic matcher or named status value instead of raw numeric status codes"
+	Expect(result.ExitCode()).To(Equal(1))        // want "assert process/domain status with a semantic matcher or named status value instead of raw numeric status codes"
 	decoded, ok := any(text).(string)
 	Expect(ok).To(BeTrue()) // want "assert the decoded value or map contents with a semantic matcher instead of asserting comma-ok booleans"
 	_ = decoded
@@ -502,6 +566,9 @@ func TestRepoTestGomegaSemanticMatcherShortcutsAreRejected(t *testing.T) {
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("ok")))
 	Expect(rec).To(HaveHTTPBody(ContainSubstring("done")))                                                     // want "compose repeated HaveHTTPBody assertions for the same response into one matcher"
 	Expect(logOutput.String()).To(ContainSubstring("could not close store"))                                   // want "raw localized prose \"could not close store\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
+	Expect(logs.String()).To(ContainSubstring("workspace sync startup failed"))                                // want "raw localized prose \"workspace sync startup failed\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
+	Expect(output).To(ContainSubstring("Usage: leafwiki [command]"))                                           // want "raw localized prose \"Usage: leafwiki \\[command\\]\" used in test assertion code; assert a semantic code/message ID instead" "do not assert rendered message text with strings.Contains; assert structured code, message ID, field, or path semantics instead"
+	Expect(func() { panic("Page not found") }).To(PanicWith("Page not found"))                                 // want "raw localized prose \"Page not found\" used in test assertion code; assert a semantic code/message ID instead"
 	Expect(resp.Header.Get("X-Request-Id")).To(Equal("abc"))                                                   // want "use HaveHTTPHeaderWithValue matcher instead of matching response header values directly"
 	Expect(httptest.NewRequest(http.MethodGet, "/", nil)).To(HaveHTTPHeaderWithValue("X-Request-Id", "req-1")) // want "HaveHTTPHeaderWithValue matches HTTP responses; assert request headers with request-header semantics instead"
 	Expect(count).To(BeEquivalentTo(int64(1)))                                                                 // want "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"
@@ -553,6 +620,10 @@ func matchValidationIssueMessageText(expected string) any {
 	}
 }
 
+func matchPageState(id string, code string, messageID string) GomegaMatcher { // want "custom matcher matchPageState parameter id uses string for PageID; use the semantic type in matcher constructors" "custom matcher matchPageState parameter code uses string for ErrorCode; use the semantic type in matcher constructors" "custom matcher matchPageState parameter messageID uses string for MessageID; use the semantic type in matcher constructors"
+	return nil
+}
+
 func matchMatcherBackedRecord(content GomegaMatcher) any {
 	type matcherBackedRecord struct {
 		Content any
@@ -568,7 +639,7 @@ func matchGenericToolErrorArgContainingAny(wants ...any) GomegaMatcher { // want
 		argMatchers = append(argMatchers, ContainSubstring(fmt.Sprint(want)))
 	}
 	return SatisfyAll(
-		HaveField("Code", Equal(ErrorCode("mcp_tool_error"))),
+		HaveField("Code", Equal(ErrorCode("mcp_tool_error"))), // want "direct cast to semantic type ErrorCode outside parser or boundary"
 		HaveField("Args", ContainElement(SatisfyAny(argMatchers...))),
 	).(GomegaMatcher)
 }
@@ -585,8 +656,8 @@ func TestRepoTestGomegaStructuredMatcherShortcutsAreRejected(t *testing.T) {
 }
 
 func TestRepoTestNewSemanticStringerShortcutsAreRejected(t *testing.T) {
-	actorID := ActorID("actor-1")
-	sessionID := WebSessionID("tab-1")
+	actorID := ActorID("actor-1")      // want "direct cast to semantic type ActorID outside parser or boundary"
+	sessionID := WebSessionID("tab-1") // want "direct cast to semantic type WebSessionID outside parser or boundary"
 	rawActorID := "actor-2"
 	rawSessionID := "tab-2"
 
@@ -616,6 +687,10 @@ type pathContainmentResult struct {
 	Path string
 	Err  error
 }
+
+type commandResult struct{}
+
+func (commandResult) ExitCode() int { return 1 }
 
 func TestRepoTestGomegaNestedGenericHaveOccurredIsRejected(t *testing.T) {
 	Expect(readMethodErrors{TableColumns: returnError()}).To(MatchFields(nil, Fields{ // want "assert expected error semantics with MatchError or a domain matcher instead of generic HaveOccurred"
@@ -692,16 +767,35 @@ func FromBody(raw string) string { return raw }
 
 func errorMessage() string { return "" }
 
-func loadInternalPage(pageID string) {}
+func loadAnalyzerFile(filename string) {}
+
+func loadAnalyzerFiles(filenames string) {}
+
+func loadAssetFile(filename string) {} // want "test helper loadAssetFile parameter filename uses string for AssetName; use the semantic type in test helpers"
+
+func loadAssetFiles(filenames string) {} // want "test helper loadAssetFiles parameter filenames uses string for AssetName; use the semantic type in test helpers"
+
+func loadInternalPage(pageID string) {} // want "test helper loadInternalPage parameter pageID uses string for PageID; use the semantic type in test helpers"
+
+func errorStatus(code ErrorCode) int { return 0 }
+
+func getHTTPPageByID(router http.Handler, pageID string) map[string]any { // want "test helper getHTTPPageByID parameter pageID uses string for PageID; use the semantic type in test helpers"
+	return nil
+}
 
 func typedToolMessageID() ToolMessageID { return "" }
 
 func typedMessageID() MessageID { return "" }
 
+type helperHarness struct{}
+
 func assertWireError(code string) { // want "test helper assertWireError parameter code uses string for ErrorCode; use the semantic type in test helpers"
 }
 
 func assertStructuredError(code string, messageID string, message string) { // want "test helper assertStructuredError parameter code uses string for ErrorCode; use the semantic type in test helpers" "test helper assertStructuredError parameter messageID uses string for MessageID; use the semantic type in test helpers" "test helper assertStructuredError parameter message accepts rendered prose; assert MessageID/catalog semantics instead"
+}
+
+func (helperHarness) assertStructuredError(code string, messageID string, message string) { // want "test helper assertStructuredError parameter code uses string for ErrorCode; use the semantic type in test helpers" "test helper assertStructuredError parameter messageID uses string for MessageID; use the semantic type in test helpers" "test helper assertStructuredError parameter message accepts rendered prose; assert MessageID/catalog semantics instead"
 }
 
 func assertStructuredResponse(payload structuredError) { // want "test assertion helper assertStructuredResponse contains Gomega assertions without GinkgoHelper, WithOffset, ExpectWithOffset, or a Gomega parameter"

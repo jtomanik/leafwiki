@@ -57,6 +57,18 @@ func fixtureRuntimeConstructorDiagnostic(funcName string) string {
 	return fmt.Sprintf("fixture semantic constructor %s receives runtime string; fixture constructors should only wrap static test values", funcName)
 }
 
+func testRawSemanticParamLiteralDiagnostic(typeName string) string {
+	return fmt.Sprintf("raw string literal passed as %s in test code; use a semantic fixture/helper value", typeName)
+}
+
+func testRawSemanticFieldLiteralDiagnostic(typeName string, fieldName string) string {
+	return fmt.Sprintf("raw string literal assigned to %s field %s in test code; use a semantic fixture/helper value", typeName, fieldName)
+}
+
+func testRawSemanticAssignedLiteralDiagnostic(typeName string) string {
+	return fmt.Sprintf("raw string literal assigned as %s in test code; use a semantic fixture/helper value", typeName)
+}
+
 func messageFieldDiagnostic(fieldName string, typeName string) string {
 	return fmt.Sprintf("message-bearing struct %s exposes %s string without MessageID; add a catalog-backed MessageID", typeName, fieldName)
 }
@@ -209,6 +221,10 @@ func gomegaControlStatusMatcherDiagnostic() string {
 	return "assert project daemon control errors with MatchError or a domain matcher instead of IsControlStatus with boolean matchers"
 }
 
+func gomegaRawStatusCodeDiagnostic() string {
+	return "assert process/domain status with a semantic matcher or named status value instead of raw numeric status codes"
+}
+
 func gomegaStringPredicateMatcherDiagnostic(predicate string, matcher string) string {
 	return fmt.Sprintf("use %s matcher instead of asserting %s with BeTrue/BeFalse", matcher, predicate)
 }
@@ -355,6 +371,10 @@ func ginkgoWideEntryDiagnostic() string {
 
 func ginkgoEntrySetupValueDiagnostic() string {
 	return "Ginkgo Entry arguments are evaluated at construction time; pass stable row data instead of setup-initialized variables"
+}
+
+func ginkgoSemanticEntryDataDiagnostic(paramName string, semanticType string) string {
+	return fmt.Sprintf("Ginkgo Entry data for %s uses raw string for %s; use a semantic fixture value or row struct", paramName, semanticType)
 }
 
 func ginkgoAsyncContextDiagnostic() string {

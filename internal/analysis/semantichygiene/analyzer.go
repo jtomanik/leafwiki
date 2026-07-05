@@ -72,6 +72,7 @@ func run(pass *analysis.Pass) (any, error) {
 		case *ast.BasicLit:
 			checkStableLiteral(ctx, n)
 			checkLocalizedProseLiteral(ctx, n)
+			checkTestRawSemanticLiteral(ctx, n)
 		}
 	})
 	checkGinkgoMissingTaxonomyLabels(ctx)

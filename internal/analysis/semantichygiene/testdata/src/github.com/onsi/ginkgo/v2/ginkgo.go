@@ -22,6 +22,8 @@ func Entry(description string, args ...any) any { return nil }
 
 func Label(labels ...string) any { return nil }
 
+func SemVerConstraint(semVerConstraints ...string) any { return nil }
+
 func By(description string) {}
 
 func DeferCleanup(args ...any) {}

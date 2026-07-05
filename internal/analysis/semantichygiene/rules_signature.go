@@ -24,7 +24,7 @@ func checkSignature(ctx *analysisContext, fn *ast.FuncDecl) {
 }
 
 func checkTestHelperSignature(ctx *analysisContext, fn *ast.FuncDecl) {
-	if fn.Type.Params == nil || !isTestSemanticAssertionHelper(fn.Name.Name) {
+	if fn.Type.Params == nil || !isTestHelperSignatureCandidate(ctx, fn) {
 		return
 	}
 	for _, field := range fn.Type.Params.List {
@@ -48,6 +48,45 @@ func checkTestHelperSignature(ctx *analysisContext, fn *ast.FuncDecl) {
 			}
 		}
 	}
+}
+
+func isTestHelperSignatureCandidate(ctx *analysisContext, fn *ast.FuncDecl) bool {
+	if fn.Name == nil ||
+		funcReturnsGomegaMatcher(fn) ||
+		isGoTestEntrypointName(fn.Name.Name) ||
+		isFixtureFunctionName(fn.Name.Name) {
+		return false
+	}
+	if isTestSemanticAssertionHelper(fn.Name.Name) {
+		return true
+	}
+	return testHelperHasRawSemanticParameter(ctx, fn)
+}
+
+func isGoTestEntrypointName(name string) bool {
+	return strings.HasPrefix(name, "Test") ||
+		strings.HasPrefix(name, "Benchmark") ||
+		strings.HasPrefix(name, "Fuzz")
+}
+
+func testHelperHasRawSemanticParameter(ctx *analysisContext, fn *ast.FuncDecl) bool {
+	for _, field := range fn.Type.Params.List {
+		if !isRawStringCarrier(ctx.pass.TypesInfo.TypeOf(field.Type)) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name == nil {
+				continue
+			}
+			if _, ok := semanticTypeForTestHelperParamName(name.Name, fn.Name.Name); ok {
+				return true
+			}
+			if testHelperMessageParamName(name.Name, fn.Name.Name) || testHelperFieldParamName(name.Name, fn.Name.Name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func checkLocalizedProseSinkSignature(ctx *analysisContext, fn *ast.FuncDecl) {
