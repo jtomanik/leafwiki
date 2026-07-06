@@ -22,6 +22,10 @@ var _ = ginkgo.Describe("project daemon deterministic edges", func() { // want "
 	ginkgo.It("canonicalizes missing project paths and redacts config mismatch secrets", ginkgo.Label("integration"), func() {})
 })
 
+var _ = ginkgo.Describe("MCP recent changes", ginkgo.Label("integration"), func() {
+	ginkgo.It("handles page ID lookup guard branches for recent changes", func() {}) // want "semh:ginkgo.coverage-name: Ginkgo node name \"handles page ID lookup guard branches for recent changes\" reads like a coverage bucket; describe observable behavior instead"
+})
+
 var _ = ginkgo.Describe("Ginkgo policy", ginkgo.Label("unit"), func() {
 	ginkgo.FIt("does not commit focused specs", func() {})                         // want "semh:ginkgo.focus: do not commit focused Ginkgo specs; remove Focus/F-prefixed node"
 	ginkgo.It("does not commit pending decorators", ginkgo.Pending, func() {})     // want "semh:ginkgo.pending: do not commit pending Ginkgo specs; finish or delete the spec instead"

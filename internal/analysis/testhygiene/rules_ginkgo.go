@@ -254,5 +254,6 @@ func isCoverageBucketVerb(field string) bool {
 }
 
 func isCoverageBucketBranchPhrase(previous string, current string) bool {
-	return previous == "edge" && (current == "branch" || current == "branches" || current == "case" || current == "cases")
+	return (previous == "edge" || previous == "guard") &&
+		(current == "branch" || current == "branches" || current == "case" || current == "cases")
 }
