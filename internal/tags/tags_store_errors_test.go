@@ -312,7 +312,7 @@ var _ = ginkgo.Describe("tag database error recovery", ginkgo.Label("unit"), fun
 			`CREATE TABLE page_meta (page_id INTEGER, excerpt TEXT)`,
 			`INSERT INTO page_meta (page_id, excerpt) VALUES (42, 'excerpt')`,
 		)
-		excerpts, err := excerptsStore.GetExcerptsForPages([]tree.PageID{"42"})
+		excerpts, err := excerptsStore.GetExcerptsForPages([]tree.PageID{newFixturePageID("42")})
 		Expect(excerpts).To(BeNil())
 		Expect(err).To(SatisfyAll(
 			MatchError(ErrTagsScanRow),

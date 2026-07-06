@@ -11,9 +11,9 @@ var _ = ginkgo.Describe("indexed page metadata deletion", ginkgo.Label("unit"), 
 		service := NewTagsService(store)
 
 		content := "---\ntags:\n  - Go\n  - Testing\n---\n\n# Page\n\nA useful excerpt."
-		Expect(service.IndexPageContent("page-1", content)).To(Succeed())
+		Expect(service.IndexPageContent(newFixturePageID("page-1"), content)).To(Succeed())
 
-		Expect(service.DeletePageIndex("page-1")).To(Succeed())
+		Expect(service.DeletePageIndex(newFixturePageID("page-1"))).To(Succeed())
 
 		tagsByPage, err := service.GetTagsForPages(testPageIDs("page-1"))
 		Expect(err).NotTo(HaveOccurred())
@@ -28,10 +28,10 @@ var _ = ginkgo.Describe("indexed page metadata deletion", ginkgo.Label("unit"), 
 var _ = ginkgo.Describe("selection-aware tag suggestions", ginkgo.Label("unit"), func() {
 	ginkgo.It("suggests additive tags for pages matching the selected tags", func() {
 		store := newTestStore()
-		Expect(store.SetTagsForPage("page-1", []string{"go", "react", "testing"})).To(Succeed())
-		Expect(store.SetTagsForPage("page-2", []string{"go", "react"})).To(Succeed())
-		Expect(store.SetTagsForPage("page-3", []string{"go", "rust"})).To(Succeed())
-		Expect(store.SetTagsForPage("page-4", []string{"testing"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "react", "testing"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"go", "react"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-3"), []string{"go", "rust"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-4"), []string{"testing"})).To(Succeed())
 
 		got, err := store.GetAllTagsForSelection("", []string{"go"}, 0)
 		Expect(err).NotTo(HaveOccurred())
@@ -49,8 +49,8 @@ var _ = ginkgo.Describe("selection-aware tag suggestions", ginkgo.Label("unit"),
 	ginkgo.It("falls back to normal tag listing when no tags are selected", func() {
 		store := newTestStore()
 		service := NewTagsService(store)
-		Expect(store.SetTagsForPage("page-1", []string{"go", "react"})).To(Succeed())
-		Expect(store.SetTagsForPage("page-2", []string{"react"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "react"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"react"})).To(Succeed())
 
 		got, err := service.GetAllTagsForSelection("r", nil, 10)
 		Expect(err).NotTo(HaveOccurred())
@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("tag normalization", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("duplicate page tag persistence", ginkgo.Label("unit"), func() {
 	ginkgo.It("stores duplicate input tags only once for a page", func() {
 		store := newTestStore()
-		Expect(store.SetTagsForPage("page-1", []string{"go", "go", "rust"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "go", "rust"})).To(Succeed())
 
 		got, err := store.GetTagsForPages(testPageIDs("page-1"))
 		Expect(err).NotTo(HaveOccurred())

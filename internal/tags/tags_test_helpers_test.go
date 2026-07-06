@@ -67,24 +67,16 @@ func matchPageIDSet(ids ...tree.PageID) types.GomegaMatcher {
 	return ConsistOf(values...)
 }
 
-func matchFixturePageIDSet(ids ...string) types.GomegaMatcher {
+func matchFixturePageIDSet(ids ...tree.PageID) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	pageIDs := make([]tree.PageID, 0, len(ids))
-	for _, id := range ids {
-		pageIDs = append(pageIDs, tree.PageIDFromString(id))
-	}
-	return matchPageIDSet(pageIDs...)
+	return matchPageIDSet(ids...)
 }
 
-func matchPageIDsInOrder(ids ...string) types.GomegaMatcher {
+func matchPageIDsInOrder(ids ...tree.PageID) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 
-	pageIDs := make([]tree.PageID, 0, len(ids))
-	for _, id := range ids {
-		pageIDs = append(pageIDs, tree.PageIDFromString(id))
-	}
-	return Equal(pageIDs)
+	return Equal([]tree.PageID(ids))
 }
 
 func matchTagCounts(want map[string]int) types.GomegaMatcher {

@@ -36,10 +36,10 @@ func newTestStore() *PropertiesStore {
 	return store
 }
 
-func testPageIDs(ids ...string) []tree.PageID {
+func testPageIDs[T ~string](ids ...T) []tree.PageID {
 	pageIDs := make([]tree.PageID, 0, len(ids))
 	for _, id := range ids {
-		pageIDs = append(pageIDs, tree.PageIDFromString(id))
+		pageIDs = append(pageIDs, newFixturePageID(id))
 	}
 	return pageIDs
 }
@@ -317,7 +317,7 @@ var _ = ginkgo.Describe("properties store", ginkgo.Label("integration"), func() 
 		ginkgo.It("returns an empty non-nil map for empty and unknown selections", func() {
 			store := newTestStore()
 
-			emptySelection, err := store.GetPropertiesForPages(testPageIDs())
+			emptySelection, err := store.GetPropertiesForPages(testPageIDs[string]())
 			Expect(err).To(Succeed())
 			Expect(emptySelection).To(SatisfyAll(Not(BeNil()), BeEmpty()))
 

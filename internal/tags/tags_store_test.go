@@ -241,7 +241,7 @@ var _ = ginkgo.Describe("tag-filtered page lookup", ginkgo.Label("unit"), func()
 		ids, err := store.GetPageIDsByTags([]string{"react", "typescript"})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ids).To(matchFixturePageIDSet("page-1"))
+		Expect(ids).To(matchFixturePageIDSet(newFixturePageID("page-1")))
 	})
 
 	ginkgo.It("returns all pages that have a single requested tag", func() {
@@ -254,7 +254,7 @@ var _ = ginkgo.Describe("tag-filtered page lookup", ginkgo.Label("unit"), func()
 		ids, err := store.GetPageIDsByTags([]string{"react"})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(sortedPageIDs(ids)).To(matchPageIDsInOrder("page-1", "page-2"))
+		Expect(sortedPageIDs(ids)).To(matchPageIDsInOrder(newFixturePageID("page-1"), newFixturePageID("page-2")))
 	})
 
 	ginkgo.It("returns no page IDs when no pages match the requested tag", func() {
@@ -289,7 +289,7 @@ var _ = ginkgo.Describe("tag-filtered page lookup", ginkgo.Label("unit"), func()
 		ids, err := store.GetPageIDsByTags([]string{"a", "b", "c"})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ids).To(matchFixturePageIDSet("page-1"))
+		Expect(ids).To(matchFixturePageIDSet(newFixturePageID("page-1")))
 	})
 })
 

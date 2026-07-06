@@ -97,8 +97,8 @@ var _ = ginkgo.Describe("tree-backed tag indexing", ginkgo.Label("unit"), func()
 	ginkgo.It("builds a queryable tag index for pages with tags", func() {
 		svc, ts := setupTagsService()
 
-		id1 := createPageWithTags(ts, "Page React", "react-page", []string{"react", "typescript"})
-		id2 := createPageWithTags(ts, "Page Go", "go-page", []string{"go"})
+		id1 := createPageWithTags(ts, "Page React", newFixtureSlug("react-page"), []string{"react", "typescript"})
+		id2 := createPageWithTags(ts, "Page Go", newFixtureSlug("go-page"), []string{"go"})
 
 		indexAllPages(svc, ts)
 
@@ -113,7 +113,7 @@ var _ = ginkgo.Describe("tree-backed tag indexing", ginkgo.Label("unit"), func()
 
 	ginkgo.It("rebuilds the tag index idempotently", func() {
 		svc, ts := setupTagsService()
-		createPageWithTags(ts, "Page A", "page-a", []string{"go"})
+		createPageWithTags(ts, "Page A", newFixtureSlug("page-a"), []string{"go"})
 
 		for i := 0; i < 3; i++ {
 			Expect(svc.ClearIndex()).To(Succeed())
@@ -128,7 +128,7 @@ var _ = ginkgo.Describe("tree-backed tag indexing", ginkgo.Label("unit"), func()
 	ginkgo.It("skips pages that do not contain frontmatter tags", func() {
 		svc, ts := setupTagsService()
 
-		idPtr, err := ts.CreateNode("system", nil, "No Tags Page", newFixtureSlug("no-tags"), pageKind())
+		idPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "No Tags Page", newFixtureSlug("no-tags"), pageKind())
 		Expect(err).NotTo(HaveOccurred())
 		content := "# No Tags Page\n\nNo frontmatter."
 		Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, "No Tags Page", newFixtureSlug("no-tags"), &content, false)).To(Succeed())
@@ -142,7 +142,7 @@ var _ = ginkgo.Describe("tree-backed tag indexing", ginkgo.Label("unit"), func()
 
 	ginkgo.It("normalizes indexed page tags to lowercase", func() {
 		svc, ts := setupTagsService()
-		createPageWithTags(ts, "Mixed Case", "mixed", []string{"React", "TypeScript"})
+		createPageWithTags(ts, "Mixed Case", newFixtureSlug("mixed"), []string{"React", "TypeScript"})
 
 		indexAllPages(svc, ts)
 
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("tree-backed tag indexing", ginkgo.Label("unit"), func()
 
 	ginkgo.It("indexes tags from raw frontmatter even when parsed content omits metadata", func() {
 		svc, ts := setupTagsService()
-		pageID := createPageWithTags(ts, "Tagged Page", "tagged-page", []string{"react"})
+		pageID := createPageWithTags(ts, "Tagged Page", newFixtureSlug("tagged-page"), []string{"react"})
 
 		page, err := ts.GetPage(pageID)
 		Expect(err).NotTo(HaveOccurred())
@@ -196,7 +196,7 @@ var _ = ginkgo.Describe("tree-backed tag indexing", ginkgo.Label("unit"), func()
 
 	ginkgo.It("stores excerpts while indexing pages from the tree", func() {
 		svc, ts := setupTagsService()
-		pageID := createPageWithTags(ts, "Excerpt Page", "excerpt-page", []string{"go"})
+		pageID := createPageWithTags(ts, "Excerpt Page", newFixtureSlug("excerpt-page"), []string{"go"})
 
 		indexAllPages(svc, ts)
 
@@ -248,7 +248,7 @@ var _ = ginkgo.Describe("single-page content indexing", ginkgo.Label("unit"), fu
 
 		tags, err := svc.GetPageIDsByTags([]string{"rust"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(tags).To(matchFixturePageIDSet("page-1"))
+		Expect(tags).To(matchFixturePageIDSet(newFixturePageID("page-1")))
 
 		oldTags, err := svc.GetPageIDsByTags([]string{"go"})
 		Expect(err).NotTo(HaveOccurred())
@@ -275,10 +275,10 @@ func pageKind() *tree.NodeKind {
 	return &k
 }
 
-func createPageWithTags(ts *tree.TreeService, title, slug string, tags []string) tree.PageID {
+func createPageWithTags(ts *tree.TreeService, title string, slug tree.Slug, tags []string) tree.PageID {
 	ginkgo.GinkgoHelper()
 
-	idPtr, err := ts.CreateNode("system", nil, title, tree.SlugFromString(slug), pageKind())
+	idPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, title, slug, pageKind())
 	Expect(err).NotTo(HaveOccurred())
 
 	frontmatter := "---\ntags:\n"
@@ -287,7 +287,7 @@ func createPageWithTags(ts *tree.TreeService, title, slug string, tags []string)
 	}
 	frontmatter += "---\n\n# " + title
 
-	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, tree.SlugFromString(slug), &frontmatter, true)).To(Succeed())
+	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, slug, &frontmatter, true)).To(Succeed())
 
 	return *idPtr
 }

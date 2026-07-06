@@ -17,7 +17,7 @@ var _ = Describe("workspace ID parsing", Label("unit"), func() {
 		id, err := ParseWorkspaceID("docs-home")
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(id).To(Equal(WorkspaceID("docs-home")))
+		Expect(id).To(Equal(newFixtureWorkspaceID("docs-home")))
 	})
 
 	It("rejects whitespace input with a typed validation code", func() {
@@ -33,7 +33,7 @@ var _ = Describe("workspace ID parsing", Label("unit"), func() {
 
 var _ = Describe("workspace ID boundary helpers", Label("unit"), func() {
 	It("returns stable string forms for transport, URL, and storage boundaries", func() {
-		id := WorkspaceID("docs-home")
+		id := newFixtureWorkspaceID("docs-home")
 
 		Expect(id.HTTPHeaderValue()).To(Equal("docs-home"))
 		Expect(id.URLPathSegment()).To(Equal("docs-home"))
@@ -41,7 +41,7 @@ var _ = Describe("workspace ID boundary helpers", Label("unit"), func() {
 	})
 
 	It("path-escapes URL path segments at the boundary", func() {
-		id := WorkspaceID("docs home")
+		id := newFixtureWorkspaceID("docs home")
 
 		Expect(id.URLPathSegment()).To(Equal("docs%20home"))
 	})
@@ -50,7 +50,7 @@ var _ = Describe("workspace ID boundary helpers", Label("unit"), func() {
 		id, err := ValidateWorkspaceID("docs-home")
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(id).To(Equal(WorkspaceID("docs-home")))
+		Expect(id).To(Equal(newFixtureWorkspaceID("docs-home")))
 	})
 })
 
@@ -80,14 +80,14 @@ var _ = Describe("workspace ID validation errors", Label("unit"), func() {
 
 var _ = Describe("workspace ID SQL conversion", Label("unit"), func() {
 	It("Value returns the string form for a valid workspace ID", func() {
-		value, err := WorkspaceID("docs-home").Value()
+		value, err := newFixtureWorkspaceID("docs-home").Value()
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(value).To(Equal(driver.Value("docs-home")))
 	})
 
 	It("Value returns a typed validation error for an invalid workspace ID", func() {
-		value, err := WorkspaceID("Docs").Value()
+		value, err := newFixtureWorkspaceID("Docs").Value()
 
 		Expect(value).To(BeNil())
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid)))
@@ -97,14 +97,14 @@ var _ = Describe("workspace ID SQL conversion", Label("unit"), func() {
 		var id WorkspaceID
 
 		Expect(id.Scan("docs-home")).To(Succeed())
-		Expect(id).To(Equal(WorkspaceID("docs-home")))
+		Expect(id).To(Equal(newFixtureWorkspaceID("docs-home")))
 	})
 
 	It("Scan accepts byte slice sources", func() {
 		var id WorkspaceID
 
 		Expect(id.Scan([]byte("docs-home"))).To(Succeed())
-		Expect(id).To(Equal(WorkspaceID("docs-home")))
+		Expect(id).To(Equal(newFixtureWorkspaceID("docs-home")))
 	})
 
 	It("Scan rejects nil sources with the required code", func() {

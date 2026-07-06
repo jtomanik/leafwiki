@@ -212,15 +212,29 @@ func IsNormalizedEvent(event Event) bool {
 	provider := event.Provider.Normalize()
 	eventName := event.EventName.Normalize()
 	toolName := event.ToolName.Normalize()
+
+	return hasCanonicalAgentEventValues(event, provider, eventName, toolName) &&
+		hasSupportedAgentEventProtocol(provider, eventName) &&
+		hasValidAgentSessionHash(event) &&
+		hasExpectedAgentEventDerivedState(event, provider, eventName, toolName)
+}
+
+func hasCanonicalAgentEventValues(event Event, provider ProviderID, eventName AgentEventName, toolName AgentToolName) bool {
 	if provider != event.Provider || eventName != event.EventName || toolName != event.ToolName {
 		return false
 	}
-	if !isSupportedProvider(provider) || !isSupportedEvent(provider, eventName) {
-		return false
-	}
-	if !isSessionIDHash(event.SessionIDHash) {
-		return false
-	}
+	return true
+}
+
+func hasSupportedAgentEventProtocol(provider ProviderID, eventName AgentEventName) bool {
+	return isSupportedProvider(provider) && isSupportedEvent(provider, eventName)
+}
+
+func hasValidAgentSessionHash(event Event) bool {
+	return isSessionIDHash(event.SessionIDHash)
+}
+
+func hasExpectedAgentEventDerivedState(event Event, provider ProviderID, eventName AgentEventName, toolName AgentToolName) bool {
 	if event.IsMCPTool != isMCPToolEvent(eventName, toolName) {
 		return false
 	}

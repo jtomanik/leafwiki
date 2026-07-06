@@ -44,6 +44,10 @@ func beNormalizedAgentHookEvent() types.GomegaMatcher {
 }
 
 func normalizedAgentHookEventStateFor(event Event) normalizedAgentHookEventState {
+	if IsNormalizedEvent(event) {
+		return normalizedAgentHookEventContractSatisfied
+	}
+
 	provider := event.Provider.Normalize()
 	eventName := event.EventName.Normalize()
 	toolName := event.ToolName.Normalize()
@@ -93,7 +97,7 @@ var _ = Describe("agent hook normalization", Label("unit"), func() {
 			"SessionIDHash": Equal(testSessionHash(ProviderCodex, "raw-codex-session")),
 			"EventName":     Equal(AgentEventPreToolUse),
 			"Model":         Equal("gpt-5.4"),
-			"ToolName":      Equal(AgentToolName("mcp__leafwiki__wiki_get_page")),
+			"ToolName":      Equal(newFixtureAgentToolName("mcp__leafwiki__wiki_get_page")),
 			"SeenAt":        BeTemporally("==", seenAt),
 		}))
 	})
@@ -102,7 +106,7 @@ var _ = Describe("agent hook normalization", Label("unit"), func() {
 		var provider ProviderID = ProviderCodex
 		var eventName AgentEventName = AgentEventPreToolUse
 		var source AgentSource = AgentSourceCLI
-		var tool AgentToolName = AgentToolName("mcp__leafwiki__wiki_get_page")
+		var tool AgentToolName = newFixtureAgentToolName("mcp__leafwiki__wiki_get_page")
 
 		event, err := normalizeEvent(provider, []byte(`{
 			"hook_event_name":"PreToolUse",
@@ -189,30 +193,30 @@ var _ = DescribeTable("supported provider event normalization",
 		}
 	},
 	Entry("codex session start", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"SessionStart","session_id":"codex-session","model":"gpt-5.4","source":"cli"}`, wantEvent: AgentEventSessionStart}),
-	Entry("codex permission request", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"PermissionRequest","session_id":"codex-session","tool_name":"Shell"}`, wantEvent: AgentEventPermissionRequest, wantToolName: AgentToolName("Shell")}),
-	Entry("codex post tool use", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"PostToolUse","session_id":"codex-session","tool_name":"mcp__leafwiki__wiki_update_page","tool_response":"secret output"}`, wantEvent: AgentEventPostToolUse, wantToolName: AgentToolName("mcp__leafwiki__wiki_update_page"), wantMCPTool: true}),
+	Entry("codex permission request", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"PermissionRequest","session_id":"codex-session","tool_name":"Shell"}`, wantEvent: AgentEventPermissionRequest, wantToolName: newFixtureAgentToolName("Shell")}),
+	Entry("codex post tool use", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"PostToolUse","session_id":"codex-session","tool_name":"mcp__leafwiki__wiki_update_page","tool_response":"secret output"}`, wantEvent: AgentEventPostToolUse, wantToolName: newFixtureAgentToolName("mcp__leafwiki__wiki_update_page"), wantMCPTool: true}),
 	Entry("codex user prompt submit", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"UserPromptSubmit","session_id":"codex-session","prompt":"private prompt"}`, wantEvent: AgentEventUserPromptSubmit}),
 	Entry("codex stop", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"Stop","session_id":"codex-session","last_assistant_message":"private output"}`, wantEvent: AgentEventStop}),
 	Entry("codex subagent start", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"SubagentStart","session_id":"codex-session"}`, wantEvent: AgentEventSubagentStart, wantSubagentDelta: 1}),
 	Entry("codex subagent stop", supportedProviderEventCase{provider: ProviderCodex, payload: `{"hook_event_name":"SubagentStop","session_id":"codex-session"}`, wantEvent: AgentEventSubagentStop, wantSubagentDelta: -1}),
 	Entry("claude session start", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"SessionStart","session_id":"claude-session","model":"claude-opus-4","source":"startup"}`, wantEvent: AgentEventSessionStart}),
 	Entry("claude session end", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"SessionEnd","session_id":"claude-session","reason":"clear"}`, wantEvent: AgentEventSessionEnd, wantEndsSession: true}),
-	Entry("claude pre tool use", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"PreToolUse","session_id":"claude-session","tool_name":"Read","tool_input":{"file_path":"/secret"}}`, wantEvent: AgentEventPreToolUse, wantToolName: AgentToolName("Read")}),
-	Entry("claude post tool use", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"PostToolUse","session_id":"claude-session","tool_name":"mcp__leafwiki__wiki_get_page","tool_response":"private"}`, wantEvent: AgentEventPostToolUse, wantToolName: AgentToolName("mcp__leafwiki__wiki_get_page"), wantMCPTool: true}),
+	Entry("claude pre tool use", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"PreToolUse","session_id":"claude-session","tool_name":"Read","tool_input":{"file_path":"/secret"}}`, wantEvent: AgentEventPreToolUse, wantToolName: newFixtureAgentToolName("Read")}),
+	Entry("claude post tool use", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"PostToolUse","session_id":"claude-session","tool_name":"mcp__leafwiki__wiki_get_page","tool_response":"private"}`, wantEvent: AgentEventPostToolUse, wantToolName: newFixtureAgentToolName("mcp__leafwiki__wiki_get_page"), wantMCPTool: true}),
 	Entry("claude user prompt submit", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"UserPromptSubmit","session_id":"claude-session","prompt":"private prompt"}`, wantEvent: AgentEventUserPromptSubmit}),
 	Entry("claude stop", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"Stop","session_id":"claude-session","last_assistant_message":"private"}`, wantEvent: AgentEventStop}),
 	Entry("claude subagent start", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"SubagentStart","session_id":"claude-session","agent_transcript_path":"/secret"}`, wantEvent: AgentEventSubagentStart, wantSubagentDelta: 1}),
 	Entry("claude subagent stop", supportedProviderEventCase{provider: ProviderClaude, payload: `{"hook_event_name":"SubagentStop","session_id":"claude-session","agent_transcript_path":"/secret"}`, wantEvent: AgentEventSubagentStop, wantSubagentDelta: -1}),
-	Entry("cursor session start", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"sessionStart","session_id":"cursor-session","conversation_id":"cursor-conversation","model":"gpt-5.4","user_email":"secret@example.com"}`, wantEvent: AgentEventName("sessionStart")}),
-	Entry("cursor session end", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"sessionEnd","session_id":"cursor-session","reason":"stop"}`, wantEvent: AgentEventName("sessionEnd"), wantEndsSession: true}),
-	Entry("cursor pre tool use", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"preToolUse","session_id":"cursor-session","tool_name":"Read","tool_input":{"path":"/secret"}}`, wantEvent: AgentEventName("preToolUse"), wantToolName: AgentToolName("Read")}),
-	Entry("cursor post tool use", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"postToolUse","session_id":"cursor-session","tool_name":"mcp__leafwiki__wiki_get_page","tool_output":"private"}`, wantEvent: AgentEventName("postToolUse"), wantToolName: AgentToolName("mcp__leafwiki__wiki_get_page"), wantMCPTool: true}),
-	Entry("cursor before mcp execution", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"beforeMCPExecution","session_id":"cursor-session","tool_name":"leafwiki.get_page"}`, wantEvent: AgentEventName("beforeMCPExecution"), wantToolName: AgentToolName("leafwiki.get_page"), wantMCPTool: true}),
-	Entry("cursor after mcp execution", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"afterMCPExecution","session_id":"cursor-session","tool_name":"leafwiki.get_page","tool_output":"private"}`, wantEvent: AgentEventName("afterMCPExecution"), wantToolName: AgentToolName("leafwiki.get_page"), wantMCPTool: true}),
-	Entry("cursor before submit prompt", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"beforeSubmitPrompt","session_id":"cursor-session","prompt":"private prompt"}`, wantEvent: AgentEventName("beforeSubmitPrompt")}),
-	Entry("cursor stop", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"stop","session_id":"cursor-session","status":"done"}`, wantEvent: AgentEventName("stop")}),
-	Entry("cursor subagent start", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"subagentStart","session_id":"cursor-session","parent_conversation_id":"parent-conversation"}`, wantEvent: AgentEventName("subagentStart"), wantSubagentDelta: 1}),
-	Entry("cursor subagent stop", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"subagentStop","session_id":"cursor-session","parent_conversation_id":"parent-conversation"}`, wantEvent: AgentEventName("subagentStop"), wantSubagentDelta: -1}),
+	Entry("cursor session start", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"sessionStart","session_id":"cursor-session","conversation_id":"cursor-conversation","model":"gpt-5.4","user_email":"secret@example.com"}`, wantEvent: newFixtureAgentEventName("sessionStart")}),
+	Entry("cursor session end", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"sessionEnd","session_id":"cursor-session","reason":"stop"}`, wantEvent: newFixtureAgentEventName("sessionEnd"), wantEndsSession: true}),
+	Entry("cursor pre tool use", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"preToolUse","session_id":"cursor-session","tool_name":"Read","tool_input":{"path":"/secret"}}`, wantEvent: newFixtureAgentEventName("preToolUse"), wantToolName: newFixtureAgentToolName("Read")}),
+	Entry("cursor post tool use", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"postToolUse","session_id":"cursor-session","tool_name":"mcp__leafwiki__wiki_get_page","tool_output":"private"}`, wantEvent: newFixtureAgentEventName("postToolUse"), wantToolName: newFixtureAgentToolName("mcp__leafwiki__wiki_get_page"), wantMCPTool: true}),
+	Entry("cursor before mcp execution", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"beforeMCPExecution","session_id":"cursor-session","tool_name":"leafwiki.get_page"}`, wantEvent: newFixtureAgentEventName("beforeMCPExecution"), wantToolName: newFixtureAgentToolName("leafwiki.get_page"), wantMCPTool: true}),
+	Entry("cursor after mcp execution", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"afterMCPExecution","session_id":"cursor-session","tool_name":"leafwiki.get_page","tool_output":"private"}`, wantEvent: newFixtureAgentEventName("afterMCPExecution"), wantToolName: newFixtureAgentToolName("leafwiki.get_page"), wantMCPTool: true}),
+	Entry("cursor before submit prompt", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"beforeSubmitPrompt","session_id":"cursor-session","prompt":"private prompt"}`, wantEvent: newFixtureAgentEventName("beforeSubmitPrompt")}),
+	Entry("cursor stop", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"stop","session_id":"cursor-session","status":"done"}`, wantEvent: newFixtureAgentEventName("stop")}),
+	Entry("cursor subagent start", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"subagentStart","session_id":"cursor-session","parent_conversation_id":"parent-conversation"}`, wantEvent: newFixtureAgentEventName("subagentStart"), wantSubagentDelta: 1}),
+	Entry("cursor subagent stop", supportedProviderEventCase{provider: ProviderCursor, payload: `{"hook_event_name":"subagentStop","session_id":"cursor-session","parent_conversation_id":"parent-conversation"}`, wantEvent: newFixtureAgentEventName("subagentStop"), wantSubagentDelta: -1}),
 )
 
 type normalizeFailureCase struct {
@@ -286,7 +290,7 @@ var _ = Describe("agent hook normalized event validation", Label("unit"), func()
 		Expect(err).To(Succeed())
 		Expect(event).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Model":    Equal("gpt 5.4"),
-			"ToolName": Equal(AgentToolName("Shell Command")),
+			"ToolName": Equal(newFixtureAgentToolName("Shell Command")),
 		}))
 	})
 
@@ -332,7 +336,7 @@ var _ = Describe("agent hook normalized event validation", Label("unit"), func()
 			Expect(mutator(event)).NotTo(beNormalizedAgentHookEvent())
 		},
 		Entry("provider with surrounding whitespace", func(event Event) Event {
-			event.Provider = " codex"
+			event.Provider = newFixtureProviderID(" codex")
 			return event
 		}),
 		Entry("unsupported provider", func(event Event) Event {
@@ -340,11 +344,11 @@ var _ = Describe("agent hook normalized event validation", Label("unit"), func()
 			return event
 		}),
 		Entry("unsupported event", func(event Event) Event {
-			event.EventName = "NotARealEvent"
+			event.EventName = newFixtureAgentEventName("NotARealEvent")
 			return event
 		}),
 		Entry("trimmed tool name mismatch", func(event Event) Event {
-			event.ToolName += " "
+			event.ToolName += newFixtureAgentToolName(" ")
 			return event
 		}),
 		Entry("bad session hash prefix", func(event Event) Event {

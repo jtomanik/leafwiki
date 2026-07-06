@@ -47,13 +47,13 @@ func pageKind() *tree.NodeKind {
 	return &kind
 }
 
-func createPageWithContent(treeService *tree.TreeService, title, slug, content string) tree.PageID {
+func createPageWithContent(treeService *tree.TreeService, title string, slug tree.Slug, content string) tree.PageID {
 	ginkgo.GinkgoHelper()
 
-	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), pageKind())
+	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, slug, pageKind())
 	Expect(err).To(Succeed())
 	Expect(id).NotTo(BeNil())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &content, true)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, slug, &content, true)).To(Succeed())
 	return *id
 }
 
@@ -165,8 +165,8 @@ var _ = ginkgo.Describe("properties service page indexing", ginkgo.Label("integr
 	ginkgo.When("all tree pages are indexed", func() {
 		ginkgo.It("builds a queryable property index from page frontmatter", func() {
 			svc, treeService := setupPropertiesService()
-			draftID := createPageWithContent(treeService, "Page A", "page-a", "---\nstatus: draft\n---\n# A")
-			publishedID := createPageWithContent(treeService, "Page B", "page-b", "---\nstatus: published\n---\n# B")
+			draftID := createPageWithContent(treeService, "Page A", newFixtureSlug("page-a"), "---\nstatus: draft\n---\n# A")
+			publishedID := createPageWithContent(treeService, "Page B", newFixtureSlug("page-b"), "---\nstatus: published\n---\n# B")
 
 			indexAllPages(svc, treeService)
 
@@ -181,7 +181,7 @@ var _ = ginkgo.Describe("properties service page indexing", ginkgo.Label("integr
 
 		ginkgo.It("can rebuild the index repeatedly without duplicating keys", func() {
 			svc, treeService := setupPropertiesService()
-			createPageWithContent(treeService, "Page A", "page-a", "---\nstatus: draft\n---\n# A")
+			createPageWithContent(treeService, "Page A", newFixtureSlug("page-a"), "---\nstatus: draft\n---\n# A")
 
 			for range 3 {
 				Expect(svc.ClearIndex()).To(Succeed())
@@ -195,7 +195,7 @@ var _ = ginkgo.Describe("properties service page indexing", ginkgo.Label("integr
 
 		ginkgo.It("keeps reserved keys and list values out of the index", func() {
 			svc, treeService := setupPropertiesService()
-			createPageWithContent(treeService, "Page A", "page-a",
+			createPageWithContent(treeService, "Page A", newFixtureSlug("page-a"),
 				"---\ntags:\n  - go\ntitle: Custom\nleafwiki_id: abc\nkeywords: [go, testing]\nstatus: draft\n---\n# A")
 
 			indexAllPages(svc, treeService)
@@ -207,7 +207,7 @@ var _ = ginkgo.Describe("properties service page indexing", ginkgo.Label("integr
 
 		ginkgo.It("skips pages without indexable properties", func() {
 			svc, treeService := setupPropertiesService()
-			createPageWithContent(treeService, "No Props", "no-props", "# Just content")
+			createPageWithContent(treeService, "No Props", newFixtureSlug("no-props"), "# Just content")
 
 			indexAllPages(svc, treeService)
 
@@ -218,7 +218,7 @@ var _ = ginkgo.Describe("properties service page indexing", ginkgo.Label("integr
 
 		ginkgo.It("indexes raw frontmatter even when parsed page content omits it", func() {
 			svc, treeService := setupPropertiesService()
-			pageID := createPageWithContent(treeService, "Page A", "page-a", "---\nstatus: draft\n---\n# A")
+			pageID := createPageWithContent(treeService, "Page A", newFixtureSlug("page-a"), "---\nstatus: draft\n---\n# A")
 
 			page, err := treeService.GetPage(pageID)
 			Expect(err).To(Succeed())
