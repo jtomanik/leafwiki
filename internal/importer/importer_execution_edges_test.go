@@ -103,8 +103,8 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			hash: "h1",
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 				pageID := newFixturePageID("p1")
-				if targetPath == "render-error" {
-					pageID = "."
+				if targetPath == newFixtureRoutePath("render-error") {
+					pageID = newFixturePageID(".")
 				}
 				return &tree.Page{PageNode: &tree.PageNode{ID: pageID, Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 			},

@@ -102,7 +102,7 @@ func (f *fakeWiki) UpdatePage(userID tree.UserID, id tree.PageID, title string, 
 		k = *kind
 	}
 	return &tree.Page{PageNode: &tree.PageNode{
-		ID:    newFixturePageID(id),
+		ID:    id,
 		Title: title,
 		Slug:  slug,
 		Kind:  k,
@@ -117,10 +117,10 @@ func newPlannerWithFake(w *fakeWiki) *Planner {
 	return NewPlanner(w, tree.NewSlugService())
 }
 
-func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, exists bool) tree.PathSegment {
-	pageID := newFixturePageID(id)
+func fakePathSegment(slug tree.Slug, kind tree.NodeKind, id tree.PageID, title string, exists bool) tree.PathSegment {
+	pageID := id
 	return tree.PathSegment{
-		Slug:   newFixtureSlug(slug),
+		Slug:   slug,
 		Kind:   &kind,
 		ID:     &pageID,
 		Title:  &title,
@@ -128,9 +128,9 @@ func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, e
 	}
 }
 
-func fakeMissingPathSegment(slug string, kind tree.NodeKind) tree.PathSegment {
+func fakeMissingPathSegment(slug tree.Slug, kind tree.NodeKind) tree.PathSegment {
 	return tree.PathSegment{
-		Slug:   newFixtureSlug(slug),
+		Slug:   slug,
 		Kind:   &kind,
 		Exists: false,
 	}
@@ -249,20 +249,20 @@ var _ = ginkgo.Describe("import plan creation beside existing sections", ginkgo.
 			treeHash: "h",
 			lookups: map[string]*tree.PathLookup{
 				"docs/sync": {
-					Path:   "docs/sync",
+					Path:   newFixtureRoutePath("docs/sync"),
 					Exists: true,
 					Segments: []tree.PathSegment{
-						fakePathSegment("docs", tree.NodeKindSection, "docs-section", "Docs", true),
-						fakePathSegment("sync", tree.NodeKindSection, "sync-section", "Sync Section", true),
+						fakePathSegment(newFixtureSlug("docs"), tree.NodeKindSection, newFixturePageID("docs-section"), "Docs", true),
+						fakePathSegment(newFixtureSlug("sync"), tree.NodeKindSection, newFixturePageID("sync-section"), "Sync Section", true),
 					},
 				},
 			},
 			lookupsForKind: map[fakeLookupForKindKey]*tree.PathLookup{
 				{path: newFixtureRoutePath("docs/sync"), kind: tree.NodeKindPage}: {
-					Path: "docs/sync",
+					Path: newFixtureRoutePath("docs/sync"),
 					Segments: []tree.PathSegment{
-						fakePathSegment("docs", tree.NodeKindSection, "docs-section", "Docs", true),
-						fakeMissingPathSegment("sync", tree.NodeKindPage),
+						fakePathSegment(newFixtureSlug("docs"), tree.NodeKindSection, newFixturePageID("docs-section"), "Docs", true),
+						fakeMissingPathSegment(newFixtureSlug("sync"), tree.NodeKindPage),
 					},
 					Exists: false,
 				},
@@ -364,7 +364,7 @@ var _ = ginkgo.Describe("import plan existing page detection", ginkgo.Label("uni
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "a.md", "# A")
 
-		existingID := "id123"
+		existingID := newFixturePageID("id123")
 		existingKind := tree.NodeKindPage
 		existingTitle := "Existing A"
 
@@ -372,11 +372,11 @@ var _ = ginkgo.Describe("import plan existing page detection", ginkgo.Label("uni
 			treeHash: "h",
 			lookups: map[string]*tree.PathLookup{
 				"docs/a": {
-					Path:   "docs/a",
+					Path:   newFixtureRoutePath("docs/a"),
 					Exists: true,
 					Segments: []tree.PathSegment{
 						{Slug: newFixtureSlug("docs"), Exists: true},
-						{Slug: newFixtureSlug("a"), Exists: true, ID: func() *tree.PageID { id := newFixturePageID(existingID); return &id }(), Kind: &existingKind, Title: &existingTitle},
+						{Slug: newFixtureSlug("a"), Exists: true, ID: &existingID, Kind: &existingKind, Title: &existingTitle},
 					},
 				},
 			},
@@ -389,7 +389,7 @@ var _ = ginkgo.Describe("import plan existing page detection", ginkgo.Label("uni
 		})
 		Expect(err).To(Succeed())
 		Expect(res).To(HaveImportPlanResult(ConsistOf(HaveSkippedExistingPage(
-			newFixturePageID(existingID),
+			existingID,
 			newFixtureSlug("a"),
 		))))
 
@@ -438,7 +438,7 @@ var _ = ginkgo.Describe("import plan malformed lookup errors", ginkgo.Label("uni
 		wiki := &fakeWiki{
 			treeHash: "h",
 			lookups: map[string]*tree.PathLookup{
-				"docs/x": {Path: "docs/x", Exists: true, Segments: []tree.PathSegment{}},
+				"docs/x": {Path: newFixtureRoutePath("docs/x"), Exists: true, Segments: []tree.PathSegment{}},
 			},
 		}
 		p := newPlannerWithFake(wiki)

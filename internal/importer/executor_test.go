@@ -11,7 +11,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -246,7 +245,7 @@ var _ = ginkgo.Describe("create execution when path creation fails", ginkgo.Labe
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 		res, err := ex.Execute(newFixtureUserID("user1"))
 		Expect(err).To(Succeed())
-		Expect(res).To(MatchExecutionResultCounts(0, 1, ConsistOf(HaveField("Error", gstruct.PointTo(Not(BeEmpty()))))))
+		Expect(res).To(MatchExecutionResultCounts(0, 1, ConsistOf(HaveExecutionItemErrorCode(ImportErrorCodeEnsurePathFailed))))
 		Expect(w.updateCalls).To(BeZero())
 
 	})
@@ -267,7 +266,7 @@ var _ = ginkgo.Describe("execution of unsupported plan actions", ginkgo.Label("u
 		ex := NewExecutor(plan, opts, 0, w, slog.Default())
 		res, err := ex.Execute(newFixtureUserID("user1"))
 		Expect(err).To(Succeed())
-		Expect(res).To(MatchExecutionResultCounts(0, 1, ConsistOf(HaveField("Error", gstruct.PointTo(Equal("unknown action"))))))
+		Expect(res).To(MatchExecutionResultCounts(0, 1, ConsistOf(HaveExecutionItemErrorCode(ImportErrorCodeUnknownAction))))
 
 	})
 })
@@ -299,7 +298,7 @@ title: Ordner
 		Expect(w).To(MatchFakeExecWikiState(SatisfyAll(
 			HaveField("EnsureCalls", Equal(2)),
 			HaveField("UpdateCalls", Equal(2)),
-			HaveField("EnsureTargets", Equal([]tree.RoutePath{"ordner", "ordner/ordner"})),
+			HaveField("EnsureTargets", Equal([]tree.RoutePath{newFixtureRoutePath("ordner"), newFixtureRoutePath("ordner/ordner")})),
 			HaveField("EnsureKinds", Equal([]tree.NodeKind{tree.NodeKindSection, tree.NodeKindPage})),
 			HaveField("UpdateTitles", Equal([]string{"Ordner", "Unterseite"})),
 		)))

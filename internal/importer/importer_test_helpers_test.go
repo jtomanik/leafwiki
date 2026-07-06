@@ -264,6 +264,18 @@ func HaveImportedPageDocument(body types.GomegaMatcher, fields types.GomegaMatch
 	)
 }
 
+func HavePlanResultIdentifier(expected string) types.GomegaMatcher {
+	return SatisfyAll(
+		Not(BeNil()),
+		WithTransform(func(plan *PlanResult) string {
+			if plan == nil {
+				return ""
+			}
+			return plan.ID
+		}, Equal(expected)),
+	)
+}
+
 func HaveStoredPlanState(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, fields))
 }
@@ -296,9 +308,7 @@ func HaveFreshRunningStoredPlan(userID tree.UserID, totalItems int) types.Gomega
 		HaveStoredPlanCancellation(storedPlanCancellationClear),
 		HaveStoredPlanState(gstruct.Fields{
 			"ExecutionStatus": Equal(ExecutionStatusRunning),
-			"ExecutionUserID": WithTransform(func(raw string) tree.UserID {
-				return newFixtureUserID(raw)
-			}, Equal(userID)),
+			"ExecutionUserID": Equal(userID.MetadataValue()),
 			"ExecutionResult": BeNil(),
 			"ExecutionError":  BeNil(),
 			"ExecutionProgress": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{

@@ -14,13 +14,14 @@ import (
 	"github.com/perber/wiki/internal/properties"
 	"github.com/perber/wiki/internal/tags"
 	"github.com/perber/wiki/internal/wiki"
+	"github.com/perber/wiki/internal/workspaceid"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
-func expectedAssetPath(pageID tree.PageID, filename string) string {
-	return fmt.Sprintf("/assets/%s/%s", pageID, filename)
+func expectedAssetPath(pageID tree.PageID, filename tree.AssetName) string {
+	return fmt.Sprintf("/assets/%s/%s", pageID, filename.Filename())
 }
 
 var errIntegrationFrontmatterMissing = errors.New("importer integration frontmatter missing")
@@ -29,7 +30,19 @@ var errIntegrationFrontmatterMissing = errors.New("importer integration frontmat
 // - Importer distinguishes folder README section from README child page
 
 func integFixtureUserID[T ~string](raw T) tree.UserID {
-	return tree.NewUserIDUnchecked(string(raw))
+	return tree.UserIDFromString(raw)
+}
+
+func integFixtureAssetName[T ~string](raw T) tree.AssetName {
+	return tree.AssetNameFromString(raw)
+}
+
+func integFixtureWorkspaceID[T ~string](raw T) workspaceid.WorkspaceID {
+	ginkgo.GinkgoHelper()
+
+	id, err := workspaceid.ParseWorkspaceID(string(raw))
+	Expect(err).To(Succeed())
+	return id
 }
 
 func integMustWrite(base, rel, content string) string {
@@ -84,7 +97,7 @@ func newTestWiki() *wiki.Wiki {
 	dataDir := filepath.Join(integTempDir(), "data")
 	rootDir := filepath.Join(integTempDir(), "content")
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
-		Workspace:           wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+		Workspace:           wiki.Workspace{ID: integFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir},
 		AdminPassword:       "admin",
 		JWTSecret:           "secretkey",
 		AccessTokenTimeout:  15 * time.Minute,
@@ -260,8 +273,8 @@ var _ = ginkgo.Describe("import execution rewrites links and uploads assets", gi
 			"[Guide Home](/guides)",
 			"[API](/reference/endpoints.md#intro)",
 			"[API Alias](/reference/endpoints.md)",
-			expectedAssetPath(setupPage.ID, "logo.png"),
-			expectedAssetPath(setupPage.ID, "manual.pdf"),
+			expectedAssetPath(setupPage.ID, integFixtureAssetName("logo.png")),
+			expectedAssetPath(setupPage.ID, integFixtureAssetName("manual.pdf")),
 		} {
 			Expect(setupPage.Content).To(ContainSubstring(expected))
 		}
@@ -298,9 +311,9 @@ var _ = ginkgo.Describe("import execution for link asset fixture packages", gink
 			"[Container](/guides)",
 			"[Endpoints](/reference/endpoints.md)",
 			"[API Alias](/reference/endpoints.md)",
-			fmt.Sprintf("![Relative Image](%s)", expectedAssetPath(setupPage.ID, "logo.png")),
-			fmt.Sprintf("[Manual](%s)", expectedAssetPath(setupPage.ID, "manual.pdf")),
-			fmt.Sprintf("![logo.png](%s)", expectedAssetPath(setupPage.ID, "logo.png")),
+			fmt.Sprintf("![Relative Image](%s)", expectedAssetPath(setupPage.ID, integFixtureAssetName("logo.png"))),
+			fmt.Sprintf("[Manual](%s)", expectedAssetPath(setupPage.ID, integFixtureAssetName("manual.pdf"))),
+			fmt.Sprintf("![logo.png](%s)", expectedAssetPath(setupPage.ID, integFixtureAssetName("logo.png"))),
 			"`[Inline](../Reference/Endpoints.md)`",
 			"`[[Reference/Endpoints|Inline Alias]]`",
 			"[Fenced](../Reference/Endpoints.md)",
@@ -384,8 +397,8 @@ var _ = ginkgo.Describe("import execution for nested LeafWiki fixture packages",
 		Expect(fm).To(SatisfyAll(
 			HaveField("LeafWikiID", Not(BeEmpty())),
 			HaveField("LeafWikiTitle", Equal("Introduction")),
-			HaveField("LeafWikiCreatorID", Equal("system")),
-			HaveField("LeafWikiLastAuthorID", Equal("system")),
+			HaveField("LeafWikiCreatorID", Equal(integFixtureUserID("system").MetadataValue())),
+			HaveField("LeafWikiLastAuthorID", Equal(integFixtureUserID("system").MetadataValue())),
 			HaveField("LeafWikiCreatedAt", Not(BeEmpty())),
 			HaveField("LeafWikiUpdatedAt", Not(BeEmpty())),
 			HaveField("ExtraFields", SatisfyAll(
@@ -430,7 +443,7 @@ var _ = ginkgo.Describe("import execution for Obsidian wiki-link fixture package
 			"[Brainstorm](/daily/brainstorm.md)",
 			"[[Meeting Notes]]",
 			"[Meeting Alias](/daily/meeting-notes.md)",
-			fmt.Sprintf("![diagram.png](%s)", expectedAssetPath(homePage.ID, "diagram.png")),
+			fmt.Sprintf("![diagram.png](%s)", expectedAssetPath(homePage.ID, integFixtureAssetName("diagram.png"))),
 			"`[[Project Plan]]`",
 			"[[Daily/Meeting Notes]]",
 			"![[Attachments/diagram.png]]",

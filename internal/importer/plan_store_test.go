@@ -46,7 +46,7 @@ var _ = ginkgo.Describe("plan store cloned payload reads", ginkgo.Label("unit"),
 		retrieved, err := s.Get()
 		Expect(err).To(Succeed())
 		Expect(retrieved).NotTo(BeIdenticalTo(plan))
-		Expect(retrieved.Plan).To(SatisfyAll(Not(BeNil()), HaveField("ID", Equal("plan-1"))))
+		Expect(retrieved.Plan).To(HavePlanResultIdentifier("plan-1"))
 
 	})
 })
@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("persistent plan store state", ginkgo.Label("unit"), fun
 		retrieved, err := loaded.Get()
 		Expect(err).To(Succeed())
 		Expect(retrieved).To(HaveStoredPlanState(gstruct.Fields{
-			"Plan":            SatisfyAll(Not(BeNil()), HaveField("ID", Equal("plan-1"))),
+			"Plan":            HavePlanResultIdentifier("plan-1"),
 			"ExecutionUserID": Equal(newFixtureUserID("user-1").MetadataValue()),
 		}))
 

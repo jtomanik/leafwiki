@@ -142,16 +142,16 @@ var _ = ginkgo.Describe("content transformer target normalization", ginkgo.Label
 
 	ginkgo.It("filters ambiguous import targets by requested kind", func() {
 		targets := []importTarget{
-			{targetPath: "docs/sync", kind: tree.NodeKindPage},
-			{targetPath: "docs/sync", kind: tree.NodeKindSection},
-			{targetPath: "docs/other", kind: tree.NodeKindPage},
+			{targetPath: newFixtureRoutePath("docs/sync"), kind: tree.NodeKindPage},
+			{targetPath: newFixtureRoutePath("docs/sync"), kind: tree.NodeKindSection},
+			{targetPath: newFixtureRoutePath("docs/other"), kind: tree.NodeKindPage},
 		}
 
 		Expect(filterImportTargetsByKind(targets, tree.NodeKindSection)).To(Equal([]importTarget{
-			{targetPath: "docs/sync", kind: tree.NodeKindSection},
+			{targetPath: newFixtureRoutePath("docs/sync"), kind: tree.NodeKindSection},
 		}))
 		Expect(filterImportTargetsByKind(targets, tree.NodeKindPage)).To(HaveLen(2))
-		Expect(filterImportTargetsByKind(targets, tree.NodeKind("unknown"))).To(BeEmpty())
+		Expect(filterImportTargetsByKind(targets, newFixtureNodeKind("unknown"))).To(BeEmpty())
 	})
 })
 
@@ -159,7 +159,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 	ginkgo.It("infers target kind only for markdown page and section destinations", func() {
 		kind, err := impliedImportTargetKindResult("")
 		Expect(err).To(MatchError(errImporterTargetKindRejected))
-		Expect(kind).To(Equal(tree.NodeKind("")))
+		Expect(kind).To(Equal(newFixtureNodeKind("")))
 
 		kind, err = impliedImportTargetKindResult(" docs/ ")
 		Expect(err).To(Succeed())
@@ -233,13 +233,13 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 
 		targets := uniqueImportTargets([]importTarget{
 			{},
-			{targetPath: "docs/guide", kind: tree.NodeKindPage},
-			{targetPath: "docs/guide", kind: tree.NodeKindPage},
-			{targetPath: "docs/guide", kind: tree.NodeKindSection},
+			{targetPath: newFixtureRoutePath("docs/guide"), kind: tree.NodeKindPage},
+			{targetPath: newFixtureRoutePath("docs/guide"), kind: tree.NodeKindPage},
+			{targetPath: newFixtureRoutePath("docs/guide"), kind: tree.NodeKindSection},
 		})
 		Expect(targets).To(Equal([]importTarget{
-			{targetPath: "docs/guide", kind: tree.NodeKindPage},
-			{targetPath: "docs/guide", kind: tree.NodeKindSection},
+			{targetPath: newFixtureRoutePath("docs/guide"), kind: tree.NodeKindPage},
+			{targetPath: newFixtureRoutePath("docs/guide"), kind: tree.NodeKindSection},
 		}))
 
 		key, err := sourceSuffixLookupKeyResult("/docs/index.md#intro")
@@ -337,12 +337,12 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		})
 		Expect(err).To(MatchError(referenceUploadErr))
 
-		Expect(formatResolvedTargetPath(importTarget{targetPath: "docs/raw.md", kind: tree.NodeKindPage})).To(Equal("docs/raw.md"))
-		Expect(transformer.formatResolvedHref(importTarget{targetPath: "", kind: tree.NodeKindSection})).To(Equal("/docs"))
+		Expect(formatResolvedTargetPath(importTarget{targetPath: newFixtureRoutePath("docs/raw.md"), kind: tree.NodeKindPage})).To(Equal("docs/raw.md"))
+		Expect(transformer.formatResolvedHref(importTarget{targetPath: newFixtureRoutePath(""), kind: tree.NodeKindSection})).To(Equal("/docs"))
 
 		transformer.pagesBySuffix["Resources/Guide"] = []importTarget{
-			{targetPath: "area/resources/guide", kind: tree.NodeKindPage},
-			{targetPath: "other/resources/guide", kind: tree.NodeKindSection},
+			{targetPath: newFixtureRoutePath("area/resources/guide"), kind: tree.NodeKindPage},
+			{targetPath: newFixtureRoutePath("other/resources/guide"), kind: tree.NodeKindSection},
 		}
 		target, err := uniqueTargetSuffixResult(transformer, "Resources/Guide.md")
 		Expect(err).To(Succeed())
@@ -350,7 +350,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 
 		kind, err := impliedImportTargetKindResult("/")
 		Expect(err).To(MatchError(errImporterTargetKindRejected))
-		Expect(kind).To(Equal(tree.NodeKind("")))
+		Expect(kind).To(Equal(newFixtureNodeKind("")))
 	})
 
 	ginkgo.It("rejects unsafe fallback routes and asset paths", func() {
