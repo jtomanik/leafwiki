@@ -136,6 +136,41 @@ DescribeTable("configuration validation",
 | Custom/composed matchers for reused oracles | reusable `expect*`/`assert*` functions with many field checks |
 | `Eventually(...).WithContext(ctx)` and callback polling | boolean polling, blocking receives, goroutine assertions without recovery |
 
+## Unified Quality Gate
+
+LeafWiki quality policy is enforced through one static gate:
+
+```sh
+rtk bash scripts/golangci-lint.sh --output.text.colors=false
+```
+
+The script owns package selection and runs the root module plus `e2e-proxy`.
+Do not pass package arguments, do not replace it with standalone
+`ginkgolinter`, `leafwiki-vet`, taxonomy reports, i18n scripts, or direct
+`golangci-lint` commands for acceptance. Focused package tests are still
+required for touched code, but the source-policy truth is the unified script.
+
+## Project Quality Metrics
+
+The unified gate includes project-specific analyzers and standard correctness
+linters. Treat each finding as a signal about behaviour clarity, correctness,
+or maintainability:
+
+| Finding family | Good fix | Bad fix |
+|---|---|---|
+| LeafWiki semantic/test hygiene | introduce typed IDs, semantic matchers, behaviour names, truthful labels, and i18n/message contracts | raw strings, rendered prose oracles, weak booleans, generic `HaveOccurred`, `MatchError("...")`, `semh:allow`, or renamed-but-still-vague specs |
+| `ginkgolinter` | use Ginkgo/Gomega-native assertions, labels, async contexts, and helpers | standalone ignore comments, fake adapters, `GinkgoT()` inside specs, or callback `Fail` |
+| `crap4go` | reduce real complexity by extracting named behaviour helpers or add meaningful branch coverage for observable contracts | split code mechanically, add superficial coverage, dead branches, or tests that only execute code without assertions |
+| `revive:file-length-limit` | split files by cohesive rule, behaviour, helper, or fixture families while preserving setup and imports | arbitrary line-count chunks, generated headers, moving unrelated code, or hiding context in catch-all helpers |
+| resource/error linters | return, join, assert, or deliberately handle cleanup/close/rows errors; use `DeferCleanup` with assertions in specs | `_ = err`, unchecked `Close`, ignored `rows.Err`, broad `nolint`, or cleanup that can silently fail |
+| architecture/i18n analyzers | keep package boundaries and user-facing text contracts explicit | move code across layers just to silence lint, duplicate strings, or bypass catalogs |
+| dead-code linters | remove stale helpers or make the behaviour contract visible where genuinely needed | keep unused scaffolding, blank imports, or unused parameters as migration residue |
+
+Only the supervisor may change checker code, `.golangci.leafwiki.yml`, the
+custom golangci plugin, gate scripts, or module files. If cleanup exposes a
+repeatable project-specific bad pattern that is not caught, harden the checker
+fixture-first before accepting the workaround.
+
 ## Matcher Pressure
 
 If a spec repeats three or more field assertions against the same domain object, create or reuse a matcher. The spec should say what behaviour is true, not how a DTO is laid out.
@@ -166,6 +201,10 @@ When fixing semantic-hygiene findings, keep the checker strict and fix tests in 
 4. Add or correct taxonomy labels only after the spec boundary is understood.
 5. Convert wide table rows to struct rows with named fields.
 6. Extract semantic matchers where repeated field assertions obscure behaviour.
+7. Address standard correctness findings by preserving contracts: handle
+   cleanup errors, remove dead code, split oversized files cohesively, and
+   reduce high CRAP scores through simpler code or meaningful behaviour
+   coverage.
 
 Do not add baselines, broad allowlists, `//nolint`, `ginkgo-linter:ignore-*`,
 or checker relaxations to make the gate pass. Change the checker only to make a
@@ -185,6 +224,9 @@ Reject changes that:
 - replace one weak assertion with another semantically equivalent weak form
 - rename specs to hide `Test...` without producing behaviour names
 - introduce broad helper abstractions whose only purpose is avoiding a rule
+- edit checker/config/scripts/module files without supervisor assignment
+- claim acceptance from a package-scoped direct linter when the unified script
+  has not been run or its remaining findings have not been classified
 
 ## Acceptance
 
@@ -192,18 +234,23 @@ Before claiming a LeafWiki Ginkgo/Gomega cleanup is done, run the unified
 static source-policy gate plus the relevant runtime tests:
 
 ```sh
-rtk bash scripts/golangci-lint.sh --output.text.colors=false --max-issues-per-linter=0 --max-same-issues=0
-rtk go test ./...
-rtk git diff --check
+rtk bash scripts/golangci-lint.sh --output.text.colors=false
+rtk go test ./touched/package -count=1
+rtk git diff --check -- touched/path
 ```
 
 `ginkgolinter` runs through `.golangci.leafwiki.yml` together with LeafWiki's
 semantic hygiene and i18n analyzers. Do not run or require a standalone
 ginkgolinter gate unless the supervisor is explicitly debugging that linter.
 
-For an in-progress package slice, the supervisor may use the same config against
-the assigned package path, plus the package's focused `go test` and
-`git diff --check`. Taxonomy completeness is part of the unified gate; do not
-use a separate taxonomy report as an acceptance condition. The unified gate may
-be red only when the supervising thread explicitly accepts the remaining rule
-counts as follow-up scope.
+For an in-progress slice, fixers may use focused `go test` and local searches
+while iterating, but handoff evidence must include the unified script. Because
+other owned slices can keep the root gate red, the handoff must also classify
+remaining findings by owner/path and show that the assigned paths are clean or
+explain the exact blocker.
+
+Taxonomy completeness, semantic hygiene, i18n catalog checks, Ginkgo/Gomega
+mechanics, file length, CRAP score, resource cleanup, unused code, and standard
+correctness linters are all part of the unified gate. Do not use separate
+reports as acceptance conditions unless the supervisor asks for diagnostic
+detail.
