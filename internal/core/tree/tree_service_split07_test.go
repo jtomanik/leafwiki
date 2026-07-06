@@ -11,10 +11,10 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path segments", func() {
 		svc, _ := newLoadedService()
 
-		homeID, _ := svc.CreateNode("system", nil, "Home", "home", ptrKind(NodeKindPage))
-		aboutID, _ := svc.CreateNode("system", homeID, "About", "about", ptrKind(NodeKindPage))
+		homeID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Home", newFixtureSlug("home"), ptrKind(NodeKindPage))
+		aboutID, _ := svc.CreateNode(newFixtureUserID("system"), homeID, "About", newFixtureSlug("about"), ptrKind(NodeKindPage))
 
-		lookup, err := svc.LookupPagePath("home/about/team")
+		lookup, err := svc.LookupPagePath(newFixtureRoutePath("home/about/team"))
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
@@ -32,20 +32,20 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path is case insensitive", func() {
 		svc, _ := newLoadedService()
 
-		homeID, err := svc.CreateNode("system", nil, "Home", "Home", ptrKind(NodeKindPage))
+		homeID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Home", newFixtureSlug("Home"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode home failed: %v",
 
 			err)
 		var aboutID *PageID
 		{
 
-			aboutID, err = svc.CreateNode("system", homeID, "About", "About", ptrKind(NodeKindPage))
+			aboutID, err = svc.CreateNode(newFixtureUserID("system"), homeID, "About", newFixtureSlug("About"), ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode about failed: %v",
 
 				err)
 		}
 
-		lookup, err := svc.LookupPagePath("home/about")
+		lookup, err := svc.LookupPagePath(newFixtureRoutePath("home/about"))
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
@@ -61,21 +61,21 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path prefers section for same basename twin", func() {
 		svc, _ := newLoadedService()
 
-		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+		sectionID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Sync Section", newFixtureSlug("sync"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode section failed: %v",
 
 			err,
 		)
 		{
 
-			_, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+			_, err := svc.CreateNode(newFixtureUserID("system"), nil, "Sync Page", newFixtureSlug("sync"), ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode page twin failed: %v",
 
 				err,
 			)
 		}
 
-		lookup, err := svc.LookupPagePath("sync")
+		lookup, err := svc.LookupPagePath(newFixtureRoutePath("sync"))
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
@@ -92,27 +92,27 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path reflects slug rename", func() {
 		svc, _ := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
 			err)
 		var guideID *PageID
 		{
 
-			guideID, err = svc.CreateNode("system", id, "Guide", "guide", ptrKind(NodeKindPage))
+			guideID, err = svc.CreateNode(newFixtureUserID("system"), id, "Guide", newFixtureSlug("guide"), ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode guide failed: %v",
 
 				err)
 		}
 		{
 
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", Slug("documentation"), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", newFixtureSlug("documentation"), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
 		}
 
-		oldLookup, err := svc.LookupPagePath("docs/guide")
+		oldLookup, err := svc.LookupPagePath(newFixtureRoutePath("docs/guide"))
 		Expect(err).To(Succeed(), "LookupPagePath old path failed: %v",
 
 			err)
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 			matchMissingPathSegment(),
 		)), "expected old path to stop resolving after slug rename")
 
-		newLookup, err := svc.LookupPagePath("documentation/guide")
+		newLookup, err := svc.LookupPagePath(newFixtureRoutePath("documentation/guide"))
 		Expect(err).To(Succeed(), "LookupPagePath new path failed: %v",
 
 			err)
@@ -130,7 +130,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 			matchExistingPathSegment(*guideID),
 		)), "expected renamed path to resolve")
 
-		page, err := svc.FindPageByRoutePath("documentation/guide")
+		page, err := svc.FindPageByRoutePath(newFixtureRoutePath("documentation/guide"))
 		Expect(err).To(Succeed(), "FindPageByRoutePath renamed path failed: %v",
 
 			err)
@@ -147,7 +147,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path can create for missing valid path", func() {
 		svc, _ := newLoadedService()
 
-		lookup, err := svc.LookupPagePath("docs/guide")
+		lookup, err := svc.LookupPagePath(newFixtureRoutePath("docs/guide"))
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
@@ -162,7 +162,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("lookup page path cannot create reserved missing path", func() {
 		svc, _ := newLoadedService()
 
-		lookup, err := svc.LookupPagePath("history/guide")
+		lookup, err := svc.LookupPagePath(newFixtureRoutePath("history/guide"))
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
@@ -177,31 +177,31 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolve permalink target reflects rename and move", func() {
 		svc, _ := newLoadedService()
 
-		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+		docsID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
 			err)
 
-		guideID, err := svc.CreateNode("system", docsID, "Guide", "guide", ptrKind(NodeKindPage))
+		guideID, err := svc.CreateNode(newFixtureUserID("system"), docsID, "Guide", newFixtureSlug("guide"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode guide failed: %v",
 
 			err)
 
-		archiveID, err := svc.CreateNode("system", nil, "Archive", "archive", ptrKind(NodeKindPage))
+		archiveID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Archive", newFixtureSlug("archive"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode archive failed: %v",
 
 			err,
 		)
 		{
 
-			err := svc.UpdateNode(newFixtureUserID("system"), *guideID, "User Guide", Slug("user-guide"), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *guideID, "User Guide", newFixtureSlug("user-guide"), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "UpdateNode guide failed: %v",
 
 				err)
 		}
 		{
 
-			err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked)
+			err := svc.MoveNode(newFixtureUserID("system"), *guideID, *archiveID, pageVersionUnchecked)
 			Expect(err).To(Succeed(), "MoveNode guide failed: %v",
 
 				err)
@@ -225,7 +225,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("resolve permalink target returns not found for missing page", func() {
 		svc, _ := newLoadedService()
 
-		_, err := svc.ResolvePermalinkTarget("missing-page")
+		_, err := svc.ResolvePermalinkTarget(newFixturePageID("missing-page"))
 		Expect(err).To(MatchError(ErrPageNotFound),
 			"expected ErrPageNotFound, got %v",
 
@@ -239,7 +239,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path persists order files for created path", func() {
 		svc, tmpDir := newLoadedService()
 
-		res, err := svc.EnsurePagePath("system", "home/about/team/members", "Members", ptrKind(NodeKindPage))
+		res, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("home/about/team/members"), "Members", ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "EnsurePagePath failed: %v",
 
 			err)
@@ -272,7 +272,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, _ := newLoadedService()
 
 		// Ensure a deep path; intermediate nodes should become sections
-		res, err := svc.EnsurePagePath("system", "home/about/team/members", "Members", ptrKind(NodeKindPage))
+		res, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("home/about/team/members"), "Members", ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "EnsurePagePath failed: %v",
 
 			err)
@@ -282,7 +282,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		), "expected final page 'members'")
 
 		// home/about/team should exist as path now
-		lookup, err := svc.LookupPagePath("home/about/team/members")
+		lookup, err := svc.LookupPagePath(newFixtureRoutePath("home/about/team/members"))
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
@@ -300,13 +300,13 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path returns existing page without creating nodes", func() {
 		svc, _ := newLoadedService()
 
-		res, err := svc.EnsurePagePath("system", "home/about/team/members", "Members", ptrKind(NodeKindPage))
+		res, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("home/about/team/members"), "Members", ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "EnsurePagePath initial create failed: %v",
 
 			err,
 		)
 
-		existing, err := svc.EnsurePagePath("system", "home/about/team/members", "Ignored", ptrKind(NodeKindPage))
+		existing, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("home/about/team/members"), "Ignored", ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "EnsurePagePath existing failed: %v",
 
 			err)
@@ -320,13 +320,13 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path creates page twin when section route exists", func() {
 		svc, _ := newLoadedService()
 
-		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+		sectionID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Sync Section", newFixtureSlug("sync"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode section failed: %v",
 
 			err,
 		)
 
-		res, err := svc.EnsurePagePath("system", "sync", "Sync Page", ptrKind(NodeKindPage))
+		res, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("sync"), "Sync Page", ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "EnsurePagePath page twin failed: %v",
 
 			err)
@@ -337,13 +337,13 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 			)),
 		), "expected EnsurePagePath to create one page twin, got %#v", res)
 
-		section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
+		section, err := svc.FindPageByRoutePathAndKind(newFixtureRoutePath("sync"), NodeKindSection)
 		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind section failed: %v",
 
 			err)
 
 		Expect(section.ID).To(Equal(*sectionID))
-		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+		page, err := svc.FindPageByRoutePathAndKind(newFixtureRoutePath("sync"), NodeKindPage)
 		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
 
 			err,
@@ -357,7 +357,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 				Page.ID,
 		)
 
-		second, err := svc.EnsurePagePath("system", "sync", "Ignored", ptrKind(NodeKindPage))
+		second, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("sync"), "Ignored", ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "EnsurePagePath existing page twin failed: %v",
 
 			err)
@@ -371,12 +371,12 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("ensure page path creates section twin when page route exists", func() {
 		svc, _ := newLoadedService()
 
-		pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+		pageID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Sync Page", newFixtureSlug("sync"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode page failed: %v",
 
 			err)
 
-		res, err := svc.EnsurePagePath("system", "sync", "Sync Section", ptrKind(NodeKindSection))
+		res, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("sync"), "Sync Section", ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "EnsurePagePath section twin failed: %v",
 
 			err)
@@ -387,14 +387,14 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 			)),
 		), "expected EnsurePagePath to create one section twin, got %#v", res)
 
-		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+		page, err := svc.FindPageByRoutePathAndKind(newFixtureRoutePath("sync"), NodeKindPage)
 		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
 
 			err,
 		)
 
 		Expect(page.ID).To(Equal(*pageID))
-		section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
+		section, err := svc.FindPageByRoutePathAndKind(newFixtureRoutePath("sync"), NodeKindSection)
 		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind section failed: %v",
 
 			err)
@@ -406,7 +406,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 				ID, res.
 				Page.ID)
 
-		second, err := svc.EnsurePagePath("system", "sync", "Ignored", ptrKind(NodeKindSection))
+		second, err := svc.EnsurePagePath(newFixtureUserID("system"), newFixtureRoutePath("sync"), "Ignored", ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "EnsurePagePath existing section twin failed: %v",
 
 			err)

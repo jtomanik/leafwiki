@@ -77,23 +77,28 @@ func matchResolution(kind TargetKind, code IssueCode) types.GomegaMatcher {
 	})
 }
 
-func matchResolvedLink(kind TargetKind, canonicalHref string, routePath string) types.GomegaMatcher {
+func matchResolvedLink(kind TargetKind, canonicalHref string, routePath tree.RoutePath) types.GomegaMatcher {
 	fields := gstruct.Fields{
 		"Kind":          Equal(kind),
 		"CanonicalHref": Equal(canonicalHref),
 		"Code":          BeZero(),
 	}
 	if routePath != "" {
-		fields["RoutePath"] = Equal(mustRoutePath(routePath))
+		fields["RoutePath"] = Equal(routePath)
 	}
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
-func mustRoutePath(raw string) tree.RoutePath {
-	ginkgo.GinkgoHelper()
-	routePath, err := tree.ParseRoutePath(raw)
-	Expect(err).NotTo(HaveOccurred())
-	return routePath
+func newFixtureMarkdownPath[T ~string](raw T) tree.MarkdownPath {
+	return tree.MarkdownPathFromString(raw)
+}
+
+func newFixtureRoutePath[T ~string](raw T) tree.RoutePath {
+	return tree.RoutePathFromString(raw)
+}
+
+func newFixtureIssueCode[T ~string](raw T) IssueCode {
+	return IssueCode(raw)
 }
 
 func matchRootSection(canonicalHref string) types.GomegaMatcher {
@@ -222,9 +227,9 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 
 		index, err = NewIndexFromRootWithOptions(rootDir, Options{})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(index.Resolve("docs/source.md", "/docs/page.md").Kind).To(Equal(TargetKindPage))
-		Expect(index.sections).To(HaveKey(tree.RoutePath("docs")))
-		Expect(index.sections).ToNot(HaveKey(tree.RoutePath(".hidden")))
+		Expect(index.Resolve(newFixtureMarkdownPath("docs/source.md"), "/docs/page.md").Kind).To(Equal(TargetKindPage))
+		Expect(index.sections).To(HaveKey(newFixtureRoutePath("docs")))
+		Expect(index.sections).ToNot(HaveKey(newFixtureRoutePath(".hidden")))
 
 		originalMapWorkspaceMarkdownRoute := mapWorkspaceMarkdownRoute
 		mapWorkspaceMarkdownRoute = func(rootDir string, relPath string, isDir bool) (tree.WorkspaceMarkdownRoute, error) {
@@ -263,16 +268,16 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 
 	ginkgo.It("resolves empty, broken trailing-slash, and missing section destinations", func() {
 		index := NewIndex([]Entry{
-			{Kind: EntryKindPage, Path: "docs/page.md"},
-			{Kind: EntryKindSection, RoutePath: "docs/section"},
+			{Kind: EntryKindPage, Path: newFixtureMarkdownPath("docs/page.md")},
+			{Kind: EntryKindSection, RoutePath: newFixtureRoutePath("docs/section")},
 		})
 
-		Expect(index.Resolve("docs/source.md", "?query")).To(matchResolution(TargetKindUnresolved, IssueCodeEmpty))
+		Expect(index.Resolve(newFixtureMarkdownPath("docs/source.md"), "?query")).To(matchResolution(TargetKindUnresolved, IssueCodeEmpty))
 
-		trailing := index.Resolve("docs/source.md", "/missing/")
+		trailing := index.Resolve(newFixtureMarkdownPath("docs/source.md"), "/missing/")
 		Expect(trailing).To(matchResolution(TargetKindUnresolved, IssueCodeBrokenLink))
 
-		missing := index.Resolve("docs/source.md", "/missing")
+		missing := index.Resolve(newFixtureMarkdownPath("docs/source.md"), "/missing")
 		Expect(missing).To(matchResolution(TargetKindUnresolved, IssueCodeBrokenLink))
 	})
 
@@ -362,8 +367,8 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 		Expect(base).To(Equal("docs/page"))
 		Expect(suffix).To(Equal("#section?query"))
 
-		Expect(formatHref("docs/source.md", "", false, true, "?q")).To(Equal("/?q"))
-		Expect(formatHref("docs/source.md", "", true, true, "#heading")).To(Equal("/#heading"))
+		Expect(formatHref(newFixtureMarkdownPath("docs/source.md"), newFixtureMarkdownPath(""), false, true, "?q")).To(Equal("/?q"))
+		Expect(formatHref(newFixtureMarkdownPath("docs/source.md"), newFixtureMarkdownPath(""), true, true, "#heading")).To(Equal("/#heading"))
 
 		originalRelMarkdownLinkPath := relMarkdownLinkPath
 		relMarkdownLinkPath = func(string, string) (string, error) {
@@ -372,13 +377,13 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 		ginkgo.DeferCleanup(func() {
 			relMarkdownLinkPath = originalRelMarkdownLinkPath
 		})
-		Expect(formatHref("docs/source.md", "docs/page.md", true, false, "")).To(Equal("docs/page.md"))
+		Expect(formatHref(newFixtureMarkdownPath("docs/source.md"), newFixtureMarkdownPath("docs/page.md"), true, false, "")).To(Equal("docs/page.md"))
 		relMarkdownLinkPath = originalRelMarkdownLinkPath
 
-		Expect(formatHref("docs/source.md", "docs", false, false, "")).To(Equal("."))
+		Expect(formatHref(newFixtureMarkdownPath("docs/source.md"), newFixtureMarkdownPath("docs"), false, false, "")).To(Equal("."))
 
 		index := NewIndexWithOptions(nil, Options{MarkdownLinkRootPrefix: "/wiki"})
-		Expect(index.formatCanonicalHref("docs/source.md", "docs/page.md", true, true, "", "docs/page%20name")).To(Equal("docs/page%20name.md"))
+		Expect(index.formatCanonicalHref(newFixtureMarkdownPath("docs/source.md"), newFixtureMarkdownPath("docs/page.md"), true, true, "", "docs/page%20name")).To(Equal("docs/page%20name.md"))
 
 		Expect(encodedSectionHrefBase("/")).To(Equal("/"))
 		Expect(encodedSectionHrefBase("README.md")).To(Equal("."))

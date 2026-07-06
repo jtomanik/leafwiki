@@ -24,15 +24,15 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		base = tempTreeDir()
 		root = filepath.Join(base, "root")
 		store = NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "data"), RootDir: root})
-		parent = edgeSectionNode(RootPageID, "root", "Root", nil)
+		parent = edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 	})
 
 	It("store operation seams preserve path and conversion error contracts", func() {
-		page := edgePageNode("page", "page", "Page", parent)
-		section := edgeSectionNode("section", "section", "Section", parent)
-		dest := edgeSectionNode("dest", "dest", "Dest", parent)
-		loosePage := edgePageNode("loose", "loose", "Loose", nil)
-		looseSection := edgeSectionNode("loose-section", "loose-section", "Loose Section", nil)
+		page := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", parent)
+		section := edgeSectionNode(newFixturePageID("section"), newFixtureSlug("section"), "Section", parent)
+		dest := edgeSectionNode(newFixturePageID("dest"), newFixtureSlug("dest"), "Dest", parent)
+		loosePage := edgePageNode(newFixturePageID("loose"), newFixtureSlug("loose"), "Loose", nil)
+		looseSection := edgeSectionNode(newFixturePageID("loose-section"), newFixtureSlug("loose-section"), "Loose Section", nil)
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
 		swapTreeSeam(&treeFilepathRel, func(_, target string) (string, error) {
@@ -114,7 +114,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		swapTreeSeam(&treeFilepathRel, func(string, string) (string, error) {
 			return "../outside", nil
 		})
-		Expect(store.RenameNode(page, "renamed")).To(matchInvalidOp("RenameNode"))
+		Expect(store.RenameNode(page, newFixtureSlug("renamed"))).To(matchInvalidOp("RenameNode"))
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -123,12 +123,12 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(ErrPageAlreadyExists))
+		Expect(store.RenameNode(section, newFixtureSlug("renamed-section"))).To(MatchError(ErrPageAlreadyExists))
 
 		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(looseSection, "renamed-section")).To(matchInvalidOp("dirPathForNode"))
+		Expect(store.RenameNode(looseSection, newFixtureSlug("renamed-section"))).To(matchInvalidOp("dirPathForNode"))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "section") {
@@ -136,7 +136,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(section, "renamed-section")).To(matchDrift("expected folder missing"))
+		Expect(store.RenameNode(section, newFixtureSlug("renamed-section"))).To(matchDrift("expected folder missing"))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "page.md") {
@@ -144,7 +144,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(page, "renamed")).To(matchDrift("expected file missing"))
+		Expect(store.RenameNode(page, newFixtureSlug("renamed"))).To(matchDrift("expected file missing"))
 
 		_, err := store.ReadPageRaw(loosePage)
 		Expect(err).To(matchInvalidOp("dirPathForNode"))
@@ -183,7 +183,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
 		Expect(store.ConvertNode(loosePage, NodeKindSection)).To(matchInvalidOp("dirPathForNode"))
 
-		page.WorkspaceSourcePath = "Imported/Page.md"
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("Imported/Page.md")
 		swapTreeSeam(&treeFilepathRel, func(_, target string) (string, error) {
 			if filepath.Base(target) == "page" {
 				return "../outside", nil
@@ -191,7 +191,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			return ".", nil
 		})
 		Expect(store.ConvertNode(page, NodeKindSection)).To(matchInvalidOp("ConvertNode"))
-		page.WorkspaceSourcePath = ""
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("")
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -223,7 +223,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
 		Expect(store.ConvertNode(looseSection, NodeKindPage)).To(matchInvalidOp("dirPathForNode"))
 
-		section.WorkspaceSourcePath = "Imported/Section"
+		section.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("Imported/Section")
 		swapTreeSeam(&treeFilepathRel, func(_, target string) (string, error) {
 			if filepath.Base(target) == "section.md" {
 				return "../outside", nil
@@ -231,7 +231,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			return ".", nil
 		})
 		Expect(store.ConvertNode(section, NodeKindPage)).To(matchInvalidOp("ConvertNode"))
-		section.WorkspaceSourcePath = ""
+		section.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("")
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -273,10 +273,10 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 	})
 
 	It("node store seams propagate filesystem failure contracts", func() {
-		page := edgePageNode("page", "page", "Page", parent)
-		section := edgeSectionNode("section", "section", "Section", parent)
-		dest := edgeSectionNode("dest", "dest", "Dest", parent)
-		loosePage := edgePageNode("loose", "loose", "Loose", nil)
+		page := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", parent)
+		section := edgeSectionNode(newFixturePageID("section"), newFixtureSlug("section"), "Section", parent)
+		dest := edgeSectionNode(newFixturePageID("dest"), newFixtureSlug("dest"), "Dest", parent)
+		loosePage := edgePageNode(newFixturePageID("loose"), newFixtureSlug("loose"), "Loose", nil)
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -298,8 +298,8 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 				return nil, os.ErrNotExist
 			}
 		})
-		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(statRenameSectionErr))
-		Expect(store.RenameNode(loosePage, "renamed")).To(matchInvalidOp("dirPathForNode"))
+		Expect(store.RenameNode(section, newFixtureSlug("renamed-section"))).To(MatchError(statRenameSectionErr))
+		Expect(store.RenameNode(loosePage, newFixtureSlug("renamed"))).To(matchInvalidOp("dirPathForNode"))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "page.md") {
@@ -308,14 +308,14 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			return nil, os.ErrNotExist
 		})
 		swapTreeSeam(&treeOSReadFile, func(string) ([]byte, error) {
-			page.WorkspaceSourcePath = "../outside.md"
+			page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("../outside.md")
 			return []byte("# Page\n"), nil
 		})
 		_, raw, err := store.ReadPageAndRaw(page)
 		Expect(err).To(matchInvalidOp("contentPathForNodeRead"))
 		Expect(raw).To(Equal("# Page\n"))
 
-		page.WorkspaceSourcePath = ""
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("")
 		_, err = store.ReadPageContent(page)
 		Expect(err).To(matchInvalidOp("contentPathForNodeRead"))
 
@@ -328,13 +328,13 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		swapTreeSeam(&treeFilepathRel, func(string, string) (string, error) {
 			return "../outside", nil
 		})
-		page.WorkspaceSourcePath = ""
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("")
 		_, err = store.contentPathForNodeRead(page)
 		Expect(err).To(matchInvalidOp("dirPathForNode"))
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
 
-		workspaceWriteSection := edgeSectionNode("workspace-write-section", "workspace-write-section", "Workspace Write Section", parent)
-		workspaceWriteSection.WorkspaceSourcePath = "../outside"
+		workspaceWriteSection := edgeSectionNode(newFixturePageID("workspace-write-section"), newFixtureSlug("workspace-write-section"), "Workspace Write Section", parent)
+		workspaceWriteSection.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("../outside")
 		_, err = store.contentPathForNodeWrite(workspaceWriteSection)
 		Expect(err).To(matchInvalidOp("contentPathForNodeWrite"))
 
@@ -350,8 +350,8 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		_, err = resolvePathForContainment(filepath.Join(root, "missing", "page.md"))
 		Expect(err).To(MatchError(errFixtureEvalFailed))
 
-		workspaceSection := edgeSectionNode("workspace-section", "workspace-section", "Workspace Section", parent)
-		workspaceSection.WorkspaceSourcePath = "../outside"
+		workspaceSection := edgeSectionNode(newFixturePageID("workspace-section"), newFixtureSlug("workspace-section"), "Workspace Section", parent)
+		workspaceSection.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("../outside")
 		swapTreeSeam(&treeFilepathEvalSymlinks, filepath.EvalSymlinks)
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return nil, os.ErrNotExist
@@ -363,9 +363,9 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			matchInvalidOp("workspaceContent"),
 		))
 
-		unknownWorkspace := edgePageNode("unknown", "unknown", "Unknown", parent)
-		unknownWorkspace.Kind = NodeKind("unknown")
-		unknownWorkspace.WorkspaceSourcePath = "custom.md"
+		unknownWorkspace := edgePageNode(newFixturePageID("unknown"), newFixtureSlug("unknown"), "Unknown", parent)
+		unknownWorkspace.Kind = newFixtureNodeKind("unknown")
+		unknownWorkspace.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("custom.md")
 		path, exists, err = store.workspaceContentPathForNode(unknownWorkspace, "workspaceContent")
 		unknownWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}
 		Expect(unknownWorkspaceLookup).To(matchMissingWorkspaceContentPath(
@@ -387,7 +387,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		_, err = store.contentPathForNodeRead(section)
 		Expect(err).To(matchInvalidOp("contentPathForNodeRead"))
 
-		page.WorkspaceSourcePath = ""
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("")
 		relCalls = 0
 		_, err = store.contentPathForNodeRead(page)
 		Expect(err).To(matchInvalidOp("contentPathForNodeRead"))
@@ -395,12 +395,12 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		_, err = store.contentPathForNodeWrite(nil)
 		Expect(err).To(matchInvalidOp("contentPathForNodeWrite"))
 
-		page.WorkspaceSourcePath = "Imported/Page.md"
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("Imported/Page.md")
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
 		path, err = store.contentPathForNodeWrite(page)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(path).To(ContainSubstring(filepath.Join("Imported", "Page.md")))
-		page.WorkspaceSourcePath = ""
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("")
 
 		relCalls = 0
 		swapTreeSeam(&treeFilepathRel, func(string, string) (string, error) {

@@ -36,30 +36,30 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 	It("unloaded services return errors without disk state", func() {
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: tempTreeDir(), RootDir: filepath.Join(tempTreeDir(), "root")})
 
-		_, err := svc.FindPageByID("missing")
+		_, err := svc.FindPageByID(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
-		Expect(svc.DeleteNode("user", "missing", false, pageVersionUnchecked)).To(MatchError(ErrTreeNotLoaded))
-		Expect(svc.UpdateNode("user", "missing", "Missing", "missing", nil, pageVersionUnchecked, false)).To(MatchError(ErrTreeNotLoaded))
-		Expect(svc.ConvertNode("user", "missing", NodeKindSection, pageVersionUnchecked)).To(MatchError(ErrTreeNotLoaded))
+		Expect(svc.DeleteNode(newFixtureUserID("user"), newFixturePageID("missing"), false, pageVersionUnchecked)).To(MatchError(ErrTreeNotLoaded))
+		Expect(svc.UpdateNode(newFixtureUserID("user"), newFixturePageID("missing"), "Missing", newFixtureSlug("missing"), nil, pageVersionUnchecked, false)).To(MatchError(ErrTreeNotLoaded))
+		Expect(svc.ConvertNode(newFixtureUserID("user"), newFixturePageID("missing"), NodeKindSection, pageVersionUnchecked)).To(MatchError(ErrTreeNotLoaded))
 
-		_, err = svc.GetPage("missing")
+		_, err = svc.GetPage(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
-		_, err = svc.ReadPageRaw("missing")
+		_, err = svc.ReadPageRaw(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
-		_, err = svc.ResolvePermalinkTarget("missing")
+		_, err = svc.ResolvePermalinkTarget(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
-		_, err = svc.LookupPagePath("missing")
+		_, err = svc.LookupPagePath(newFixtureRoutePath("missing"))
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
-		_, err = svc.LookupPagePathForKind("missing", NodeKindPage)
+		_, err = svc.LookupPagePathForKind(newFixtureRoutePath("missing"), NodeKindPage)
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
-		_, err = svc.EnsurePagePath("user", "missing", "Missing", nil)
+		_, err = svc.EnsurePagePath(newFixtureUserID("user"), newFixtureRoutePath("missing"), "Missing", nil)
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
-		Expect(svc.MoveNode("user", "missing", RootPageID, pageVersionUnchecked)).To(MatchError(ErrTreeNotLoaded))
+		Expect(svc.MoveNode(newFixtureUserID("user"), newFixturePageID("missing"), RootPageID, pageVersionUnchecked)).To(MatchError(ErrTreeNotLoaded))
 		Expect(svc.SortPages(RootPageID, nil)).To(MatchError(ErrTreeNotLoaded))
 
-		bulkErrs := svc.BulkUpdateContent("user", []BulkContentUpdate{{ID: "missing", Content: "body"}})
+		bulkErrs := svc.BulkUpdateContent(newFixtureUserID("user"), []BulkContentUpdate{{ID: newFixturePageID("missing"), Content: "body"}})
 		Expect(bulkErrs).To(ConsistOf(MatchError(ErrTreeNotLoaded)))
-		pages, pageErrs := svc.GetPages([]PageID{"missing"})
+		pages, pageErrs := svc.GetPages([]PageID{newFixturePageID("missing")})
 		Expect(pages).To(Equal([]*Page{nil}))
 		Expect(pageErrs).To(ConsistOf(MatchError(ErrTreeNotLoaded)))
 
@@ -68,9 +68,9 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 	})
 
 	It("index and lookup helpers maintain stable tree results", func() {
-		root := edgeSectionNode(RootPageID, "root", "Root", nil)
-		docs := edgeSectionNode("docs", "docs", "Docs", root)
-		guide := edgePageNode("guide", "Guide", "Guide", docs)
+		root := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
+		docs := edgeSectionNode(newFixturePageID("docs"), newFixtureSlug("docs"), "Docs", root)
+		guide := edgePageNode(newFixturePageID("guide"), newFixtureSlug("Guide"), "Guide", docs)
 		docs.Children = []*PageNode{nil, guide}
 		root.Children = []*PageNode{nil, docs}
 
@@ -78,21 +78,21 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 		svc.tree = root
 		svc.rebuildIndexesLocked()
 
-		Expect(svc.getNodeByIDLocked("")).To(BeNil())
+		Expect(svc.getNodeByIDLocked(newFixturePageID(""))).To(BeNil())
 		Expect(svc.getNodeByIDLocked(RootPageID)).To(BeIdenticalTo(root))
-		Expect(svc.getNodeByIDLocked("guide")).To(BeIdenticalTo(guide))
+		Expect(svc.getNodeByIDLocked(newFixturePageID("guide"))).To(BeIdenticalTo(guide))
 
 		svc.rebuildChildSlugIndexForParentLocked(nil)
 		svc.indexNodeLocked(nil)
 		svc.removeNodeIndexLocked(nil)
-		Expect(svc.findChildBySlugInParentLocked(nil, "guide")).To(BeNil())
-		Expect(svc.findChildBySlugExactInParentLocked(nil, "guide")).To(BeNil())
-		Expect(svc.findChildBySlugAndKindExactInParentLocked(nil, "guide", NodeKindPage)).To(BeNil())
+		Expect(svc.findChildBySlugInParentLocked(nil, newFixtureSlug("guide"))).To(BeNil())
+		Expect(svc.findChildBySlugExactInParentLocked(nil, newFixtureSlug("guide"))).To(BeNil())
+		Expect(svc.findChildBySlugAndKindExactInParentLocked(nil, newFixtureSlug("guide"), NodeKindPage)).To(BeNil())
 
 		delete(svc.childSlugs, docs.ID)
-		Expect(svc.findChildBySlugInParentLocked(docs, "guide")).To(BeIdenticalTo(guide))
-		Expect(svc.findChildBySlugExactInParentLocked(docs, "missing")).To(BeNil())
-		Expect(svc.findChildBySlugAndKindExactInParentLocked(docs, "Guide", NodeKindSection)).To(BeNil())
+		Expect(svc.findChildBySlugInParentLocked(docs, newFixtureSlug("guide"))).To(BeIdenticalTo(guide))
+		Expect(svc.findChildBySlugExactInParentLocked(docs, newFixtureSlug("missing"))).To(BeNil())
+		Expect(svc.findChildBySlugAndKindExactInParentLocked(docs, newFixtureSlug("Guide"), NodeKindSection)).To(BeNil())
 
 		svc.removeNodeIndexLocked(docs)
 		Expect(svc).To(HaveRemovedTreeIndexEntries(newFixturePageID("guide"), newFixturePageID("docs")))
@@ -102,9 +102,9 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 		Expect(svc).To(HaveEmptyTreeIndexState())
 
 		positions := snapshotChildPositions([]*PageNode{nil, guide})
-		Expect(positions).To(HaveKeyWithValue(PageID("guide"), guide.Position))
+		Expect(positions).To(HaveKeyWithValue(newFixturePageID("guide"), guide.Position))
 		restoreChildSnapshot(nil, []*PageNode{guide}, positions)
-		orphanParent := edgeSectionNode("orphan-parent", "orphan-parent", "Orphan Parent", root)
+		orphanParent := edgeSectionNode(newFixturePageID("orphan-parent"), newFixtureSlug("orphan-parent"), "Orphan Parent", root)
 		restoreChildSnapshot(orphanParent, []*PageNode{nil, guide}, map[PageID]int{"guide": 7})
 		Expect(guide).To(WithTransform(func(node *PageNode) PageNode {
 			if node == nil {
@@ -120,32 +120,32 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 	It("service lookup, read, and batch APIs propagate failure states", func() {
 		svc, dataDir := newLoadedService()
 
-		emptyLookup, err := svc.lookupPagePathLocked("", "")
+		emptyLookup, err := svc.lookupPagePathLocked(newFixtureRoutePath(""), newFixtureNodeKind(""))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(emptyLookup).To(MatchPathLookupState(false, false))
 
-		missingLookup, err := svc.lookupPagePathLocked("missing/!!!", "")
+		missingLookup, err := svc.lookupPagePathLocked(newFixtureRoutePath("missing/!!!"), newFixtureNodeKind(""))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(missingLookup).To(MatchPathLookupState(false, false))
 
-		_, err = svc.FindPageByRoutePath("")
+		_, err = svc.FindPageByRoutePath(newFixtureRoutePath(""))
 		Expect(err).To(MatchError(ErrMissingRoutePath))
-		_, err = svc.EnsurePagePath("user", "", "Empty", nil)
+		_, err = svc.EnsurePagePath(newFixtureUserID("user"), newFixtureRoutePath(""), "Empty", nil)
 		Expect(err).To(MatchError(ErrEnsurePagePath))
 
-		pageID, err := svc.CreateNode("user", nil, "Page", "page", ptrKind(NodeKindPage))
+		pageID, err := svc.CreateNode(newFixtureUserID("user"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 		page, err := svc.FindPageByID(*pageID)
 		Expect(err).NotTo(HaveOccurred())
 		currentVersion := page.Version()
 
-		_, err = svc.FindPageByID("missing")
+		_, err = svc.FindPageByID(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrPageNotFound))
-		_, err = svc.GetPage("missing")
+		_, err = svc.GetPage(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrPageNotFound))
-		_, err = svc.ReadPageRaw("missing")
+		_, err = svc.ReadPageRaw(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrPageNotFound))
-		_, err = svc.ResolvePermalinkTarget("missing")
+		_, err = svc.ResolvePermalinkTarget(newFixturePageID("missing"))
 		Expect(err).To(MatchError(ErrPageNotFound))
 
 		relPath, err := svc.ContentPathForNode(page)
@@ -153,7 +153,7 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 		badCanonicalPath := filepath.Join(dataDir, "root", filepath.FromSlash(relPath))
 		Expect(os.WriteFile(badCanonicalPath, []byte("<!-- leafwiki\nversion: 1\n"), 0o644)).To(Succeed())
 
-		errs := svc.BulkUpdateContent("bulk-user", []BulkContentUpdate{{ID: "missing", Content: "body"}, {ID: *pageID, Content: "new body"}})
+		errs := svc.BulkUpdateContent(newFixtureUserID("bulk-user"), []BulkContentUpdate{{ID: newFixturePageID("missing"), Content: "body"}, {ID: *pageID, Content: "new body"}})
 		Expect(errs).To(HaveExactElements(
 			MatchError(ErrPageNotFound),
 			MatchError(ErrLoadMarkdownFile),
@@ -162,7 +162,7 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 		Expect(err).NotTo(HaveOccurred())
 		Expect(afterFailedBulk.Version()).To(Equal(currentVersion))
 
-		gotPages, gotErrs := svc.GetPages([]PageID{"missing", *pageID})
+		gotPages, gotErrs := svc.GetPages([]PageID{newFixturePageID("missing"), *pageID})
 		Expect(gotPages).To(HaveExactElements(BeNil(), BeNil()))
 		Expect(gotErrs).To(HaveExactElements(
 			MatchError(ErrPageNotFound),
@@ -175,7 +175,7 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("legacy root comparison distinguishes equivalent roots", func() {
+	It(")legacy root comparison distinguishes equivalent roots", func() {
 		base := tempTreeDir()
 		sourceDir := filepath.Join(base, "source")
 		targetDir := filepath.Join(base, "target")
@@ -217,18 +217,18 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 
 		Expect(configuredRootMissingLegacyContentResult(svc, nil)).To(Succeed())
 
-		legacy := &PageNode{ID: RootPageID, Slug: "root", Kind: NodeKindSection, Children: []*PageNode{
-			{ID: "page", Slug: "page", Title: "Page", Kind: NodeKindPage},
-			{ID: "section", Slug: "section", Title: "Section", Kind: NodeKindSection},
-			{ID: "legacy", Slug: "legacy", Title: "Legacy", Kind: ""},
+		legacy := &PageNode{ID: RootPageID, Slug: newFixtureSlug("root"), Kind: NodeKindSection, Children: []*PageNode{
+			{ID: newFixturePageID("page"), Slug: newFixtureSlug("page"), Title: "Page", Kind: NodeKindPage},
+			{ID: newFixturePageID("section"), Slug: newFixtureSlug("section"), Title: "Section", Kind: NodeKindSection},
+			{ID: newFixturePageID("legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: ""},
 		}}
 		paths, err := svc.expectedLegacyContentPaths(legacy)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(paths).To(HaveLen(3))
 
-		_, err = svc.expectedLegacyContentPaths(&PageNode{ID: "bad", Slug: "", Kind: NodeKindPage})
+		_, err = svc.expectedLegacyContentPaths(&PageNode{ID: newFixturePageID("bad"), Slug: newFixtureSlug(""), Kind: NodeKindPage})
 		Expect(err).To(MatchError(ErrSlugEmpty))
-		_, err = svc.expectedLegacyContentPaths(&PageNode{ID: "bad", Slug: "bad", Kind: NodeKind("unknown")})
+		_, err = svc.expectedLegacyContentPaths(&PageNode{ID: newFixturePageID("bad"), Slug: newFixtureSlug("bad"), Kind: newFixtureNodeKind("unknown")})
 		Expect(err).To(MatchError(ErrLegacyUnknownKind))
 
 		Expect(configuredRootMissingLegacyContentResult(svc, legacy)).To(Succeed())
@@ -249,9 +249,9 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 		mdFile := markdown.NewMarkdownFile(targetPage, "# Page", markdown.Frontmatter{LeafWikiID: "page", LeafWikiTitle: "Page"})
 		Expect(mdFile.WriteToFile()).To(Succeed())
 		Expect(os.WriteFile(sourcePage, []byte(mustReadString(targetPage)), 0o644)).To(Succeed())
-		Expect(legacyTargetMatchesNodeResult(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: "page", nodeTitle: "Page"})).To(Succeed())
+		Expect(legacyTargetMatchesNodeResult(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: newFixturePageID("page"), nodeTitle: "Page"})).To(Succeed())
 
-		Expect(legacyTargetDiffersFromNodeResult(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: "other", nodeTitle: "Page"})).To(Succeed())
+		Expect(legacyTargetDiffersFromNodeResult(legacyContentPath{sourceFile: sourcePage, targetFile: targetPage, nodeID: newFixturePageID("other"), nodeTitle: "Page"})).To(Succeed())
 
 		Expect(configuredRootHasLegacyContentResult(svc, legacy)).To(Succeed())
 	})

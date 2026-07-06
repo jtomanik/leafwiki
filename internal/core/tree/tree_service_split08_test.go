@@ -17,30 +17,30 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node updates path lookup", func() {
 		svc, _ := newLoadedService()
 
-		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
+		docsID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
 			err)
 
-		archiveID, err := svc.CreateNode("system", nil, "Archive", "archive", ptrKind(NodeKindSection))
+		archiveID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Archive", newFixtureSlug("archive"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode archive failed: %v",
 
 			err,
 		)
 
-		guideID, err := svc.CreateNode("system", docsID, "Guide", "guide", ptrKind(NodeKindPage))
+		guideID, err := svc.CreateNode(newFixtureUserID("system"), docsID, "Guide", newFixtureSlug("guide"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode guide failed: %v",
 
 			err)
 		{
 
-			err := svc.MoveNode("system", *guideID, *archiveID, pageVersionUnchecked)
+			err := svc.MoveNode(newFixtureUserID("system"), *guideID, *archiveID, pageVersionUnchecked)
 			Expect(err).To(Succeed(), "MoveNode failed: %v",
 
 				err)
 		}
 
-		oldLookup, err := svc.LookupPagePath("docs/guide")
+		oldLookup, err := svc.LookupPagePath(newFixtureRoutePath("docs/guide"))
 		Expect(err).To(Succeed(), "LookupPagePath old path failed: %v",
 
 			err)
@@ -49,7 +49,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 			matchMissingPathSegment(),
 		)), "expected old path to stop resolving after move")
 
-		newLookup, err := svc.LookupPagePath("archive/guide")
+		newLookup, err := svc.LookupPagePath(newFixtureRoutePath("archive/guide"))
 		Expect(err).To(Succeed(), "LookupPagePath new path failed: %v",
 
 			err)
@@ -85,17 +85,17 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 				err)
 		}
 
-		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
+		docsID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode docs failed: %v",
 
 			err)
 
-		alphaID, err := svc.CreateNode("system", nil, "Alpha", "alpha", ptrKind(NodeKindPage))
+		alphaID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Alpha", newFixtureSlug("alpha"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode alpha failed: %v",
 
 			err)
 
-		betaID, err := svc.CreateNode("system", docsID, "Beta", "beta", ptrKind(NodeKindPage))
+		betaID, err := svc.CreateNode(newFixtureUserID("system"), docsID, "Beta", newFixtureSlug("beta"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode beta failed: %v",
 
 			err)
@@ -170,7 +170,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 				err)
 		}
 
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -183,8 +183,8 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		node.Metadata = PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
-			CreatorID:    "alice",
-			LastAuthorID: "bob",
+			CreatorID:    newFixtureUserID("alice"),
+			LastAuthorID: newFixtureUserID("bob"),
 		}
 
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
@@ -258,7 +258,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 				err)
 		}
 
-		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page1", newFixtureSlug("page1"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -382,7 +382,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 				err)
 		}
 
-		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page1", newFixtureSlug("page1"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -395,8 +395,8 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		node.Metadata = PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 21, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 21, 11, 16, 31, 0, time.UTC),
-			CreatorID:    "alice",
-			LastAuthorID: "bob",
+			CreatorID:    newFixtureUserID("alice"),
+			LastAuthorID: newFixtureUserID("bob"),
 		}
 
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())

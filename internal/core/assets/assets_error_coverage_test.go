@@ -49,44 +49,44 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 		DeferCleanup(func() {
 			Expect(os.Chmod(permissionAssetsDir, 0o755)).To(Succeed())
 		})
-		_, err := permissionService.SaveAssetForPage(&tree.PageNode{ID: "permission-denied"}, newTestMultipartFile([]byte("asset")), assetName("asset.png"), testAssetMaxBytes)
+		_, err := permissionService.SaveAssetForPage(&tree.PageNode{ID: newFixturePageID("permission-denied")}, newTestMultipartFile([]byte("asset")), assetName("asset.png"), testAssetMaxBytes)
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetUploadFailed))
 		Expect(os.Chmod(permissionAssetsDir, 0o755)).To(Succeed())
 
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
 		Expect(os.WriteFile(filepath.Join(service.GetAssetsDir(), "blocked"), []byte("file"), 0o600)).To(Succeed())
 
-		_, err = service.SaveAssetForPage(&tree.PageNode{ID: "blocked/child"}, newTestMultipartFile([]byte("asset")), assetName("asset.png"), testAssetMaxBytes)
+		_, err = service.SaveAssetForPage(&tree.PageNode{ID: newFixturePageID("blocked/child")}, newTestMultipartFile([]byte("asset")), assetName("asset.png"), testAssetMaxBytes)
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetUploadFailed))
 
-		_, err = service.SaveAssetForPage(&tree.PageNode{ID: "stream-error"}, failingMultipartFile{Reader: bytes.NewReader([]byte("asset"))}, assetName("asset.png"), shared.MaxBytes(1024))
+		_, err = service.SaveAssetForPage(&tree.PageNode{ID: newFixturePageID("stream-error")}, failingMultipartFile{Reader: bytes.NewReader([]byte("asset"))}, assetName("asset.png"), shared.MaxBytes(1024))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetUploadFailed))
 	})
 
 	It("handles malformed asset entries for list, read, and delete operations", func() {
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
 
-		Expect(service.DeleteAllAssetsForPage(&tree.PageNode{ID: "never-uploaded"})).To(Succeed())
-		loopPage := &tree.PageNode{ID: "loop-page"}
+		Expect(service.DeleteAllAssetsForPage(&tree.PageNode{ID: newFixturePageID("never-uploaded")})).To(Succeed())
+		loopPage := &tree.PageNode{ID: newFixturePageID("loop-page")}
 		loopPath := filepath.Join(service.GetAssetsDir(), loopPage.ID.String())
 		Expect(os.Symlink(loopPath, loopPath)).To(Succeed())
 		Expect(service.DeleteAllAssetsForPage(loopPage)).To(Succeed())
 
-		listPage := &tree.PageNode{ID: "list-page"}
+		listPage := &tree.PageNode{ID: newFixturePageID("list-page")}
 		Expect(os.WriteFile(filepath.Join(service.GetAssetsDir(), listPage.ID.String()), []byte("not a directory"), 0o600)).To(Succeed())
 		files, err := service.ListAssetsForPage(listPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(files).To(BeEmpty())
 
-		readPage := &tree.PageNode{ID: "read-page"}
+		readPage := &tree.PageNode{ID: newFixturePageID("read-page")}
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), readPage.ID.String(), "note.txt"), 0o755)).To(Succeed())
 		_, err = service.ReadAssetForPage(readPage, assetName("note.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetReadFailed))
 
-		err = service.DeleteAsset(&tree.PageNode{ID: "missing-page"}, assetName("missing.txt"))
+		err = service.DeleteAsset(&tree.PageNode{ID: newFixturePageID("missing-page")}, assetName("missing.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 
-		deletePage := &tree.PageNode{ID: "delete-page"}
+		deletePage := &tree.PageNode{ID: newFixturePageID("delete-page")}
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), deletePage.ID.String(), "blocked.txt", "child"), 0o755)).To(Succeed())
 		err = service.DeleteAsset(deletePage, assetName("blocked.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetDeleteFailed))
@@ -95,17 +95,17 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 	It("returns localized rename failures for missing pages, target stat errors, and rename syscall errors", func() {
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
 
-		_, err := service.RenameAsset(&tree.PageNode{ID: "missing-page"}, assetName("old.txt"), assetName("new.txt"))
+		_, err := service.RenameAsset(&tree.PageNode{ID: newFixturePageID("missing-page")}, assetName("old.txt"), assetName("new.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 
-		statErrorPage := &tree.PageNode{ID: "stat-error-page"}
-		writeAssetFile(service, statErrorPage, "old.txt", []byte("old"))
+		statErrorPage := &tree.PageNode{ID: newFixturePageID("stat-error-page")}
+		writeAssetFile(service, statErrorPage, assetName("old.txt"), []byte("old"))
 		statErrorDir := filepath.Join(service.GetAssetsDir(), statErrorPage.ID.String())
 		Expect(os.Symlink("new.txt", filepath.Join(statErrorDir, "new.txt"))).To(Succeed())
 		_, err = service.RenameAsset(statErrorPage, assetName("old.txt"), assetName("new.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetRenameFailed))
 
-		renameErrorPage := &tree.PageNode{ID: "rename-error-page"}
+		renameErrorPage := &tree.PageNode{ID: newFixturePageID("rename-error-page")}
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), renameErrorPage.ID.String()), 0o755)).To(Succeed())
 		tooLongName := strings.Repeat("a", 4096) + ".txt"
 		_, err = service.RenameAsset(renameErrorPage, assetName(tooLongName), assetName("renamed.txt"))
@@ -115,27 +115,27 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 	It("returns copy failures for malformed source and target filesystem states", func() {
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
 
-		source := &tree.PageNode{ID: "source"}
-		writeAssetFile(service, source, "one.txt", []byte("one"))
+		source := &tree.PageNode{ID: newFixturePageID("source")}
+		writeAssetFile(service, source, assetName("one.txt"), []byte("one"))
 		assetsDir := service.GetAssetsDir()
 		Expect(os.Chmod(assetsDir, 0o555)).To(Succeed())
 		DeferCleanup(func() {
 			Expect(os.Chmod(assetsDir, 0o755)).To(Succeed())
 		})
-		err := service.CopyAllAssets(source, &tree.PageNode{ID: "blocked-target"})
+		err := service.CopyAllAssets(source, &tree.PageNode{ID: newFixturePageID("blocked-target")})
 		Expect(err).To(Satisfy(wrapsAssetPathError))
 		Expect(os.Chmod(assetsDir, 0o755)).To(Succeed())
 
-		sourceFilePage := &tree.PageNode{ID: "source-file"}
+		sourceFilePage := &tree.PageNode{ID: newFixturePageID("source-file")}
 		Expect(os.WriteFile(filepath.Join(service.GetAssetsDir(), sourceFilePage.ID.String()), []byte("not a directory"), 0o600)).To(Succeed())
-		err = service.CopyAllAssets(sourceFilePage, &tree.PageNode{ID: "target"})
+		err = service.CopyAllAssets(sourceFilePage, &tree.PageNode{ID: newFixturePageID("target")})
 		Expect(err).To(Satisfy(wrapsAssetPathError))
 
-		danglingSource := &tree.PageNode{ID: "dangling-source"}
+		danglingSource := &tree.PageNode{ID: newFixturePageID("dangling-source")}
 		danglingDir := filepath.Join(service.GetAssetsDir(), danglingSource.ID.String())
 		Expect(os.MkdirAll(danglingDir, 0o755)).To(Succeed())
 		Expect(os.Symlink("missing.txt", filepath.Join(danglingDir, "broken.txt"))).To(Succeed())
-		err = service.CopyAllAssets(danglingSource, &tree.PageNode{ID: "dangling-target"})
+		err = service.CopyAllAssets(danglingSource, &tree.PageNode{ID: newFixturePageID("dangling-target")})
 		Expect(err).To(Satisfy(wrapsAssetPathError))
 
 		directSourceDir := filepath.Join(tempAssetDir(), "direct-source")

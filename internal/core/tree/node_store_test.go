@@ -58,20 +58,20 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		store := NewNodeStore(tmp)
 
 		tree := &PageNode{
-			ID:    "root",
-			Slug:  "root",
+			ID:    newFixturePageID("root"),
+			Slug:  newFixtureSlug("root"),
 			Title: "root",
 			Kind:  NodeKindSection,
 			Children: []*PageNode{
 				{
-					ID:    "s1",
-					Slug:  "sec",
+					ID:    newFixturePageID("s1"),
+					Slug:  newFixtureSlug("sec"),
 					Title: "Section",
 					Kind:  NodeKindSection,
 					Children: []*PageNode{
 						{
-							ID:    "p1",
-							Slug:  "page",
+							ID:    newFixturePageID("p1"),
+							Slug:  newFixtureSlug("page"),
 							Title: "Page",
 							Kind:  NodeKindPage,
 						},
@@ -100,8 +100,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
-		parent := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		entry := &PageNode{ID: "outside", Slug: "../outside", Title: "Outside", Kind: NodeKindPage, Parent: parent}
+		parent := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		entry := &PageNode{ID: newFixturePageID("outside"), Slug: newFixtureSlug("../outside"), Title: "Outside", Kind: NodeKindPage, Parent: parent}
 
 		err := store.CreatePage(parent, entry)
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
@@ -118,8 +118,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
-		parent := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		entry := &PageNode{ID: "docs", Slug: "docs", Title: "Docs", Kind: NodeKindPage, Parent: parent}
+		parent := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		entry := &PageNode{ID: newFixturePageID("docs"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindPage, Parent: parent}
 		{
 			err := store.CreatePage(parent, entry)
 			Expect(err).To(Succeed(), "CreatePage failed: %v",
@@ -127,7 +127,7 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 				err)
 		}
 
-		err := store.RenameNode(entry, "../outside")
+		err := store.RenameNode(entry, newFixtureSlug("../outside"))
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err)
@@ -143,7 +143,7 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		baseDir := tempTreeDir()
 		rootDir := filepath.Join(baseDir, "content")
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
-		entry := &PageNode{ID: "loose", Slug: "loose", Title: "Loose", Kind: NodeKindPage}
+		entry := &PageNode{ID: newFixturePageID("loose"), Slug: newFixtureSlug("loose"), Title: "Loose", Kind: NodeKindPage}
 
 		err := store.UpsertContent(entry, "# Loose")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
@@ -186,9 +186,9 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		}
 
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		docs := &PageNode{ID: "docs", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
-		child := &PageNode{ID: "child", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: docs}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		docs := &PageNode{ID: newFixturePageID("docs"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
+		child := &PageNode{ID: newFixturePageID("child"), Slug: newFixtureSlug("child"), Title: "Child", Kind: NodeKindPage, Parent: docs}
 
 		err := store.CreatePage(docs, child)
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
@@ -231,9 +231,9 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		}
 
 		store := NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(baseDir, "data"), RootDir: rootDir})
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		docs := &PageNode{ID: "docs", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
-		child := &PageNode{ID: "child", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: docs}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		docs := &PageNode{ID: newFixturePageID("docs"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
+		child := &PageNode{ID: newFixturePageID("child"), Slug: newFixtureSlug("child"), Title: "Child", Kind: NodeKindPage, Parent: docs}
 
 		err := store.UpsertContent(child, "# Child")
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
@@ -251,13 +251,13 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		store := NewNodeStore(tmp)
 
 		root := &PageNode{
-			ID:    "root",
-			Slug:  "root",
+			ID:    newFixturePageID("root"),
+			Slug:  newFixtureSlug("root"),
 			Title: "root",
 			Kind:  NodeKindSection,
 			Children: []*PageNode{
-				{ID: "a"},
-				{ID: "b"},
+				{ID: newFixturePageID("a")},
+				{ID: newFixturePageID("b")},
 			},
 		}
 		{
@@ -284,8 +284,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "page1", Slug: "docs", Title: "Docs", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("page1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindPage, Parent: root}
 
 		err := store.SaveChildOrder(page)
 
@@ -311,18 +311,18 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
 		sec := &PageNode{
-			ID:     "sec1",
-			Slug:   "docs",
+			ID:     newFixturePageID("sec1"),
+			Slug:   newFixtureSlug("docs"),
 			Title:  "Docs",
 			Kind:   NodeKindSection,
 			Parent: root,
 			Metadata: PageMetadata{
 				CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 				UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
-				CreatorID:    "alice",
-				LastAuthorID: "bob",
+				CreatorID:    newFixtureUserID("alice"),
+				LastAuthorID: newFixtureUserID("bob"),
 			},
 		}
 		{
@@ -362,16 +362,16 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		rootPageWrong := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindPage}
-		sec := &PageNode{ID: "sec1", Slug: "docs", Title: "Docs", Kind: NodeKindSection}
+		rootPageWrong := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindPage}
+		sec := &PageNode{ID: newFixturePageID("sec1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection}
 		{
 
 			err := store.CreateSection(rootPageWrong, sec)
 			Expect(err).To(MatchError(ErrInvalidOperation), "expected parent section validation error, got %v", err)
 		}
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		pageWrong := &PageNode{ID: "x", Slug: "x", Title: "X", Kind: NodeKindPage}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		pageWrong := &PageNode{ID: newFixturePageID("x"), Slug: newFixtureSlug("x"), Title: "X", Kind: NodeKindPage}
 		{
 			err := store.CreateSection(root, pageWrong)
 			Expect(err).To(MatchError(ErrInvalidOperation), "expected section entry validation error, got %v", err)
@@ -385,8 +385,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "hello", Title: "Hello World", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("hello"), Title: "Hello World", Kind: NodeKindPage, Parent: root}
 		{
 
 			err := store.CreatePage(root, page)

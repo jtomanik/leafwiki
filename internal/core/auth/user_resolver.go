@@ -6,7 +6,7 @@ import (
 )
 
 type UserLabel struct {
-	ID       string `json:"id"`
+	ID       UserID `json:"id"`
 	Username string `json:"username"`
 }
 
@@ -28,7 +28,7 @@ func NewUserResolver(userService *UserService) (*UserResolver, error) {
 	}
 
 	for _, user := range users {
-		r.resolved[UserIDFromString(user.ID)] = &UserLabel{
+		r.resolved[user.ID] = &UserLabel{
 			ID:       user.ID,
 			Username: user.Username,
 		}
@@ -78,7 +78,7 @@ func (r *UserResolver) Reload() error {
 
 	newMap := make(map[UserID]*UserLabel, len(users))
 	for _, u := range users {
-		newMap[UserIDFromString(u.ID)] = &UserLabel{ID: u.ID, Username: u.Username}
+		newMap[u.ID] = &UserLabel{ID: u.ID, Username: u.Username}
 	}
 
 	r.mu.Lock()

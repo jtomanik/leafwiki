@@ -16,7 +16,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 
 	It("rolls back restore attempts when orchestration seams fail", func() {
 		service, treeService, _ := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "before")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "before")
 		contentHash, err := service.store.SaveContentBlob([]byte("after"))
 		Expect(err).NotTo(HaveOccurred())
 		manifestHash, err := service.store.SaveAssetManifest(nil)
@@ -113,7 +113,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 
 	It("propagates restore-revision recording failures", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
 
 		contentSaveErr := errors.New("content save failed")
@@ -159,7 +159,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 
 	It("reports batch, manifest fallback, integrity, and restore failures", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		page, err := treeService.GetPage(pageID)
 		Expect(err).NotTo(HaveOccurred())
 

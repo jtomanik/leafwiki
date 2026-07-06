@@ -98,7 +98,7 @@ var _ = ginkgo.Describe("auth seam failure behavior", ginkgo.Label("integration"
 			restoreUser()
 
 			restoreUser = setAuthSeam(&authUserStoreGetUserByID, func(*UserStore, UserID) (*User, error) {
-				return &User{ID: "user-1", Username: "editor", Role: RoleEditor}, nil
+				return &User{ID: newFixtureUserID("user-1"), Username: "editor", Role: RoleEditor}, nil
 			})
 			restoreMark := setAuthSeam(&authAPIKeyStoreMarkAPIKeyUsed, func(*APIKeyStore, APIKeyID, time.Time) error {
 				return ErrAPIKeyNotFound
@@ -231,7 +231,7 @@ var _ = ginkgo.Describe("auth seam failure behavior", ginkgo.Label("integration"
 			})
 			_, err := generateJTI()
 			Expect(err).To(MatchError(randomErr))
-			_, _, _, err = service.generateToken(&User{ID: "user-1"}, time.Minute, "access")
+			_, _, _, err = service.generateToken(&User{ID: newFixtureUserID("user-1")}, time.Minute, "access")
 			Expect(err).To(MatchError(randomErr))
 			restoreRand()
 
@@ -239,7 +239,7 @@ var _ = ginkgo.Describe("auth seam failure behavior", ginkgo.Label("integration"
 			restoreSign := setAuthSeam(&authSignJWT, func(*jwt.Token, []byte) (string, error) {
 				return "", signErr
 			})
-			_, _, _, err = service.generateToken(&User{ID: "user-1"}, time.Minute, "access")
+			_, _, _, err = service.generateToken(&User{ID: newFixtureUserID("user-1")}, time.Minute, "access")
 			Expect(err).To(MatchError(signErr))
 			restoreSign()
 		})

@@ -38,7 +38,7 @@ leafwiki_last_author_id: bob
 
 			err)
 
-		page := findChildBySlug(tree, "page")
+		page := findChildBySlug(tree, newFixtureSlug("page"))
 		{
 			got := page.Metadata.CreatedAt.UTC().Format(time.RFC3339)
 			Expect(got).To(Equal(wantTime.

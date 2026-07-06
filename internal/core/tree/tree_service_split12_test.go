@@ -25,13 +25,13 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 				err)
 		}
 
-		parentID, err := svc.CreateNode("u", nil, "Parent", "parent", ptrKind(NodeKindSection))
+		parentID, err := svc.CreateNode(newFixtureUserID("u"), nil, "Parent", newFixtureSlug("parent"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode parent: %v",
 
 			err)
 		{
 
-			_, err := svc.CreateNode("u", parentID, "Child", "child", ptrKind(NodeKindPage))
+			_, err := svc.CreateNode(newFixtureUserID("u"), parentID, "Child", newFixtureSlug("child"), ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode child: %v",
 
 				err)
@@ -63,19 +63,19 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get pages preserves order and aligns errors", func() {
 		svc, _ := newLoadedService()
 
-		firstID, err := svc.CreateNode("system", nil, "First", "first", ptrKind(NodeKindPage))
+		firstID, err := svc.CreateNode(newFixtureUserID("system"), nil, "First", newFixtureSlug("first"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode(first) failed: %v",
 
 			err)
 
-		secondID, err := svc.CreateNode("system", nil, "Second", "second", ptrKind(NodeKindPage))
+		secondID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Second", newFixtureSlug("second"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode(second) failed: %v",
 
 			err,
 		)
 
-		pages, errs := svc.GetPages([]PageID{*secondID, PageID("missing-id"), *firstID})
-		Expect(pages).To(HaveLen(3), "unexpected page result length")
+		pages, errs := svc.GetPages([]PageID{*secondID, newFixturePageID("missing-id"), *firstID})
+		Expect(pages).To(HaveLen(3), ")unexpected page result length")
 		Expect(errs).To(HaveLen(3), "unexpected error result length")
 		pageResults := make([]pageLookupResult, 0, len(pages))
 		for i := range pages {
@@ -103,12 +103,12 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("bulk update content treats frontmatter like input as body", func() {
 		svc, _ := newLoadedService()
 
-		firstID, err := svc.CreateNode("system", nil, "First", "first", ptrKind(NodeKindPage))
+		firstID, err := svc.CreateNode(newFixtureUserID("system"), nil, "First", newFixtureSlug("first"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode(first) failed: %v",
 
 			err)
 
-		secondID, err := svc.CreateNode("system", nil, "Second", "second", ptrKind(NodeKindPage))
+		secondID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Second", newFixtureSlug("second"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode(second) failed: %v",
 
 			err,
@@ -121,10 +121,10 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 		// Content that looks like invalid YAML frontmatter is now stored as plain
 		// body text — UpsertContent no longer parses frontmatter from UI content.
-		errs := svc.BulkUpdateContent("bulk-user", []BulkContentUpdate{
+		errs := svc.BulkUpdateContent(newFixtureUserID("bulk-user"), []BulkContentUpdate{
 			{ID: *firstID, Content: "updated first"},
 			{ID: *secondID, Content: "---\ninvalid: [\n---\nbody"},
-			{ID: "missing-id", Content: "ignored"},
+			{ID: newFixturePageID("missing-id"), Content: "ignored"},
 		})
 		Expect(errs).To(HaveExactElements(
 			Succeed(),
@@ -176,21 +176,21 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
-		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*id)
 		currentVersion := node.Version()
 		{
 
 			// First update succeeds — advances the version.
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersionFromString(currentVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", newFixtureSlug("page"), nil, PageVersionFromString(currentVersion), false)
 			Expect(err).To(Succeed(), "first UpdateNode failed: %v",
 
 				err)
 		}
 
 		// Second update with the same (now stale) version must fail.
-		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", Slug("page"), nil, PageVersionFromString(currentVersion), false)
+		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", newFixtureSlug("page"), nil, PageVersionFromString(currentVersion), false)
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -201,9 +201,9 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
-		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
-		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersion(""), false)
+		err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", newFixtureSlug("page"), nil, newFixturePageVersion(""), false)
 		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
 
 			err)
@@ -214,20 +214,20 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
-		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*id)
 		staleVersion := node.Version()
 		{
 
 			// Advance the version via an update.
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersionFromString(staleVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", newFixtureSlug("page"), nil, PageVersionFromString(staleVersion), false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
 		}
 
-		err := svc.DeleteNode("system", *id, false, PageVersionFromString(staleVersion))
+		err := svc.DeleteNode(newFixtureUserID("system"), *id, false, PageVersionFromString(staleVersion))
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -238,9 +238,9 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
-		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
-		err := svc.DeleteNode("system", *id, false, "")
+		err := svc.DeleteNode(newFixtureUserID("system"), *id, false, "")
 		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
 
 			err)
@@ -251,21 +251,21 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
-		destID, _ := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindPage))
-		moveID, _ := svc.CreateNode("system", nil, "Move", "move", ptrKind(NodeKindPage))
+		destID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Dest", newFixtureSlug("dest"), ptrKind(NodeKindPage))
+		moveID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Move", newFixtureSlug("move"), ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*moveID)
 		staleVersion := node.Version()
 		{
 
 			// Advance the version.
-			err := svc.UpdateNode(newFixtureUserID("system"), *moveID, "Move v2", Slug("move"), nil, PageVersionFromString(staleVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *moveID, "Move v2", newFixtureSlug("move"), nil, PageVersionFromString(staleVersion), false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
 		}
 
-		err := svc.MoveNode("system", *moveID, *destID, PageVersionFromString(staleVersion))
+		err := svc.MoveNode(newFixtureUserID("system"), *moveID, *destID, PageVersionFromString(staleVersion))
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -276,10 +276,10 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("move node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
-		destID, _ := svc.CreateNode("system", nil, "Dest", "dest", ptrKind(NodeKindPage))
-		moveID, _ := svc.CreateNode("system", nil, "Move", "move", ptrKind(NodeKindPage))
+		destID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Dest", newFixtureSlug("dest"), ptrKind(NodeKindPage))
+		moveID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Move", newFixtureSlug("move"), ptrKind(NodeKindPage))
 
-		err := svc.MoveNode("system", *moveID, *destID, "")
+		err := svc.MoveNode(newFixtureUserID("system"), *moveID, *destID, "")
 		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
 
 			err)
@@ -290,20 +290,20 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node stale version returns err version conflict", func() {
 		svc, _ := newLoadedService()
-		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
 		node, _ := svc.FindPageByID(*id)
 		staleVersion := node.Version()
 		{
 
 			// Advance the version.
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, PageVersionFromString(staleVersion), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", newFixtureSlug("page"), nil, PageVersionFromString(staleVersion), false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
 		}
 
-		err := svc.ConvertNode("system", *id, NodeKindSection, PageVersionFromString(staleVersion))
+		err := svc.ConvertNode(newFixtureUserID("system"), *id, NodeKindSection, PageVersionFromString(staleVersion))
 		Expect(err).To(MatchError(ErrVersionConflict), "expected ErrVersionConflict, got %v",
 
 			err)
@@ -314,9 +314,9 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("convert node missing version returns err version required", func() {
 		svc, _ := newLoadedService()
-		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
-		err := svc.ConvertNode("system", *id, NodeKindSection, "")
+		err := svc.ConvertNode(newFixtureUserID("system"), *id, NodeKindSection, "")
 		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
 
 			err)
@@ -327,11 +327,11 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("version unchecked bypasses version check", func() {
 		svc, _ := newLoadedService()
-		id, _ := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 		{
 
 			// The tree-owned unchecked operation must always succeed regardless of actual node version.
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", Slug("page"), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v2", newFixtureSlug("page"), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "expected unchecked operation to bypass check, got: %v",
 
 				err,
@@ -339,7 +339,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		}
 		{
 
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", Slug("page"), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Page v3", newFixtureSlug("page"), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "expected unchecked operation to bypass check on second call, got: %v",
 
 				err)
@@ -354,7 +354,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get page raw content contains canonical metadata and body", func() {
 		svc, _ := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "Raw Test", "raw-test", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Raw Test", newFixtureSlug("raw-test"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode: %v",
 
 			err,
@@ -367,7 +367,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 			err)
 		{
 
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Raw Test", Slug("raw-test"), &body, PageVersionFromString(page.Version()), false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Raw Test", newFixtureSlug("raw-test"), &body, PageVersionFromString(page.Version()), false)
 			Expect(err).To(Succeed(), "UpdateNode: %v",
 
 				err,
@@ -397,12 +397,12 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get pages raw content populated for all", func() {
 		svc, _ := newLoadedService()
 
-		id1, err := svc.CreateNode("system", nil, "Page One", "page-one", ptrKind(NodeKindPage))
+		id1, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page One", newFixtureSlug("page-one"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode 1: %v",
 
 			err)
 
-		id2, err := svc.CreateNode("system", nil, "Page Two", "page-two", ptrKind(NodeKindPage))
+		id2, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page Two", newFixtureSlug("page-two"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode 2: %v",
 
 			err)

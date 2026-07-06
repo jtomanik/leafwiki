@@ -25,9 +25,9 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 			newFixtureSlug("docs"),
 			newFixtureSlug("guide"),
 		}))
-		Expect(RoutePathFromString("").WithLeafSlug("home")).To(Equal(RoutePathFromString("home")))
-		Expect(RoutePathFromString("docs").WithLeafSlug("guide")).To(Equal(RoutePathFromString("guide")))
-		Expect(RoutePathFromString("docs/old").WithLeafSlug("guide")).To(Equal(RoutePathFromString("docs/guide")))
+		Expect(RoutePathFromString("").WithLeafSlug(newFixtureSlug("home"))).To(Equal(RoutePathFromString("home")))
+		Expect(RoutePathFromString("docs").WithLeafSlug(newFixtureSlug("guide"))).To(Equal(RoutePathFromString("guide")))
+		Expect(RoutePathFromString("docs/old").WithLeafSlug(newFixtureSlug("guide"))).To(Equal(RoutePathFromString("docs/guide")))
 		Expect(RoutePathFromString("").MarkdownContentPath(NodeKindPage)).To(Equal(MarkdownPathFromString("index.md")))
 		Expect(RoutePathFromString("").LeafSlug()).To(BeEmpty())
 		Expect(WorkspaceSourcePathFromString("readme.md").Dir()).To(BeEmpty())
@@ -61,32 +61,32 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 		Expect((&Page{}).Version()).To(BeEmpty())
 		Expect((&Page{PageNode: &PageNode{}}).Version()).To(BeEmpty())
 
-		root := &PageNode{ID: RootPageID, Slug: "root", Title: "Root"}
-		docs := &PageNode{ID: newFixturePageID("docs"), Slug: "Docs", Title: "Docs", Parent: root, Kind: NodeKindSection}
-		guide := &PageNode{ID: newFixturePageID("guide"), Slug: "guide", Title: "Guide", Parent: docs, Kind: NodeKindPage}
+		root := &PageNode{ID: RootPageID, Slug: newFixtureSlug("root"), Title: "Root"}
+		docs := &PageNode{ID: newFixturePageID("docs"), Slug: newFixtureSlug("Docs"), Title: "Docs", Parent: root, Kind: NodeKindSection}
+		guide := &PageNode{ID: newFixturePageID("guide"), Slug: newFixtureSlug("guide"), Title: "Guide", Parent: docs, Kind: NodeKindPage}
 		docs.Children = []*PageNode{guide}
 		root.Children = []*PageNode{docs}
 
-		Expect(docs).To(haveChildSlugState("docs", childSlugAvailable))
-		Expect(docs).To(haveChildSlugState("GUIDE", childSlugTaken))
+		Expect(docs).To(haveChildSlugState(newFixtureSlug("docs"), childSlugAvailable))
+		Expect(docs).To(haveChildSlugState(newFixtureSlug("GUIDE"), childSlugTaken))
 		Expect(root).To(haveChildMembership(newFixturePageID("guide"), childMembershipDirect, childMembershipAbsent))
 		Expect(root).To(haveChildMembership(newFixturePageID("guide"), childMembershipRecursive, childMembershipPresent))
 		Expect(root.CalculatePath()).To(BeEmpty())
-		Expect((&PageNode{ID: newFixturePageID("orphan"), Slug: "orphan"}).CalculateRoutePath()).To(Equal(RoutePathFromString("orphan")))
+		Expect((&PageNode{ID: newFixturePageID("orphan"), Slug: newFixtureSlug("orphan")}).CalculateRoutePath()).To(Equal(RoutePathFromString("orphan")))
 
 		hashable := &PageNode{
 			ID:       newFixturePageID("hash-root"),
-			Slug:     "hash-root",
-			Children: []*PageNode{nil, &PageNode{ID: newFixturePageID("child"), Slug: "child"}},
+			Slug:     newFixtureSlug("hash-root"),
+			Children: []*PageNode{nil, &PageNode{ID: newFixturePageID("child"), Slug: newFixtureSlug("child")}},
 		}
 		Expect(hashable.Hash()).To(HaveLen(64))
 
 		tieSorted := &PageNode{
 			ID:   newFixturePageID("tie-root"),
-			Slug: "tie-root",
+			Slug: newFixtureSlug("tie-root"),
 			Children: []*PageNode{
-				{ID: newFixturePageID("b"), Slug: "b", Position: 0},
-				{ID: newFixturePageID("a"), Slug: "a", Position: 0},
+				{ID: newFixturePageID("b"), Slug: newFixtureSlug("b"), Position: 0},
+				{ID: newFixturePageID("a"), Slug: newFixtureSlug("a"), Position: 0},
 			},
 		}
 		Expect(tieSorted.hashSum(false)).NotTo(Equal(tieSorted.hashSum(true)))
@@ -108,12 +108,12 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 		node := &PageNode{
 			ID:    newFixturePageID("docs"),
 			Title: "Docs",
-			Slug:  "docs",
+			Slug:  newFixtureSlug("docs"),
 			Kind:  NodeKindPage,
 			Children: []*PageNode{{
 				ID:    newFixturePageID("guide"),
 				Title: "Guide",
-				Slug:  "guide",
+				Slug:  newFixtureSlug("guide"),
 				Kind:  NodeKindPage,
 			}},
 		}
@@ -179,11 +179,11 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw).To(ContainSubstring("restored body"))
 
-		lookup, err := svc.LookupPagePathForKind("restored", NodeKindPage)
+		lookup, err := svc.LookupPagePathForKind(newFixtureRoutePath("restored"), NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lookup).To(MatchExistingPathLookupWithKind(NodeKindPage))
 
-		sectionLookup, err := svc.LookupPagePathForKind("restored", NodeKindSection)
+		sectionLookup, err := svc.LookupPagePathForKind(newFixtureRoutePath("restored"), NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sectionLookup).To(MatchPathLookupState(false, true))
 
@@ -238,7 +238,7 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 
 	It("filesystem helper no-ops leave absent paths stable", func() {
 		tmpDir := tempTreeDir()
-		Expect(EnsurePageIsFolder(tmpDir, "missing/page")).To(Succeed())
+		Expect(EnsurePageIsFolder(tmpDir, newFixtureRoutePath("missing/page"))).To(Succeed())
 		Expect(FoldPageFolderIfEmpty(tmpDir, "missing/page")).To(Succeed())
 
 		dir := filepath.Join(tmpDir, "docs", "guide")

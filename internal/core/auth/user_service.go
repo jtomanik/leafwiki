@@ -65,7 +65,7 @@ func (s *UserService) CreateUser(username, email, password, role string) (*User,
 
 	// Create new user
 	user := &User{
-		ID:       id,
+		ID:       UserIDFromString(id),
 		Username: username,
 		Email:    email,
 		Password: string(hashedPassword),
@@ -102,13 +102,13 @@ func (s *UserService) UpdateUser(id UserID, username, email, password, role stri
 
 	// Check if username already exists (but if it's the same user, ignore)
 	existingUser, err := authUserStoreGetUserByUsername(s.store, username)
-	if err == nil && UserIDFromString(existingUser.ID) != id {
+	if err == nil && existingUser.ID != id {
 		return nil, ErrUserAlreadyExists
 	}
 
 	// Check if email already exists (but if it's the same user, ignore)
 	existingUser, err = authUserStoreGetUserByEmail(s.store, email)
-	if err == nil && UserIDFromString(existingUser.ID) != id {
+	if err == nil && existingUser.ID != id {
 		return nil, ErrUserAlreadyExists
 	}
 
@@ -304,7 +304,7 @@ func (s *UserService) ResetAdminUserPassword() (*User, error) {
 	}
 
 	// Update the password for the admin user
-	err = s.UpdatePassword(UserIDFromString(adminUser.ID), password)
+	err = s.UpdatePassword(adminUser.ID, password)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update admin password: %w", err)
 	}

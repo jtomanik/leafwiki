@@ -49,15 +49,15 @@ leafwiki_title: Page Two
 		// Check root metadata
 
 		// Find and verify page1
-		page1 := findChildBySlug(tree, "page1")
+		page1 := findChildBySlug(tree, newFixtureSlug("page1"))
 		Expect(page1.Metadata).To(haveRecordedMetadataTimestamps(), "expected page1 metadata timestamps to be backfilled")
 
 		// Find and verify section1
-		section1 := findChildBySlug(tree, "section1")
+		section1 := findChildBySlug(tree, newFixtureSlug("section1"))
 		Expect(section1.Metadata).To(haveRecordedMetadataTimestamps(), "expected section1 metadata timestamps to be backfilled")
 
 		// Find and verify page2 (child of section1)
-		page2 := findChildBySlug(section1, "page2")
+		page2 := findChildBySlug(section1, newFixtureSlug("page2"))
 		Expect(page2.Metadata).To(haveRecordedMetadataTimestamps(), "expected page2 metadata timestamps to be backfilled")
 
 	})
@@ -96,7 +96,7 @@ leafwiki_title: README
 			"expected root node after reload, got: %+v", tree)
 
 		// Verify the readme page exists
-		readme := findChildBySlug(tree, "readme")
+		readme := findChildBySlug(tree, newFixtureSlug("readme"))
 		Expect(readme).To(SatisfyAll(
 			HaveField("ID", Equal(newFixturePageID("readme-page"))),
 			HaveField("Title", Equal("README")),
@@ -138,7 +138,7 @@ leafwiki_last_author_id: bob
 			)
 		}
 
-		readme := findChildBySlug(newSvc.GetTree(), "readme")
+		readme := findChildBySlug(newSvc.GetTree(), newFixtureSlug("readme"))
 		{
 			got := readme.Metadata.CreatedAt.UTC().Format(time.RFC3339)
 			Expect(got).To(Equal("2026-03-21T10:15:30Z"), "expected persisted created_at from frontmatter, got %q",
@@ -189,7 +189,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 			)
 		}
 
-		readme := findChildBySlug(newSvc.GetTree(), "readme")
+		readme := findChildBySlug(newSvc.GetTree(), newFixtureSlug("readme"))
 		Expect(strings.TrimSpace(readme.
 			ID.String(),
 		)).NotTo(BeEmpty(),
@@ -267,22 +267,22 @@ leafwiki_title: Basic Guide
 		tree := svc.GetTree()
 
 		// Verify structure
-		intro := findChildBySlug(tree, "intro")
+		intro := findChildBySlug(tree, newFixtureSlug("intro"))
 		Expect(intro).To(matchReconstructedNode(NodeKindPage, nil), "expected intro to be reconstructed as a page with metadata")
 
-		docs := findChildBySlug(tree, "docs")
+		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(docs).To(matchReconstructedNode(NodeKindSection, Equal(newFixturePageID("docs-section"))),
 			"expected docs to reload as the frontmatter-backed section with metadata")
 
-		gettingStarted := findChildBySlug(docs, "getting-started")
+		gettingStarted := findChildBySlug(docs, newFixtureSlug("getting-started"))
 		Expect(gettingStarted).To(matchReconstructedNode(NodeKindPage, nil),
 			"expected getting-started to be reconstructed as a page with metadata")
 
-		guides := findChildBySlug(docs, "guides")
+		guides := findChildBySlug(docs, newFixtureSlug("guides"))
 		Expect(guides).To(matchReconstructedNode(NodeKindSection, nil),
 			"expected guides to be reconstructed as a section with metadata")
 
-		basic := findChildBySlug(guides, "basic")
+		basic := findChildBySlug(guides, newFixtureSlug("basic"))
 		Expect(basic).To(matchReconstructedNode(NodeKindPage, nil),
 			"expected basic to be reconstructed as a page with metadata")
 
@@ -354,7 +354,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, tmpDir := newLoadedService()
 
 		// Create initial tree state
-		initialID, err := svc.CreateNode("system", nil, "Initial", "initial", ptrKind(NodeKindPage))
+		initialID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Initial", newFixtureSlug("initial"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)

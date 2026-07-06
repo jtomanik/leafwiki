@@ -94,8 +94,8 @@ var _ = ginkgo.Describe("semantic types", ginkgo.Label("unit"), func() {
 		sourceIssue := Issue{
 			Severity:     IssueSeverityError,
 			Code:         IssueCodeBrokenLink,
-			SourcePath:   tree.MarkdownPath("docs/source.md"),
-			RoutePath:    tree.RoutePath("docs/source"),
+			SourcePath:   newFixtureMarkdownPath("docs/source.md"),
+			RoutePath:    newFixtureRoutePath("docs/source"),
 			PageID:       newFixturePageID("source-page-id"),
 			TargetPageID: newFixturePageID("target-page-id"),
 			Message:      "broken link",
@@ -108,23 +108,23 @@ var _ = ginkgo.Describe("semantic types", ginkgo.Label("unit"), func() {
 
 		Expect(issuePathString(sourceIssue)).To(Equal("docs/source.md"))
 
-		routeIssue := Issue{RoutePath: tree.RoutePath("docs/source"), PageID: newFixturePageID("source-page-id")}
+		routeIssue := Issue{RoutePath: newFixtureRoutePath("docs/source"), PageID: newFixturePageID("source-page-id")}
 		Expect(issuePathString(routeIssue)).To(Equal("docs/source"))
 	})
 
 	ginkgo.It("returns metadata page IDs for workspace markdown link routes", func() {
 		filesByRoute := map[workspaceValidationRouteKey]tree.PageID{
-			workspaceValidationRouteConflictKey(tree.RoutePath("docs/target"), tree.NodeKindPage):     newFixturePageID("target-page-id"),
-			workspaceValidationRouteConflictKey(tree.RoutePath("docs/section"), tree.NodeKindSection): newFixturePageID("section-page-id"),
+			workspaceValidationRouteConflictKey(newFixtureRoutePath("docs/target"), tree.NodeKindPage):     newFixturePageID("target-page-id"),
+			workspaceValidationRouteConflictKey(newFixtureRoutePath("docs/section"), tree.NodeKindSection): newFixturePageID("section-page-id"),
 		}
 
-		pageID, err := workspaceLinkPageIDForRouteResult(filesByRoute, tree.RoutePath("docs/target"), tree.NodeKindPage)
+		pageID, err := workspaceLinkPageIDForRouteResult(filesByRoute, newFixtureRoutePath("docs/target"), tree.NodeKindPage)
 		Expect(err).To(Succeed())
 		Expect(pageID).To(Equal(newFixturePageID("target-page-id")))
-		sectionID, err := workspaceLinkPageIDForRouteResult(filesByRoute, tree.RoutePath("docs/section"), tree.NodeKindSection)
+		sectionID, err := workspaceLinkPageIDForRouteResult(filesByRoute, newFixtureRoutePath("docs/section"), tree.NodeKindSection)
 		Expect(err).To(Succeed())
 		Expect(sectionID).To(Equal(newFixturePageID("section-page-id")))
-		missingID, err := workspaceLinkPageIDForRouteResult(filesByRoute, tree.RoutePath("docs/missing"), tree.NodeKindPage)
+		missingID, err := workspaceLinkPageIDForRouteResult(filesByRoute, newFixtureRoutePath("docs/missing"), tree.NodeKindPage)
 		Expect(err).To(MatchError(errWorkspaceRouteAbsent))
 		Expect(missingID).To(BeEmpty())
 	})
@@ -138,10 +138,10 @@ var _ = ginkgo.Describe("semantic types", ginkgo.Label("unit"), func() {
 		linkIndex, err := markdownlinks.NewIndexFromRoot(rootDir)
 		Expect(err).NotTo(HaveOccurred())
 		filesByRoute := map[workspaceValidationRouteKey]tree.PageID{
-			workspaceValidationRouteConflictKey(tree.RoutePath("docs/target"), tree.NodeKindPage):  newFixturePageID("target-page-id"),
-			workspaceValidationRouteConflictKey(tree.RoutePath("docs/sync"), tree.NodeKindSection): newFixturePageID("sync-section-id"),
+			workspaceValidationRouteConflictKey(newFixtureRoutePath("docs/target"), tree.NodeKindPage):  newFixturePageID("target-page-id"),
+			workspaceValidationRouteConflictKey(newFixtureRoutePath("docs/sync"), tree.NodeKindSection): newFixturePageID("sync-section-id"),
 		}
-		resolver := newWorkspaceMarkdownLinkResolver("docs/source.md", linkIndex, filesByRoute)
+		resolver := newWorkspaceMarkdownLinkResolver(newFixtureMarkdownPath("docs/source.md"), linkIndex, filesByRoute)
 
 		pageResolution, err := resolveWorkspaceMarkdownLinkResult(resolver, "/docs/target.md")
 		Expect(err).To(Succeed())
@@ -178,7 +178,7 @@ var _ = ginkgo.Describe("semantic types", ginkgo.Label("unit"), func() {
 		}
 		Expect(issue).NotTo(BeNil())
 		Expect(*issue).To(SatisfyAll(
-			HaveField("RoutePath", tree.RoutePath("docs/source")),
+			HaveField("RoutePath", newFixtureRoutePath("docs/source")),
 			HaveField("PageID", newFixturePageID("source-page-id")),
 			HaveField("TargetPageID", newFixturePageID("target-page-id")),
 			Not(HaveField("TargetPageID", newFixturePageID("docs/target"))),

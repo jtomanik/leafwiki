@@ -25,12 +25,12 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		base = tempTreeDir()
 		root = filepath.Join(base, "root")
 		store = NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "data"), RootDir: root})
-		parent = edgeSectionNode(RootPageID, "root", "Root", nil)
+		parent = edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 	})
 
 	It("migration adapters, route mapping, and content paths preserve legacy compatibility", func() {
-		page := edgePageNode("page", "page", "Page", parent)
-		section := edgeSectionNode("section", "section", "Section", parent)
+		page := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", parent)
+		section := edgeSectionNode(newFixturePageID("section"), newFixtureSlug("section"), "Section", parent)
 
 		adapter := &migrationStoreAdapter{store: store}
 		_, err := adapter.ResolveNode(&migrationNodeAdapter{node: page})
@@ -38,7 +38,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		Expect(err).To(matchErrorAs(&notFound), "expected NotFoundError, got %T: %v", err, err)
 
 		svc := NewTreeService(tempTreeDir())
-		svc.tree = edgeSectionNode(RootPageID, "root", "Root", nil)
+		svc.tree = edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 		swapTreeSeam(&treeWriteFileAtomic, func(string, []byte, os.FileMode) error {
 			return errors.New("snapshot failed")
 		})
@@ -88,14 +88,14 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		Expect(store.reconstructTreeRecursive(root, parent, time.Now().UTC(), map[PageID]string{RootPageID: root})).To(MatchError(workspaceRelErr))
 
 		swapTreeSeam(&treeFilepathRel, filepath.Rel)
-		looseParent := edgeSectionNode("loose", "loose", "Loose", nil)
+		looseParent := edgeSectionNode(newFixturePageID("loose"), newFixtureSlug("loose"), "Loose", nil)
 		Expect(store.SaveChildOrder(looseParent)).To(matchInvalidOp("dirPathForNode"))
 
 		parent.Children = []*PageNode{nil, page}
 		swapTreeSeam(&treeWriteFileAtomic, func(string, []byte, os.FileMode) error { return nil })
 		Expect(store.SaveChildOrder(parent)).To(Succeed())
 
-		section.WorkspaceSourcePath = "Imported/Section"
+		section.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("Imported/Section")
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return []os.DirEntry{fakeTreeDirEntry{name: "index.md"}}, nil
 		})
@@ -106,7 +106,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			Succeed(),
 		))
 
-		page.WorkspaceSourcePath = "../outside.md"
+		page.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("../outside.md")
 		sourcePath, exists, err = store.workspaceContentPathForNode(page, "workspaceContent")
 		outsideSourceLookup := workspaceContentPathLookup{Path: sourcePath, Exists: exists, Err: err}
 		Expect(outsideSourceLookup).To(matchMissingWorkspaceContentPath(
@@ -114,9 +114,9 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			matchInvalidOp("workspaceContent"),
 		))
 
-		_, err = store.contentPathForNodeRead(edgePageNode("loose-page", "loose-page", "Loose Page", nil))
+		_, err = store.contentPathForNodeRead(edgePageNode(newFixturePageID("loose-page"), newFixtureSlug("loose-page"), "Loose Page", nil))
 		Expect(err).To(matchInvalidOp("dirPathForNode"))
-		_, err = store.contentPathForNodeWrite(edgePageNode("loose-page", "loose-page", "Loose Page", nil))
+		_, err = store.contentPathForNodeWrite(edgePageNode(newFixturePageID("loose-page"), newFixtureSlug("loose-page"), "Loose Page", nil))
 		Expect(err).To(matchInvalidOp("dirPathForNode"))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -152,7 +152,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		})
 		swapTreeSeam(&treeMapWorkspaceMarkdownRoute, func(_ string, relPath string, isDir bool) (WorkspaceMarkdownRoute, error) {
 			Expect(isDir).To(BeTrue())
-			return WorkspaceMarkdownRoute{Kind: NodeKindSection, RoutePath: "same", SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
+			return WorkspaceMarkdownRoute{Kind: NodeKindSection, RoutePath: newFixtureRoutePath("same"), SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
 		})
 		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ErrDuplicateReconstructedSlug))
 
@@ -213,8 +213,8 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			return []os.DirEntry{}, nil
 		})
 		routeCalls := map[string]WorkspaceMarkdownRoute{
-			"notes.txt": {Kind: NodeKindPage, RoutePath: "notes"},
-			"README.md": {Kind: NodeKindPage, RoutePath: "readme"},
+			"notes.txt": {Kind: NodeKindPage, RoutePath: newFixtureRoutePath("notes")},
+			"README.md": {Kind: NodeKindPage, RoutePath: newFixtureRoutePath("readme")},
 			"empty.md":  {Kind: NodeKindPage},
 		}
 		swapTreeSeam(&treeMapWorkspaceMarkdownRoute, func(_ string, relPath string, _ bool) (WorkspaceMarkdownRoute, error) {
@@ -229,7 +229,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			return []os.DirEntry{}, nil
 		})
 		swapTreeSeam(&treeMapWorkspaceMarkdownRoute, func(_ string, relPath string, _ bool) (WorkspaceMarkdownRoute, error) {
-			return WorkspaceMarkdownRoute{Kind: NodeKindPage, RoutePath: "page", SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
+			return WorkspaceMarkdownRoute{Kind: NodeKindPage, RoutePath: newFixtureRoutePath("page"), SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
 		})
 		swapTreeSeam(&treeLoadMarkdownFile, func(path string) (*markdown.MarkdownFile, error) {
 			return markdown.NewMarkdownFile(path, "# Page\n", markdown.Frontmatter{}), nil

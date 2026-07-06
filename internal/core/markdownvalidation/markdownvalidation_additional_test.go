@@ -127,31 +127,31 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 	})
 
 	ginkgo.It("ValidateMarkdownContentWithOptions reports root routes, path conflicts, and reserved extra metadata", func() {
-		root := ValidateMarkdownContentWithOptions("", string(canonicalValidationMarkdown("root-page", "Root", "# Root\n")), ContentValidationOptions{})
+		root := ValidateMarkdownContentWithOptions(newFixtureRoutePath(""), string(canonicalValidationMarkdown("root-page", "Root", "# Root\n")), ContentValidationOptions{})
 		Expect(issueCodes(root)).To(ContainElement(IssueCodeInvalidPath))
 
-		allowedRoot := ValidateMarkdownContentWithOptions("", string(canonicalValidationMarkdown("root-page", "Root", "# Root\n")), ContentValidationOptions{
+		allowedRoot := ValidateMarkdownContentWithOptions(newFixtureRoutePath(""), string(canonicalValidationMarkdown("root-page", "Root", "# Root\n")), ContentValidationOptions{
 			AllowRootRoute: true,
 		})
 		Expect(allowedRoot).To(matchValidationSuccess())
 
-		conflict := ValidateMarkdownContentWithOptions("docs/page", string(canonicalValidationMarkdown("current-page", "Page", "# Page\n")), ContentValidationOptions{
-			ExistingPageID: "current-page",
+		conflict := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/page"), string(canonicalValidationMarkdown("current-page", "Page", "# Page\n")), ContentValidationOptions{
+			ExistingPageID: newFixturePageID("current-page"),
 			ResolvePageID: func(routePath tree.RoutePath) (tree.PageID, bool) {
-				Expect(routePath).To(Equal(tree.RoutePath("docs/page")))
+				Expect(routePath).To(Equal(newFixtureRoutePath("docs/page")))
 				return "other-page", true
 			},
 		})
 		Expect(issueCodes(conflict)).To(ContainElement(IssueCodePathConflict))
 
-		reservedExtra := ValidateMarkdownContentWithOptions("docs/page", "<!-- leafwiki\nversion: 1\npage:\n  id: current-page\n  title: Page\nextra:\n  leafwiki_shadow: value\n-->\n\n# Page\n", ContentValidationOptions{
-			ExistingPageID: "current-page",
+		reservedExtra := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/page"), "<!-- leafwiki\nversion: 1\npage:\n  id: current-page\n  title: Page\nextra:\n  leafwiki_shadow: value\n-->\n\n# Page\n", ContentValidationOptions{
+			ExistingPageID: newFixturePageID("current-page"),
 		})
 		Expect(issueCodes(reservedExtra)).To(ContainElement(IssueCodeReservedMetadata))
 	})
 
 	ginkgo.It("reports markdown link resolver fallbacks as validation issues", func() {
-		markdownResolver := ValidateMarkdownContentWithOptions("docs/source", "[Missing](/missing)\n", ContentValidationOptions{
+		markdownResolver := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/source"), "[Missing](/missing)\n", ContentValidationOptions{
 			ResolveMarkdownLink: func(destination string) (tree.PageID, tree.NodeKind, bool, IssueCode) {
 				Expect(destination).To(Equal("/missing"))
 				return "", "", false, ""
@@ -159,7 +159,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 		})
 		Expect(issueCodes(markdownResolver)).To(Equal([]IssueCode{IssueCodeBrokenLink}))
 
-		legacyResolver := ValidateMarkdownContentWithOptions("docs/source", "[Bad](bad)\n[Missing](missing)\n[Page](page)\n", ContentValidationOptions{
+		legacyResolver := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/source"), "[Bad](bad)\n[Missing](missing)\n[Page](page)\n", ContentValidationOptions{
 			ResolvePageID: func(tree.RoutePath) (tree.PageID, bool) {
 				return "", false
 			},
@@ -186,21 +186,21 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 	})
 
 	ginkgo.It("ValidateMarkdownContentWithOptions ignores external links and uses legacy page resolution", func() {
-		external := ValidateMarkdownContentWithOptions("docs/source", "[External](https://example.com)\n[Anchor](#local)\n", ContentValidationOptions{
+		external := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/source"), "[External](https://example.com)\n[Anchor](#local)\n", ContentValidationOptions{
 			ResolvePageID: func(routePath tree.RoutePath) (tree.PageID, bool) {
 				return "", false
 			},
 		})
 		Expect(external).To(matchValidationSuccess())
 
-		noLegacyResolver := ValidateMarkdownContentWithOptions("docs/source", "[Wiki](target)\n", ContentValidationOptions{
+		noLegacyResolver := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/source"), "[Wiki](target)\n", ContentValidationOptions{
 			AssetExists: func(string) bool {
 				return true
 			},
 		})
 		Expect(noLegacyResolver).To(matchValidationSuccess())
 
-		rootReference := ValidateMarkdownContentWithOptions("", "[Root](/)\n", ContentValidationOptions{
+		rootReference := ValidateMarkdownContentWithOptions(newFixtureRoutePath(""), "[Root](/)\n", ContentValidationOptions{
 			AllowRootRoute: true,
 			ResolvePageID: func(routePath tree.RoutePath) (tree.PageID, bool) {
 				return "", false
@@ -209,7 +209,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 		Expect(rootReference).To(matchValidationSuccess())
 
 		var resolvedRoute tree.RoutePath
-		missing := ValidateMarkdownContentWithOptions("docs/source", "[Missing](missing)\n", ContentValidationOptions{
+		missing := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/source"), "[Missing](missing)\n", ContentValidationOptions{
 			ResolvePageID: func(routePath tree.RoutePath) (tree.PageID, bool) {
 				resolvedRoute = routePath
 				return "", false
@@ -241,7 +241,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 	})
 
 	ginkgo.It("normalizes relative parent and absolute wiki references while ignoring empty anchors", func() {
-		route := tree.RoutePath("docs/source")
+		route := newFixtureRoutePath("docs/source")
 
 		Expect(resolveReferencePath(route, "target")).To(Equal("/docs/source/target"))
 		Expect(resolveReferencePath(route, "../target?view=1#intro")).To(Equal("/docs/target"))
@@ -251,8 +251,8 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 	})
 
 	ginkgo.It("maps markdown file references to workspace routes before falling back to route-relative links", func() {
-		relPath := tree.MarkdownPath("docs/source.md")
-		routePath := tree.RoutePath("docs/source")
+		relPath := newFixtureMarkdownPath("docs/source.md")
+		routePath := newFixtureRoutePath("docs/source")
 
 		Expect(resolveWorkspaceReferencePath(relPath, routePath, "")).To(BeEmpty())
 		Expect(resolveWorkspaceReferencePath(relPath, routePath, "target.md#intro")).To(Equal("/docs/target"))
@@ -261,22 +261,22 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 		Expect(resolveWorkspaceReferencePath(relPath, routePath, "target")).To(Equal("/docs/source/target"))
 	})
 
-	ginkgo.It("link helper edge cases preserve root prefixes and reject empty extensionless destinations", func() {
+	ginkgo.It("preserves root-prefixed link semantics and rejects empty extensionless destinations", func() {
 		Expect(stripMarkdownLinkRootPrefix("/docs", "docs")).To(Equal("/"))
 		Expect(stripMarkdownLinkRootPrefix("/docs/page.md", "docs")).To(Equal("/page.md"))
 		Expect(stripMarkdownLinkRootPrefix("/other/page.md", "docs")).To(Equal("/other/page.md"))
 
 		Expect(extensionlessWikiDestinations("", "section/", "page")).To(Equal([]string{"page"}))
 
-		resolverResult, err := resolveWorkspaceMarkdownLink(newWorkspaceMarkdownLinkResolver("source.md", nil, nil), "missing.md")
+		resolverResult, err := resolveWorkspaceMarkdownLink(newWorkspaceMarkdownLinkResolver(newFixtureMarkdownPath("source.md"), nil, nil), "missing.md")
 		Expect(err).To(MatchError(errWorkspaceMarkdownLinkUnresolved))
-		Expect(resolverResult).To(matchWorkspaceResolverResult("", IssueCodeBrokenLink))
+		Expect(resolverResult).To(matchWorkspaceResolverResult(newFixtureNodeKind(""), IssueCodeBrokenLink))
 
 		index := markdownlinks.NewIndex([]markdownlinks.Entry{
-			{Kind: markdownlinks.EntryKindPage, RoutePath: "docs/page", Path: "docs/page.md"},
-			{Kind: markdownlinks.EntryKindSection, RoutePath: "docs/section"},
+			{Kind: markdownlinks.EntryKindPage, RoutePath: newFixtureRoutePath("docs/page"), Path: newFixtureMarkdownPath("docs/page.md")},
+			{Kind: markdownlinks.EntryKindSection, RoutePath: newFixtureRoutePath("docs/section")},
 		})
-		resolver := newWorkspaceMarkdownLinkResolver("docs/source.md", index, map[workspaceValidationRouteKey]tree.PageID{})
+		resolver := newWorkspaceMarkdownLinkResolver(newFixtureMarkdownPath("docs/source.md"), index, map[workspaceValidationRouteKey]tree.PageID{})
 		resolverResult, err = resolveWorkspaceMarkdownLink(resolver, "/docs/page.md")
 		Expect(err).To(MatchError(errWorkspaceMarkdownLinkUnresolved))
 		Expect(resolverResult).To(matchWorkspaceResolverResult(tree.NodeKindPage, IssueCodeBrokenLink))
@@ -285,8 +285,8 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 		Expect(err).To(MatchError(errWorkspaceMarkdownLinkUnresolved))
 		Expect(resolverResult).To(matchWorkspaceResolverResult(tree.NodeKindSection, IssueCodeBrokenLink))
 
-		Expect(resolveReferencePath(tree.RoutePath("docs/source"), "%zz")).To(BeEmpty())
-		Expect(resolveReferencePath("", "/")).To(BeEmpty())
+		Expect(resolveReferencePath(newFixtureRoutePath("docs/source"), "%zz")).To(BeEmpty())
+		Expect(resolveReferencePath(newFixtureRoutePath(""), "/")).To(BeEmpty())
 	})
 
 	ginkgo.It("recognizes only lowercase markdown file targets after removing query and fragment markers", func() {
@@ -299,13 +299,13 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 	})
 
 	ginkgo.It("ValidateWorkspaceStatus filters warnings and preserves explicit message IDs", func() {
-		customMessageID := sharederrors.MessageID("custom.message")
+		customMessageID := newFixtureMessageID("custom.message")
 		result := ValidateWorkspaceStatus([]WorkspaceStatusIssue{
 			{Path: "warn.md", Severity: IssueSeverityWarning, Message: "warning"},
 			{Path: "error.md", Code: IssueCodeBrokenLink, MessageID: customMessageID, Severity: IssueSeverityError, Message: "error"},
 		}, false)
 
-		Expect(result.Issues).To(ConsistOf(matchIssue(tree.MarkdownPath("error.md"), IssueCodeBrokenLink, customMessageID)))
+		Expect(result.Issues).To(ConsistOf(matchIssue(newFixtureMarkdownPath("error.md"), IssueCodeBrokenLink, customMessageID)))
 	})
 
 	ginkgo.It("ValidateWorkspaceMarkdownFiles handles empty roots, hidden markdown warnings, and workspace asset callbacks", func() {
@@ -335,7 +335,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 		})
 		Expect(assetResult).To(matchValidationFailure())
 		Expect(issueCodes(assetResult)).To(ContainElement(IssueCodeMissingAsset))
-		Expect(seenPageID).To(Equal(tree.PageID("source-page")))
+		Expect(seenPageID).To(Equal(newFixturePageID("source-page")))
 		Expect(seenDestination).To(Equal("assets/logo.png"))
 	})
 
@@ -365,8 +365,8 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 		result := ValidateWorkspaceMarkdownFiles(WorkspaceMarkdownValidationOptions{RootDir: rootDir})
 
 		Expect(result).To(matchValidationFailureWithIssues(HaveExactElements(
-			matchWorkspaceScanIssue(tree.MarkdownPath("broken.md")),
-			matchWorkspaceScanIssue(tree.MarkdownPath("workspace")),
+			matchWorkspaceScanIssue(newFixtureMarkdownPath("broken.md")),
+			matchWorkspaceScanIssue(newFixtureMarkdownPath("workspace")),
 		)))
 	})
 
@@ -407,22 +407,22 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 
 	ginkgo.It("IssueCode and IssueSeverity normalize empty and unknown values predictably", func() {
 		result := ValidateWorkspaceStatus([]WorkspaceStatusIssue{
-			{Path: "default-severity.md", Severity: IssueSeverity("  "), Code: IssueCodeBrokenLink, Message: "default severity"},
-			{Path: "custom-severity.md", Severity: IssueSeverity(" notice "), Code: IssueCodeBrokenLink, Message: "custom severity"},
-			{Path: "unknown-code.md", Code: IssueCode("unknown_code"), Message: "unknown code"},
+			{Path: "default-severity.md", Severity: newFixtureIssueSeverity("  "), Code: IssueCodeBrokenLink, Message: "default severity"},
+			{Path: "custom-severity.md", Severity: newFixtureIssueSeverity(" notice "), Code: IssueCodeBrokenLink, Message: "custom severity"},
+			{Path: "unknown-code.md", Code: newFixtureIssueCode("unknown_code"), Message: "unknown code"},
 		}, true)
 
 		Expect(result.Issues).To(ConsistOf(
 			SatisfyAll(
-				matchIssue(tree.MarkdownPath("default-severity.md"), IssueCodeBrokenLink, MessageIDBrokenLink),
+				matchIssue(newFixtureMarkdownPath("default-severity.md"), IssueCodeBrokenLink, MessageIDBrokenLink),
 				HaveField("Severity", IssueSeverityError),
 			),
 			SatisfyAll(
-				matchIssue(tree.MarkdownPath("custom-severity.md"), IssueCodeBrokenLink, MessageIDBrokenLink),
-				HaveField("Severity", IssueSeverity("notice")),
+				matchIssue(newFixtureMarkdownPath("custom-severity.md"), IssueCodeBrokenLink, MessageIDBrokenLink),
+				HaveField("Severity", newFixtureIssueSeverity("notice")),
 			),
 			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"SourcePath": Equal(tree.MarkdownPath("unknown-code.md")),
+				"SourcePath": Equal(newFixtureMarkdownPath("unknown-code.md")),
 				"MessageID":  Equal(MessageIDWorkspaceSyncValidation),
 				"Severity":   Equal(IssueSeverityError),
 			}),
@@ -432,7 +432,7 @@ var _ = ginkgo.Describe("markdown validation edge behavior", ginkgo.Label("unit"
 	ginkgo.It("helper fallbacks return stable values for invalid relative and URL inputs", func() {
 		absoluteRoot := filepath.Join(string(filepath.Separator), "abs", "root")
 		Expect(workspaceValidationRelPath(absoluteRoot, "relative.md")).To(Equal("relative.md"))
-		Expect(resolveReferencePath(tree.RoutePath("%zz"), "target")).To(BeEmpty())
+		Expect(resolveReferencePath(newFixtureRoutePath("%zz"), "target")).To(BeEmpty())
 	})
 })
 

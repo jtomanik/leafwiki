@@ -137,19 +137,19 @@ var _ = ginkgo.Describe("tree service construction with explicit roots", ginkgo.
 	ginkgo.It("uses separate root directory for content and data directory for schema", func() {
 		svc, dataDir, rootDir := newLoadedServiceWithDirs()
 
-		pageID, err := svc.CreateNode("system", nil, "Page", "page", ptrKind(NodeKindPage))
+		pageID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode page failed: %v",
 
 			err)
 
-		sectionID, err := svc.CreateNode("system", nil, "Section", "section", ptrKind(NodeKindSection))
+		sectionID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Section", newFixtureSlug("section"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode section failed: %v",
 
 			err,
 		)
 		{
 
-			_, err := svc.CreateNode("system", sectionID, "Nested", "nested", ptrKind(NodeKindPage))
+			_, err := svc.CreateNode(newFixtureUserID("system"), sectionID, "Nested", newFixtureSlug("nested"), ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode nested failed: %v",
 
 				err)
@@ -198,11 +198,11 @@ leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
 		persistLegacyTreeSnapshot(dataDir, &PageNode{
-			ID:       "root",
-			Slug:     "root",
+			ID:       newFixturePageID("root"),
+			Slug:     newFixtureSlug("root"),
 			Title:    "root",
 			Kind:     NodeKindSection,
-			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
+			Children: []*PageNode{{ID: newFixturePageID("id-legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: NodeKindPage}},
 		})
 		{
 			err := saveSchema(dataDir, 4)
@@ -223,7 +223,7 @@ leafwiki_title: Legacy
 		statTreePath(filepath.Join(dataDir, "schema.json"))
 		Expect(filepath.Join(dataDir, legacyTreeFilename)).To(beMissingTreePath())
 		{
-			_, err := svc.GetPage("id-legacy")
+			_, err := svc.GetPage(newFixturePageID("id-legacy"))
 			Expect(err).To(Succeed(), "expected migrated page from root directory: %v",
 
 				err)
@@ -254,18 +254,18 @@ leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
 		persistLegacyTreeSnapshot(dataDir, &PageNode{
-			ID:    "root",
-			Slug:  "root",
+			ID:    newFixturePageID("root"),
+			Slug:  newFixtureSlug("root"),
 			Title: "root",
 			Kind:  NodeKindSection,
 			Children: []*PageNode{{
-				ID:    "id-docs",
-				Slug:  "docs",
+				ID:    newFixturePageID("id-docs"),
+				Slug:  newFixtureSlug("docs"),
 				Title: "Docs",
 				Kind:  NodeKindSection,
 				Children: []*PageNode{{
-					ID:    "id-legacy",
-					Slug:  "legacy",
+					ID:    newFixturePageID("id-legacy"),
+					Slug:  newFixtureSlug("legacy"),
 					Title: "Legacy",
 					Kind:  NodeKindPage,
 				}},
@@ -287,7 +287,7 @@ leafwiki_title: Legacy
 		}
 		{
 
-			_, err := svc.GetPage("id-legacy")
+			_, err := svc.GetPage(newFixturePageID("id-legacy"))
 			Expect(err).To(Succeed(), "expected migrated page from moved section content: %v",
 
 				err,
@@ -350,11 +350,11 @@ leafwiki_title: Legacy
 ---
 # Legacy`, 0o644)
 		persistLegacyTreeSnapshot(dataDir, &PageNode{
-			ID:       "root",
-			Slug:     "root",
+			ID:       newFixturePageID("root"),
+			Slug:     newFixtureSlug("root"),
 			Title:    "root",
 			Kind:     NodeKindSection,
-			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
+			Children: []*PageNode{{ID: newFixturePageID("id-legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: NodeKindPage}},
 		})
 		{
 			err := saveSchema(dataDir, 4)

@@ -30,15 +30,15 @@ func newGomegaRevisionService() (*Service, *tree.TreeService, string) {
 	return NewService(storageDir, treeService, nil), treeService, storageDir
 }
 
-func createGomegaRevisionPage(treeService *tree.TreeService, title, slug, content string) tree.PageID {
+func createGomegaRevisionPage(treeService *tree.TreeService, title string, slug tree.Slug, content string) tree.PageID {
 	GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode(newFixtureUserID("tester"), nil, title, tree.SlugFromString(slug), &kind)
+	id, err := treeService.CreateNode(newFixtureUserID("tester"), nil, title, slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(id).NotTo(BeNil())
 
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, tree.SlugFromString(slug), &content, false)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, slug, &content, false)).To(Succeed())
 	return *id
 }
 
@@ -69,7 +69,7 @@ func saveRevisionFixture(store *FSStore, pageID tree.PageID, revisionID Revision
 		CreatedAt:         createdAt.UTC(),
 		Type:              RevisionTypeContentUpdate,
 		Title:             "Page",
-		Slug:              "page",
+		Slug:              newFixtureSlug("page"),
 		ContentHash:       contentHash,
 		AssetManifestHash: assetManifestHash,
 	}
@@ -280,7 +280,7 @@ var _ = Describe("revision edge behavior", func() {
 			PageID: newFixturePageID("page"),
 			Type:   RevisionTypeContentUpdate,
 			Title:  "Page",
-			Slug:   "page",
+			Slug:   newFixtureSlug("page"),
 		})
 		Expect(err).To(MatchError(ErrRevisionCreatedAtRequired))
 	})
@@ -310,7 +310,7 @@ var _ = Describe("revision edge behavior", func() {
 
 	It("reports missing asset blobs and size mismatches during integrity checks", Label("integration"), func() {
 		service, treeService, _ := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		contentHash, err := service.store.SaveContentBlob([]byte("body"))
 		Expect(err).NotTo(HaveOccurred())
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
@@ -340,8 +340,8 @@ var _ = Describe("revision edge behavior", func() {
 			codes = append(codes, issue.Code)
 		}
 		Expect(codes).To(ContainElements(
-			sharederrors.ErrorCode("missing_asset_blob"),
-			sharederrors.ErrorCode("asset_blob_size_mismatch"),
+			newFixtureErrorCode("missing_asset_blob"),
+			newFixtureErrorCode("asset_blob_size_mismatch"),
 		))
 	})
 
@@ -371,7 +371,7 @@ var _ = Describe("revision edge behavior", func() {
 		_, err := service.resolveAssetManifestHash(newFixturePageID("missing-manifest-page"), nil)
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		writeGomegaLiveAsset(storageDir, pageID, "asset.txt", "asset")
 		record := createdRevisionRecord(service.RecordAssetChange(pageID, newFixtureUserID("tester"), "assets"))
 		Expect(record).To(haveRecordedRevision(Not(BeNil())))
@@ -405,7 +405,7 @@ var _ = Describe("revision edge behavior", func() {
 
 	It("rolls back content when restore asset rehydration fails", Label("integration"), func() {
 		service, treeService, _ := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "original")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "original")
 		contentHash, err := service.store.SaveContentBlob([]byte("restored"))
 		Expect(err).NotTo(HaveOccurred())
 		brokenManifest, err := service.store.SaveAssetManifest([]AssetRef{{
@@ -426,7 +426,7 @@ var _ = Describe("revision edge behavior", func() {
 
 	It("reports deterministic service and store failure paths", Label("integration"), func() {
 		service, treeService, storageDir := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 
 		contentHash, err := service.store.SaveContentBlob([]byte("body"))
@@ -437,7 +437,7 @@ var _ = Describe("revision edge behavior", func() {
 
 		_, err = service.CompareRevisionSnapshots(pageID, validRev.ID, newFixtureRevisionID("missing-target"))
 		Expect(err).To(matchRevisionError(os.ErrNotExist))
-		_, err = service.GetRevisionAsset(pageID, newFixtureRevisionID("missing-asset-revision"), tree.AssetName("image.png"))
+		_, err = service.GetRevisionAsset(pageID, newFixtureRevisionID("missing-asset-revision"), newFixtureAssetName("image.png"))
 		Expect(err).To(matchRevisionError(os.ErrNotExist))
 
 		Expect(os.WriteFile(service.store.revisionIndexPath(pageID), []byte("{"), 0o644)).To(Succeed())
@@ -452,7 +452,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(service.store.SaveRevision(invalidMetadataRev)).To(Succeed())
 		Expect(service.RestoreRevision(pageID, invalidMetadataRev.ID, newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreFailed))
 
-		brokenAssetPageID := createGomegaRevisionPage(treeService, "Broken Assets", "broken-assets", "body")
+		brokenAssetPageID := createGomegaRevisionPage(treeService, "Broken Assets", newFixtureSlug("broken-assets"), "body")
 		assetPath := revisionAssetPath(storageDir, brokenAssetPageID)
 		Expect(os.MkdirAll(filepath.Dir(assetPath), 0o755)).To(Succeed())
 		Expect(os.WriteFile(assetPath, []byte("not a directory"), 0o644)).To(Succeed())
@@ -510,7 +510,7 @@ var _ = Describe("revision edge behavior", func() {
 			CreatedAt: revisionTime,
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 		})
 		Expect(err).To(MatchError(os.ErrExist))
 
@@ -523,7 +523,7 @@ var _ = Describe("revision edge behavior", func() {
 			CreatedAt: revisionTime.Add(time.Minute),
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 		})
 		Expect(err).To(MatchJSONSyntaxError())
 
@@ -535,7 +535,7 @@ var _ = Describe("revision edge behavior", func() {
 
 	It("localizes restore, snapshot, comparison, and asset preview failures", Label("integration"), func() {
 		service, treeService, _ := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		createdAt := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 
 		Expect(service.RestoreRevision(newFixturePageID(""), newFixtureRevisionID("rev"), newFixtureUserID("tester"))).To(MatchLocalizedRevisionErrorCode(errCodeRevisionRestoreInvalidPageID))
@@ -565,15 +565,15 @@ var _ = Describe("revision edge behavior", func() {
 		_, err = service.CompareRevisionSnapshots(pageID, missingContentRev.ID, newFixtureRevisionID("missing-target"))
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewContentUnavailable))
 
-		_, err = service.GetRevisionAsset(pageID, missingManifestRev.ID, tree.AssetName(" "))
+		_, err = service.GetRevisionAsset(pageID, missingManifestRev.ID, newFixtureAssetName(" "))
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetInvalidName))
-		_, err = service.GetRevisionAsset(pageID, missingManifestRev.ID, tree.AssetName("image.png"))
+		_, err = service.GetRevisionAsset(pageID, missingManifestRev.ID, newFixtureAssetName("image.png"))
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetsUnavailable))
 
 		missingBlobManifestHash, err := service.store.SaveAssetManifest([]AssetRef{{Name: "image.png", SHA256: strings.Repeat("a", 64), SizeBytes: 5}})
 		Expect(err).NotTo(HaveOccurred())
 		missingBlobRev := saveRevisionFixture(service.store, pageID, newFixtureRevisionID("rev-missing-blob"), createdAt.Add(2*time.Minute), contentHash, missingBlobManifestHash)
-		_, err = service.GetRevisionAsset(pageID, missingBlobRev.ID, tree.AssetName("image.png"))
+		_, err = service.GetRevisionAsset(pageID, missingBlobRev.ID, newFixtureAssetName("image.png"))
 		Expect(err).To(MatchLocalizedRevisionErrorCode(errCodeRevisionPreviewAssetBlobMissing))
 	})
 })

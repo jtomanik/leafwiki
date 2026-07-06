@@ -197,7 +197,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 			CreatedAt: createdAt,
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 		})
 		Expect(err).To(MatchError(indexWriteFailedErr))
 		restoreWrite()
@@ -232,7 +232,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 
 	It("propagates service record failures from store seams", func() {
 		service, treeService, storageDir := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		page, err := treeService.GetPage(pageID)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -330,7 +330,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 
 	It("reports integrity, delete, parser, sort, and restore failures", func() {
 		service, treeService, _ := newGomegaRevisionService()
-		pageID := createGomegaRevisionPage(treeService, "Page", "page", "body")
+		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 
 		deleteRevisionsErr := errors.New("delete revisions failed")
 		restoreDelete := setRevisionSeam(&revisionStoreDeletePageRevisions, func(*FSStore, tree.PageID) error {

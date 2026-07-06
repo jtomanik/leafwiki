@@ -21,14 +21,14 @@ func newRevisionTestService() (*Service, *tree.TreeService, string) {
 	return NewService(storageDir, treeService, nil), treeService, storageDir
 }
 
-func createRevisionTestPage(treeService *tree.TreeService, title, slug, content string) tree.PageID {
+func createRevisionTestPage(treeService *tree.TreeService, title string, slug tree.Slug, content string) tree.PageID {
 	ginkgo.GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode("tester", nil, title, tree.SlugFromString(slug), &kind)
+	id, err := treeService.CreateNode(newFixtureUserID("tester"), nil, title, slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(id).NotTo(BeNil())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, tree.SlugFromString(slug), &content, false)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("tester"), *id, title, slug, &content, false)).To(Succeed())
 	return *id
 }
 

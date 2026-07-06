@@ -157,7 +157,7 @@ var _ = ginkgo.Describe("runner", ginkgo.Label("unit"), func() {
 		svc := tree.NewTreeService(tmpDir)
 		Expect(svc.LoadTree()).To(Succeed())
 
-		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(tree.NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page1", newFixtureSlug("page1"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
@@ -190,7 +190,7 @@ var _ = ginkgo.Describe("runner", ginkgo.Label("unit"), func() {
 		svc := tree.NewTreeService(tmpDir)
 		Expect(svc.LoadTree()).To(Succeed())
 
-		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(tree.NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page1", newFixtureSlug("page1"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
 
@@ -235,7 +235,7 @@ Hello World
 		svc := tree.NewTreeService(tmpDir)
 		Expect(svc.LoadTree()).To(Succeed())
 
-		id, err := svc.CreateNode("system", nil, "Page1", "page1", ptrKind(tree.NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Page1", newFixtureSlug("page1"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 
 		node, err := svc.FindPageByID(*id)
@@ -243,8 +243,8 @@ Hello World
 		node.Metadata = tree.PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 21, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 21, 11, 16, 31, 0, time.UTC),
-			CreatorID:    "alice",
-			LastAuthorID: "bob",
+			CreatorID:    newFixtureUserID("alice"),
+			LastAuthorID: newFixtureUserID("bob"),
 		}
 
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
@@ -276,11 +276,11 @@ Hello World
 		svc := tree.NewTreeService(tmpDir)
 		Expect(svc.LoadTree()).To(Succeed())
 
-		docsID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
+		docsID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(tree.NodeKindSection))
 		Expect(err).NotTo(HaveOccurred())
-		alphaID, err := svc.CreateNode("system", nil, "Alpha", "alpha", ptrKind(tree.NodeKindPage))
+		alphaID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Alpha", newFixtureSlug("alpha"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
-		betaID, err := svc.CreateNode("system", docsID, "Beta", "beta", ptrKind(tree.NodeKindPage))
+		betaID, err := svc.CreateNode(newFixtureUserID("system"), docsID, "Beta", newFixtureSlug("beta"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 
 		root := svc.GetTree()
@@ -324,7 +324,7 @@ Hello World
 		svc := tree.NewTreeService(tmpDir)
 		Expect(svc.LoadTree()).To(Succeed())
 
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(tree.NodeKindSection))
 		Expect(err).NotTo(HaveOccurred())
 
 		node, err := svc.FindPageByID(*id)
@@ -332,8 +332,8 @@ Hello World
 		node.Metadata = tree.PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
-			CreatorID:    "alice",
-			LastAuthorID: "bob",
+			CreatorID:    newFixtureUserID("alice"),
+			LastAuthorID: newFixtureUserID("bob"),
 		}
 
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())
@@ -368,11 +368,11 @@ Hello World
 
 		// Build: root → notes (section) → zebra, alpha (pages in non-alphabetical order)
 		// so we can verify the legacy ordering is preserved, not reset to alphabetical.
-		notesID, err := svc.CreateNode("system", nil, "Notes", "notes", ptrKind(tree.NodeKindSection))
+		notesID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Notes", newFixtureSlug("notes"), ptrKind(tree.NodeKindSection))
 		Expect(err).NotTo(HaveOccurred())
-		zebraID, err := svc.CreateNode("system", notesID, "Zebra", "zebra", ptrKind(tree.NodeKindPage))
+		zebraID, err := svc.CreateNode(newFixtureUserID("system"), notesID, "Zebra", newFixtureSlug("zebra"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
-		alphaID, err := svc.CreateNode("system", notesID, "Alpha", "alpha", ptrKind(tree.NodeKindPage))
+		alphaID, err := svc.CreateNode(newFixtureUserID("system"), notesID, "Alpha", newFixtureSlug("alpha"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 
 		// Corrupt the tree snapshot: flip "notes" kind from section → page to simulate
@@ -416,9 +416,9 @@ Hello World
 		svc := tree.NewTreeService(tmpDir)
 		Expect(svc.LoadTree()).To(Succeed())
 
-		_, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
+		_, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(tree.NodeKindSection))
 		Expect(err).NotTo(HaveOccurred())
-		_, err = svc.CreateNode("system", nil, "Alpha", "alpha", ptrKind(tree.NodeKindPage))
+		_, err = svc.CreateNode(newFixtureUserID("system"), nil, "Alpha", newFixtureSlug("alpha"), ptrKind(tree.NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(removeIfPresent(filepath.Join(tmpDir, "root", ".order.json"))).To(Succeed())
@@ -442,7 +442,7 @@ Hello World
 		svc := tree.NewTreeService(tmpDir)
 		Expect(svc.LoadTree()).To(Succeed())
 
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(tree.NodeKindSection))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(tree.NodeKindSection))
 		Expect(err).NotTo(HaveOccurred())
 
 		node, err := svc.FindPageByID(*id)
@@ -450,8 +450,8 @@ Hello World
 		node.Metadata = tree.PageMetadata{
 			CreatedAt:    time.Date(2026, time.March, 22, 10, 15, 30, 0, time.UTC),
 			UpdatedAt:    time.Date(2026, time.March, 22, 11, 16, 31, 0, time.UTC),
-			CreatorID:    "alice",
-			LastAuthorID: "bob",
+			CreatorID:    newFixtureUserID("alice"),
+			LastAuthorID: newFixtureUserID("bob"),
 		}
 
 		persistLegacyTreeSnapshot(tmpDir, svc.GetTree())

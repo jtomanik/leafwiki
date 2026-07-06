@@ -27,13 +27,13 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 
 			err)
 
-		plans := findChildBySlug(tree, "plans")
+		plans := findChildBySlug(tree, newFixtureSlug("plans"))
 		Expect(plans).To(SatisfyAll(
 			HaveField("Kind", Equal(NodeKindSection)),
 			HaveField("Slug", Equal(newFixtureSlug("plans"))),
 		), "unexpected plans section: %#v", plans)
 
-		plan := findChildBySlug(plans, "agent-hooks-plan")
+		plan := findChildBySlug(plans, newFixtureSlug("agent-hooks-plan"))
 		Expect(plan).To(SatisfyAll(
 			HaveField("Kind", Equal(NodeKindPage)),
 			HaveField("Title", Equal("Agent Hooks Plan")),
@@ -51,7 +51,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 			raw,
 		)
 
-		guides := findChildBySlug(tree, "user-guides")
+		guides := findChildBySlug(tree, newFixtureSlug("user-guides"))
 		Expect(guides.Kind).
 			To(Equal(NodeKindSection), "guides.Kind = %q, want %q",
 
@@ -102,7 +102,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 
 			err)
 
-		findChildBySlug(tree, "guide")
+		findChildBySlug(tree, newFixtureSlug("guide"))
 		for _, child := range tree.Children {
 			Expect(strings.ToLower(child.Slug.String())).NotTo(SatisfyAny(Equal("assets"), Equal("assets-1")),
 				"top-level static assets directory became wiki child: %#v", child)
@@ -129,8 +129,8 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 			err)
 
 		// Get the page and section nodes
-		page := findChildBySlug(tree, "no-id")
-		section := findChildBySlug(tree, "section")
+		page := findChildBySlug(tree, newFixtureSlug("no-id"))
+		section := findChildBySlug(tree, newFixtureSlug("section"))
 
 		// Now reload the files and check that IDs were written back
 		pageMd, err := markdown.LoadMarkdownFile(filepath.Join(tmp, "root", "no-id.md"))
@@ -165,8 +165,8 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 			err,
 		)
 
-		page2 := findChildBySlug(tree2, "no-id")
-		section2 := findChildBySlug(tree2, "section")
+		page2 := findChildBySlug(tree2, newFixtureSlug("no-id"))
+		section2 := findChildBySlug(tree2, newFixtureSlug("section"))
 		Expect(page2.ID).To(
 			Equal(page.
 				ID),
@@ -205,10 +205,10 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 			err)
 
 		// The valid file should be present with normalized slug
-		findChildBySlug(tree, "valid")
-		findChildBySlug(tree, "UPPERCASE")
-		findChildBySlug(tree, "valid-page")
-		findChildBySlug(tree, "valid-section")
+		findChildBySlug(tree, newFixtureSlug("valid"))
+		findChildBySlug(tree, newFixtureSlug("UPPERCASE"))
+		findChildBySlug(tree, newFixtureSlug("valid-page"))
+		findChildBySlug(tree, newFixtureSlug("valid-section"))
 		Expect(tree.Children).To(HaveLen(4),
 			"expected only empty-normalized names to be skipped, got %v",
 
@@ -229,7 +229,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 
 			err)
 
-		findChildBySlug(tree, "ABCD-efg")
+		findChildBySlug(tree, newFixtureSlug("ABCD-efg"))
 
 	})
 })
@@ -253,7 +253,7 @@ leafwiki_last_author_id: bob
 
 			err)
 
-		page := findChildBySlug(tree, "page")
+		page := findChildBySlug(tree, newFixtureSlug("page"))
 		Expect(page).To(SatisfyAll(
 			HaveField("ID", Equal(newFixturePageID("page-1"))),
 			HaveField("Metadata", SatisfyAll(
@@ -310,13 +310,13 @@ leafwiki_last_author_id: page-editor
 			tree.
 				ID)
 
-		section := findChildBySlug(tree, "docs")
+		section := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(section.ID).To(Equal(newFixturePageID("docs-section")), "section ID = %q",
 
 			section.
 				ID)
 
-		page := findChildBySlug(section, "page")
+		page := findChildBySlug(section, newFixtureSlug("page"))
 		Expect(page.ID).To(Equal(newFixturePageID("docs-page")), "page ID = %q",
 			page.ID,
 		)
@@ -375,7 +375,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 
 			err)
 
-		page := findChildBySlug(tree, "page")
+		page := findChildBySlug(tree, newFixtureSlug("page"))
 		Expect(strings.TrimSpace(page.
 			ID.String())).NotTo(BeEmpty(),
 

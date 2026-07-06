@@ -27,11 +27,11 @@ leafwiki_title: Legacy
 # Legacy`, 0o644)
 		writeTreeFile(filepath.Join(rootDir, "unrelated.md"), "# Unrelated", 0o644)
 		persistLegacyTreeSnapshot(dataDir, &PageNode{
-			ID:       "root",
-			Slug:     "root",
+			ID:       newFixturePageID("root"),
+			Slug:     newFixtureSlug("root"),
 			Title:    "root",
 			Kind:     NodeKindSection,
-			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
+			Children: []*PageNode{{ID: newFixturePageID("id-legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: NodeKindPage}},
 		})
 		{
 			err := saveSchema(dataDir, 4)
@@ -81,11 +81,11 @@ leafwiki_title: Orphan
 ---
 # Orphan`, 0o644)
 		persistLegacyTreeSnapshot(dataDir, &PageNode{
-			ID:       "root",
-			Slug:     "root",
+			ID:       newFixturePageID("root"),
+			Slug:     newFixtureSlug("root"),
 			Title:    "root",
 			Kind:     NodeKindSection,
-			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
+			Children: []*PageNode{{ID: newFixturePageID("id-legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: NodeKindPage}},
 		})
 		{
 			err := saveSchema(dataDir, 4)
@@ -131,11 +131,11 @@ leafwiki_title: Other
 ---
 # Other`, 0o644)
 		persistLegacyTreeSnapshot(dataDir, &PageNode{
-			ID:       "root",
-			Slug:     "root",
+			ID:       newFixturePageID("root"),
+			Slug:     newFixtureSlug("root"),
 			Title:    "root",
 			Kind:     NodeKindSection,
-			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
+			Children: []*PageNode{{ID: newFixturePageID("id-legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: NodeKindPage}},
 		})
 		{
 			err := saveSchema(dataDir, 4)
@@ -183,11 +183,11 @@ leafwiki_title: Legacy
 
 old content`, 0o644)
 		persistLegacyTreeSnapshot(dataDir, &PageNode{
-			ID:       "root",
-			Slug:     "root",
+			ID:       newFixturePageID("root"),
+			Slug:     newFixtureSlug("root"),
 			Title:    "root",
 			Kind:     NodeKindSection,
-			Children: []*PageNode{{ID: "id-legacy", Slug: "legacy", Title: "Legacy", Kind: NodeKindPage}},
+			Children: []*PageNode{{ID: newFixturePageID("id-legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: NodeKindPage}},
 		})
 		{
 			err := saveSchema(dataDir, 4)
@@ -230,11 +230,11 @@ leafwiki_title: C
 # C`, 0o644)
 
 		legacyTree := &PageNode{
-			ID:       "root",
-			Slug:     "root",
+			ID:       newFixturePageID("root"),
+			Slug:     newFixtureSlug("root"),
 			Title:    "root",
 			Kind:     NodeKindSection,
-			Children: []*PageNode{{ID: "id-c", Slug: "c", Title: "C", Kind: NodeKindPage, Position: 0}, {ID: "id-a", Slug: "a", Title: "A", Kind: NodeKindPage, Position: 1}, {ID: "id-b", Slug: "b", Title: "B", Kind: NodeKindPage, Position: 2}},
+			Children: []*PageNode{{ID: newFixturePageID("id-c"), Slug: newFixtureSlug("c"), Title: "C", Kind: NodeKindPage, Position: 0}, {ID: newFixturePageID("id-a"), Slug: newFixtureSlug("a"), Title: "A", Kind: NodeKindPage, Position: 1}, {ID: newFixturePageID("id-b"), Slug: newFixtureSlug("b"), Title: "B", Kind: NodeKindPage, Position: 2}},
 		}
 		persistLegacyTreeSnapshot(tmpDir, legacyTree)
 		{
@@ -296,13 +296,13 @@ leafwiki_title: B
 # B`, 0o644)
 
 		legacyTree := &PageNode{
-			ID:    "root",
-			Slug:  "root",
+			ID:    newFixturePageID("root"),
+			Slug:  newFixtureSlug("root"),
 			Title: "root",
 			Kind:  NodeKindSection,
 			Children: []*PageNode{
-				{ID: "id-b", Slug: "b", Title: "B", Kind: NodeKindPage, Position: 0},
-				{ID: "id-a", Slug: "a", Title: "A", Kind: NodeKindPage, Position: 1},
+				{ID: newFixturePageID("id-b"), Slug: newFixtureSlug("b"), Title: "B", Kind: NodeKindPage, Position: 0},
+				{ID: newFixturePageID("id-a"), Slug: newFixtureSlug("a"), Title: "A", Kind: NodeKindPage, Position: 1},
 			},
 		}
 		persistLegacyTreeSnapshot(tmpDir, legacyTree)
@@ -331,12 +331,12 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, tmpDir := newLoadedService()
 
 		// Create a small tree through public API (exercises disk + tree)
-		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
+		idA, err := svc.CreateNode(newFixtureUserID("system"), nil, "A", newFixtureSlug("a"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode A failed: %v",
 
 			err)
 
-		_, err = svc.CreateNode("system", idA, "B", "b", ptrKind(NodeKindPage))
+		_, err = svc.CreateNode(newFixtureUserID("system"), idA, "B", newFixtureSlug("b"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode B failed: %v",
 
 			err)
@@ -410,7 +410,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, _ := newLoadedService()
 
 		before := svc.TreeHash()
-		pageID, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
+		pageID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Welcome", newFixtureSlug("welcome"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -419,7 +419,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		Expect(before).NotTo(Equal(afterCreate), "expected hash to change after create")
 		{
 
-			err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Welcome 2", Slug("welcome"), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Welcome 2", newFixtureSlug("welcome"), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)

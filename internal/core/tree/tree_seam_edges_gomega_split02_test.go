@@ -25,7 +25,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		base = tempTreeDir()
 		root = filepath.Join(base, "root")
 		store = NewNodeStoreWithOptions(NodeStoreOptions{DataDir: filepath.Join(base, "data"), RootDir: root})
-		parent = edgeSectionNode(RootPageID, "root", "Root", nil)
+		parent = edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 	})
 
 	It("filesystem helper seams propagate rename and remove failures", func() {
@@ -43,7 +43,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		renameErr := errors.New("rename failed")
 		swapTreeSeam(&treeOSRename, func(string, string) error { return renameErr })
 
-		Expect(EnsurePageIsFolder(root, "guide")).To(MatchError(renameErr))
+		Expect(EnsurePageIsFolder(root, newFixtureRoutePath("guide"))).To(MatchError(renameErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			return fakeTreeFileInfo{name: filepath.Base(path), mode: fs.ModeDir}, nil
@@ -61,7 +61,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 
 	It("metadata and section-index seams surface write failures", func() {
 		mdFile := markdown.NewMarkdownFile(filepath.Join(root, "page.md"), "# Page\n", markdown.Frontmatter{})
-		entry := edgePageNode("page", "page", "Page", parent)
+		entry := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", parent)
 
 		writeMetadataErr := errors.New("write failed")
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return writeMetadataErr })
@@ -74,7 +74,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		swapTreeSeam(&treeOSChtimes, func(string, time.Time, time.Time) error { return errors.New("chtime failed") })
 		Expect(store.writeReconstructedMetadata(mdFile, entry)).To(Succeed())
 
-		section := edgeSectionNode("section", "section", "Section", parent)
+		section := edgeSectionNode(newFixturePageID("section"), newFixtureSlug("section"), "Section", parent)
 		swapTreeSeam(&treeLoadMarkdownFile, func(string) (*markdown.MarkdownFile, error) {
 			return nil, errors.New("load failed")
 		})
@@ -93,8 +93,8 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 	})
 
 	It("node store filesystem seams propagate operation failures", func() {
-		page := edgePageNode("page", "page", "Page", parent)
-		section := edgeSectionNode("section", "section", "Section", parent)
+		page := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", parent)
+		section := edgeSectionNode(newFixturePageID("section"), newFixtureSlug("section"), "Section", parent)
 
 		mkdirErr := errors.New("mkdir failed")
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return mkdirErr })
@@ -157,7 +157,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error {
 			return rootMetadataWriteErr
 		})
-		rootNode := edgeSectionNode(RootPageID, "root", "Root", nil)
+		rootNode := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 		Expect(store.applyRootSectionContent(rootNode, time.Now().UTC())).To(MatchError(rootMetadataWriteErr))
 
 		swapTreeSeam(&treeMarkdownWriteToFile, func(*markdown.MarkdownFile) error { return nil })
@@ -210,9 +210,9 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 	})
 
 	It("CRUD filesystem seams preserve stat, rename, and remove failure contracts", func() {
-		page := edgePageNode("page", "page", "Page", parent)
-		dest := edgeSectionNode("dest", "dest", "Dest", parent)
-		section := edgeSectionNode("section", "section", "Section", parent)
+		page := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", parent)
+		dest := edgeSectionNode(newFixturePageID("dest"), newFixtureSlug("dest"), "Dest", parent)
+		section := edgeSectionNode(newFixturePageID("section"), newFixtureSlug("section"), "Section", parent)
 
 		swapTreeSeam(&treeOSMkdirAll, func(string, os.FileMode) error { return nil })
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -288,8 +288,8 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 	})
 
 	It("filesystem seams propagate rename, read, sync, path, resolve, and conversion failures", func() {
-		page := edgePageNode("page", "page", "Page", parent)
-		section := edgeSectionNode("section", "section", "Section", parent)
+		page := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", parent)
+		section := edgeSectionNode(newFixturePageID("section"), newFixtureSlug("section"), "Section", parent)
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "renamed.md") {
@@ -297,7 +297,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(page, "renamed")).To(MatchError(ErrPageAlreadyExists))
+		Expect(store.RenameNode(page, newFixtureSlug("renamed"))).To(MatchError(ErrPageAlreadyExists))
 
 		statRenameErr := errors.New("stat failed")
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -310,7 +310,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 				return nil, os.ErrNotExist
 			}
 		})
-		Expect(store.RenameNode(page, "renamed")).To(MatchError(statRenameErr))
+		Expect(store.RenameNode(page, newFixtureSlug("renamed"))).To(MatchError(statRenameErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if strings.HasSuffix(path, "page.md") {
@@ -320,7 +320,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		})
 		renameNodeErr := errors.New("rename failed")
 		swapTreeSeam(&treeOSRename, func(string, string) error { return renameNodeErr })
-		Expect(store.RenameNode(page, "renamed")).To(MatchError(renameNodeErr))
+		Expect(store.RenameNode(page, newFixtureSlug("renamed"))).To(MatchError(renameNodeErr))
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
 			if filepath.Base(path) == "section" {
@@ -328,7 +328,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			}
 			return nil, os.ErrNotExist
 		})
-		Expect(store.RenameNode(section, "renamed-section")).To(MatchError(renameNodeErr))
+		Expect(store.RenameNode(section, newFixtureSlug("renamed-section"))).To(MatchError(renameNodeErr))
 
 		swapTreeSeam(&treeOSRename, func(string, string) error { return nil })
 		errFixtureReadFailed := errors.New("read failed")
@@ -364,7 +364,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		swapTreeSeam(&treeFilepathRel, func(string, string) (string, error) {
 			return "", relErr
 		})
-		store.setWorkspaceSourcePathForPhysicalPath(page, filepath.Join(root, "page.md"), "page", NodeKindPage)
+		store.setWorkspaceSourcePathForPhysicalPath(page, filepath.Join(root, "page.md"), newFixtureRoutePath("page"), NodeKindPage)
 		Expect(page.WorkspaceSourcePath).To(BeEmpty())
 		Expect(store.requirePathInRoot("relOp", filepath.Join(root, "page.md"))).To(MatchError(relErr))
 
@@ -380,8 +380,8 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resolved).To(ContainSubstring("missing"))
 
-		workspaceSection := edgeSectionNode("workspace-section", "workspace-section", "Workspace Section", parent)
-		workspaceSection.WorkspaceSourcePath = "Imported/Section"
+		workspaceSection := edgeSectionNode(newFixturePageID("workspace-section"), newFixtureSlug("workspace-section"), "Workspace Section", parent)
+		workspaceSection.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("Imported/Section")
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) { return nil, errFixtureReadFailed })
 		path, exists, err := store.workspaceContentPathForNode(workspaceSection, "workspaceContent")
 		failedWorkspaceLookup := workspaceContentPathLookup{Path: path, Exists: exists, Err: err}

@@ -49,7 +49,7 @@ leafwiki_title: Root Readme Page
 
 			raw)
 
-		readme := findChildBySlug(tree, "README")
+		readme := findChildBySlug(tree, newFixtureSlug("README"))
 		Expect(readme).To(matchTreeNode(NodeKindPage, newFixturePageID("root-readme"), "Root Readme Page"),
 			"README child = %#v, want root README.md as separate page", readme)
 
@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 
 			err)
 
-		sec := findChildBySlug(tree, "emptysec")
+		sec := findChildBySlug(tree, newFixtureSlug("emptysec"))
 		Expect(sec).To(SatisfyAll(
 			HaveField("Kind", Equal(NodeKindSection)),
 			HaveField("Title", Equal("emptysec")),
@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 
 			err)
 
-		p := findChildBySlug(tree, "plain")
+		p := findChildBySlug(tree, newFixtureSlug("plain"))
 		Expect(p).To(SatisfyAll(
 			HaveField("Kind", Equal(NodeKindPage)),
 			HaveField("Title", Equal("hello")),

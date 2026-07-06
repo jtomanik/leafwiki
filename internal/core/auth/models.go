@@ -2,7 +2,7 @@ package auth
 
 // PublicUser represents a user object that is safe to expose to the public.
 type PublicUser struct {
-	ID       string `json:"id"`
+	ID       UserID `json:"id"`
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Role     string `json:"role"`
@@ -10,7 +10,7 @@ type PublicUser struct {
 
 // User represents a user object with sensitive information.
 type User struct {
-	ID       string `json:"id"`
+	ID       UserID `json:"id"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Email    string `json:"email"`

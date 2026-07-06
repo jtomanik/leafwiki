@@ -335,13 +335,13 @@ var _ = ginkgo.Describe("auth SQL store failure behavior", ginkgo.Label("integra
 			restoreUsers()
 
 			userID := UserIDFromString("user-1")
-			existing := &UserLabel{ID: userID.String(), Username: "cached"}
+			existing := &UserLabel{ID: userID, Username: "cached"}
 			resolver = &UserResolver{userService: service, resolved: map[UserID]*UserLabel{}}
 			restoreGet := setAuthSeam(&authUserStoreGetUserByID, func(*UserStore, UserID) (*User, error) {
 				resolver.mu.Lock()
 				resolver.resolved[userID] = existing
 				resolver.mu.Unlock()
-				return &User{ID: userID.String(), Username: "fresh"}, nil
+				return &User{ID: userID, Username: "fresh"}, nil
 			})
 			label, err := resolver.ResolveUserLabel(userID)
 			Expect(err).NotTo(HaveOccurred())

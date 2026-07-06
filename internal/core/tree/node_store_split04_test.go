@@ -16,13 +16,13 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "same", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("same"), Title: "P", Kind: NodeKindPage, Parent: root}
 		file := filepath.Join(tmp, "root", "same.md")
 		writeTreeFile(file, "# x", 0o644)
 		{
 
-			err := store.RenameNode(page, "same")
+			err := store.RenameNode(page, newFixtureSlug("same"))
 			Expect(err).To(Succeed(), "expected unchanged slug rename to be a no-op, got %v",
 
 				err,
@@ -44,12 +44,12 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("old"), Title: "P", Kind: NodeKindPage, Parent: root}
 		writeTreeFile(filepath.Join(tmp, "root", "old.md"), "# x", 0o644)
 		writeTreeFile(filepath.Join(tmp, "root", "new.md"), "# y", 0o644)
 
-		err := store.RenameNode(page, "new")
+		err := store.RenameNode(page, newFixtureSlug("new"))
 
 		var existsErr *PageAlreadyExistsError
 		Expect(err).To(matchErrorAs(&existsErr), "expected PageAlreadyExistsError, got %T: %v",
@@ -64,11 +64,11 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("old"), Title: "P", Kind: NodeKindPage, Parent: root}
 		createTreeDirectory(filepath.Join(tmp, "root", "old.md"))
 
-		err := store.RenameNode(page, "new")
+		err := store.RenameNode(page, newFixtureSlug("new"))
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
@@ -84,11 +84,11 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		sec := &PageNode{ID: newFixturePageID("s1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
 		writeTreeFile(filepath.Join(tmp, "root", "docs"), "not a directory", 0o644)
 
-		err := store.RenameNode(sec, "docs2")
+		err := store.RenameNode(sec, newFixtureSlug("docs2"))
 
 		var de *DriftError
 		Expect(err).To(matchErrorAs(&de), "expected DriftError, got %T: %v",
@@ -104,10 +104,10 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		entry := &PageNode{ID: "x1", Slug: "weird", Title: "Weird", Kind: NodeKind("mystery"), Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		entry := &PageNode{ID: newFixturePageID("x1"), Slug: newFixtureSlug("weird"), Title: "Weird", Kind: newFixtureNodeKind("mystery"), Parent: root}
 
-		err := store.RenameNode(entry, "other")
+		err := store.RenameNode(entry, newFixtureSlug("other"))
 
 		var opErr *InvalidOpError
 		Expect(err).To(matchErrorAs(&opErr),
@@ -124,8 +124,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		sec := &PageNode{ID: newFixturePageID("s1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
 
 		createTreeDirectory(filepath.Join(tmp, "root", "docs"))
 
@@ -153,8 +153,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "P", Kind: NodeKindPage, Parent: root}
 
 		_, err := store.ReadPageRaw(page)
 		var de *DriftError
@@ -168,8 +168,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "P", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
 		writeTreeFile(path, `---
@@ -199,8 +199,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "P", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
 		raw := `---
@@ -226,18 +226,18 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
 		page := &PageNode{
-			ID:     "p1",
-			Slug:   "p",
+			ID:     newFixturePageID("p1"),
+			Slug:   newFixtureSlug("p"),
 			Title:  "Title A",
 			Kind:   NodeKindPage,
 			Parent: root,
 			Metadata: PageMetadata{
 				CreatedAt:    time.Date(2026, time.March, 21, 10, 15, 30, 0, time.UTC),
 				UpdatedAt:    time.Date(2026, time.March, 21, 11, 16, 31, 0, time.UTC),
-				CreatorID:    "alice",
-				LastAuthorID: "bob",
+				CreatorID:    newFixtureUserID("alice"),
+				LastAuthorID: newFixtureUserID("bob"),
 			},
 		}
 
@@ -269,9 +269,9 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 
 		// update title and id
 		page.Title = "Title B"
-		page.ID = "p1b"
+		page.ID = newFixturePageID("p1b")
 		page.Metadata.UpdatedAt = time.Date(2026, time.March, 21, 12, 17, 32, 0, time.UTC)
-		page.Metadata.LastAuthorID = "carol"
+		page.Metadata.LastAuthorID = newFixtureUserID("carol")
 		{
 			err := store.SyncFrontmatterIfExists(page)
 			Expect(err).To(Succeed(), "SyncFrontmatterIfExists(update): %v",
@@ -302,8 +302,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "p", Title: "Title A", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "Title A", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
 		writeTreeFile(path, `---
@@ -354,8 +354,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		sec := &PageNode{ID: newFixturePageID("s1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
 		{
 
 			// Do NOT create folder: sync must not mkdir via write-path; should return nil.
@@ -379,9 +379,9 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
 
-		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "P", Kind: NodeKindPage, Parent: root}
 		writeTreeFile(filepath.Join(tmp, "root", "p.md"), "# x", 0o644)
 
 		r1, err := store.resolveNode(page)
@@ -391,7 +391,7 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		Expect(r1).To(matchResolvedNode(NodeKindPage, true, HaveSuffix("p.md")),
 			"unexpected resolved: %#v", r1)
 
-		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		sec := &PageNode{ID: newFixturePageID("s1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
 		secDir := filepath.Join(tmp, "root", "docs")
 		createTreeDirectory(secDir)
 

@@ -116,8 +116,8 @@ var _ = ginkgo.Describe("workspace markdown route mapping", ginkgo.Label("unit")
 var _ = ginkgo.Describe("workspace route conflict tracking", ginkgo.Label("unit"), func() {
 	ginkgo.It("workspace route conflict tracker reports normalized collisions", func() {
 		tracker := newWorkspaceRouteConflictTracker()
-		first := WorkspaceMarkdownRoute{SourcePath: "plans/foo_bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
-		second := WorkspaceMarkdownRoute{SourcePath: "plans/foo-bar.md", RoutePath: "plans/foo-bar", Kind: NodeKindPage}
+		first := WorkspaceMarkdownRoute{SourcePath: newFixtureWorkspaceSourcePath("plans/foo_bar.md"), RoutePath: newFixtureRoutePath("plans/foo-bar"), Kind: NodeKindPage}
+		second := WorkspaceMarkdownRoute{SourcePath: newFixtureWorkspaceSourcePath("plans/foo-bar.md"), RoutePath: newFixtureRoutePath("plans/foo-bar"), Kind: NodeKindPage}
 		{
 
 			conflict := tracker.Record(first)
@@ -133,10 +133,10 @@ var _ = ginkgo.Describe("workspace route conflict tracking", ginkgo.Label("unit"
 			"expected normalized route conflict",
 		)
 		Expect(conflict).To(SatisfyAll(
-			HaveField("RoutePath", Equal(RoutePath("plans/foo-bar"))),
+			HaveField("RoutePath", Equal(newFixtureRoutePath("plans/foo-bar"))),
 			HaveField("Kind", Equal(NodeKindPage)),
-			HaveField("FirstPath", Equal(WorkspaceSourcePath("plans/foo_bar.md"))),
-			HaveField("SecondPath", Equal(WorkspaceSourcePath("plans/foo-bar.md"))),
+			HaveField("FirstPath", Equal(newFixtureWorkspaceSourcePath("plans/foo_bar.md"))),
+			HaveField("SecondPath", Equal(newFixtureWorkspaceSourcePath("plans/foo-bar.md"))),
 		), "conflict = %#v", conflict)
 
 	})
@@ -147,7 +147,7 @@ var _ = ginkgo.Describe("workspace route conflict tracking", ginkgo.Label("unit"
 		tracker := newWorkspaceRouteConflictTracker()
 		{
 
-			conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes", RoutePath: "notes", Kind: NodeKindSection})
+			conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: newFixtureWorkspaceSourcePath("notes"), RoutePath: newFixtureRoutePath("notes"), Kind: NodeKindSection})
 			Expect(conflict).To(BeNil(), "section route conflict = %#v",
 
 				conflict,
@@ -155,7 +155,7 @@ var _ = ginkgo.Describe("workspace route conflict tracking", ginkgo.Label("unit"
 		}
 		{
 
-			conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: "notes.md", RoutePath: "notes", Kind: NodeKindPage})
+			conflict := tracker.Record(WorkspaceMarkdownRoute{SourcePath: newFixtureWorkspaceSourcePath("notes.md"), RoutePath: newFixtureRoutePath("notes"), Kind: NodeKindPage})
 			Expect(conflict).To(BeNil(), "page and section twin route conflict = %#v",
 
 				conflict)

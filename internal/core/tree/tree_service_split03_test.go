@@ -13,19 +13,19 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("tree hash changes when order changes", func() {
 		svc, _ := newLoadedService()
 
-		firstID, err := svc.CreateNode("system", nil, "One", "one", ptrKind(NodeKindPage))
+		firstID, err := svc.CreateNode(newFixtureUserID("system"), nil, "One", newFixtureSlug("one"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode first failed: %v",
 
 			err)
 
-		secondID, err := svc.CreateNode("system", nil, "Two", "two", ptrKind(NodeKindPage))
+		secondID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Two", newFixtureSlug("two"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode second failed: %v",
 
 			err)
 
 		before := svc.TreeHash()
 		{
-			err := svc.SortPages("", testPageIDs(*secondID, *firstID))
+			err := svc.SortPages(newFixturePageID(""), testPageIDs(*secondID, *firstID))
 			Expect(err).To(Succeed(), "SortPages failed: %v",
 
 				err)
@@ -43,7 +43,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node reloads from filesystem", func() {
 		svc, tmpDir := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Welcome", newFixtureSlug("welcome"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -66,7 +66,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create child rolls back parent auto convert when tree save fails", func() {
 		svc, tmpDir := newLoadedService()
 
-		parentID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+		parentID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode parent failed: %v",
 
 			err)
@@ -75,7 +75,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 		createTreeDirectory(filepath.Join(tmpDir, "root", "docs", ".order.json"))
 
-		childID, err := svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
+		childID, err := svc.CreateNode(newFixtureUserID("system"), parentID, "Child", newFixtureSlug("child"), ptrKind(NodeKindPage))
 		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
 			err)
@@ -108,7 +108,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
-		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Welcome", newFixtureSlug("welcome"), ptrKind(NodeKindPage))
 		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
 			err)
@@ -145,7 +145,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 		createTreeDirectory(filepath.Join(tmpDir, "root", ".order.json"))
 
-		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Welcome", newFixtureSlug("welcome"), ptrKind(NodeKindPage))
 		Expect(err).To(MatchError(ErrPersistChildOrder), "expected child order persistence error, got: %v",
 
 			err)
@@ -178,7 +178,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node page root creates file and frontmatter", func() {
 		svc, tmpDir := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "Welcome", "welcome", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Welcome", newFixtureSlug("welcome"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -212,14 +212,14 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, _ := newLoadedService()
 		{
 
-			_, err := svc.CreateNode("system", nil, "Alpha", "Alpha", ptrKind(NodeKindPage))
+			_, err := svc.CreateNode(newFixtureUserID("system"), nil, "Alpha", newFixtureSlug("Alpha"), ptrKind(NodeKindPage))
 			Expect(err).To(Succeed(), "CreateNode alpha failed: %v",
 
 				err)
 		}
 		{
 
-			_, err := svc.CreateNode("system", nil, "Alpha Lower", "alpha", ptrKind(NodeKindPage))
+			_, err := svc.CreateNode(newFixtureUserID("system"), nil, "Alpha Lower", newFixtureSlug("alpha"), ptrKind(NodeKindPage))
 			Expect(err).To(MatchError(ErrPageAlreadyExists), "expected ErrPageAlreadyExists for case-insensitive conflict, got %v",
 
 				err)
@@ -232,12 +232,12 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node allows same basename page and section twins", func() {
 		svc, dataDir := newLoadedService()
 
-		pageID, err := svc.CreateNode("system", nil, "Sync Page", "sync", ptrKind(NodeKindPage))
+		pageID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Sync Page", newFixtureSlug("sync"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode page failed: %v",
 
 			err)
 
-		sectionID, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+		sectionID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Sync Section", newFixtureSlug("sync"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode section twin failed: %v",
 
 			err)
@@ -245,7 +245,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		statTreePath(filepath.Join(dataDir, "root", "sync.md"))
 		statTreePath(filepath.Join(dataDir, "root", "sync", "index.md"))
 
-		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+		page, err := svc.FindPageByRoutePathAndKind(newFixtureRoutePath("sync"), NodeKindPage)
 		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
 
 			err,
@@ -253,7 +253,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 
 		Expect(page.ID).To(Equal(*pageID))
 
-		section, err := svc.FindPageByRoutePathAndKind("sync", NodeKindSection)
+		section, err := svc.FindPageByRoutePathAndKind(newFixtureRoutePath("sync"), NodeKindSection)
 		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind section failed: %v",
 
 			err)
@@ -261,7 +261,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		Expect(section.ID).To(Equal(*sectionID))
 		{
 
-			_, err := svc.CreateNode("system", nil, "Duplicate Page", "SYNC", ptrKind(NodeKindPage))
+			_, err := svc.CreateNode(newFixtureUserID("system"), nil, "Duplicate Page", newFixtureSlug("SYNC"), ptrKind(NodeKindPage))
 			Expect(err).To(MatchError(ErrPageAlreadyExists), "expected ErrPageAlreadyExists for same-kind duplicate, got %v",
 
 				err)
@@ -274,13 +274,13 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("content path for node uses core read rules", func() {
 		svc, dataDir := newLoadedService()
 
-		sectionID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
+		sectionID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode section failed: %v",
 
 			err,
 		)
 
-		pageID, err := svc.CreateNode("system", nil, "Guide", "guide", ptrKind(NodeKindPage))
+		pageID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Guide", newFixtureSlug("guide"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode page failed: %v",
 
 			err)
@@ -336,7 +336,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node rejects traversal slug", func() {
 		svc, dataDir := newLoadedService()
 
-		_, err := svc.CreateNode("system", nil, "Outside", "../outside", ptrKind(NodeKindPage))
+		_, err := svc.CreateNode(newFixtureUserID("system"), nil, "Outside", newFixtureSlug("../outside"), ptrKind(NodeKindPage))
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err,
@@ -351,12 +351,12 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node persists root order file", func() {
 		svc, tmpDir := newLoadedService()
 
-		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
+		idA, err := svc.CreateNode(newFixtureUserID("system"), nil, "A", newFixtureSlug("a"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode A failed: %v",
 
 			err)
 
-		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
+		idB, err := svc.CreateNode(newFixtureUserID("system"), nil, "B", newFixtureSlug("b"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode B failed: %v",
 
 			err)
@@ -371,7 +371,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("create node section creates index with frontmatter", func() {
 		svc, tmpDir := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindSection))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindSection))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)

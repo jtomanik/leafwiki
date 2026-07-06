@@ -13,10 +13,10 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		secA := &PageNode{ID: "a", Slug: "a", Title: "A", Kind: NodeKindSection, Parent: root}
-		secB := &PageNode{ID: "b", Slug: "b", Title: "B", Kind: NodeKindSection, Parent: root}
-		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: secA}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		secA := &PageNode{ID: newFixturePageID("a"), Slug: newFixtureSlug("a"), Title: "A", Kind: NodeKindSection, Parent: root}
+		secB := &PageNode{ID: newFixturePageID("b"), Slug: newFixtureSlug("b"), Title: "B", Kind: NodeKindSection, Parent: root}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "P", Kind: NodeKindPage, Parent: secA}
 
 		// create source file at old location (tree-based path)
 		src := filepath.Join(tmp, "root", "a", "p.md")
@@ -56,16 +56,16 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		plans := &PageNode{ID: "plans", Slug: "plans", Title: "Plans", Kind: NodeKindSection, Parent: root}
-		archive := &PageNode{ID: "archive", Slug: "archive", Title: "Archive", Kind: NodeKindSection, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		plans := &PageNode{ID: newFixturePageID("plans"), Slug: newFixtureSlug("plans"), Title: "Plans", Kind: NodeKindSection, Parent: root}
+		archive := &PageNode{ID: newFixturePageID("archive"), Slug: newFixtureSlug("archive"), Title: "Archive", Kind: NodeKindSection, Parent: root}
 		page := &PageNode{
-			ID:                  "p1",
-			Slug:                "agent-hooks-plan",
+			ID:                  newFixturePageID("p1"),
+			Slug:                newFixtureSlug("agent-hooks-plan"),
 			Title:               "Agent Hooks Plan",
 			Kind:                NodeKindPage,
 			Parent:              plans,
-			WorkspaceSourcePath: "plans/agent_hooks.PLAN.md",
+			WorkspaceSourcePath: newFixtureWorkspaceSourcePath("plans/agent_hooks.PLAN.md"),
 		}
 
 		src := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
@@ -109,9 +109,9 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		sec := &PageNode{ID: "s", Slug: "s", Title: "S", Kind: NodeKindSection, Parent: root}
-		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: sec}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		sec := &PageNode{ID: newFixturePageID("s"), Slug: newFixtureSlug("s"), Title: "S", Kind: NodeKindSection, Parent: root}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "P", Kind: NodeKindPage, Parent: sec}
 
 		err := store.MoveNode(page, root)
 
@@ -129,16 +129,16 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
 		parent := &PageNode{
-			ID:                  "s1",
-			Slug:                "my-docs",
+			ID:                  newFixturePageID("s1"),
+			Slug:                newFixtureSlug("my-docs"),
 			Title:               "My Docs",
 			Kind:                NodeKindSection,
 			Parent:              root,
-			WorkspaceSourcePath: "My Docs",
+			WorkspaceSourcePath: newFixtureWorkspaceSourcePath("My Docs"),
 		}
-		page := &PageNode{ID: "p1", Slug: "child", Title: "Child", Kind: NodeKindPage, Parent: parent}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("child"), Title: "Child", Kind: NodeKindPage, Parent: parent}
 		{
 
 			err := store.CreatePage(parent, page)
@@ -168,8 +168,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "p", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("p"), Title: "P", Kind: NodeKindPage, Parent: root}
 
 		path := filepath.Join(tmp, "root", "p.md")
 		writeTreeFile(path, "# x", 0o644)
@@ -204,15 +204,15 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		plans := &PageNode{ID: "plans", Slug: "plans", Title: "Plans", Kind: NodeKindSection, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		plans := &PageNode{ID: newFixturePageID("plans"), Slug: newFixtureSlug("plans"), Title: "Plans", Kind: NodeKindSection, Parent: root}
 		page := &PageNode{
-			ID:                  "p1",
-			Slug:                "agent-hooks-plan",
+			ID:                  newFixturePageID("p1"),
+			Slug:                newFixtureSlug("agent-hooks-plan"),
 			Title:               "Agent Hooks Plan",
 			Kind:                NodeKindPage,
 			Parent:              plans,
-			WorkspaceSourcePath: "plans/agent_hooks.PLAN.md",
+			WorkspaceSourcePath: newFixtureWorkspaceSourcePath("plans/agent_hooks.PLAN.md"),
 		}
 
 		rawSource := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
@@ -243,8 +243,8 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		sec := &PageNode{ID: newFixturePageID("s1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
 
 		directory := filepath.Join(tmp, "root", "docs")
 		createTreeDirectory(directory)
@@ -280,16 +280,16 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
 		parent := &PageNode{
-			ID:                  "s1",
-			Slug:                "my-docs",
+			ID:                  newFixturePageID("s1"),
+			Slug:                newFixtureSlug("my-docs"),
 			Title:               "My Docs",
 			Kind:                NodeKindSection,
 			Parent:              root,
-			WorkspaceSourcePath: "My Docs",
+			WorkspaceSourcePath: newFixtureWorkspaceSourcePath("My Docs"),
 			Children: []*PageNode{
-				{ID: "p1", Slug: "child", Title: "Child", Kind: NodeKindPage},
+				{ID: newFixturePageID("p1"), Slug: newFixtureSlug("child"), Title: "Child", Kind: NodeKindPage},
 			},
 		}
 		assignParentToChildren(parent)
@@ -326,15 +326,15 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
 
 		// page rename
-		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("old"), Title: "P", Kind: NodeKindPage, Parent: root}
 		oldFile := filepath.Join(tmp, "root", "old.md")
 		writeTreeFile(oldFile, "# x", 0o644)
 		{
 
-			err := store.RenameNode(page, "new")
+			err := store.RenameNode(page, newFixtureSlug("new"))
 			Expect(err).To(Succeed(), "RenameNode(page): %v",
 
 				err)
@@ -346,13 +346,13 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		}
 
 		// section rename
-		sec := &PageNode{ID: "s1", Slug: "docs", Title: "Docs", Kind: NodeKindSection, Parent: root}
+		sec := &PageNode{ID: newFixturePageID("s1"), Slug: newFixtureSlug("docs"), Title: "Docs", Kind: NodeKindSection, Parent: root}
 		secDir := filepath.Join(tmp, "root", "docs")
 		createTreeDirectory(secDir)
 		writeTreeFile(filepath.Join(secDir, "index.md"), "# y", 0o644)
 		{
 
-			err := store.RenameNode(sec, "docs2")
+			err := store.RenameNode(sec, newFixtureSlug("docs2"))
 			Expect(err).To(Succeed(), "RenameNode(section): %v",
 
 				err,
@@ -368,21 +368,21 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		plans := &PageNode{ID: "plans", Slug: "plans", Title: "Plans", Kind: NodeKindSection, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		plans := &PageNode{ID: newFixturePageID("plans"), Slug: newFixtureSlug("plans"), Title: "Plans", Kind: NodeKindSection, Parent: root}
 		page := &PageNode{
-			ID:                  "p1",
-			Slug:                "agent-hooks-plan",
+			ID:                  newFixturePageID("p1"),
+			Slug:                newFixtureSlug("agent-hooks-plan"),
 			Title:               "Agent Hooks Plan",
 			Kind:                NodeKindPage,
 			Parent:              plans,
-			WorkspaceSourcePath: "plans/agent_hooks.PLAN.md",
+			WorkspaceSourcePath: newFixtureWorkspaceSourcePath("plans/agent_hooks.PLAN.md"),
 		}
 		rawSource := filepath.Join(tmp, "root", "plans", "agent_hooks.PLAN.md")
 		writeTreeFile(rawSource, "# plan", 0o644)
 		{
 
-			err := store.RenameNode(page, "agent-hooks-v2")
+			err := store.RenameNode(page, newFixtureSlug("agent-hooks-v2"))
 			Expect(err).To(Succeed(), "RenameNode: %v",
 
 				err)
@@ -417,16 +417,16 @@ var _ = ginkgo.Describe("node store persistence", ginkgo.Label("unit"), func() {
 		tmp := tempTreeDir()
 		store := NewNodeStore(tmp)
 
-		root := &PageNode{ID: "root", Slug: "root", Title: "root", Kind: NodeKindSection}
-		page := &PageNode{ID: "p1", Slug: "old", Title: "P", Kind: NodeKindPage, Parent: root}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root", Kind: NodeKindSection}
+		page := &PageNode{ID: newFixturePageID("p1"), Slug: newFixtureSlug("old"), Title: "P", Kind: NodeKindPage, Parent: root}
 		{
 
-			err := store.RenameNode(page, "   ")
+			err := store.RenameNode(page, newFixtureSlug("   "))
 			Expect(err).To(MatchError(ErrInvalidOperation), "expected empty slug validation error, got %v", err)
 		}
 		{
 
-			err := store.RenameNode(root, "new-root")
+			err := store.RenameNode(root, newFixtureSlug("new-root"))
 			Expect(err).To(MatchError(ErrInvalidOperation), "expected root rename validation error, got %v", err)
 		}
 

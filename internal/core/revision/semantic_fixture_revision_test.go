@@ -29,6 +29,14 @@ func newFixtureUserID[T ~string](raw T) tree.UserID {
 	return tree.NewUserIDUnchecked(string(raw))
 }
 
+func newFixtureErrorCode[T ~string](raw T) sharederrors.ErrorCode {
+	return sharederrors.ErrorCode(raw)
+}
+
+func newFixtureAssetName[T ~string](raw T) tree.AssetName {
+	return tree.AssetNameFromString(raw)
+}
+
 func revisionTempDir() string {
 	ginkgo.GinkgoHelper()
 

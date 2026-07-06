@@ -23,8 +23,8 @@ const testAssetMaxBytes shared.MaxBytes = 1024
 var _ = Describe("asset service behavior", Label("unit"), func() {
 	It("stores uploaded page assets and returns public asset paths", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "lonely-page", ID: "a7b3"}
-		createPageFile(tmp, "lonely-page", "# Lonely Page")
+		page := &tree.PageNode{Slug: newFixtureSlug("lonely-page"), ID: newFixturePageID("a7b3")}
+		createPageFile(tmp, newFixtureSlug("lonely-page"), "# Lonely Page")
 		service := NewAssetService(tmp, tree.NewSlugService())
 
 		file, name := createMultipartFile("my-image.png", []byte("hello image"))
@@ -41,8 +41,8 @@ var _ = Describe("asset service behavior", Label("unit"), func() {
 
 	It("removes all stored assets for a page and lists none afterward", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "lonely-page", ID: "a7b3"}
-		createPageFile(tmp, "lonely-page", "# Lonely Page")
+		page := &tree.PageNode{Slug: newFixtureSlug("lonely-page"), ID: newFixturePageID("a7b3")}
+		createPageFile(tmp, newFixtureSlug("lonely-page"), "# Lonely Page")
 		service := NewAssetService(tmp, tree.NewSlugService())
 
 		file, name := createMultipartFile("my-image.png", []byte("hello image"))
@@ -63,7 +63,7 @@ var _ = Describe("asset service behavior", Label("unit"), func() {
 
 	It("removes the page asset directory after deleting its last asset", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("delete-page"), ID: newFixturePageID("delete-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 
 		file, name := createMultipartFile("only.png", []byte("hello image"))
@@ -80,7 +80,7 @@ var _ = Describe("asset service behavior", Label("unit"), func() {
 
 	It("generates distinct filenames for repeated uploads with the same name", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "collision-page"}
+		page := &tree.PageNode{Slug: newFixtureSlug("collision-page")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 
 		for i := 0; i < 3; i++ {
@@ -98,8 +98,8 @@ var _ = Describe("asset service behavior", Label("unit"), func() {
 
 	It("renames an asset and lists only the new public path", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "rename-page", ID: "c3d4"}
-		createPageFile(tmp, "rename-page", "# Rename Page")
+		page := &tree.PageNode{Slug: newFixtureSlug("rename-page"), ID: newFixturePageID("c3d4")}
+		createPageFile(tmp, newFixtureSlug("rename-page"), "# Rename Page")
 		service := NewAssetService(tmp, tree.NewSlugService())
 
 		file, name := createMultipartFile("old-name.png", []byte("old image"))
@@ -120,7 +120,7 @@ var _ = Describe("asset service behavior", Label("unit"), func() {
 
 	It("returns localized not-found errors for missing assets", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("delete-page"), ID: newFixturePageID("delete-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
@@ -138,7 +138,7 @@ type invalidSaveNameCase struct {
 var _ = DescribeTable("asset uploads reject invalid normalized filenames", Label("unit"),
 	func(tc invalidSaveNameCase) {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "upload-page", ID: "upload-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("upload-page"), ID: newFixturePageID("upload-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		file := newTestMultipartFile([]byte("asset"))
 		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
@@ -159,7 +159,7 @@ var _ = DescribeTable("asset uploads reject invalid normalized filenames", Label
 var _ = Describe("asset name validation guards", Label("unit"), func() {
 	It("rejects read filenames that escape the page asset directory", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("read-page"), ID: newFixturePageID("read-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
 		Expect(os.MkdirAll(pageAssetDir, 0o755)).To(Succeed())
@@ -173,10 +173,10 @@ var _ = Describe("asset name validation guards", Label("unit"), func() {
 
 	It("rejects delete filenames that target another page's assets", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
-		other := &tree.PageNode{Slug: "other-page", ID: "other-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("delete-page"), ID: newFixturePageID("delete-page-id")}
+		other := &tree.PageNode{Slug: newFixtureSlug("other-page"), ID: newFixturePageID("other-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
-		otherAsset := writeAssetFile(service, other, "note.txt", []byte("other asset"))
+		otherAsset := writeAssetFile(service, other, assetName("note.txt"), []byte("other asset"))
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
 		err := service.DeleteAsset(page, siblingAssetName(other.ID, assetName("note.txt")))
@@ -187,11 +187,11 @@ var _ = Describe("asset name validation guards", Label("unit"), func() {
 
 	It("rejects rename filenames that target another page's assets", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
-		other := &tree.PageNode{Slug: "other-page", ID: "other-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("rename-page"), ID: newFixturePageID("rename-page-id")}
+		other := &tree.PageNode{Slug: newFixtureSlug("other-page"), ID: newFixturePageID("other-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
-		pageAsset := writeAssetFile(service, page, "note.txt", []byte("page asset"))
-		otherAsset := writeAssetFile(service, other, "note.txt", []byte("other asset"))
+		pageAsset := writeAssetFile(service, page, assetName("note.txt"), []byte("page asset"))
+		otherAsset := writeAssetFile(service, other, assetName("note.txt"), []byte("other asset"))
 
 		_, err := service.RenameAsset(page, siblingAssetName(other.ID, assetName("note.txt")), assetName("renamed.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetInvalidName))
@@ -209,7 +209,7 @@ type assetNameCase struct {
 var _ = DescribeTable("asset reads reject dot-component filenames", Label("unit"),
 	func(tc assetNameCase) {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("read-page"), ID: newFixturePageID("read-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
@@ -224,7 +224,7 @@ var _ = DescribeTable("asset reads reject dot-component filenames", Label("unit"
 var _ = DescribeTable("asset deletes reject dot-component filenames", Label("unit"),
 	func(tc assetNameCase) {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "delete-page", ID: "delete-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("delete-page"), ID: newFixturePageID("delete-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		pageAssetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
 		Expect(os.MkdirAll(pageAssetDir, 0o755)).To(Succeed())
@@ -246,9 +246,9 @@ type renameDotNameCase struct {
 var _ = DescribeTable("asset renames reject dot-component filenames", Label("unit"),
 	func(tc renameDotNameCase) {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("rename-page"), ID: newFixturePageID("rename-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
-		pageAsset := writeAssetFile(service, page, "note.txt", []byte("page asset"))
+		pageAsset := writeAssetFile(service, page, assetName("note.txt"), []byte("page asset"))
 
 		_, err := service.RenameAsset(page, assetName(tc.oldFilename), assetName(tc.newFilename))
 
@@ -263,13 +263,13 @@ var _ = DescribeTable("asset renames reject dot-component filenames", Label("uni
 
 var _ = Describe("asset path and filename helpers", Label("unit"), func() {
 	It("builds disk paths from Windows-style asset roots", func() {
-		Expect(strings.ReplaceAll(assetPageDiskPath(`C:\wiki\data\assets`, "a7b3"), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3`))
-		Expect(strings.ReplaceAll(assetFileDiskPath(`C:\wiki\data\assets\a7b3`, "my-image.png"), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3/my-image.png`))
+		Expect(strings.ReplaceAll(assetPageDiskPath(`C:\wiki\data\assets`, newFixturePageID("a7b3")), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3`))
+		Expect(strings.ReplaceAll(assetFileDiskPath(`C:\wiki\data\assets\a7b3`, assetName("my-image.png")), `\`, `/`)).To(Equal(`C:/wiki/data/assets/a7b3/my-image.png`))
 	})
 
 	It("uses forward slashes for public asset paths", func() {
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
-		page := &tree.PageNode{ID: "a7b3"}
+		page := &tree.PageNode{ID: newFixturePageID("a7b3")}
 
 		Expect(service.buildPublicPath(page, assetName("my-image.png"))).To(Equal("/assets/a7b3/my-image.png"))
 	})
@@ -302,7 +302,7 @@ var _ = DescribeTable("asset filename validation returns localized errors for em
 var _ = DescribeTable("asset deletes reject path traversal filenames", Label("unit"),
 	func(tc invalidAssetOperationCase) {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "test-page", ID: "traversal-delete"}
+		page := &tree.PageNode{Slug: newFixtureSlug("test-page"), ID: newFixturePageID("traversal-delete")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
@@ -322,7 +322,7 @@ var _ = DescribeTable("asset deletes reject path traversal filenames", Label("un
 var _ = DescribeTable("asset renames reject path traversal source filenames", Label("unit"),
 	func(tc invalidAssetOperationCase) {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "test-page", ID: "traversal-rename"}
+		page := &tree.PageNode{Slug: newFixtureSlug("test-page"), ID: newFixturePageID("traversal-rename")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
@@ -347,8 +347,8 @@ type invalidAssetOperationCase struct {
 var _ = Describe("asset service storage boundary behavior", Label("unit"), func() {
 	It("copies regular files while skipping nested directories", func() {
 		tmp := tempAssetDir()
-		source := &tree.PageNode{Slug: "source", ID: "source-id"}
-		target := &tree.PageNode{Slug: "target", ID: "target-id"}
+		source := &tree.PageNode{Slug: newFixtureSlug("source"), ID: newFixturePageID("source-id")}
+		target := &tree.PageNode{Slug: newFixtureSlug("target"), ID: newFixturePageID("target-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		sourceDir := filepath.Join(service.GetAssetsDir(), source.ID.String())
 		Expect(os.MkdirAll(filepath.Join(sourceDir, "nested"), 0o755)).To(Succeed())
@@ -367,14 +367,14 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 	It("succeeds when the source page has no asset directory", func() {
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
 
-		Expect(service.CopyAllAssets(&tree.PageNode{ID: "missing"}, &tree.PageNode{ID: "target"})).To(Succeed())
+		Expect(service.CopyAllAssets(&tree.PageNode{ID: newFixturePageID("missing")}, &tree.PageNode{ID: newFixturePageID("target")})).To(Succeed())
 	})
 
 	It("returns saved bytes for an existing asset", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("read-page"), ID: newFixturePageID("read-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
-		writeAssetFile(service, page, "note.txt", []byte("asset bytes"))
+		writeAssetFile(service, page, assetName("note.txt"), []byte("asset bytes"))
 
 		raw, err := service.ReadAssetForPage(page, assetName("note.txt"))
 
@@ -384,7 +384,7 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 
 	It("returns localized not-found errors for missing assets", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "read-page", ID: "read-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("read-page"), ID: newFixturePageID("read-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
@@ -396,16 +396,16 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 	It("returns localized not-found errors when the page asset directory is missing", func() {
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
 
-		_, err := service.ReadAssetForPage(&tree.PageNode{ID: "missing-page"}, assetName("missing.txt"))
+		_, err := service.ReadAssetForPage(&tree.PageNode{ID: newFixturePageID("missing-page")}, assetName("missing.txt"))
 
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 	})
 
 	It("rejects asset renames that change extensions", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("rename-page"), ID: newFixturePageID("rename-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
-		writeAssetFile(service, page, "note.txt", []byte("asset"))
+		writeAssetFile(service, page, assetName("note.txt"), []byte("asset"))
 
 		_, err := service.RenameAsset(page, assetName("note.txt"), assetName("note.png"))
 
@@ -414,9 +414,9 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 
 	It("rejects asset renames with invalid slug names", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("rename-page"), ID: newFixturePageID("rename-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
-		writeAssetFile(service, page, "note.txt", []byte("asset"))
+		writeAssetFile(service, page, assetName("note.txt"), []byte("asset"))
 
 		_, err := service.RenameAsset(page, assetName("note.txt"), assetName("Bad Name.txt"))
 
@@ -425,10 +425,10 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 
 	It("rejects asset renames that collide with existing targets", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("rename-page"), ID: newFixturePageID("rename-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
-		writeAssetFile(service, page, "old.txt", []byte("old"))
-		writeAssetFile(service, page, "new.txt", []byte("new"))
+		writeAssetFile(service, page, assetName("old.txt"), []byte("old"))
+		writeAssetFile(service, page, assetName("new.txt"), []byte("new"))
 
 		_, err := service.RenameAsset(page, assetName("old.txt"), assetName("new.txt"))
 
@@ -437,7 +437,7 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 
 	It("returns localized not-found errors for missing rename sources", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "rename-page", ID: "rename-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("rename-page"), ID: newFixturePageID("rename-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), page.ID.String()), 0o755)).To(Succeed())
 
@@ -449,12 +449,12 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 	It("succeeds when deleting assets for a page with no asset directory", func() {
 		service := NewAssetService(tempAssetDir(), tree.NewSlugService())
 
-		Expect(service.DeleteAllAssetsForPage(&tree.PageNode{ID: "missing-page"})).To(Succeed())
+		Expect(service.DeleteAllAssetsForPage(&tree.PageNode{ID: newFixturePageID("missing-page")})).To(Succeed())
 	})
 
 	It("rejects oversized uploads without leaving partial files", func() {
 		tmp := tempAssetDir()
-		page := &tree.PageNode{Slug: "limit-page", ID: "limit-page-id"}
+		page := &tree.PageNode{Slug: newFixtureSlug("limit-page"), ID: newFixturePageID("limit-page-id")}
 		service := NewAssetService(tmp, tree.NewSlugService())
 		file, name := createMultipartFile("too-large.bin", []byte(strings.Repeat("a", 32)))
 		DeferCleanup(func() { Expect(file.Close()).To(Succeed()) })
@@ -470,9 +470,9 @@ var _ = Describe("asset service storage boundary behavior", Label("unit"), func(
 	})
 })
 
-func createPageFile(root, slug, content string) {
+func createPageFile(root string, slug tree.Slug, content string) {
 	GinkgoHelper()
-	pagePath := filepath.Join(root, slug)
+	pagePath := filepath.Join(root, slug.FilesystemPath())
 	Expect(os.MkdirAll(pagePath, 0o755)).To(Succeed())
 	Expect(os.WriteFile(filepath.Join(pagePath, "index.md"), []byte(content), 0o644)).To(Succeed())
 }
@@ -492,11 +492,11 @@ func createMultipartFile(name string, content []byte) (multipart.File, string) {
 	return file, filename
 }
 
-func writeAssetFile(service *AssetService, page *tree.PageNode, filename string, content []byte) string {
+func writeAssetFile(service *AssetService, page *tree.PageNode, filename tree.AssetName, content []byte) string {
 	GinkgoHelper()
 	assetDir := filepath.Join(service.GetAssetsDir(), page.ID.String())
 	Expect(os.MkdirAll(assetDir, 0o755)).To(Succeed())
-	assetPath := filepath.Join(assetDir, filename)
+	assetPath := filepath.Join(assetDir, filename.Filename())
 	Expect(os.WriteFile(assetPath, content, 0o644)).To(Succeed())
 	return assetPath
 }
@@ -516,6 +516,14 @@ func newTestMultipartFile(content []byte) multipart.File {
 
 func assetName(raw string) tree.AssetName {
 	return tree.AssetNameFromString(raw)
+}
+
+func newFixturePageID[T ~string](raw T) tree.PageID {
+	return tree.NewPageIDUnchecked(raw)
+}
+
+func newFixtureSlug[T ~string](raw T) tree.Slug {
+	return tree.NewSlugUnchecked(raw)
 }
 
 func siblingAssetName(pageID tree.PageID, filename tree.AssetName) tree.AssetName {

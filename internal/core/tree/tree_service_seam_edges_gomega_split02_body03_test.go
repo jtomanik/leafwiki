@@ -39,8 +39,8 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		swapTreeSeam(&treeOSReadDir, os.ReadDir)
 		Expect(os.WriteFile(filepath.Join(defaultRoot, "page.md"), []byte("# Page"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "page.md"), []byte("# Page"), 0o644)).To(Succeed())
-		legacy := edgeSectionNode(RootPageID, "root", "Root", nil)
-		legacy.Children = []*PageNode{edgePageNode("page", "page", "Page", legacy)}
+		legacy := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
+		legacy.Children = []*PageNode{edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", legacy)}
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
 
 		legacyTargetLoadErr := errors.New("legacy target load failed")
@@ -69,7 +69,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		Expect(err).NotTo(HaveOccurred())
 		Expect(files).To(BeEmpty())
 
-		Expect(configuredRootHasLegacyContentResult(svc, &PageNode{ID: "bad", Slug: "", Kind: NodeKindPage})).To(MatchError(ErrSlugEmpty))
+		Expect(configuredRootHasLegacyContentResult(svc, &PageNode{ID: newFixturePageID("bad"), Slug: newFixtureSlug(""), Kind: NodeKindPage})).To(MatchError(ErrSlugEmpty))
 
 		swapTreeSeam(&treeOSReadDir, func(string) ([]os.DirEntry, error) {
 			return nil, errors.New("configured read failed")
@@ -82,23 +82,23 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		Expect(legacyTargetDiffersFromNodeResult(legacyContentPath{sourceFile: "source.md", targetFile: "target.md"})).To(MatchError(ErrReadLegacyContentPath))
 
 		rollbackSvc := newInMemoryService()
-		rollbackParent := edgeSectionNode("rollback-parent", "rollback-parent", "Rollback Parent", rollbackSvc.tree)
-		rollbackParent.WorkspaceSourcePath = "../outside"
-		rollbackPage := edgePageNode("rollback-page", "rollback-page", "Rollback Page", rollbackParent)
+		rollbackParent := edgeSectionNode(newFixturePageID("rollback-parent"), newFixtureSlug("rollback-parent"), "Rollback Parent", rollbackSvc.tree)
+		rollbackParent.WorkspaceSourcePath = newFixtureWorkspaceSourcePath("../outside")
+		rollbackPage := edgePageNode(newFixturePageID("rollback-page"), newFixtureSlug("rollback-page"), "Rollback Page", rollbackParent)
 		rollbackParent.Children = []*PageNode{rollbackPage}
 		swapTreeSeam(&treeStoreDeletePage, func(*NodeStore, *PageNode) error { return nil })
 		Expect(rollbackSvc.rollbackCreatedNodeLocked(rollbackParent, rollbackPage, true)).To(matchInvalidOp("rollbackCreatedNode"))
 
 		lookupSvc := newInMemoryService()
 		delete(lookupSvc.childSlugs, lookupSvc.tree.ID)
-		Expect(lookupSvc.findChildBySlugInParentLocked(lookupSvc.tree, "missing")).To(BeNil())
-		_, err = lookupSvc.lookupPagePathLocked("bad//path", "")
+		Expect(lookupSvc.findChildBySlugInParentLocked(lookupSvc.tree, newFixtureSlug("missing"))).To(BeNil())
+		_, err = lookupSvc.lookupPagePathLocked(newFixtureRoutePath("bad//path"), newFixtureNodeKind(""))
 		Expect(err).To(MatchError(ErrInvalidRoutePath))
-		_, err = lookupSvc.EnsurePagePath("user", "bad//path", "Bad", nil)
+		_, err = lookupSvc.EnsurePagePath(newFixtureUserID("user"), newFixtureRoutePath("bad//path"), "Bad", nil)
 		Expect(err).To(MatchError(ErrLookupPagePath))
 
 		contentSvc := newInMemoryService()
-		contentPage := edgePageNode("content-page", "content-page", "Content Page", contentSvc.tree)
+		contentPage := edgePageNode(newFixturePageID("content-page"), newFixtureSlug("content-page"), "Content Page", contentSvc.tree)
 		contentSvc.tree.Children = []*PageNode{contentPage}
 		contentSvc.rebuildIndexesLocked()
 		errFixtureServiceRelFailed := errors.New("service rel failed")
@@ -119,23 +119,23 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		swapTreeSeam(&treeStoreCreatePage, func(*NodeStore, *PageNode, *PageNode) error {
 			return errors.New("create segment failed")
 		})
-		_, err = ensureSvc.EnsurePagePath("user", "created", "Created", nil)
+		_, err = ensureSvc.EnsurePagePath(newFixtureUserID("user"), newFixtureRoutePath("created"), "Created", nil)
 		Expect(err).To(MatchError(ErrCreateSegment))
 
 		ensureReuseSvc := newInMemoryService()
-		existingSection := edgeSectionNode("existing", "existing", "Existing", ensureReuseSvc.tree)
+		existingSection := edgeSectionNode(newFixturePageID("existing"), newFixtureSlug("existing"), "Existing", ensureReuseSvc.tree)
 		ensureReuseSvc.tree.Children = []*PageNode{existingSection}
 		ensureReuseSvc.rebuildIndexesLocked()
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) { return "child-id", nil })
 		swapTreeSeam(&treeStoreCreatePage, func(*NodeStore, *PageNode, *PageNode) error { return nil })
 		swapTreeSeam(&treeStoreSaveChildOrder, func(*NodeStore, *PageNode) error { return nil })
-		ensured, err := ensureReuseSvc.EnsurePagePath("user", "existing/child", "Child", nil)
+		ensured, err := ensureReuseSvc.EnsurePagePath(newFixtureUserID("user"), newFixtureRoutePath("existing/child"), "Child", nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ensured.Page.Parent).To(BeIdenticalTo(existingSection))
 
 		sourceOrderSvc := newInMemoryService()
-		movePage := edgePageNode("move-page", "move-page", "Move Page", sourceOrderSvc.tree)
-		moveDest := edgeSectionNode("move-dest", "move-dest", "Move Dest", sourceOrderSvc.tree)
+		movePage := edgePageNode(newFixturePageID("move-page"), newFixtureSlug("move-page"), "Move Page", sourceOrderSvc.tree)
+		moveDest := edgeSectionNode(newFixturePageID("move-dest"), newFixtureSlug("move-dest"), "Move Dest", sourceOrderSvc.tree)
 		sourceOrderSvc.tree.Children = []*PageNode{movePage, moveDest}
 		sourceOrderSvc.rebuildIndexesLocked()
 		swapTreeSeam(&treeStoreMoveNode, func(*NodeStore, *PageNode, *PageNode) error { return nil })
@@ -147,13 +147,13 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 			}
 			return nil
 		})
-		err = sourceOrderSvc.MoveNode("user", "move-page", "move-dest", pageVersionUnchecked)
+		err = sourceOrderSvc.MoveNode(newFixtureUserID("user"), newFixturePageID("move-page"), newFixturePageID("move-dest"), pageVersionUnchecked)
 		Expect(err).To(MatchError(ErrPersistSourceChildOrder))
 		Expect(err).NotTo(MatchError(ErrRollbackMovedNode))
 
 		destRollbackSvc := newInMemoryService()
-		movePage = edgePageNode("move-page", "move-page", "Move Page", destRollbackSvc.tree)
-		moveDest = edgeSectionNode("move-dest", "move-dest", "Move Dest", destRollbackSvc.tree)
+		movePage = edgePageNode(newFixturePageID("move-page"), newFixtureSlug("move-page"), "Move Page", destRollbackSvc.tree)
+		moveDest = edgeSectionNode(newFixturePageID("move-dest"), newFixtureSlug("move-dest"), "Move Dest", destRollbackSvc.tree)
 		destRollbackSvc.tree.Children = []*PageNode{movePage, moveDest}
 		destRollbackSvc.rebuildIndexesLocked()
 		moveCalls := 0
@@ -172,13 +172,13 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 			}
 			return nil
 		})
-		err = destRollbackSvc.MoveNode("user", "move-page", "move-dest", pageVersionUnchecked)
+		err = destRollbackSvc.MoveNode(newFixtureUserID("user"), newFixturePageID("move-page"), newFixturePageID("move-dest"), pageVersionUnchecked)
 		Expect(err).To(MatchError(ErrPersistDestinationChildOrder))
 		Expect(err).To(MatchError(ErrRollbackMovedNode))
 
 		syncRollbackSvc := newInMemoryService()
-		movePage = edgePageNode("move-page", "move-page", "Move Page", syncRollbackSvc.tree)
-		moveDest = edgeSectionNode("move-dest", "move-dest", "Move Dest", syncRollbackSvc.tree)
+		movePage = edgePageNode(newFixturePageID("move-page"), newFixtureSlug("move-page"), "Move Page", syncRollbackSvc.tree)
+		moveDest = edgeSectionNode(newFixturePageID("move-dest"), newFixtureSlug("move-dest"), "Move Dest", syncRollbackSvc.tree)
 		syncRollbackSvc.tree.Children = []*PageNode{movePage, moveDest}
 		syncRollbackSvc.rebuildIndexesLocked()
 		moveCalls = 0
@@ -193,7 +193,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		swapTreeSeam(&treeStoreSyncMetadataIfExists, func(*NodeStore, *PageNode) error {
 			return errors.New("sync failed")
 		})
-		err = syncRollbackSvc.MoveNode("user", "move-page", "move-dest", pageVersionUnchecked)
+		err = syncRollbackSvc.MoveNode(newFixtureUserID("user"), newFixturePageID("move-page"), newFixturePageID("move-dest"), pageVersionUnchecked)
 		Expect(err).To(MatchError(ErrSyncMovedNodeMetadata))
 		Expect(err).To(MatchError(ErrRollbackMovedNode))
 	})

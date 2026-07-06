@@ -23,9 +23,9 @@ import (
 // Plantrace evidence: TestNodeStore_ReconstructTreeFromFS_RootIndexBeatsRootReadme.
 // Plantrace evidence: TestNodeStore_ReconstructTreeFromFS_UsesUppercaseSectionIndex.
 
-func findChildBySlug(parent *PageNode, slug string) *PageNode {
+func findChildBySlug(parent *PageNode, slug Slug) *PageNode {
 	ginkgo.GinkgoHelper()
-	wantSlug := SlugFromString(slug)
+	wantSlug := slug
 	for _, ch := range parent.Children {
 		if ch.Slug == wantSlug {
 			return ch
@@ -97,7 +97,7 @@ leafwiki_title: Readme
 			err)
 
 		// root has: docs(section), readme(page)
-		docs := findChildBySlug(tree, "docs")
+		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
 
 		// section title/id from index frontmatter
@@ -110,12 +110,12 @@ leafwiki_title: Readme
 
 		}
 
-		intro := findChildBySlug(docs, "intro")
+		intro := findChildBySlug(docs, newFixtureSlug("intro"))
 		Expect(intro).To(matchTreeNode(NodeKindPage, newFixturePageID("page-intro"), "Introduction"))
 
 		// page title/id from frontmatter
 
-		readme := findChildBySlug(tree, "readme")
+		readme := findChildBySlug(tree, newFixtureSlug("readme"))
 		Expect(readme).To(matchTreeNode(NodeKindPage, newFixturePageID("page-readme"), "Readme"))
 		Expect(docs.Parent).To(haveParentPageID(RootPageID), "expected docs parent root, got %#v", docs.Parent)
 		Expect(intro.Parent).To(haveParentPageID(docs.ID), "expected intro parent docs, got %#v", intro.Parent)
@@ -162,7 +162,7 @@ leafwiki_title: Introduction
 
 			err)
 
-		docs := findChildBySlug(tree, "docs")
+		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
 
 		for _, ch := range docs.Children {
@@ -233,7 +233,7 @@ leafwiki_title: Documentation
 
 			err)
 
-		docs := findChildBySlug(tree, "docs")
+		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
 
 		for _, ch := range docs.Children {
@@ -294,7 +294,7 @@ leafwiki_title: Readme Page
 
 			err)
 
-		docs := findChildBySlug(tree, "docs")
+		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"),
 			"docs = %#v, want section from index.md", docs)
 
@@ -308,7 +308,7 @@ leafwiki_title: Readme Page
 
 			raw)
 
-		readme := findChildBySlug(docs, "README")
+		readme := findChildBySlug(docs, newFixtureSlug("README"))
 		Expect(readme).To(matchTreeNode(NodeKindPage, newFixturePageID("page-readme"), "Readme Page"),
 			"README child = %#v, want separate page from README.md", readme)
 
@@ -346,7 +346,7 @@ leafwiki_title: Sync Section
 
 			err)
 
-		docs := findChildBySlug(tree, "docs")
+		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		var syncPage, syncSection *PageNode
 		for _, ch := range docs.Children {
 			if ch.Slug == "sync" && ch.Kind == NodeKindPage {

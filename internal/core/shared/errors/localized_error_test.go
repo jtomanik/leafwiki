@@ -13,22 +13,25 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
+var (
+	testPageVersionConflictCode      sharederrors.ErrorCode = newFixtureErrorCode("page_version_conflict")
+	testPageVersionConflictMessageID sharederrors.MessageID = newFixtureMessageID("errors.page.version_conflict")
+	testAuthInvalidCredentialsCode   sharederrors.ErrorCode = newFixtureErrorCode("auth_invalid_credentials")
+	testAuthInvalidCredentialsMsgID  sharederrors.MessageID = newFixtureMessageID("errors.auth.invalid_credentials")
+	testUnknownCode                  sharederrors.ErrorCode = newFixtureErrorCode("unknown")
+	testUnknownMessageID             sharederrors.MessageID = newFixtureMessageID("errors.unknown")
+	testCustomMissingCode            sharederrors.ErrorCode = newFixtureErrorCode("custom_missing")
+	testCustomMissingMessageID       sharederrors.MessageID = newFixtureMessageID("errors.custom.missing")
+)
+
 const (
-	testPageVersionConflictCode        sharederrors.ErrorCode = "page_version_conflict"
-	testPageVersionConflictMessageID   sharederrors.MessageID = "errors.page.version_conflict"
-	testAuthInvalidCredentialsCode     sharederrors.ErrorCode = "auth_invalid_credentials"
-	testAuthInvalidCredentialsMsgID    sharederrors.MessageID = "errors.auth.invalid_credentials"
-	testUnknownCode                    sharederrors.ErrorCode = "unknown"
-	testUnknownMessageID               sharederrors.MessageID = "errors.unknown"
-	testCustomMissingCode              sharederrors.ErrorCode = "custom_missing"
-	testCustomMissingMessageID         sharederrors.MessageID = "errors.custom.missing"
-	testPageVersionConflictFallback    string                 = "page version conflict fallback"
-	testAuthInvalidCredentialsFallback string                 = "auth invalid credentials fallback"
-	testCustomMissingFallback          string                 = "fallback {{.Arg0}}"
-	testCustomMissingTemplate          string                 = "fallback template"
-	testDerivedLocalizedFallback       string                 = "fallback"
-	testPageVersionConflictTemplate    string                 = "page %s could not be saved before %s"
-	testVisibleLocalizedMessage        string                 = "visible message"
+	testPageVersionConflictFallback    string = "page version conflict fallback"
+	testAuthInvalidCredentialsFallback string = "auth invalid credentials fallback"
+	testCustomMissingFallback          string = "fallback {{.Arg0}}"
+	testCustomMissingTemplate          string = "fallback template"
+	testDerivedLocalizedFallback       string = "fallback"
+	testPageVersionConflictTemplate    string = "page %s could not be saved before %s"
+	testVisibleLocalizedMessage        string = "visible message"
 )
 
 var errLocalizedErrorAbsent = stderrors.New("localized error absent")
@@ -129,8 +132,8 @@ var _ = Describe("localized errors", Label("unit"), func() {
 
 var _ = Describe("localized error derived contracts", Label("unit"), func() {
 	It("maps empty, un-namespaced, and namespaced codes to message IDs", func() {
-		Expect(sharederrors.MessageIDForCode("")).To(BeEmpty())
-		Expect(sharederrors.MessageIDForCode("  ")).To(BeEmpty())
+		Expect(sharederrors.MessageIDForCode(newFixtureErrorCode(""))).To(BeEmpty())
+		Expect(sharederrors.MessageIDForCode(newFixtureErrorCode("  "))).To(BeEmpty())
 		Expect(sharederrors.NewLocalizedErrorDetail(testUnknownCode, "", "")).To(testmatchers.HaveStructuredError(testUnknownCode, testUnknownMessageID))
 		Expect(sharederrors.NewLocalizedErrorDetail(testAuthInvalidCredentialsCode, "", "")).To(testmatchers.HaveStructuredError(testAuthInvalidCredentialsCode, testAuthInvalidCredentialsMsgID))
 	})

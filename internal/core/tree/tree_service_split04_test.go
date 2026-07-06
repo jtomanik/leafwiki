@@ -13,7 +13,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, tmpDir := newLoadedService()
 
 		// Create parent as page
-		parentID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+		parentID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "Create parent failed: %v",
 
 			err)
@@ -23,7 +23,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		statTreePath(parentFile)
 
 		// Create child under parent: must convert parent to section
-		_, err = svc.CreateNode("system", parentID, "Getting Started", "getting-started", ptrKind(NodeKindPage))
+		_, err = svc.CreateNode(newFixtureUserID("system"), parentID, "Getting Started", newFixtureSlug("getting-started"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "Create child failed: %v",
 
 			err)
@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node title only syncs frontmatter if file exists", func() {
 		svc, tmpDir := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -67,7 +67,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		{
 
 			// Update title only: content=nil, slug unchanged
-			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", Slug("docs"), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *id, "Documentation", newFixtureSlug("docs"), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "UpdateNode failed: %v",
 
 				err)
@@ -94,7 +94,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node slug rename renames on disk", func() {
 		svc, tmpDir := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
@@ -122,20 +122,20 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, tmpDir := newLoadedService()
 		{
 
-			_, err := svc.CreateNode("system", nil, "Sync Section", "sync", ptrKind(NodeKindSection))
+			_, err := svc.CreateNode(newFixtureUserID("system"), nil, "Sync Section", newFixtureSlug("sync"), ptrKind(NodeKindSection))
 			Expect(err).To(Succeed(), "CreateNode section failed: %v",
 
 				err,
 			)
 		}
 
-		pageID, err := svc.CreateNode("system", nil, "Draft Page", "draft", ptrKind(NodeKindPage))
+		pageID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Draft Page", newFixtureSlug("draft"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode page failed: %v",
 
 			err)
 		{
 
-			err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Sync Page", Slug("sync"), nil, pageVersionUnchecked, false)
+			err := svc.UpdateNode(newFixtureUserID("system"), *pageID, "Sync Page", newFixtureSlug("sync"), nil, pageVersionUnchecked, false)
 			Expect(err).To(Succeed(), "UpdateNode page rename to section basename failed: %v",
 
 				err,
@@ -145,7 +145,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		statTreePath(filepath.Join(tmpDir, "root", "sync.md"))
 		statTreePath(filepath.Join(tmpDir, "root", "sync", "index.md"))
 
-		page, err := svc.FindPageByRoutePathAndKind("sync", NodeKindPage)
+		page, err := svc.FindPageByRoutePathAndKind(newFixtureRoutePath("sync"), NodeKindPage)
 		Expect(err).To(Succeed(), "FindPageByRoutePathAndKind page failed: %v",
 
 			err,
@@ -160,17 +160,17 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node rejects case insensitive slug conflict", func() {
 		svc, _ := newLoadedService()
 
-		firstID, err := svc.CreateNode("system", nil, "Alpha", "Alpha", ptrKind(NodeKindPage))
+		firstID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Alpha", newFixtureSlug("Alpha"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode first failed: %v",
 
 			err)
 
-		secondID, err := svc.CreateNode("system", nil, "Beta", "Beta", ptrKind(NodeKindPage))
+		secondID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Beta", newFixtureSlug("Beta"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode second failed: %v",
 
 			err)
 
-		err = svc.UpdateNode(newFixtureUserID("system"), *secondID, "Beta", Slug("alpha"), nil, pageVersionUnchecked, false)
+		err = svc.UpdateNode(newFixtureUserID("system"), *secondID, "Beta", newFixtureSlug("alpha"), nil, pageVersionUnchecked, false)
 		Expect(err).To(MatchError(ErrPageAlreadyExists), "expected ErrPageAlreadyExists, got %v",
 
 			err,
@@ -191,12 +191,12 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("update node rejects traversal slug", func() {
 		svc, dataDir := newLoadedService()
-		id, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode failed: %v",
 
 			err)
 
-		err = svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", Slug("../outside"), nil, pageVersionUnchecked, false)
+		err = svc.UpdateNode(newFixtureUserID("system"), *id, "Docs", newFixtureSlug("../outside"), nil, pageVersionUnchecked, false)
 		Expect(err).To(MatchError(ErrInvalidOperation), "expected ErrInvalidOperation, got %v",
 
 			err,
@@ -215,9 +215,9 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	svc, _ := newLoadedService()
 
 	// Create parent page, then child to force parent to section
-	parentID, err := svc.CreateNode("system", nil, "Docs", "docs", ptrKind(NodeKindPage))
+	parentID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed())
-		_, err = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
+		_, err = svc.CreateNode("system", parentID, "Child", newFixtureSlug("child"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed())
 
 	// Now parent is section with children, attempt to convert back to page
@@ -232,10 +232,10 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node non recursive errors when has children", func() {
 		svc, _ := newLoadedService()
 
-		parentID, _ := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
-		_, _ = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
+		parentID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Parent", newFixtureSlug("parent"), ptrKind(NodeKindPage))
+		_, _ = svc.CreateNode(newFixtureUserID("system"), parentID, "Child", newFixtureSlug("child"), ptrKind(NodeKindPage))
 
-		err := svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
+		err := svc.DeleteNode(newFixtureUserID("system"), *parentID, false, pageVersionUnchecked)
 		Expect(err).To(MatchError(ErrPageHasChildren), "expected ErrPageHasChildren, got: %v",
 
 			err,
@@ -248,14 +248,14 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node recursive deletes disk and tree", func() {
 		svc, tmpDir := newLoadedService()
 
-		parentID, _ := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
-		_, _ = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
+		parentID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Parent", newFixtureSlug("parent"), ptrKind(NodeKindPage))
+		_, _ = svc.CreateNode(newFixtureUserID("system"), parentID, "Child", newFixtureSlug("child"), ptrKind(NodeKindPage))
 
 		// Parent should now be a folder
 		parentDir := filepath.Join(tmpDir, "root", "parent")
 		statTreePath(parentDir)
 
-		err := svc.DeleteNode("system", *parentID, true, pageVersionUnchecked)
+		err := svc.DeleteNode(newFixtureUserID("system"), *parentID, true, pageVersionUnchecked)
 		Expect(err).To(Succeed(), "DeleteNode recursive failed: %v",
 
 			err,
@@ -277,17 +277,17 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, tmpDir := newLoadedService()
 
 		// Create 3 leaf pages
-		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
+		idA, err := svc.CreateNode(newFixtureUserID("system"), nil, "A", newFixtureSlug("a"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode A: %v",
 
 			err)
 
-		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
+		idB, err := svc.CreateNode(newFixtureUserID("system"), nil, "B", newFixtureSlug("b"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode B: %v",
 
 			err)
 
-		idC, err := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
+		idC, err := svc.CreateNode(newFixtureUserID("system"), nil, "C", newFixtureSlug("c"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode C: %v",
 
 			err)
@@ -306,7 +306,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		{
 
 			// Delete middle page (B)
-			err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked)
+			err := svc.DeleteNode(newFixtureUserID("system"), *idB, false, pageVersionUnchecked)
 			Expect(err).To(Succeed(), "DeleteNode failed: %v",
 
 				err)
@@ -370,23 +370,23 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete node updates root order file", func() {
 		svc, tmpDir := newLoadedService()
 
-		idA, err := svc.CreateNode("system", nil, "A", "a", ptrKind(NodeKindPage))
+		idA, err := svc.CreateNode(newFixtureUserID("system"), nil, "A", newFixtureSlug("a"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode A: %v",
 
 			err)
 
-		idB, err := svc.CreateNode("system", nil, "B", "b", ptrKind(NodeKindPage))
+		idB, err := svc.CreateNode(newFixtureUserID("system"), nil, "B", newFixtureSlug("b"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode B: %v",
 
 			err)
 
-		idC, err := svc.CreateNode("system", nil, "C", "c", ptrKind(NodeKindPage))
+		idC, err := svc.CreateNode(newFixtureUserID("system"), nil, "C", newFixtureSlug("c"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode C: %v",
 
 			err)
 		{
 
-			err := svc.DeleteNode("system", *idB, false, pageVersionUnchecked)
+			err := svc.DeleteNode(newFixtureUserID("system"), *idB, false, pageVersionUnchecked)
 			Expect(err).To(Succeed(), "DeleteNode failed: %v",
 
 				err)
@@ -401,17 +401,17 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("delete page with children non recursive returns err page has children", func() {
 		svc, _ := newLoadedService()
 
-		parentID, err := svc.CreateNode("system", nil, "Parent", "parent", ptrKind(NodeKindPage))
+		parentID, err := svc.CreateNode(newFixtureUserID("system"), nil, "Parent", newFixtureSlug("parent"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode parent: %v",
 
 			err)
 
-		_, err = svc.CreateNode("system", parentID, "Child", "child", ptrKind(NodeKindPage))
+		_, err = svc.CreateNode(newFixtureUserID("system"), parentID, "Child", newFixtureSlug("child"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode child: %v",
 
 			err)
 
-		err = svc.DeleteNode("system", *parentID, false, pageVersionUnchecked)
+		err = svc.DeleteNode(newFixtureUserID("system"), *parentID, false, pageVersionUnchecked)
 		Expect(err).To(MatchError(ErrPageHasChildren), "expected ErrPageHasChildren, got: %v",
 
 			err,

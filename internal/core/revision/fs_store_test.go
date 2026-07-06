@@ -35,22 +35,22 @@ var _ = ginkgo.Describe("fs store", func() {
 		created2 := created1.Add(time.Minute)
 		created3 := created2.Add(time.Minute)
 
-		rev1 := &Revision{ID: "rev1", PageID: "page-1", CreatedAt: created1, Type: RevisionTypeContentUpdate, Title: "A", Slug: "a"}
-		rev2 := &Revision{ID: "rev2", PageID: "page-1", CreatedAt: created2, Type: RevisionTypeAssetUpdate, Title: "A", Slug: "a"}
-		rev3 := &Revision{ID: "rev3", PageID: "page-1", CreatedAt: created3, Type: RevisionTypeStructureUpdate, Title: "A", Slug: "a"}
+		rev1 := &Revision{ID: newFixtureRevisionID("rev1"), PageID: newFixturePageID("page-1"), CreatedAt: created1, Type: RevisionTypeContentUpdate, Title: "A", Slug: newFixtureSlug("a")}
+		rev2 := &Revision{ID: newFixtureRevisionID("rev2"), PageID: newFixturePageID("page-1"), CreatedAt: created2, Type: RevisionTypeAssetUpdate, Title: "A", Slug: newFixtureSlug("a")}
+		rev3 := &Revision{ID: newFixtureRevisionID("rev3"), PageID: newFixturePageID("page-1"), CreatedAt: created3, Type: RevisionTypeStructureUpdate, Title: "A", Slug: newFixtureSlug("a")}
 		for _, rev := range []*Revision{rev1, rev2, rev3} {
 			Expect(store.SaveRevision(rev)).To(Succeed())
 		}
 
-		latest, err := store.GetLatestRevision("page-1")
+		latest, err := store.GetLatestRevision(newFixturePageID("page-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(latest).To(HaveField("ID", newFixtureRevisionID("rev3")))
 
-		got, err := store.GetRevision("page-1", "rev2")
+		got, err := store.GetRevision(newFixturePageID("page-1"), newFixtureRevisionID("rev2"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(HaveField("ID", newFixtureRevisionID("rev2")))
 
-		firstPage, nextCursor, err := store.ListRevisionsPage("page-1", "", 2)
+		firstPage, nextCursor, err := store.ListRevisionsPage(newFixturePageID("page-1"), "", 2)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(firstPage).To(HaveExactElements(
 			HaveField("ID", newFixtureRevisionID("rev3")),
@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		))
 		Expect(nextCursor).NotTo(BeEmpty())
 
-		secondPage, nextCursor2, err := store.ListRevisionsPage("page-1", nextCursor, 2)
+		secondPage, nextCursor2, err := store.ListRevisionsPage(newFixturePageID("page-1"), nextCursor, 2)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(secondPage).To(HaveExactElements(HaveField("ID", newFixtureRevisionID("rev1"))))
 		Expect(nextCursor2).To(BeEmpty())
@@ -95,12 +95,12 @@ var _ = ginkgo.Describe("fs store", func() {
 		store := NewFSStore(revisionTempDir())
 		createdAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
 		revision := &Revision{
-			ID:        "rev-snake",
-			PageID:    "page-snake",
+			ID:        newFixtureRevisionID("rev-snake"),
+			PageID:    newFixturePageID("page-snake"),
 			CreatedAt: createdAt,
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 			PageMetadata: &markdown.PageMetadata{
 				Version: 1,
 				Page: markdown.PageMetadataPage{
@@ -118,7 +118,7 @@ var _ = ginkgo.Describe("fs store", func() {
 
 		Expect(store.SaveRevision(revision)).To(Succeed())
 
-		raw, err := os.ReadFile(store.revisionFilePath("page-snake", "rev-snake", createdAt))
+		raw, err := os.ReadFile(store.revisionFilePath(newFixturePageID("page-snake"), newFixtureRevisionID("rev-snake"), createdAt))
 		Expect(err).NotTo(HaveOccurred())
 		revisionJSON := string(raw)
 		for _, want := range []string{
@@ -149,28 +149,28 @@ var _ = ginkgo.Describe("fs store", func() {
 		createdAt := time.Date(2026, 4, 12, 18, 0, 0, 0, time.UTC)
 
 		revision := &Revision{
-			ID:        "rev1",
-			PageID:    "page-1",
+			ID:        newFixtureRevisionID("rev1"),
+			PageID:    newFixturePageID("page-1"),
 			CreatedAt: createdAt,
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 		}
 		Expect(store.SaveRevision(revision)).To(Succeed())
 
-		_, err := os.Stat(store.revisionsPageDir("page-1"))
+		_, err := os.Stat(store.revisionsPageDir(newFixturePageID("page-1")))
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(store.DeletePageRevisions("page-1")).To(Succeed())
+		Expect(store.DeletePageRevisions(newFixturePageID("page-1"))).To(Succeed())
 
-		_, err = os.Stat(store.revisionsPageDir("page-1"))
+		_, err = os.Stat(store.revisionsPageDir(newFixturePageID("page-1")))
 		Expect(err).To(MatchError(os.ErrNotExist))
 
-		revisions, err := store.ListRevisions("page-1")
+		revisions, err := store.ListRevisions(newFixturePageID("page-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions).To(BeEmpty())
 
-		Expect(store.DeletePageRevisions("page-1")).To(Succeed())
+		Expect(store.DeletePageRevisions(newFixturePageID("page-1"))).To(Succeed())
 	})
 
 	ginkgo.It("accepts empty content references and rejects missing required revision data", ginkgo.Label("unit"), func() {
@@ -224,17 +224,17 @@ var _ = ginkgo.Describe("fs store", func() {
 
 	ginkgo.It("returns stable empty results and validates missing revisions", ginkgo.Label("integration"), func() {
 		store := NewFSStore(revisionTempDir())
-		got, err := store.ListRevisions("missing")
+		got, err := store.ListRevisions(newFixturePageID("missing"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(BeEmpty())
 
-		latest, err := store.GetLatestRevision("missing")
+		latest, err := store.GetLatestRevision(newFixturePageID("missing"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(latest).To(BeNil())
 
-		_, err = store.GetRevision("missing", "")
+		_, err = store.GetRevision(newFixturePageID("missing"), newFixtureRevisionID(""))
 		Expect(err).To(MatchError(os.ErrNotExist))
-		_, err = store.GetRevision("missing", "rev1")
+		_, err = store.GetRevision(newFixturePageID("missing"), newFixtureRevisionID("rev1"))
 		Expect(err).To(MatchError(os.ErrNotExist))
 
 		Expect(shardHash("a")).To(Equal("00"))
@@ -282,7 +282,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		pageID := newFixturePageID("page-1")
 		created := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 		for i := 0; i < 2; i++ {
-			rev := &Revision{ID: RevisionIDFromString(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
+			rev := &Revision{ID: RevisionIDFromString(string(rune('a' + i))), PageID: pageID, CreatedAt: created.Add(time.Duration(i) * time.Minute), Type: RevisionTypeContentUpdate, Title: "Page", Slug: newFixtureSlug("page")}
 			Expect(store.SaveRevision(rev)).To(Succeed())
 		}
 
@@ -299,22 +299,22 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(got).To(BeEmpty())
 		Expect(next).To(BeEmpty())
 
-		brokenDir := store.revisionsPageDir("broken-page")
+		brokenDir := store.revisionsPageDir(newFixturePageID("broken-page"))
 		Expect(os.MkdirAll(brokenDir, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(brokenDir, "20260326T120000.000000000Z_a.json"), []byte("{"), 0o644)).To(Succeed())
-		_, err = store.GetLatestRevision("broken-page")
+		_, err = store.GetLatestRevision(newFixturePageID("broken-page"))
 		Expect(err).To(MatchJSONSyntaxError())
 	})
 
 	ginkgo.It("rejects unsafe revision identifiers", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		rev := &Revision{
-			ID:        "x/../../outside",
-			PageID:    "page-1",
+			ID:        newFixtureRevisionID("x/../../outside"),
+			PageID:    newFixturePageID("page-1"),
 			CreatedAt: time.Now().UTC(),
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 		}
 
 		err := store.SaveRevision(rev)
@@ -324,12 +324,12 @@ var _ = ginkgo.Describe("fs store", func() {
 	ginkgo.It("rejects invalid page identifiers before revision identifiers", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		rev := &Revision{
-			ID:        "x/../../outside",
-			PageID:    "../page-1",
+			ID:        newFixtureRevisionID("x/../../outside"),
+			PageID:    newFixturePageID("../page-1"),
 			CreatedAt: time.Now().UTC(),
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 		}
 
 		err := store.SaveRevision(rev)
@@ -384,7 +384,7 @@ var _ = ginkgo.Describe("fs store", func() {
 				Expect(err).To(rejectRevisionValidation())
 				_, err = store.GetLatestRevision(pageID)
 				Expect(err).To(rejectRevisionValidation())
-				_, err = store.GetRevision(pageID, "rev1")
+				_, err = store.GetRevision(pageID, newFixtureRevisionID("rev1"))
 				Expect(err).To(rejectRevisionValidation())
 				Expect(store.PruneRevisions(pageID, 5)).To(rejectRevisionValidation())
 			})
@@ -413,27 +413,27 @@ var _ = ginkgo.Describe("fs store", func() {
 		_, err = store.SaveAssetManifest([]AssetRef{{Name: "asset.txt", SHA256: "abc", SizeBytes: 5}})
 		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 
-		rev := &Revision{ID: "rev1", PageID: "page-1", CreatedAt: time.Now().UTC(), Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
+		rev := &Revision{ID: newFixtureRevisionID("rev1"), PageID: newFixturePageID("page-1"), CreatedAt: time.Now().UTC(), Type: RevisionTypeContentUpdate, Title: "Page", Slug: newFixtureSlug("page")}
 		Expect(store.SaveRevision(rev)).To(matchRevisionError(syscall.ENOTDIR))
-		_, err = store.ListRevisions("page-1")
+		_, err = store.ListRevisions(newFixturePageID("page-1"))
 		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 	})
 
 	ginkgo.It("uses and backfills revision indexes for direct lookups", ginkgo.Label("integration"), func() {
 		store := NewFSStore(revisionTempDir())
 		created := time.Date(2026, 3, 26, 12, 30, 0, 0, time.UTC)
-		rev := &Revision{ID: "rev-index", PageID: "page-1", CreatedAt: created, Type: RevisionTypeContentUpdate, Title: "Page", Slug: "page"}
+		rev := &Revision{ID: newFixtureRevisionID("rev-index"), PageID: newFixturePageID("page-1"), CreatedAt: created, Type: RevisionTypeContentUpdate, Title: "Page", Slug: newFixtureSlug("page")}
 		Expect(store.SaveRevision(rev)).To(Succeed())
 
-		index, err := store.loadRevisionIndex("page-1")
+		index, err := store.loadRevisionIndex(newFixturePageID("page-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(index).To(HaveKey(rev.ID.CommitID()))
 
-		Expect(os.Remove(store.revisionIndexPath("page-1"))).To(Succeed())
-		got, err := store.GetRevision("page-1", rev.ID)
+		Expect(os.Remove(store.revisionIndexPath(newFixturePageID("page-1")))).To(Succeed())
+		got, err := store.GetRevision(newFixturePageID("page-1"), rev.ID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(HaveField("ID", rev.ID))
-		index, err = store.loadRevisionIndex("page-1")
+		index, err = store.loadRevisionIndex(newFixturePageID("page-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(index).To(HaveKey(rev.ID.CommitID()))
 	})

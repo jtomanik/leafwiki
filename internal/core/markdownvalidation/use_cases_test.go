@@ -103,8 +103,8 @@ var _ = ginkgo.Describe("use cases", ginkgo.Label("unit"), func() {
 
 	ginkgo.It("resolves prefixed assets through the markdown link root prefix", func() {
 		seenDestination := ""
-		result := ValidateMarkdownContentWithOptions(tree.RoutePath("source"), "![Logo](/docs/assets/logo.png)", ContentValidationOptions{
-			ExistingPageID:         "source",
+		result := ValidateMarkdownContentWithOptions(newFixtureRoutePath("source"), "![Logo](/docs/assets/logo.png)", ContentValidationOptions{
+			ExistingPageID:         newFixturePageID("source"),
 			MarkdownLinkRootPrefix: "/docs",
 			AssetExists: func(destination string) bool {
 				seenDestination = destination
@@ -118,8 +118,8 @@ var _ = ginkgo.Describe("use cases", ginkgo.Label("unit"), func() {
 
 	ginkgo.It("reports missing prefixed markdown assets after root-prefix normalization", func() {
 		seenDestination := ""
-		result := ValidateMarkdownContentWithOptions(tree.RoutePath("source"), "[Manual](/docs/assets/manual.md)", ContentValidationOptions{
-			ExistingPageID:         "source",
+		result := ValidateMarkdownContentWithOptions(newFixtureRoutePath("source"), "[Manual](/docs/assets/manual.md)", ContentValidationOptions{
+			ExistingPageID:         newFixturePageID("source"),
 			MarkdownLinkRootPrefix: "/docs",
 			AssetExists: func(destination string) bool {
 				seenDestination = destination
@@ -196,8 +196,8 @@ var _ = ginkgo.Describe("use cases", ginkgo.Label("unit"), func() {
 	})
 
 	ginkgo.It("reports duplicate content page IDs with page metadata wording", func() {
-		result := ValidateMarkdownContentWithOptions(tree.RoutePath("docs/page"), string(canonicalValidationMarkdown("duplicate-id", "Page", "# Page\n")), ContentValidationOptions{
-			ExistingPageID: "current-id",
+		result := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/page"), string(canonicalValidationMarkdown("duplicate-id", "Page", "# Page\n")), ContentValidationOptions{
+			ExistingPageID: newFixturePageID("current-id"),
 			PageIDExists: func(pageID tree.PageID) bool {
 				return pageID == "duplicate-id"
 			},
@@ -291,7 +291,7 @@ var _ = ginkgo.Describe("use cases", ginkgo.Label("unit"), func() {
 	})
 
 	ginkgo.It("uses the markdown link resolver without falling back to legacy route resolution", func() {
-		result := ValidateMarkdownContentWithOptions(tree.RoutePath("docs/a"), "[B](/docs/b)\n", ContentValidationOptions{
+		result := ValidateMarkdownContentWithOptions(newFixtureRoutePath("docs/a"), "[B](/docs/b)\n", ContentValidationOptions{
 			ResolveMarkdownLink: func(destination string) (tree.PageID, tree.NodeKind, bool, IssueCode) {
 				if destination == "/docs/b" {
 					return "docs/b", tree.NodeKindPage, true, ""

@@ -33,7 +33,7 @@ var _ = ginkgo.Describe("revision store persistence behavior", func() {
 				CreatedAt: createdAt.Add(time.Duration(i) * time.Minute),
 				Type:      RevisionTypeContentUpdate,
 				Title:     "Page",
-				Slug:      "page",
+				Slug:      newFixtureSlug("page"),
 			})
 			Expect(err).NotTo(HaveOccurred())
 		}
@@ -70,7 +70,7 @@ var _ = ginkgo.Describe("revision store persistence behavior", func() {
 			CreatedAt: time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC),
 			Type:      RevisionTypeContentUpdate,
 			Title:     "Page",
-			Slug:      "page",
+			Slug:      newFixtureSlug("page"),
 		})).To(Succeed())
 
 		Expect(store.PruneRevisions(pageID, 0)).To(Succeed())

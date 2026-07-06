@@ -10,13 +10,16 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
+var (
+	testAuthEmailInvalidFieldCode sharederrors.FieldErrorCode = newFixtureFieldErrorCode("auth_email_invalid")
+	testAuthEmailInvalidMessageID sharederrors.MessageID      = newFixtureMessageID("validation.auth.email_invalid")
+)
+
 const (
-	testAuthEmailInvalidFieldCode sharederrors.FieldErrorCode = "auth_email_invalid"
-	testAuthEmailInvalidMessageID sharederrors.MessageID      = "validation.auth.email_invalid"
-	testSiteNameRequiredFallback  string                      = "site name is required"
-	testEmailValidationField      string                      = "email"
-	testSiteNameValidationField   string                      = "siteName"
-	testSlugValidationField       string                      = "slug"
+	testSiteNameRequiredFallback string = "site name is required"
+	testEmailValidationField     string = "email"
+	testSiteNameValidationField  string = "siteName"
+	testSlugValidationField      string = "slug"
 )
 
 var _ = Describe("field validation errors", Label("unit"), func() {

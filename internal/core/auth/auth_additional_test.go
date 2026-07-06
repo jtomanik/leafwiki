@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 		resolver, err := NewUserResolver(service)
 		Expect(err).NotTo(HaveOccurred())
 
-		empty, err := resolver.ResolveUserLabel("")
+		empty, err := resolver.ResolveUserLabel(newFixtureUserID(""))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(empty).To(BeNil())
 

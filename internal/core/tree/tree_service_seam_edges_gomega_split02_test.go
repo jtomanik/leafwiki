@@ -37,7 +37,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		})
 		Expect(svc.LoadTree()).To(MatchError(ErrTreeReconstructionNil))
 
-		root := edgeSectionNode(RootPageID, "root", "Root", nil)
+		root := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 		swapTreeSeam(&treeLoadSchema, func(string) (SchemaInfo, error) {
 			return SchemaInfo{Version: 0}, nil
 		})
@@ -76,7 +76,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 	It("LoadTree falls back to legacy data and cleans stale state", func() {
 		dataDir := tempTreeDir()
 		legacyPath := filepath.Join(dataDir, legacyTreeFilename)
-		root := edgeSectionNode(RootPageID, "root", "Root", nil)
+		root := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 		var nilRoot *PageNode
 
 		swapTreeSeam(&treeLoadSchema, func(string) (SchemaInfo, error) {
@@ -140,7 +140,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		})
 		Expect(svc.ReconstructTreeFromFS()).To(MatchError(ErrTreeReconstructionNil))
 
-		newTree := edgeSectionNode(RootPageID, "root", "New Root", nil)
+		newTree := edgeSectionNode(RootPageID, newFixtureSlug("root"), "New Root", nil)
 		swapTreeSeam(&treeStoreReconstructTreeFromFS, func(*NodeStore) (*PageNode, error) {
 			return newTree, nil
 		})
@@ -189,8 +189,8 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		rootDir := filepath.Join(base, "configured")
 		defaultRoot := filepath.Join(dataDir, "root")
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
-		legacy := edgeSectionNode(RootPageID, "root", "Root", nil)
-		page := edgePageNode("page", "page", "Page", legacy)
+		legacy := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
+		page := edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", legacy)
 		legacy.Children = []*PageNode{page}
 
 		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
@@ -252,8 +252,8 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		})
 		Expect(configuredRootHasLegacyContentResult(svc, legacy)).To(MatchError(ErrLoadConfiguredLegacyContentPath))
 
-		badParent := edgeSectionNode(RootPageID, "root", "Root", nil)
-		badParent.Children = []*PageNode{edgePageNode("bad", "", "Bad", badParent)}
+		badParent := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
+		badParent.Children = []*PageNode{edgePageNode(newFixturePageID("bad"), newFixtureSlug(""), "Bad", badParent)}
 		_, err := svc.expectedLegacyContentPaths(badParent)
 		Expect(err).To(MatchError(ErrSlugEmpty))
 	})
@@ -266,7 +266,7 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		Expect(os.MkdirAll(defaultRoot, 0o755)).To(Succeed())
 		Expect(os.MkdirAll(rootDir, 0o755)).To(Succeed())
 		svc := NewTreeServiceWithOptions(TreeOptions{DataDir: dataDir, RootDir: rootDir})
-		legacy := edgeSectionNode(RootPageID, "root", "Root", nil)
+		legacy := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
 
 		swapTreeSeam(&treeOSReadDir, func(path string) ([]os.DirEntry, error) {
 			if path == defaultRoot {
@@ -300,8 +300,8 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 			}
 			return fakeTreeFileInfo{}, nil
 		})
-		pageLegacy := edgeSectionNode(RootPageID, "root", "Root", nil)
-		pageLegacy.Children = []*PageNode{edgePageNode("page", "page", "Page", pageLegacy)}
+		pageLegacy := edgeSectionNode(RootPageID, newFixtureSlug("root"), "Root", nil)
+		pageLegacy.Children = []*PageNode{edgePageNode(newFixturePageID("page"), newFixtureSlug("page"), "Page", pageLegacy)}
 		Expect(configuredRootHasLegacyContentResult(svc, pageLegacy)).To(MatchError(ErrStatLegacyContentPath))
 	})
 
@@ -310,33 +310,33 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		pageKind := NodeKindPage
 
 		unloaded := NewTreeService(tempTreeDir())
-		_, err := unloaded.CreateNode("user", nil, "Unloaded", "unloaded", &pageKind)
+		_, err := unloaded.CreateNode(newFixtureUserID("user"), nil, "Unloaded", newFixtureSlug("unloaded"), &pageKind)
 		Expect(err).To(MatchError(ErrTreeNotLoaded))
 
-		_, err = svc.CreateNode("user", nil, "Bad", "", &pageKind)
+		_, err = svc.CreateNode(newFixtureUserID("user"), nil, "Bad", newFixtureSlug(""), &pageKind)
 		Expect(err).To(matchInvalidOp("CreateNode"))
 
-		missingParent := PageID("missing")
-		_, err = svc.CreateNode("user", &missingParent, "Child", "child", &pageKind)
+		missingParent := newFixturePageID("missing")
+		_, err = svc.CreateNode(newFixtureUserID("user"), &missingParent, "Child", newFixtureSlug("child"), &pageKind)
 		Expect(err).To(MatchError(ErrParentNotFound))
 
-		existing := edgePageNode("existing", "existing", "Existing", svc.tree)
+		existing := edgePageNode(newFixturePageID("existing"), newFixtureSlug("existing"), "Existing", svc.tree)
 		svc.tree.Children = append(svc.tree.Children, existing)
 		svc.rebuildIndexesLocked()
-		_, err = svc.CreateNode("user", nil, "Existing", "existing", &pageKind)
+		_, err = svc.CreateNode(newFixtureUserID("user"), nil, "Existing", newFixtureSlug("existing"), &pageKind)
 		Expect(err).To(MatchError(ErrPageAlreadyExists))
 
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) {
 			return "", errors.New("id failed")
 		})
-		_, err = svc.CreateNode("user", nil, "Generated", "generated", &pageKind)
+		_, err = svc.CreateNode(newFixtureUserID("user"), nil, "Generated", newFixtureSlug("generated"), &pageKind)
 		Expect(err).To(MatchError(ErrGenerateUniqueID))
 
 		swapTreeSeam(&treeGenerateUniqueID, func() (string, error) { return "new-id", nil })
 		swapTreeSeam(&treeStoreCreatePage, func(*NodeStore, *PageNode, *PageNode) error {
 			return errors.New("create failed")
 		})
-		_, err = svc.CreateNode("user", nil, "Created", "created", &pageKind)
+		_, err = svc.CreateNode(newFixtureUserID("user"), nil, "Created", newFixtureSlug("created"), &pageKind)
 		Expect(err).To(MatchError(ErrCreatePageEntry))
 
 		swapTreeSeam(&treeStoreCreatePage, func(*NodeStore, *PageNode, *PageNode) error { return nil })
@@ -344,13 +344,13 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 			return errors.New("order failed")
 		})
 		swapTreeSeam(&treeStoreDeletePage, func(*NodeStore, *PageNode) error { return nil })
-		_, err = svc.CreateNode("user", nil, "Rollback", "rollback", &pageKind)
+		_, err = svc.CreateNode(newFixtureUserID("user"), nil, "Rollback", newFixtureSlug("rollback"), &pageKind)
 		Expect(err).To(MatchError(ErrPersistChildOrder))
 
 		swapTreeSeam(&treeStoreDeletePage, func(*NodeStore, *PageNode) error {
 			return errors.New("delete failed")
 		})
-		_, err = svc.CreateNode("user", nil, "Rollback Fail", "rollback-fail", &pageKind)
+		_, err = svc.CreateNode(newFixtureUserID("user"), nil, "Rollback Fail", newFixtureSlug("rollback-fail"), &pageKind)
 		Expect(err).To(MatchError(ErrPersistChildOrder))
 		Expect(err).To(MatchError(ErrRollbackCreatedNode))
 
@@ -359,14 +359,14 @@ var _ = Describe("tree service migration and store seam failure behavior", Label
 		swapTreeSeam(&treeStoreUpsertContent, func(*NodeStore, *PageNode, string) error {
 			return errors.New("upsert failed")
 		})
-		_, err = svc.RestoreNode("user", "restored", nil, "Restored", "restored", NodeKindPage, "body", PageMetadata{})
+		_, err = svc.RestoreNode(newFixtureUserID("user"), newFixturePageID("restored"), nil, "Restored", newFixtureSlug("restored"), NodeKindPage, "body", PageMetadata{})
 		Expect(err).To(MatchError(ErrRestoreContent))
 
 		swapTreeSeam(&treeStoreUpsertContent, func(*NodeStore, *PageNode, string) error { return nil })
 		swapTreeSeam(&treeStoreSyncMetadataIfExists, func(*NodeStore, *PageNode) error {
 			return errors.New("sync failed")
 		})
-		_, err = svc.RestoreNode("user", "restored-sync", nil, "Restored Sync", "restored-sync", NodeKindPage, "body", PageMetadata{})
+		_, err = svc.RestoreNode(newFixtureUserID("user"), newFixturePageID("restored-sync"), nil, "Restored Sync", newFixtureSlug("restored-sync"), NodeKindPage, "body", PageMetadata{})
 		Expect(err).To(MatchError(ErrSyncRestoredMetadata))
 	})
 })

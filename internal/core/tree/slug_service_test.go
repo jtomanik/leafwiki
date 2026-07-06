@@ -14,7 +14,7 @@ var _ = ginkgo.Describe("unique child slug generation", ginkgo.Label("unit"), fu
 		}
 
 		s := NewSlugService()
-		result := s.GenerateUniqueChildSlug(parent, "", "My Page")
+		result := s.GenerateUniqueChildSlug(parent, newFixturePageID(""), "My Page")
 
 		Expect(result).To(Equal("my-page"))
 	})
@@ -22,12 +22,12 @@ var _ = ginkgo.Describe("unique child slug generation", ginkgo.Label("unit"), fu
 	ginkgo.It("adds a numeric suffix when a sibling already has the normalized slug", func() {
 		parent := &PageNode{
 			Children: []*PageNode{
-				{ID: "id", Slug: "my-page"},
+				{ID: newFixturePageID("id"), Slug: newFixtureSlug("my-page")},
 			},
 		}
 
 		s := NewSlugService()
-		result := s.GenerateUniqueChildSlug(parent, "new-id-same-parent", "My Page")
+		result := s.GenerateUniqueChildSlug(parent, newFixturePageID("new-id-same-parent"), "My Page")
 
 		Expect(result).To(Equal("my-page-1"))
 	})
@@ -35,14 +35,14 @@ var _ = ginkgo.Describe("unique child slug generation", ginkgo.Label("unit"), fu
 	ginkgo.It("increments the suffix past all existing sibling collisions", func() {
 		parent := &PageNode{
 			Children: []*PageNode{
-				{ID: "id1", Slug: "my-page"},
-				{ID: "id2", Slug: "my-page-1"},
-				{ID: "id3", Slug: "my-page-2"},
+				{ID: newFixturePageID("id1"), Slug: newFixtureSlug("my-page")},
+				{ID: newFixturePageID("id2"), Slug: newFixtureSlug("my-page-1")},
+				{ID: newFixturePageID("id3"), Slug: newFixtureSlug("my-page-2")},
 			},
 		}
 
 		s := NewSlugService()
-		result := s.GenerateUniqueChildSlug(parent, "new-id", "My Page")
+		result := s.GenerateUniqueChildSlug(parent, newFixturePageID("new-id"), "My Page")
 
 		Expect(result).To(Equal("my-page-3"))
 	})
@@ -50,12 +50,12 @@ var _ = ginkgo.Describe("unique child slug generation", ginkgo.Label("unit"), fu
 	ginkgo.It("keeps the existing slug when the collision belongs to the same child", func() {
 		parent := &PageNode{
 			Children: []*PageNode{
-				{ID: "id1", Slug: "my-page"},
+				{ID: newFixturePageID("id1"), Slug: newFixtureSlug("my-page")},
 			},
 		}
 
 		s := NewSlugService()
-		result := s.GenerateUniqueChildSlug(parent, "id1", "My Page")
+		result := s.GenerateUniqueChildSlug(parent, newFixturePageID("id1"), "My Page")
 
 		Expect(result).To(Equal("my-page"))
 	})
@@ -64,7 +64,7 @@ var _ = ginkgo.Describe("unique child slug generation", ginkgo.Label("unit"), fu
 		parent := &PageNode{}
 
 		s := NewSlugService()
-		result := s.GenerateUniqueChildSlug(parent, "", "Äpfel & Bäume!")
+		result := s.GenerateUniqueChildSlug(parent, newFixturePageID(""), "Äpfel & Bäume!")
 
 		Expect(result).To(Equal("apfel-and-baume"))
 	})
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("unique child slug generation", ginkgo.Label("unit"), fu
 		result := make(chan string, 1)
 
 		go func() {
-			result <- s.GenerateUniqueChildSlug(&PageNode{}, "", "   ")
+			result <- s.GenerateUniqueChildSlug(&PageNode{}, newFixturePageID(""), "   ")
 		}()
 
 		Eventually(result).WithTimeout(100 * time.Millisecond).Should(Receive(Equal("page")))

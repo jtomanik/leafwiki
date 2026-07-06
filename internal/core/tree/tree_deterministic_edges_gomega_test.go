@@ -15,25 +15,25 @@ import (
 var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 	It("records workspace route conflicts only for distinct sources of the same route and kind", func() {
 		var nilTracker *workspaceRouteConflictTracker
-		Expect(nilTracker.Record(WorkspaceMarkdownRoute{RoutePath: "docs", Kind: NodeKindPage})).To(BeNil())
+		Expect(nilTracker.Record(WorkspaceMarkdownRoute{RoutePath: newFixtureRoutePath("docs"), Kind: NodeKindPage})).To(BeNil())
 
 		tracker := newWorkspaceRouteConflictTracker()
-		Expect(tracker.Record(WorkspaceMarkdownRoute{RoutePath: "docs/guide", Kind: NodeKindPage, Skip: true})).To(BeNil())
-		Expect(tracker.Record(WorkspaceMarkdownRoute{RoutePath: "docs/guide", Kind: NodeKindPage})).To(BeNil())
-		Expect(tracker.seen).To(HaveKey(RouteLowerKey{Kind: NodeKindPage, Path: RoutePath("docs/guide")}))
+		Expect(tracker.Record(WorkspaceMarkdownRoute{RoutePath: newFixtureRoutePath("docs/guide"), Kind: NodeKindPage, Skip: true})).To(BeNil())
+		Expect(tracker.Record(WorkspaceMarkdownRoute{RoutePath: newFixtureRoutePath("docs/guide"), Kind: NodeKindPage})).To(BeNil())
+		Expect(tracker.seen).To(HaveKey(RouteLowerKey{Kind: NodeKindPage, Path: newFixtureRoutePath("docs/guide")}))
 
-		Expect(tracker.Record(WorkspaceMarkdownRoute{SourcePath: "docs/guide", RoutePath: "docs/guide", Kind: NodeKindPage})).To(BeNil())
+		Expect(tracker.Record(WorkspaceMarkdownRoute{SourcePath: newFixtureWorkspaceSourcePath("docs/guide"), RoutePath: newFixtureRoutePath("docs/guide"), Kind: NodeKindPage})).To(BeNil())
 
 		sectionTracker := newWorkspaceRouteConflictTracker()
 		Expect(sectionTracker.Record(WorkspaceMarkdownRoute{
-			SourcePath:  "docs",
-			RoutePath:   "docs",
+			SourcePath:  newFixtureWorkspaceSourcePath("docs"),
+			RoutePath:   newFixtureRoutePath("docs"),
 			Kind:        NodeKindSection,
-			ContentPath: "docs/README.md",
+			ContentPath: newFixtureMarkdownPath("docs/README.md"),
 		})).To(BeNil())
 		Expect(sectionTracker.Record(WorkspaceMarkdownRoute{
-			SourcePath: "docs",
-			RoutePath:  "docs",
+			SourcePath: newFixtureWorkspaceSourcePath("docs"),
+			RoutePath:  newFixtureRoutePath("docs"),
 			Kind:       NodeKindSection,
 		})).To(BeNil())
 	})
@@ -58,7 +58,7 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Kind":      Equal(NodeKindPage),
-			"RoutePath": Equal(RoutePath("docs/README")),
+			"RoutePath": Equal(newFixtureRoutePath("docs/README")),
 		}))
 
 		normalized, err := normalizeWorkspaceRoutePath(NewSlugService(), "docs//User Guides")
@@ -72,9 +72,9 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 	})
 
 	It("derives non-default workspace source paths for imported content", func() {
-		Expect(nonDefaultWorkspaceSourcePath(WorkspaceMarkdownRoute{Skip: true, SourcePath: "docs/page.md"})).To(BeEmpty())
-		Expect(nonDefaultWorkspaceSourcePath(WorkspaceMarkdownRoute{RoutePath: "docs/page", Kind: NodeKindPage, SourcePath: "Imported/Page.MD"})).To(Equal(WorkspaceSourcePath("Imported/Page.MD")))
-		Expect(nonDefaultWorkspaceSourcePath(WorkspaceMarkdownRoute{RoutePath: "docs", Kind: NodeKindSection, SourcePath: "docs", ContentPath: "docs/README.md"})).To(BeEmpty())
+		Expect(nonDefaultWorkspaceSourcePath(WorkspaceMarkdownRoute{Skip: true, SourcePath: newFixtureWorkspaceSourcePath("docs/page.md")})).To(BeEmpty())
+		Expect(nonDefaultWorkspaceSourcePath(WorkspaceMarkdownRoute{RoutePath: newFixtureRoutePath("docs/page"), Kind: NodeKindPage, SourcePath: newFixtureWorkspaceSourcePath("Imported/Page.MD")})).To(Equal(newFixtureWorkspaceSourcePath("Imported/Page.MD")))
+		Expect(nonDefaultWorkspaceSourcePath(WorkspaceMarkdownRoute{RoutePath: newFixtureRoutePath("docs"), Kind: NodeKindSection, SourcePath: newFixtureWorkspaceSourcePath("docs"), ContentPath: newFixtureMarkdownPath("docs/README.md")})).To(BeEmpty())
 		Expect(sectionSourceDir(WorkspaceMarkdownRoute{})).To(BeEmpty())
 	})
 
@@ -102,13 +102,13 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 		readmeLookup := sectionIndexPathLookup{Path: readmePath, Exists: exists}
 		Expect(readmeLookup).To(matchExistingSectionIndexPath(filepath.Join(readmeDir, "README.md")))
 
-		Expect(ensureUniqueReconstructedID(map[PageID]string{}, "", "docs/page.md")).To(MatchError(ErrEmptyLeafwikiID))
+		Expect(ensureUniqueReconstructedID(map[PageID]string{}, newFixturePageID(""), "docs/page.md")).To(MatchError(ErrEmptyLeafwikiID))
 		seenIDs := map[PageID]string{"page-1": "docs/first.md"}
-		Expect(ensureUniqueReconstructedID(seenIDs, "page-1", "docs/second.md")).To(MatchError(ErrDuplicateLeafwikiID))
+		Expect(ensureUniqueReconstructedID(seenIDs, newFixturePageID("page-1"), "docs/second.md")).To(MatchError(ErrDuplicateLeafwikiID))
 
-		Expect(ensureUniqueReconstructedSlug(map[reconstructedSlugKey]string{}, "", NodeKindPage, "docs/page.md")).To(MatchError(ErrSlugEmpty))
+		Expect(ensureUniqueReconstructedSlug(map[reconstructedSlugKey]string{}, newFixtureSlug(""), NodeKindPage, "docs/page.md")).To(MatchError(ErrSlugEmpty))
 		seenSlugs := map[reconstructedSlugKey]string{{kind: NodeKindPage, slug: SlugFromString("guide")}: "docs/guide.md"}
-		Expect(ensureUniqueReconstructedSlug(seenSlugs, "GUIDE", NodeKindPage, "docs/GUIDE.md")).To(MatchError(ErrDuplicateReconstructedSlug))
+		Expect(ensureUniqueReconstructedSlug(seenSlugs, newFixtureSlug("GUIDE"), NodeKindPage, "docs/GUIDE.md")).To(MatchError(ErrDuplicateReconstructedSlug))
 	})
 
 	It("guards section index writes before touching disk", func() {
@@ -131,8 +131,8 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 		versionTime := time.Date(2026, time.June, 26, 9, 0, 0, 0, time.UTC)
 		node := &PageNode{Metadata: PageMetadata{UpdatedAt: versionTime}}
 
-		Expect(checkNodeVersion(&PageNode{}, "")).To(Succeed())
-		Expect(checkNodeVersion(node, "")).To(MatchError(ErrVersionRequired))
+		Expect(checkNodeVersion(&PageNode{}, newFixturePageVersion(""))).To(Succeed())
+		Expect(checkNodeVersion(node, newFixturePageVersion(""))).To(MatchError(ErrVersionRequired))
 		Expect(checkNodeVersion(node, NewPageVersionFromTime(versionTime.Add(time.Second)))).To(MatchError(ErrVersionConflict))
 
 		_, err := ValidateRoutePath("")
@@ -173,15 +173,15 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 		Expect(store.metadataFallbackTime(existing, fallback)).To(BeTemporally("==", mtime))
 
 		svc, _ := newLoadedService()
-		docsID, err := svc.CreateNode(newFixtureUserID("editor"), nil, "Docs", "docs", ptrKind(NodeKindSection))
+		docsID, err := svc.CreateNode(newFixtureUserID("editor"), nil, "Docs", newFixtureSlug("docs"), ptrKind(NodeKindSection))
 		Expect(err).NotTo(HaveOccurred())
-		guideID, err := svc.CreateNode(newFixtureUserID("editor"), docsID, "Guide", "guide", ptrKind(NodeKindPage))
+		guideID, err := svc.CreateNode(newFixtureUserID("editor"), docsID, "Guide", newFixtureSlug("guide"), ptrKind(NodeKindPage))
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(svc.findNodeByRoutePathAndKindLocked("", NodeKindPage)).To(BeNil())
-		Expect(svc.findNodeByRoutePathAndKindLocked("docs/missing", NodeKindPage)).To(BeNil())
-		Expect(svc.findNodeByRoutePathAndKindLocked("docs", NodeKindPage)).To(BeNil())
-		found := svc.findNodeByRoutePathAndKindLocked("docs/guide", NodeKindPage)
+		Expect(svc.findNodeByRoutePathAndKindLocked(newFixtureRoutePath(""), NodeKindPage)).To(BeNil())
+		Expect(svc.findNodeByRoutePathAndKindLocked(newFixtureRoutePath("docs/missing"), NodeKindPage)).To(BeNil())
+		Expect(svc.findNodeByRoutePathAndKindLocked(newFixtureRoutePath("docs"), NodeKindPage)).To(BeNil())
+		found := svc.findNodeByRoutePathAndKindLocked(newFixtureRoutePath("docs/guide"), NodeKindPage)
 		Expect(found).NotTo(BeNil())
 		Expect(found.ID).To(Equal(*guideID))
 	})
@@ -207,12 +207,12 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 
 		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ErrLegacySnapshotTreeRequired))
 
-		cyclic := &PageNode{ID: "cycle", Slug: "cycle", Title: "Cycle"}
+		cyclic := &PageNode{ID: newFixturePageID("cycle"), Slug: newFixtureSlug("cycle"), Title: "Cycle"}
 		cyclic.Children = []*PageNode{cyclic}
 		svc.tree = cyclic
 		Expect(svc.persistLegacyTreeSnapshotLocked()).To(MatchError(ErrMarshalLegacyTreeSnapshot))
 
-		svc.tree = &PageNode{ID: RootPageID, Slug: "root", Title: "Root"}
+		svc.tree = &PageNode{ID: RootPageID, Slug: newFixtureSlug("root"), Title: "Root"}
 		Expect(svc.persistLegacyTreeSnapshotLocked()).To(Succeed())
 		Expect(filepath.Join(svc.dataDir, legacyTreeFilename)).To(BeAnExistingFile())
 
@@ -266,12 +266,12 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 		root := tempTreeDir()
 		Expect(os.WriteFile(filepath.Join(root, "guide.md"), []byte("# Guide"), 0o644)).To(Succeed())
 
-		Expect(EnsurePageIsFolder(root, "guide")).To(Succeed())
+		Expect(EnsurePageIsFolder(root, newFixtureRoutePath("guide"))).To(Succeed())
 		Expect(os.ReadFile(filepath.Join(root, "guide", "index.md"))).To(Equal([]byte("# Guide")))
 		_, err := os.Stat(filepath.Join(root, "guide.md"))
 		Expect(err).To(MatchError(os.ErrNotExist))
 
-		Expect(EnsurePageIsFolder(root, "guide")).To(Succeed())
+		Expect(EnsurePageIsFolder(root, newFixtureRoutePath("guide"))).To(Succeed())
 		Expect(FoldPageFolderIfEmpty(root, "missing")).To(Succeed())
 
 		Expect(os.WriteFile(filepath.Join(root, "guide", "extra.md"), []byte("# Extra"), 0o644)).To(Succeed())

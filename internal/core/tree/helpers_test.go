@@ -11,13 +11,13 @@ import (
 
 var _ = ginkgo.Describe("route path generation from page nodes", ginkgo.Label("unit"), func() {
 	ginkgo.It("uses an empty route for the root and appends ancestor slugs for descendants", func() {
-		root := &PageNode{ID: "root", Slug: "root", Title: "root"}
-		docs := &PageNode{ID: "docs", Slug: "docs", Title: "Docs", Parent: root}
-		guide := &PageNode{ID: "guide", Slug: "guide", Title: "Guide", Parent: docs}
+		root := &PageNode{ID: newFixturePageID("root"), Slug: newFixtureSlug("root"), Title: "root"}
+		docs := &PageNode{ID: newFixturePageID("docs"), Slug: newFixtureSlug("docs"), Title: "Docs", Parent: root}
+		guide := &PageNode{ID: newFixturePageID("guide"), Slug: newFixtureSlug("guide"), Title: "Guide", Parent: docs}
 
 		Expect(GenerateRoutePathFromPageNode(root)).To(BeEmpty())
-		Expect(GenerateRoutePathFromPageNode(docs)).To(Equal(RoutePath("docs")))
-		Expect(GenerateRoutePathFromPageNode(guide)).To(Equal(RoutePath("docs/guide")))
+		Expect(GenerateRoutePathFromPageNode(docs)).To(Equal(newFixtureRoutePath("docs")))
+		Expect(GenerateRoutePathFromPageNode(guide)).To(Equal(newFixtureRoutePath("docs/guide")))
 	})
 })
 

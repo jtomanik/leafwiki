@@ -11,7 +11,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 	ginkgo.It("get page raw content not serialized to JSON", func() {
 		svc, _ := newLoadedService()
 
-		id, err := svc.CreateNode("system", nil, "JSON Test", "json-test", ptrKind(NodeKindPage))
+		id, err := svc.CreateNode(newFixtureUserID("system"), nil, "JSON Test", newFixtureSlug("json-test"), ptrKind(NodeKindPage))
 		Expect(err).To(Succeed(), "CreateNode: %v",
 
 			err,
