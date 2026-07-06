@@ -17,9 +17,10 @@ make lint
 
 The wrapper builds or reuses `.cache/tools/leafwiki-golangci-lint`, a pinned
 custom golangci-lint binary with the LeafWiki `semantichygiene`,
-`testhygiene`, `architecturehygiene`, and `i18ncatalog` analyzers. It runs the
-root Go module and `e2e-proxy` as separate module targets using
-`.golangci.leafwiki.yml`.
+`testhygiene`, `architecturehygiene`, and `i18ncatalog` analyzers, plus
+`crap4go`. It regenerates `target/coverage/crap4go.out` before linting each Go
+module so CRAP diagnostics use current coverage data. It runs the root Go module
+and `e2e-proxy` as separate module targets using `.golangci.leafwiki.yml`.
 
 The older checker-specific command names have been removed. Use
 `scripts/golangci-lint.sh` or `make lint` for this static policy surface.
@@ -76,7 +77,7 @@ The wrapper keeps stdout reserved for MCP JSON-RPC protocol frames. Wrapper-leve
 | `install-all-macos.sh` | Build and install `leafwiki` plus `run.sh`. | `./scripts/install-all-macos.sh --install-dir "$HOME/.local/bin"` | Delegates to `install-macos.sh`, then installs the wrapper script. |
 | `install-macos.sh` | Build and install the main `leafwiki` executable from this checkout on macOS. | `./scripts/install-macos.sh` | Builds the UI, updates ignored frontend build output, builds the server with production embedding, and installs to `/usr/local/bin` by default. |
 | `run.sh` | Run native MCP STDIO or one agent hook invocation. | `./scripts/run.sh mcp --root-dir ./wiki` | Intended as an MCP client or user-managed hook command. Supports disabled-auth and API-key native STDIO. |
-| `golangci-lint.sh` | Run the local LeafWiki golangci-lint source-policy gate. | `./scripts/golangci-lint.sh` | Builds or reuses the pinned custom binary with the semantic, test, architecture, and i18n policy analyzers, then runs root and `e2e-proxy` modules. |
+| `golangci-lint.sh` | Run the local LeafWiki golangci-lint source-policy gate. | `./scripts/golangci-lint.sh` | Builds or reuses the pinned custom binary with the semantic, test, architecture, i18n, and CRAP policy analyzers, regenerates CRAP coverage, then runs root and `e2e-proxy` modules. |
 | `changelog.sh` | Generate categorized release notes from commits between two tags. | `./scripts/changelog.sh v0.10.0 v0.11.0` | Writes `current_release_changelog.md` in the current working directory. Used by the release workflow. |
 | `test-install.sh` | Validate root `install.sh` configuration handling without performing a real system install. | `./scripts/test-install.sh` | Uses fake `systemctl`/`wget` and `LEAFWIKI_INSTALL_VALIDATE_ONLY=1`. This tests the Linux installer at repo root, not the macOS installer. |
 | `test-install-macos.sh` | Lightweight checks for `install-macos.sh`. | `./scripts/test-install-macos.sh` | Checks syntax, help text, and dry-run planning without installing. |

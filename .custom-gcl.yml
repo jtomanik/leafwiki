@@ -5,3 +5,5 @@ plugins:
   - module: github.com/perber/wiki
     import: github.com/perber/wiki/tools/golangci/leafwiki
     path: .
+  - module: github.com/unclebob/crap4go
+    path: ../crap4go

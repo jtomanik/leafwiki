@@ -24,6 +24,7 @@ fake_bin="$tmpdir/leafwiki-golangci-lint"
 failing_root_bin="$tmpdir/failing-root-leafwiki-golangci-lint"
 stale_repo="$tmpdir/stale-repo"
 log_file="$tmpdir/invocations.log"
+rtk_log_file="$tmpdir/rtk.log"
 failure_log_file="$tmpdir/failure-invocations.log"
 
 cat >"$fake_bin" <<'FAKE'
@@ -52,6 +53,22 @@ set -euo pipefail
 
 printf '%s\n' "$*" >>"${LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG:?}"
 
+if [[ "${1:-}" == "go" && "${2:-}" == "test" ]]; then
+	coverprofile=""
+	for arg in "$@"; do
+		case "$arg" in
+			-coverprofile=*)
+				coverprofile="${arg#-coverprofile=}"
+				;;
+		esac
+	done
+	if [[ -n "$coverprofile" ]]; then
+		mkdir -p "$(dirname "$coverprofile")"
+		printf 'mode: set\n' >"$coverprofile"
+	fi
+	exit 0
+fi
+
 if [[ "${1:-}" == "go" && "${2:-}" == "run" ]]; then
 	mkdir -p .cache/tools
 	cat >.cache/tools/leafwiki-golangci-lint <<'FAKE_REBUILT_LINTER'
@@ -74,13 +91,29 @@ chmod +x "$tmpdir/rtk"
 
 	(
 		cd "$repo_root/internal/wiki"
+		PATH="$tmpdir:$PATH" \
 		LEAFWIKI_GOLANGCI_LINT_BIN="$fake_bin" \
-			LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$log_file" \
+		LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$log_file" \
+		LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG="$rtk_log_file" \
 			rtk bash "$repo_root/scripts/golangci-lint.sh" --timeout 5m --output.text.colors=false
 	)
 
 	expected_root="$repo_root"$'\t'"run --config $repo_root/.golangci.leafwiki.yml --timeout 5m --output.text.colors=false ./cmd/... ./internal/... ./e2e/... ./tools/..."
 	expected_proxy="$repo_root/e2e-proxy"$'\t'"run --config $repo_root/.golangci.leafwiki.yml --timeout 5m --output.text.colors=false ./..."
+	expected_root_coverage="go test -timeout=5m ./cmd/... ./internal/... ./e2e/... ./tools/... -coverprofile=target/coverage/crap4go.out"
+	expected_proxy_coverage="go test -timeout=5m ./... -coverprofile=target/coverage/crap4go.out"
+
+if ! grep -Fxq "$expected_root_coverage" "$rtk_log_file"; then
+	echo "missing root module crap4go coverage generation" >&2
+	cat "$rtk_log_file" >&2
+	exit 1
+fi
+
+if ! grep -Fxq "$expected_proxy_coverage" "$rtk_log_file"; then
+	echo "missing e2e-proxy crap4go coverage generation" >&2
+	cat "$rtk_log_file" >&2
+	exit 1
+fi
 
 if ! grep -Fxq "$expected_root" "$log_file"; then
 	echo "missing root module invocation" >&2
@@ -161,13 +194,15 @@ fi
 	done
 
 	set +e
-	(
-		cd "$repo_root"
-		LEAFWIKI_GOLANGCI_LINT_BIN="$failing_root_bin" \
-			LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$failure_log_file" \
-			LEAFWIKI_GOLANGCI_LINT_TEST_ROOT="$repo_root" \
-			rtk bash "$repo_root/scripts/golangci-lint.sh" --timeout 5m --output.text.colors=false
-	)
+(
+	cd "$repo_root"
+	PATH="$tmpdir:$PATH" \
+	LEAFWIKI_GOLANGCI_LINT_BIN="$failing_root_bin" \
+		LEAFWIKI_GOLANGCI_LINT_TEST_LOG="$failure_log_file" \
+		LEAFWIKI_GOLANGCI_LINT_TEST_RTK_LOG="$tmpdir/failure-rtk.log" \
+		LEAFWIKI_GOLANGCI_LINT_TEST_ROOT="$repo_root" \
+		rtk bash "$repo_root/scripts/golangci-lint.sh" --timeout 5m --output.text.colors=false
+)
 failure_status=$?
 set -e
 

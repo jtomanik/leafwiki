@@ -9,6 +9,7 @@ linters:
     - ginkgolinter
     - govet
     - leafwiki
+    - crap4go
     - ineffassign
     - unused
     - errcheck
@@ -29,6 +30,12 @@ linters:
         type: module
         description: LeafWiki semantic hygiene and i18n catalog analyzers.
         settings: {}
+      crap4go:
+        type: module
+        description: Reports functions and methods with high CRAP scores.
+        settings:
+          coverage-profile: target/coverage/crap4go.out
+          min-crap: 30
     ginkgolinter:
       allow-havelen-zero: true
       forbid-focus-container: true

@@ -6,6 +6,10 @@ config="$repo_root/.golangci.leafwiki.yml"
 
 lint_bin="${LEAFWIKI_GOLANGCI_LINT_BIN:-$repo_root/.cache/tools/leafwiki-golangci-lint}"
 lint_args=("$@")
+crap4go_coverage_profile="target/coverage/crap4go.out"
+crap4go_coverage_timeout="${LEAFWIKI_CRAP4GO_COVERAGE_TEST_TIMEOUT:-5m}"
+root_packages=(./cmd/... ./internal/... ./e2e/... ./tools/...)
+proxy_packages=(./...)
 
 safe_flag_requires_value() {
 	case "$1" in
@@ -77,6 +81,12 @@ custom_binary_is_stale() {
 		"$repo_root/internal/analysis" \
 		-name '*.go' -newer "$lint_bin" -print -quit | grep -q . && return 0
 
+	if [[ -d "$repo_root/../crap4go" ]]; then
+		find "$repo_root/../crap4go" \
+			\( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) \
+			-newer "$lint_bin" -print -quit | grep -q . && return 0
+	fi
+
 	return 1
 }
 
@@ -100,14 +110,49 @@ ensure_lint_binary
 
 status=0
 
+generate_crap4go_coverage() {
+	local module_dir="$1"
+	shift
+
+	local profile="$module_dir/$crap4go_coverage_profile"
+	mkdir -p "$(dirname "$profile")"
+	rm -f "$profile"
+
+	set +e
+	(
+		cd "$module_dir"
+		rtk go test -timeout="$crap4go_coverage_timeout" "$@" -coverprofile="$crap4go_coverage_profile"
+	)
+	local coverage_status=$?
+	set -e
+
+	if [[ "$coverage_status" -ne 0 && ! -f "$profile" ]]; then
+		printf 'mode: set\n' >"$profile"
+		echo "crap4go coverage generation failed in $module_dir and produced no profile; continuing with an empty profile." >&2
+	elif [[ "$coverage_status" -ne 0 ]]; then
+		echo "crap4go coverage generation failed in $module_dir; continuing with the produced profile." >&2
+	fi
+
+	return "$coverage_status"
+}
+
+generate_crap4go_coverage "$repo_root" "${root_packages[@]}" || status=$?
+
+generate_crap4go_coverage "$repo_root/e2e-proxy" "${proxy_packages[@]}" || {
+	module_status=$?
+	if [[ "$status" -eq 0 ]]; then
+		status=$module_status
+	fi
+}
+
 (
 	cd "$repo_root"
-	"$lint_bin" run --config "$config" "${lint_args[@]}" ./cmd/... ./internal/... ./e2e/... ./tools/...
+	"$lint_bin" run --config "$config" "${lint_args[@]}" "${root_packages[@]}"
 ) || status=$?
 
 (
 	cd "$repo_root/e2e-proxy"
-	"$lint_bin" run --config "$config" "${lint_args[@]}" ./...
+	"$lint_bin" run --config "$config" "${lint_args[@]}" "${proxy_packages[@]}"
 ) || {
 	module_status=$?
 	if [[ "$status" -eq 0 ]]; then

@@ -10,6 +10,7 @@ Current gate status:
 | --- | --- | --- |
 | `leafwiki` | Configured, red | The custom module plugin runs semantic hygiene through golangci-lint, but the broad gate currently reports existing diagnostics in the root module and `e2e-proxy`. Do not narrow the package surface, add suppressions, or add a baseline to hide them. |
 | `i18ncatalog` | Configured | The custom module plugin reports static i18n/catalog policy through golangci-lint: catalog parity, generated shell-message drift, committed `translate.*` files, E2E localized prose assertions, `gin.H` payload policy, and `scripts/run.sh` literal failure bodies. |
+| `crap4go` | Configured | `scripts/golangci-lint.sh` regenerates `target/coverage/crap4go.out` for the root module and `e2e-proxy` before running golangci-lint, then the custom module plugin reports functions with CRAP scores at or above the configured threshold. |
 | `ginkgolinter` | Clean | Verified through the transition config in both modules. |
 | `govet` | Clean when scoped | Scoped to project package patterns by `scripts/golangci-lint.sh` to avoid unrelated frontend dependency trees. |
 
