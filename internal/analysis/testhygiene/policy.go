@@ -107,6 +107,7 @@ const (
 	ruleGomegaMatcherAsValue                   ruleID = "gomega.matcher-as-value"
 	ruleGomegaPositionalTransform              ruleID = "gomega.positional-transform"
 	ruleGomegaPositionalCompositeAssertion     ruleID = "gomega.positional-composite-assertion"
+	ruleGomegaSemanticContractProbe            ruleID = "gomega.semantic-contract-probe"
 )
 
 var ruleSet = checkerpolicy.NewRuleSet(testRuleMetadata(), testWaiverBudgets(), 10)
@@ -124,6 +125,7 @@ func testRuleMetadata() map[checkerpolicy.RuleID]checkerpolicy.RuleMetadata {
 		ruleGomegaEqualZero:                checkerpolicy.WaivableRule(ruleGomegaEqualZero, checkerpolicy.WaiverScopeCall),
 		ruleGomegaNumericEquivalent:        checkerpolicy.WaivableRule(ruleGomegaNumericEquivalent, checkerpolicy.WaiverScopeCall),
 		ruleGomegaTimeEqual:                checkerpolicy.WaivableRule(ruleGomegaTimeEqual, checkerpolicy.WaiverScopeCall),
+		ruleGomegaSemanticContractProbe:    checkerpolicy.WaivableRule(ruleGomegaSemanticContractProbe, checkerpolicy.WaiverScopeCall),
 	}
 	for _, id := range []checkerpolicy.RuleID{
 		ruleSemanticStringLeak, ruleDirectCast, ruleSemanticUncheckedConstructor, ruleSemanticFixtureRuntimeConstructor,
@@ -167,6 +169,7 @@ func testWaiverBudgets() map[checkerpolicy.RuleID]int {
 		ruleGomegaEqualZero:                3,
 		ruleGomegaNumericEquivalent:        3,
 		ruleGomegaTimeEqual:                3,
+		ruleGomegaSemanticContractProbe:    3,
 	}
 }
 

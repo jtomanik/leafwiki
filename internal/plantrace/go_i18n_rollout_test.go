@@ -44,7 +44,8 @@ var _ = ginkgo.Describe("go-i18n rollout plan traceability", ginkgo.Label("integ
 			ContainSubstring(".cache/tools/leafwiki-golangci-lint"),
 			ContainSubstring(".golangci.leafwiki.yml"),
 			ContainSubstring("e2e-proxy"),
-			Not(ContainSubstring("go test")),
+			ContainSubstring("go test"),
+			ContainSubstring("target/coverage/crap4go.out"),
 			Not(ContainSubstring("python")),
 		))
 

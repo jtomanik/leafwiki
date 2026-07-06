@@ -165,6 +165,10 @@ func gomegaStructuredProtocolStatusMatcherDiagnostic() string {
 	return "assert MCP tool-result success or error semantics with a domain matcher instead of matching IsError as a raw boolean"
 }
 
+func gomegaSemanticContractProbeDiagnostic(fieldName string) string {
+	return fmt.Sprintf("assert semantic field/key %s with a typed domain matcher/helper instead of raw contract values", fieldName)
+}
+
 func gomegaNumericEquivalentDiagnostic() string {
 	return "avoid BeEquivalentTo for numeric assertions; use Equal or BeNumerically"
 }

@@ -180,8 +180,8 @@ func semanticTypeForFieldName(fieldName string, typeName string) (string, bool) 
 	if typ, ok := semanticTypeForCanonicalName(canonicalName(fieldName)); ok {
 		return typ, true
 	}
-	if canonicalName(fieldName) == "id" && pageIdentityContext(typeName) {
-		return "PageID", true
+	if canonicalName(fieldName) == "id" {
+		return semanticTypeForBareIDContext(typeName)
 	}
 	if canonicalName(fieldName) == "hash" && commitHashContext(typeName) {
 		return "CommitHash", true

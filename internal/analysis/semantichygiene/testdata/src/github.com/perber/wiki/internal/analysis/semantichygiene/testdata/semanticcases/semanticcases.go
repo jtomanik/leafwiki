@@ -12,6 +12,10 @@ func (id UserID) String() string {
 	return string(id)
 }
 
+type publicUserRecord struct {
+	ID string // want "semantic-looking field ID uses string in domain/service type publicUserRecord; use UserID or mark the type as a DTO boundary"
+}
+
 type PageVersion string
 
 func (version PageVersion) String() string {
@@ -56,6 +60,14 @@ type ToolID string
 
 func (id ToolID) String() string {
 	return string(id)
+}
+
+type toolDescriptorRecord struct {
+	ID string // want "semantic-looking field ID uses string in domain/service type toolDescriptorRecord; use ToolID or mark the type as a DTO boundary"
+}
+
+type workspaceStatusRecord struct {
+	ID string // want "semantic-looking field ID uses string in domain/service type workspaceStatusRecord; use WorkspaceID or mark the type as a DTO boundary"
 }
 
 type PageService struct{}

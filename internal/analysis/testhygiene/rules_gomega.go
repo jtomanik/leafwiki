@@ -103,6 +103,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesRawStatusCode(assertion) {
 		ctx.report(ruleGomegaRawStatusCode, assertion.actual, gomegaRawStatusCodeDiagnostic())
 	}
+	if assertionUsesMatcherTreeRawStatusCode(assertion) {
+		ctx.report(ruleGomegaRawStatusCode, assertion.matcher, gomegaRawStatusCodeDiagnostic())
+	}
 	if assertionUsesOSIsNotExist(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaOSIsNotExistMatcher, assertion.actual, gomegaOSIsNotExistMatcherDiagnostic())
 	}
@@ -166,8 +169,17 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if fieldName, ok := assertionMatchesStructuredErrorField(ctx, assertion); ok {
 		ctx.report(ruleGomegaStructuredErrorMatcher, assertion.actual, gomegaStructuredErrorMatcherDiagnostic(fieldName))
 	}
+	if fieldName, ok := assertionMatchesRenderedProseField(ctx, assertion); ok {
+		ctx.report(ruleGomegaStructuredErrorMatcher, assertion.actual, gomegaStructuredErrorMatcherDiagnostic(fieldName))
+	}
 	if fieldName, ok := assertionUsesStructuredFieldMatcher(ctx, assertion); ok {
 		ctx.report(ruleGomegaStructuredErrorMatcher, assertion.matcher, gomegaStructuredErrorMatcherDiagnostic(fieldName))
+	}
+	if fieldName, ok := assertionUsesRenderedProseMatcherContract(ctx, assertion); ok {
+		ctx.report(ruleGomegaStructuredErrorMatcher, assertion.matcher, gomegaStructuredErrorMatcherDiagnostic(fieldName))
+	}
+	if fieldName, ok := assertionUsesSemanticContractProbe(ctx, assertion); ok {
+		ctx.report(ruleGomegaSemanticContractProbe, assertion.matcher, gomegaSemanticContractProbeDiagnostic(fieldName))
 	}
 	if keyName, ok := assertionUsesStructuredProtocolKeyMatcher(ctx, assertion); ok {
 		ctx.report(ruleGomegaStructuredProtocolKey, assertion.matcher, gomegaStructuredProtocolKeyMatcherDiagnostic(keyName))
