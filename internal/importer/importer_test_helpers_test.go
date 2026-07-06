@@ -184,10 +184,10 @@ func updatedContentByTitleResult(contents map[string]string, title string) (stri
 	return content, nil
 }
 
-func startStoredPlanExecutionResult(store *PlanStore, userID string) (*StoredPlan, error) {
+func startStoredPlanExecutionResult(store *PlanStore, userID tree.UserID) (*StoredPlan, error) {
 	ginkgo.GinkgoHelper()
 
-	plan, started, err := store.TryStartExecution(userID)
+	plan, started, err := store.TryStartExecution(userID.MetadataValue())
 	if err != nil {
 		return plan, err
 	}
@@ -197,10 +197,10 @@ func startStoredPlanExecutionResult(store *PlanStore, userID string) (*StoredPla
 	return plan, nil
 }
 
-func startCurrentPlanExecutionResult(service *ImporterService, userID string) (*CurrentPlanState, error) {
+func startCurrentPlanExecutionResult(service *ImporterService, userID tree.UserID) (*CurrentPlanState, error) {
 	ginkgo.GinkgoHelper()
 
-	state, started, err := service.StartCurrentPlanExecution(tree.UserIDFromString(userID))
+	state, started, err := service.StartCurrentPlanExecution(userID)
 	if err != nil {
 		return state, err
 	}
@@ -297,7 +297,7 @@ func HaveFreshRunningStoredPlan(userID tree.UserID, totalItems int) types.Gomega
 		HaveStoredPlanState(gstruct.Fields{
 			"ExecutionStatus": Equal(ExecutionStatusRunning),
 			"ExecutionUserID": WithTransform(func(raw string) tree.UserID {
-				return tree.UserIDFromString(raw)
+				return newFixtureUserID(raw)
 			}, Equal(userID)),
 			"ExecutionResult": BeNil(),
 			"ExecutionError":  BeNil(),

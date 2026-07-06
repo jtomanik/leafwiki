@@ -37,14 +37,14 @@ var _ = ginkgo.Describe("import content link rewriting", ginkgo.Label("unit"), f
 
 			transformer := newContentTransformer(&PlanResult{
 				Items: []PlanItem{
-					{SourcePath: "Note.md", TargetPath: "note", Kind: tree.NodeKindPage},
-					{SourcePath: "No)te.md", TargetPath: "no-te", Kind: tree.NodeKindPage},
-					{SourcePath: "Three laws of motion.md", TargetPath: "three-laws-of-motion", Kind: tree.NodeKindPage},
-					{SourcePath: "foo/bar.md", TargetPath: "foo/bar", Kind: tree.NodeKindPage},
+					{SourcePath: newFixtureWorkspaceSourcePath("Note.md"), TargetPath: newFixtureRoutePath("note"), Kind: tree.NodeKindPage},
+					{SourcePath: newFixtureWorkspaceSourcePath("No)te.md"), TargetPath: newFixtureRoutePath("no-te"), Kind: tree.NodeKindPage},
+					{SourcePath: newFixtureWorkspaceSourcePath("Three laws of motion.md"), TargetPath: newFixtureRoutePath("three-laws-of-motion"), Kind: tree.NodeKindPage},
+					{SourcePath: newFixtureWorkspaceSourcePath("foo/bar.md"), TargetPath: newFixtureRoutePath("foo/bar"), Kind: tree.NodeKindPage},
 				},
 			}, tmp, 1234)
 
-			page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+			page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 			wiki := &fakeExecWiki{}
 
 			got, err := transformer.TransformContent(newFixtureUserID("editor"), tt.sourcePath, page, tt.content, wiki)
@@ -234,15 +234,15 @@ var _ = ginkgo.Describe("import content link formatting", ginkgo.Label("unit"), 
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Note.md", TargetPath: "note", Kind: tree.NodeKindPage},
-				{SourcePath: "Guide/index.md", TargetPath: "guide", Kind: tree.NodeKindSection},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Note.md"), TargetPath: newFixtureRoutePath("note"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guide/index.md"), TargetPath: newFixtureRoutePath("guide"), Kind: tree.NodeKindSection},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[Note](./Note.md)\n[Guide](./Guide/)"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Note](/note.md)\n[Guide](/guide)"
@@ -257,12 +257,12 @@ var _ = ginkgo.Describe("import content generated wiki links", ginkgo.Label("uni
 		writeTmp(tmp, "Note.md", "# Note")
 		transformer := newContentTransformerWithOptions(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "Note.md", TargetPath: "note", Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Note.md"), TargetPath: newFixtureRoutePath("note"), Kind: tree.NodeKindPage},
 			},
 		}, tmp, 1234, ContentTransformerOptions{MarkdownLinkRootPrefix: "/docs"})
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
-		got, err := transformer.TransformContent("editor", "current.md", page, "[Note](./Note.md)", &fakeExecWiki{})
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, "[Note](./Note.md)", &fakeExecWiki{})
 		Expect(err).To(Succeed())
 		Expect(got).To(Equal("[Note](/docs/note.md)"))
 
@@ -277,14 +277,14 @@ var _ = ginkgo.Describe("import content source path matching", ginkgo.Label("uni
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Guide.md", TargetPath: "guide", Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guide.md"), TargetPath: newFixtureRoutePath("guide"), Kind: tree.NodeKindPage},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[Exact](./Guide.md)\n[Mismatch](./guide.md)"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Exact](/guide.md)\n[Mismatch](./guide.md)"
@@ -301,14 +301,14 @@ var _ = ginkgo.Describe("import content suffix matching", ginkgo.Label("unit"), 
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Reference/Endpoints.md", TargetPath: "reference/endpoints", Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Reference/Endpoints.md"), TargetPath: newFixtureRoutePath("reference/endpoints"), Kind: tree.NodeKindPage},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[Exact](Reference/Endpoints.md)\n[Mismatch](/reference/endpoints)\n[[Reference/Endpoints|Exact Wiki]]\n[[reference/endpoints|Mismatch Wiki]]"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Exact](/reference/endpoints.md)\n[Mismatch](/reference/endpoints)\n[Exact Wiki](/reference/endpoints.md)\n[[reference/endpoints|Mismatch Wiki]]"
@@ -325,14 +325,14 @@ var _ = ginkgo.Describe("import content basename wiki-link matching", ginkgo.Lab
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Guide.md", TargetPath: "guide", Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guide.md"), TargetPath: newFixtureRoutePath("guide"), Kind: tree.NodeKindPage},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[[Guide]]\n[[guide]]"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Guide](/guide.md)\n[[guide]]"
@@ -349,14 +349,14 @@ var _ = ginkgo.Describe("import content markdown page links", ginkgo.Label("unit
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Guide/index.md", TargetPath: "guide", Kind: tree.NodeKindSection},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guide/index.md"), TargetPath: newFixtureRoutePath("guide"), Kind: tree.NodeKindSection},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[Guide page](./Guide.md)\n[Guide index](./Guide/index.md)"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Guide page](./Guide.md)\n[Guide index](/guide)"
@@ -374,15 +374,15 @@ var _ = ginkgo.Describe("import content same-route page and section links", gink
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Guide.md", TargetPath: "guide", Kind: tree.NodeKindPage},
-				{SourcePath: "Guide/index.md", TargetPath: "guide", Kind: tree.NodeKindSection},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guide.md"), TargetPath: newFixtureRoutePath("guide"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guide/index.md"), TargetPath: newFixtureRoutePath("guide"), Kind: tree.NodeKindSection},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[Guide page](./Guide.md)\n[Guide section](./Guide/index.md)"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Guide page](/guide.md)\n[Guide section](/guide)"
@@ -400,15 +400,15 @@ var _ = ginkgo.Describe("import content suffix fallback formatting", ginkgo.Labe
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Tools/Kubernetes/Resources/Guide.md", TargetPath: "knowledge-main/tools/kubernetes/resources/guide", Kind: tree.NodeKindPage},
-				{SourcePath: "Tools/Kubernetes/Resources/Guide/index.md", TargetPath: "knowledge-main/tools/kubernetes/resources/guide", Kind: tree.NodeKindSection},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Tools/Kubernetes/Resources/Guide.md"), TargetPath: newFixtureRoutePath("knowledge-main/tools/kubernetes/resources/guide"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Tools/Kubernetes/Resources/Guide/index.md"), TargetPath: newFixtureRoutePath("knowledge-main/tools/kubernetes/resources/guide"), Kind: tree.NodeKindSection},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[[Tools/Kubernetes/Resources/Guide.md]]"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Guide](/knowledge-main/tools/kubernetes/resources/guide.md)"
@@ -425,14 +425,14 @@ var _ = ginkgo.Describe("import content README folder fallbacks", ginkgo.Label("
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Guides/README.md", TargetPath: "guides", Kind: tree.NodeKindSection},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/README.md"), TargetPath: newFixtureRoutePath("guides"), Kind: tree.NodeKindSection},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[Guide folder](./Guides/)\n[Guide path](./Guides)\n[guide-ref]: ./Guides"
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Guide folder](/guides)\n[Guide path](/guides)\n[guide-ref]: /guides"
@@ -451,21 +451,21 @@ var _ = ginkgo.Describe("import content reference definitions", ginkgo.Label("un
 
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "current.md", TargetPath: "current", Kind: tree.NodeKindPage},
-				{SourcePath: "Note.md", TargetPath: "note", Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("current.md"), TargetPath: newFixtureRoutePath("current"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Note.md"), TargetPath: newFixtureRoutePath("note"), Kind: tree.NodeKindPage},
 			},
 		}, tmp, 1234)
 
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		content := "[Note][note-ref]\n\n[note-ref]: <./Note.md> \"Note title\""
-		got, err := transformer.TransformContent("editor", "current.md", page, content, &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, content, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		want := "[Note][note-ref]\n\n[note-ref]: </note.md> \"Note title\""
 		Expect(got).To(Equal(want))
 
 		imageOnlyContent := "![Note][note-ref]\n![Photo][photo-ref]\n\n[note-ref]: <./Note.md> \"Note title\"\n[photo-ref]: ./Photo.png"
-		got, err = transformer.TransformContent("editor", "current.md", page, imageOnlyContent, &fakeExecWiki{})
+		got, err = transformer.TransformContent(newFixtureUserID("editor"), newFixtureWorkspaceSourcePath("current.md"), page, imageOnlyContent, &fakeExecWiki{})
 		Expect(err).To(Succeed())
 
 		imageOnlyWant := "![Note][note-ref]\n![Photo][photo-ref]\n\n[note-ref]: <./Note.md> \"Note title\"\n[photo-ref]: /assets/p1/Photo.png"

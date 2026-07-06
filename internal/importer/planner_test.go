@@ -79,7 +79,7 @@ func (f *fakeWiki) EnsurePath(userID tree.UserID, targetPath tree.RoutePath, tit
 	}
 	// create minimal page object
 	return &tree.Page{PageNode: &tree.PageNode{
-		ID:    "p1",
+		ID:    newFixturePageID("p1"),
 		Title: title,
 		Slug:  newFixtureSlug("slug"),
 		Kind:  k,
@@ -102,7 +102,7 @@ func (f *fakeWiki) UpdatePage(userID tree.UserID, id tree.PageID, title string, 
 		k = *kind
 	}
 	return &tree.Page{PageNode: &tree.PageNode{
-		ID:    tree.PageIDFromString(id),
+		ID:    newFixturePageID(id),
 		Title: title,
 		Slug:  slug,
 		Kind:  k,
@@ -118,9 +118,9 @@ func newPlannerWithFake(w *fakeWiki) *Planner {
 }
 
 func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, exists bool) tree.PathSegment {
-	pageID := tree.PageIDFromString(id)
+	pageID := newFixturePageID(id)
 	return tree.PathSegment{
-		Slug:   tree.SlugFromString(slug),
+		Slug:   newFixtureSlug(slug),
 		Kind:   &kind,
 		ID:     &pageID,
 		Title:  &title,
@@ -130,7 +130,7 @@ func fakePathSegment(slug string, kind tree.NodeKind, id string, title string, e
 
 func fakeMissingPathSegment(slug string, kind tree.NodeKind) tree.PathSegment {
 	return tree.PathSegment{
-		Slug:   tree.SlugFromString(slug),
+		Slug:   newFixtureSlug(slug),
 		Kind:   &kind,
 		Exists: false,
 	}
@@ -147,7 +147,7 @@ var _ = ginkgo.Describe("import plan creation for markdown pages", ginkgo.Label(
 		}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "My Page.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("My Page.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "/docs",
 		})
@@ -158,8 +158,8 @@ var _ = ginkgo.Describe("import plan creation for markdown pages", ginkgo.Label(
 				HaveField("Action", Equal(PlanActionCreate)),
 				HaveField("Kind", Equal(tree.NodeKindPage)),
 				HaveField("Title", Equal("Hello")),
-				HaveField("TargetPath", Equal(tree.RoutePath("docs/my-page"))),
-				HaveField("DesiredSlug", Equal(tree.Slug("my-page"))),
+				HaveField("TargetPath", Equal(newFixtureRoutePath("docs/my-page"))),
+				HaveField("DesiredSlug", Equal(newFixtureSlug("my-page"))),
 			))),
 		))
 
@@ -174,7 +174,7 @@ var _ = ginkgo.Describe("import plan creation for folder index sections", ginkgo
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "Guides/index.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("Guides/index.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
@@ -182,8 +182,8 @@ var _ = ginkgo.Describe("import plan creation for folder index sections", ginkgo
 		Expect(res.Items).To(ConsistOf(SatisfyAll(
 			HaveField("Kind", Equal(tree.NodeKindSection)),
 			HaveField("Action", Equal(PlanActionCreate)),
-			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides"))),
-			HaveField("DesiredSlug", Equal(tree.Slug("guides"))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath("docs/guides"))),
+			HaveField("DesiredSlug", Equal(newFixtureSlug("guides"))),
 			HaveField("Title", Equal("Guides")),
 		)))
 
@@ -198,15 +198,15 @@ var _ = ginkgo.Describe("import plan creation for README folder fallbacks", gink
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "Guides/README.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("Guides/README.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
 		Expect(err).To(Succeed())
 		Expect(res.Items).To(ConsistOf(SatisfyAll(
 			HaveField("Kind", Equal(tree.NodeKindSection)),
-			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides"))),
-			HaveField("DesiredSlug", Equal(tree.Slug("guides"))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath("docs/guides"))),
+			HaveField("DesiredSlug", Equal(newFixtureSlug("guides"))),
 		)))
 
 	})
@@ -270,7 +270,7 @@ var _ = ginkgo.Describe("import plan creation beside existing sections", ginkgo.
 		}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "sync.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("sync.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
@@ -278,7 +278,7 @@ var _ = ginkgo.Describe("import plan creation beside existing sections", ginkgo.
 		Expect(res.Items).To(ConsistOf(SatisfyAll(
 			HaveField("Action", Equal(PlanActionCreate)),
 			HaveField("Kind", Equal(tree.NodeKindPage)),
-			HaveField("TargetPath", Equal(tree.RoutePath("docs/sync"))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath("docs/sync"))),
 		)))
 
 	})
@@ -295,8 +295,8 @@ var _ = ginkgo.Describe("import plan creation with mixed-case index files", gink
 		p := newPlannerWithFake(wiki)
 
 		res, err := p.CreatePlan([]ImportMDFile{
-			{SourcePath: "Guides/index.MD"},
-			{SourcePath: "Guides/README.md"},
+			{SourcePath: newFixtureWorkspaceSourcePath("Guides/index.MD")},
+			{SourcePath: newFixtureWorkspaceSourcePath("Guides/README.md")},
 		}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
@@ -304,9 +304,9 @@ var _ = ginkgo.Describe("import plan creation with mixed-case index files", gink
 		Expect(err).To(Succeed())
 		Expect(res.Items).To(HaveLen(2))
 		Expect(res.Items).To(ContainElement(SatisfyAll(
-			HaveField("SourcePath", Equal(tree.WorkspaceSourcePath("Guides/README.md"))),
+			HaveField("SourcePath", Equal(newFixtureWorkspaceSourcePath("Guides/README.md"))),
 			HaveField("Kind", Equal(tree.NodeKindPage)),
-			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides/README"))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath("docs/guides/README"))),
 		)))
 
 	})
@@ -320,7 +320,7 @@ var _ = ginkgo.Describe("import plan title selection", ginkgo.Label("unit"), fun
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "Guide.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("Guide.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "",
 		})
@@ -375,22 +375,22 @@ var _ = ginkgo.Describe("import plan existing page detection", ginkgo.Label("uni
 					Path:   "docs/a",
 					Exists: true,
 					Segments: []tree.PathSegment{
-						{Slug: "docs", Exists: true},
-						{Slug: "a", Exists: true, ID: func() *tree.PageID { id := tree.PageIDFromString(existingID); return &id }(), Kind: &existingKind, Title: &existingTitle},
+						{Slug: newFixtureSlug("docs"), Exists: true},
+						{Slug: newFixtureSlug("a"), Exists: true, ID: func() *tree.PageID { id := newFixturePageID(existingID); return &id }(), Kind: &existingKind, Title: &existingTitle},
 					},
 				},
 			},
 		}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "a.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("a.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
 		Expect(err).To(Succeed())
 		Expect(res).To(HaveImportPlanResult(ConsistOf(HaveSkippedExistingPage(
-			tree.PageIDFromString(existingID),
-			tree.Slug("a"),
+			newFixturePageID(existingID),
+			newFixtureSlug("a"),
 		))))
 
 	})
@@ -402,7 +402,7 @@ var _ = ginkgo.Describe("import plan source file errors", ginkgo.Label("unit"), 
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "missing.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("missing.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
@@ -420,7 +420,7 @@ var _ = ginkgo.Describe("import plan directory source errors", ginkgo.Label("uni
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "dir"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("dir")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
@@ -443,7 +443,7 @@ var _ = ginkgo.Describe("import plan malformed lookup errors", ginkgo.Label("uni
 		}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "x.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("x.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
@@ -467,7 +467,7 @@ var _ = ginkgo.Describe("import plan title extraction failures", ginkgo.Label("u
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "unreadable.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("unreadable.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
@@ -489,12 +489,12 @@ var _ = ginkgo.Describe("import plan source directory normalization", ginkgo.Lab
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "My Guides/Intro.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("My Guides/Intro.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
 		Expect(err).To(Succeed())
-		Expect(res).To(HaveImportPlanResult(ConsistOf(HaveField("TargetPath", Equal(tree.RoutePath("docs/my-guides/intro"))))))
+		Expect(res).To(HaveImportPlanResult(ConsistOf(HaveField("TargetPath", Equal(newFixtureRoutePath("docs/my-guides/intro"))))))
 
 	})
 })
@@ -507,14 +507,14 @@ var _ = ginkgo.Describe("import plan reserved slug normalization", ginkgo.Label(
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "Reference/API.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("Reference/API.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
 		Expect(err).To(Succeed())
 		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
-			HaveField("TargetPath", Equal(tree.RoutePath("docs/reference/api-1"))),
-			HaveField("DesiredSlug", Equal(tree.Slug("api-1"))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath("docs/reference/api-1"))),
+			HaveField("DesiredSlug", Equal(newFixtureSlug("api-1"))),
 		))))
 
 	})
@@ -530,7 +530,7 @@ var _ = ginkgo.Describe("import plan invalid source directory segments", ginkgo.
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "!!!/a.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("!!!/a.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})

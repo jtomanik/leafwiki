@@ -81,7 +81,7 @@ var _ = ginkgo.Describe("Planner error edges", ginkgo.Label("unit"), func() {
 		importerWriteFile(tmp, "lookup.md", "# Lookup")
 
 		planner := newPlannerWithFake(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
-		plan, err := planner.CreatePlan([]ImportMDFile{{SourcePath: "!!!.md"}}, PlanOptions{SourceBasePath: tmp})
+		plan, err := planner.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("!!!.md")}}, PlanOptions{SourceBasePath: tmp})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.ErrorDetails).To(HaveImportPlanErrorCode(ImportErrorCodeNormalizeFilenameFailed))
 
@@ -90,7 +90,7 @@ var _ = ginkgo.Describe("Planner error edges", ginkgo.Label("unit"), func() {
 			lookups:          map[string]*tree.PathLookup{},
 			lookupForKindErr: errors.New("lookup failed"),
 		})
-		plan, err = planner.CreatePlan([]ImportMDFile{{SourcePath: "lookup.md"}}, PlanOptions{SourceBasePath: tmp})
+		plan, err = planner.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("lookup.md")}}, PlanOptions{SourceBasePath: tmp})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.ErrorDetails).To(HaveImportPlanErrorCode(ImportErrorCodeLookupPathFailed))
 	})
@@ -175,7 +175,7 @@ var _ = ginkgo.Describe("import planning service error handling", ginkgo.Label("
 	ginkgo.It("surfaces execution start and finish persistence errors", func() {
 		service := newServiceWithFakeWiki(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}})
 		service.planStore.stateErr = ErrImportStateUnavailable
-		_, err := startCurrentPlanExecutionResult(service, "user-1")
+		_, err := startCurrentPlanExecutionResult(service, newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 
 		workspace := importerTempDir()
@@ -189,7 +189,7 @@ var _ = ginkgo.Describe("import planning service error handling", ginkgo.Label("
 		plan, err := service.CreateImportPlanFromFolder(workspace, "")
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = service.ExecuteCurrentPlan("user-1")
+		_, err = service.ExecuteCurrentPlan(newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 		Expect(plan).NotTo(BeNil())
 	})
@@ -204,12 +204,12 @@ var _ = ginkgo.Describe("import planning service error handling", ginkgo.Label("
 		wiki.ensureFn = func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 			service.planStore.stateFile = importerBadStateFile()
 			close(finished)
-			return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
+			return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 		}
 
 		_, err := service.CreateImportPlanFromFolder(workspace, "")
 		Expect(err).NotTo(HaveOccurred())
-		_, err = startCurrentPlanExecutionResult(service, "user-1")
+		_, err = startCurrentPlanExecutionResult(service, newFixtureUserID("user-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(finished).Should(BeClosed())
 		Eventually(func() error {
@@ -221,7 +221,7 @@ var _ = ginkgo.Describe("import planning service error handling", ginkgo.Label("
 		service.planStore.stateErr = ErrImportStateUnavailable
 		result, err := service.executeStoredPlan(&StoredPlan{
 			Plan: &PlanResult{TreeHash: "h1", Items: []PlanItem{
-				{SourcePath: "skipped.md", TargetPath: "skipped", Action: PlanActionSkip},
+				{SourcePath: newFixtureWorkspaceSourcePath("skipped.md"), TargetPath: newFixtureRoutePath("skipped"), Action: PlanActionSkip},
 			}},
 			PlanOptions: PlanOptions{SourceBasePath: importerTempDir()},
 		})
@@ -371,7 +371,7 @@ var _ = ginkgo.Describe("import planning service error handling", ginkgo.Label("
 			ID:       "plan-1",
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "page.md", TargetPath: "page", Title: "Page", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("page.md"), TargetPath: newFixtureRoutePath("page"), Title: "Page", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		Expect(store.Set(&StoredPlan{
@@ -394,7 +394,7 @@ var _ = ginkgo.Describe("import planning service error handling", ginkgo.Label("
 			PlanOptions:     PlanOptions{SourceBasePath: workspace},
 			WorkspaceRoot:   workspace,
 			ExecutionStatus: ExecutionStatusRunning,
-			ExecutionUserID: "user-1",
+			ExecutionUserID: newFixtureUserID("user-1").MetadataValue(),
 		})).To(Succeed())
 		store.stateFile = importerBadStateFile()
 		service = NewImporterService(newPlannerWithFake(&fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}), store, importerTempDir(), 0)

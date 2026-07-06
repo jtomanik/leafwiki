@@ -27,13 +27,13 @@ var _ = ginkgo.Describe("import plan root index fallback titles", ginkgo.Label("
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "index.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("index.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "", // empty target base path
 		})
 		Expect(err).To(Succeed())
 		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
-			HaveField("TargetPath", Equal(tree.RoutePath(""))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath(""))),
 			HaveField("Kind", Equal(tree.NodeKindSection)),
 			HaveField("Title", Equal("index")),
 			HaveField("Notes", ContainElement(ContainSubstring("Failed to load markdown file for title extraction"))),
@@ -56,8 +56,8 @@ title: Ordner
 		p := newPlannerWithFake(wiki)
 
 		res, err := p.CreatePlan([]ImportMDFile{
-			{SourcePath: "Ordner/index.md"},
-			{SourcePath: "Ordner/Ordner.md"},
+			{SourcePath: newFixtureWorkspaceSourcePath("Ordner/index.md")},
+			{SourcePath: newFixtureWorkspaceSourcePath("Ordner/Ordner.md")},
 		}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "",
@@ -65,14 +65,14 @@ title: Ordner
 		Expect(err).To(Succeed())
 		Expect(res).To(HaveImportPlanResult(ConsistOf(
 			SatisfyAll(
-				HaveField("SourcePath", Equal(tree.WorkspaceSourcePath("Ordner/index.md"))),
+				HaveField("SourcePath", Equal(newFixtureWorkspaceSourcePath("Ordner/index.md"))),
 				HaveField("Kind", Equal(tree.NodeKindSection)),
-				HaveField("TargetPath", Equal(tree.RoutePath("ordner"))),
+				HaveField("TargetPath", Equal(newFixtureRoutePath("ordner"))),
 			),
 			SatisfyAll(
-				HaveField("SourcePath", Equal(tree.WorkspaceSourcePath("Ordner/Ordner.md"))),
+				HaveField("SourcePath", Equal(newFixtureWorkspaceSourcePath("Ordner/Ordner.md"))),
 				HaveField("Kind", Equal(tree.NodeKindPage)),
-				HaveField("TargetPath", Equal(tree.RoutePath("ordner/ordner"))),
+				HaveField("TargetPath", Equal(newFixtureRoutePath("ordner/ordner"))),
 			),
 		)))
 
@@ -87,14 +87,14 @@ var _ = ginkgo.Describe("import plan folder markdown without index", ginkgo.Labe
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "Ordner/Ordner.md"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("Ordner/Ordner.md")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "wiki",
 		})
 		Expect(err).To(Succeed())
 		Expect(res).To(HaveImportPlanResult(ConsistOf(SatisfyAll(
 			HaveField("Kind", Equal(tree.NodeKindPage)),
-			HaveField("TargetPath", Equal(tree.RoutePath("wiki/ordner/ordner"))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath("wiki/ordner/ordner"))),
 		))))
 
 	})
@@ -112,14 +112,14 @@ title: Guides
 		wiki := &fakeWiki{treeHash: "h", lookups: map[string]*tree.PathLookup{}}
 		p := newPlannerWithFake(wiki)
 
-		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: "Guides/index.MD"}}, PlanOptions{
+		res, err := p.CreatePlan([]ImportMDFile{{SourcePath: newFixtureWorkspaceSourcePath("Guides/index.MD")}}, PlanOptions{
 			SourceBasePath: tmp,
 			TargetBasePath: "docs",
 		})
 		Expect(err).To(Succeed())
 		Expect(res.Items).To(ConsistOf(SatisfyAll(
 			HaveField("Kind", Equal(tree.NodeKindSection)),
-			HaveField("TargetPath", Equal(tree.RoutePath("docs/guides"))),
+			HaveField("TargetPath", Equal(newFixtureRoutePath("docs/guides"))),
 		)))
 
 	})

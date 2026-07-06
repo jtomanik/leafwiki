@@ -145,7 +145,7 @@ var _ = ginkgo.Describe("import execution without a current plan", ginkgo.Label(
 		w := &fakeWiki{treeHash: "h1", lookups: map[string]*tree.PathLookup{}}
 		is := newServiceWithFakeWiki(w)
 
-		_, err := is.ExecuteCurrentPlan("user1")
+		_, err := is.ExecuteCurrentPlan(newFixtureUserID("user1"))
 		Expect(err).To(MatchError(ErrNoPlan))
 
 	})
@@ -163,7 +163,7 @@ var _ = ginkgo.Describe("background import execution", ginkgo.Label("unit"), fun
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 				defer ginkgo.GinkgoRecover()
 				Eventually(allowEnsure).Should(BeClosed())
-				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
+				return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 			},
 		}
 		is := newServiceWithFakeWiki(w)
@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("background import execution", ginkgo.Label("unit"), fun
 		_, err := is.CreateImportPlanFromFolder(ws, "")
 		Expect(err).To(Succeed())
 
-		state, err := startCurrentPlanExecutionResult(is, "user1")
+		state, err := startCurrentPlanExecutionResult(is, newFixtureUserID("user1"))
 		Expect(err).To(Succeed())
 		Expect(state).To(SatisfyAll(
 			HaveField("ExecutionStatus", Equal(ExecutionStatusRunning)),
@@ -211,14 +211,14 @@ var _ = ginkgo.Describe("current import plan clearing while execution is running
 			ensureFn: func(userID tree.UserID, targetPath tree.RoutePath, title string, kind *tree.NodeKind) (*tree.Page, error) {
 				defer ginkgo.GinkgoRecover()
 				Eventually(allowEnsure).Should(BeClosed())
-				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
+				return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 			},
 		}
 		is := newServiceWithFakeWiki(w)
 
 		_, err := is.CreateImportPlanFromFolder(ws, "")
 		Expect(err).To(Succeed())
-		_, err = startCurrentPlanExecutionResult(is, "user1")
+		_, err = startCurrentPlanExecutionResult(is, newFixtureUserID("user1"))
 		Expect(err).To(Succeed())
 
 		err = is.ClearCurrentPlan()
@@ -247,14 +247,14 @@ var _ = ginkgo.Describe("import cancellation between items", ginkgo.Label("unit"
 					defer ginkgo.GinkgoRecover()
 					Eventually(allowFirstEnsure).Should(BeClosed())
 				}
-				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
+				return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 			},
 		}
 		is := newServiceWithFakeWiki(w)
 
 		_, err := is.CreateImportPlanFromFolder(ws, "")
 		Expect(err).To(Succeed())
-		_, err = startCurrentPlanExecutionResult(is, "user1")
+		_, err = startCurrentPlanExecutionResult(is, newFixtureUserID("user1"))
 		Expect(err).To(Succeed())
 
 		Eventually(enterFirstEnsure).Should(Receive())
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("persisted running import resumption", ginkgo.Label("uni
 		Expect(err).To(Succeed())
 		plan.TreeHash = "original-tree"
 
-		sp, err := startStoredPlanExecutionResult(store, "user1")
+		sp, err := startStoredPlanExecutionResult(store, newFixtureUserID("user1"))
 		Expect(err).To(Succeed())
 		Expect(sp.ExecutionStatus).To(Equal(ExecutionStatusRunning))
 		startedAt := time.Now()
@@ -313,7 +313,7 @@ var _ = ginkgo.Describe("persisted running import resumption", ginkgo.Label("uni
 			TreeHashBefore: "original-tree",
 			TreeHash:       "partial-tree",
 			Items: []ExecutionItemResult{
-				{SourcePath: "a.md", TargetPath: "a", Action: ExecutionActionCreated},
+				{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("a"), Action: ExecutionActionCreated},
 			},
 		})
 		Expect(err).To(Succeed())
@@ -360,13 +360,13 @@ var _ = ginkgo.Describe("resumed import with changed tree hash", ginkgo.Label("u
 			WorkspaceRoot:   workspaceRoot,
 			CreatedAt:       time.Now(),
 			ExecutionStatus: ExecutionStatusRunning,
-			ExecutionUserID: "user1",
+			ExecutionUserID: newFixtureUserID("user1").MetadataValue(),
 			ExecutionResult: &ExecutionResult{
 				ImportedCount:  1,
 				TreeHashBefore: "original-tree",
 				TreeHash:       "partially-imported-tree",
 				Items: []ExecutionItemResult{
-					{SourcePath: "a.md", TargetPath: "a", Action: ExecutionActionCreated},
+					{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("a"), Action: ExecutionActionCreated},
 				},
 			},
 			ExecutionProgress: ExecutionProgress{
@@ -402,7 +402,7 @@ var _ = ginkgo.Describe("import service execution with source frontmatter", gink
 		Expect(err).To(Succeed())
 		Expect(plan.TreeHash).To(Equal("h1"))
 
-		res, err := is.ExecuteCurrentPlan("user1")
+		res, err := is.ExecuteCurrentPlan(newFixtureUserID("user1"))
 		Expect(err).To(Succeed())
 
 		Expect(res).To(MatchExecutionResultCounts(1, 0, HaveLen(1)))
@@ -443,7 +443,7 @@ var _ = ginkgo.Describe("import service execution with stale plan", ginkgo.Label
 		// make plan stale
 		plan.TreeHash = "OLD"
 
-		_, err = is.ExecuteCurrentPlan("user1")
+		_, err = is.ExecuteCurrentPlan(newFixtureUserID("user1"))
 		Expect(err).To(MatchError(ErrImportPlanStale))
 
 	})

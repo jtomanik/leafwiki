@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("persistent plan store state", ginkgo.Label("unit"), fun
 		Expect(store.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "plan-1"},
 			ExecutionStatus: ExecutionStatusRunning,
-			ExecutionUserID: "user-1",
+			ExecutionUserID: newFixtureUserID("user-1").MetadataValue(),
 		})).To(Succeed())
 
 		loaded := NewPlanStore(stateFile)
@@ -81,7 +81,7 @@ var _ = ginkgo.Describe("persistent plan store state", ginkgo.Label("unit"), fun
 		Expect(err).To(Succeed())
 		Expect(retrieved).To(HaveStoredPlanState(gstruct.Fields{
 			"Plan":            SatisfyAll(Not(BeNil()), HaveField("ID", Equal("plan-1"))),
-			"ExecutionUserID": Equal("user-1"),
+			"ExecutionUserID": Equal(newFixtureUserID("user-1").MetadataValue()),
 		}))
 
 	})
@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("execution start with unavailable plan payload", ginkgo.
 			ExecutionStatus: ExecutionStatusPlanned,
 		})).To(Succeed())
 
-		_, err := startStoredPlanExecutionResult(store, "user-1")
+		_, err := startStoredPlanExecutionResult(store, newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 
 	})

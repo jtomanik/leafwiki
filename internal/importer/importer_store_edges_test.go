@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("stored import plan persistence failures", ginkgo.Label(
 					plan.ExecutionStatus = ExecutionStatusPlanned
 				},
 				mutate: func(store *PlanStore) error {
-					_, err := startStoredPlanExecutionResult(store, "user-1")
+					_, err := startStoredPlanExecutionResult(store, newFixtureUserID("user-1"))
 					return err
 				},
 			},
@@ -110,7 +110,7 @@ var _ = ginkgo.Describe("stored import plan persistence failures", ginkgo.Label(
 		Expect(store.Set(&StoredPlan{})).To(MatchError(ErrImportStateUnavailable))
 		_, err := store.Clear()
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
-		_, err = startStoredPlanExecutionResult(store, "user-1")
+		_, err = startStoredPlanExecutionResult(store, newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrImportStateUnavailable))
 		Expect(store.FinishExecution("plan-1", nil, nil)).To(MatchError(ErrImportStateUnavailable))
 		Expect(store.UpdateExecutionProgress("plan-1", ExecutionProgress{}, nil)).To(MatchError(ErrImportStateUnavailable))
@@ -199,7 +199,7 @@ var _ = ginkgo.Describe("import plan execution service state handling", ginkgo.L
 			ExecutionResult: result,
 		})).To(Succeed())
 
-		got, err := service.ExecuteCurrentPlan("user-1")
+		got, err := service.ExecuteCurrentPlan(newFixtureUserID("user-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(result))
 
@@ -207,14 +207,14 @@ var _ = ginkgo.Describe("import plan execution service state handling", ginkgo.L
 			Plan:            &PlanResult{ID: "plan-2"},
 			ExecutionStatus: ExecutionStatusCompleted,
 		})).To(Succeed())
-		_, err = service.ExecuteCurrentPlan("user-1")
+		_, err = service.ExecuteCurrentPlan(newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrImportCompletedResultMissing))
 
 		Expect(service.planStore.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "plan-3"},
 			ExecutionStatus: ExecutionStatusRunning,
 		})).To(Succeed())
-		_, err = service.ExecuteCurrentPlan("user-1")
+		_, err = service.ExecuteCurrentPlan(newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrImportExecutionRunning))
 	})
 

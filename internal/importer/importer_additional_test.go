@@ -293,28 +293,28 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "current.md", "# Current")
 		importerWriteFile(tmp, "asset.png", "png-bytes")
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		transformer := newContentTransformerWithOptions(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "Area/Resources/Guide.md", TargetPath: "area/resources/guide", Kind: tree.NodeKindPage},
-				{SourcePath: "Other/Resources/Guide/index.md", TargetPath: "other/resources/guide", Kind: tree.NodeKindSection},
+				{SourcePath: newFixtureWorkspaceSourcePath("Area/Resources/Guide.md"), TargetPath: newFixtureRoutePath("area/resources/guide"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Other/Resources/Guide/index.md"), TargetPath: newFixtureRoutePath("other/resources/guide"), Kind: tree.NodeKindSection},
 			},
 		}, tmp, 1024, ContentTransformerOptions{MarkdownLinkRootPrefix: "docs"})
 
-		got, err := transformer.TransformContent("user-1", "current.md", page, "before [[unterminated", &fakeExecWiki{})
+		got, err := transformer.TransformContent(newFixtureUserID("user-1"), newFixtureWorkspaceSourcePath("current.md"), page, "before [[unterminated", &fakeExecWiki{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal("before [[unterminated"))
 
-		rewritten, err := transformer.rewriteDestination("user-1", "current.md", page, "   ", &fakeExecWiki{}, rewriteDestinationOptions{})
+		rewritten, err := transformer.rewriteDestination(newFixtureUserID("user-1"), newFixtureWorkspaceSourcePath("current.md"), page, "   ", &fakeExecWiki{}, rewriteDestinationOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rewritten).To(Equal("   "))
 
-		resolved, err := transformer.resolveAssetDestination("user-1", "current.md", page, "#local", &fakeExecWiki{})
+		resolved, err := transformer.resolveAssetDestination(newFixtureUserID("user-1"), newFixtureWorkspaceSourcePath("current.md"), page, "#local", &fakeExecWiki{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resolved).To(BeEmpty())
 
 		uploadErr := errors.New("upload failed")
-		_, err = resolvedDestinationResult(transformer, newFixtureUserID("user-1"), "current.md", page, "./asset.png", &fakeExecWiki{
+		_, err = resolvedDestinationResult(transformer, newFixtureUserID("user-1"), newFixtureWorkspaceSourcePath("current.md"), page, "./asset.png", &fakeExecWiki{
 			uploadFn: func(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 				return "", uploadErr
 			},
@@ -322,7 +322,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		Expect(err).To(MatchError(uploadErr))
 
 		wikiUploadErr := errors.New("wiki upload failed")
-		_, err = transformer.TransformContent("user-1", "current.md", page, "![[./asset.png]]", &fakeExecWiki{
+		_, err = transformer.TransformContent(newFixtureUserID("user-1"), newFixtureWorkspaceSourcePath("current.md"), page, "![[./asset.png]]", &fakeExecWiki{
 			uploadFn: func(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 				return "", wikiUploadErr
 			},
@@ -330,7 +330,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		Expect(err).To(MatchError(wikiUploadErr))
 
 		referenceUploadErr := errors.New("reference upload failed")
-		_, err = transformer.TransformContent("user-1", "current.md", page, "![Asset][asset]\n\n[asset]: ./asset.png", &fakeExecWiki{
+		_, err = transformer.TransformContent(newFixtureUserID("user-1"), newFixtureWorkspaceSourcePath("current.md"), page, "![Asset][asset]\n\n[asset]: ./asset.png", &fakeExecWiki{
 			uploadFn: func(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 				return "", referenceUploadErr
 			},
@@ -357,28 +357,28 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		tmp := importerTempDir()
 		transformer := newContentTransformer(&PlanResult{}, tmp, 1024)
 
-		Expect(buildSourceCandidates(tmp, "current.md", "")).To(BeNil())
-		Expect(buildSourceCandidates(tmp, "current.md", "../escape.md")).To(BeNil())
+		Expect(buildSourceCandidates(tmp, newFixtureWorkspaceSourcePath("current.md"), "")).To(BeNil())
+		Expect(buildSourceCandidates(tmp, newFixtureWorkspaceSourcePath("current.md"), "../escape.md")).To(BeNil())
 
-		_, err := fallbackWikiHrefResult(transformer, "docs/current.md", "!!!")
+		_, err := fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "!!!")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, err = fallbackWikiHrefResult(transformer, "current.md", "../escape.md")
+		_, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("current.md"), "../escape.md")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "./!!!")
+		_, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "./!!!")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
 		caseTransformer := newContentTransformer(&PlanResult{
-			Items: []PlanItem{{SourcePath: "Docs/Exact.md", TargetPath: "docs/exact", Kind: tree.NodeKindPage}},
+			Items: []PlanItem{{SourcePath: newFixtureWorkspaceSourcePath("Docs/Exact.md"), TargetPath: newFixtureRoutePath("docs/exact"), Kind: tree.NodeKindPage}},
 		}, tmp, 1024)
-		_, err = fallbackWikiHrefResult(caseTransformer, "current.md", "/docs/exact.md")
+		_, err = fallbackWikiHrefResult(caseTransformer, newFixtureWorkspaceSourcePath("current.md"), "/docs/exact.md")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, err = fallbackWikiHrefResult(transformer, "current.md", "bad/!!!")
+		_, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("current.md"), "bad/!!!")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		href, err := fallbackWikiHrefResult(transformer, "docs/current.md", "Missing/Sub")
+		href, err := fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "Missing/Sub")
 		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/missing/sub"))
 
@@ -390,17 +390,17 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		_, err = sourceSuffixLookupKeyResult("index.md")
 		Expect(err).To(MatchError(errImporterSourceSuffixRejected))
 
-		_, err = resolvedAssetPathResult(tmp, "current.md", "")
+		_, err = resolvedAssetPathResult(tmp, newFixtureWorkspaceSourcePath("current.md"), "")
 		Expect(err).To(MatchError(errImporterAssetPathRejected))
 
-		_, err = resolvedAssetPathResult(tmp, "current.md", "../escape.png")
+		_, err = resolvedAssetPathResult(tmp, newFixtureWorkspaceSourcePath("current.md"), "../escape.png")
 		Expect(err).To(MatchError(errImporterAssetPathRejected))
 	})
 
 	ginkgo.It("reports filesystem failures while resolving asset destinations", func() {
 		tmp := importerTempDir()
 		importerWriteFile(tmp, "asset.png", "png-bytes")
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "p1", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Kind: tree.NodeKindPage}}
 		transformer := newContentTransformer(&PlanResult{}, tmp, 1024)
 
 		originalOpenAsset := importerOpenAsset
@@ -411,7 +411,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		importerOpenAsset = func(name string) (*os.File, error) {
 			return nil, openFailedErr
 		}
-		_, err := transformer.resolveAndUploadAsset("user-1", "current.md", page, "asset.png", &fakeExecWiki{})
+		_, err := transformer.resolveAndUploadAsset(newFixtureUserID("user-1"), newFixtureWorkspaceSourcePath("current.md"), page, "asset.png", &fakeExecWiki{})
 		Expect(err).To(MatchError(openFailedErr))
 		importerOpenAsset = originalOpenAsset
 
@@ -422,7 +422,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		importerFilepathAbs = func(path string) (string, error) {
 			return "", errors.New("abs failed")
 		}
-		_, err = resolvedAssetPathResult(tmp, "current.md", "asset.png")
+		_, err = resolvedAssetPathResult(tmp, newFixtureWorkspaceSourcePath("current.md"), "asset.png")
 		Expect(err).To(MatchError(errImporterAssetPathRejected))
 
 		absCalls := 0
@@ -433,7 +433,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 			}
 			return "/base", nil
 		}
-		_, err = resolvedAssetPathResult(tmp, "current.md", "asset.png")
+		_, err = resolvedAssetPathResult(tmp, newFixtureWorkspaceSourcePath("current.md"), "asset.png")
 		Expect(err).To(MatchError(errImporterAssetPathRejected))
 		importerFilepathAbs = originalAbs
 
@@ -444,7 +444,7 @@ var _ = ginkgo.Describe("content transformer helper contracts", ginkgo.Label("un
 		importerFilepathRel = func(basepath, targpath string) (string, error) {
 			return "", errors.New("rel failed")
 		}
-		_, err = resolvedAssetPathResult(tmp, "current.md", "asset.png")
+		_, err = resolvedAssetPathResult(tmp, newFixtureWorkspaceSourcePath("current.md"), "asset.png")
 		Expect(err).To(MatchError(errImporterAssetPathRejected))
 		importerFilepathRel = originalRel
 	})
@@ -454,15 +454,15 @@ var _ = ginkgo.Describe("content transformer fallback wiki hrefs", ginkgo.Label(
 	ginkgo.It("falls back to exact planned basename matches before generated routes", func() {
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "Notes/Guide.md", TargetPath: "kb/guide", Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Notes/Guide.md"), TargetPath: newFixtureRoutePath("kb/guide"), Kind: tree.NodeKindPage},
 			},
 		}, importerTempDir(), 1024)
 
-		href, err := fallbackWikiHrefResult(transformer, "current.md", "Guide#intro")
+		href, err := fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("current.md"), "Guide#intro")
 		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/kb/guide.md#intro"))
 
-		href, err = fallbackWikiHrefResult(transformer, "current.md", "Missing Note?raw=1#intro")
+		href, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("current.md"), "Missing Note?raw=1#intro")
 		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/missing-note?raw=1#intro"))
 	})
@@ -470,16 +470,16 @@ var _ = ginkgo.Describe("content transformer fallback wiki hrefs", ginkgo.Label(
 	ginkgo.It("refuses fallback when basename or source suffix casing is ambiguous", func() {
 		transformer := newContentTransformer(&PlanResult{
 			Items: []PlanItem{
-				{SourcePath: "Area/Guide.md", TargetPath: "area/guide", Kind: tree.NodeKindPage},
-				{SourcePath: "Other/Guide.md", TargetPath: "other/guide", Kind: tree.NodeKindPage},
-				{SourcePath: "Docs/Exact.md", TargetPath: "docs/exact", Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Area/Guide.md"), TargetPath: newFixtureRoutePath("area/guide"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Other/Guide.md"), TargetPath: newFixtureRoutePath("other/guide"), Kind: tree.NodeKindPage},
+				{SourcePath: newFixtureWorkspaceSourcePath("Docs/Exact.md"), TargetPath: newFixtureRoutePath("docs/exact"), Kind: tree.NodeKindPage},
 			},
 		}, importerTempDir(), 1024)
 
-		_, err := fallbackWikiHrefResult(transformer, "current.md", "Guide")
+		_, err := fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("current.md"), "Guide")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, err = fallbackWikiHrefResult(transformer, "current.md", "guide")
+		_, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("current.md"), "guide")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
 		Expect(classifyCaseVariantSourceSuffixMatch(transformer, "docs/exact.md")).To(Equal(sourceSuffixCaseVariantPresent))
@@ -496,21 +496,21 @@ var _ = ginkgo.Describe("content transformer fallback wiki hrefs", ginkgo.Label(
 		_, err = normalizeSourceCandidateResult(transformer, "/")
 		Expect(err).To(MatchError(errImporterRouteCandidateRejected))
 
-		href, err := fallbackWikiHrefResult(transformer, "docs/current.md", "./New Page.md?raw=1")
+		href, err := fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "./New Page.md?raw=1")
 		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/docs/new-page?raw=1"))
 
-		href, err = fallbackWikiHrefResult(transformer, "docs/current.md", "/Guides/New Page.md")
+		href, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "/Guides/New Page.md")
 		Expect(err).To(Succeed())
 		Expect(href).To(Equal("/guides/new-page"))
 
-		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "https://example.test/page")
+		_, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "https://example.test/page")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "#local")
+		_, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "#local")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 
-		_, err = fallbackWikiHrefResult(transformer, "docs/current.md", "image.png")
+		_, err = fallbackWikiHrefResult(transformer, newFixtureWorkspaceSourcePath("docs/current.md"), "image.png")
 		Expect(err).To(MatchError(errImporterFallbackHrefRejected))
 	})
 

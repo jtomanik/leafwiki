@@ -31,7 +31,7 @@ var _ = ginkgo.Describe("import execution asset uploads", ginkgo.Label("unit"), 
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/Setup.md"), TargetPath: newFixtureRoutePath("guides/setup"), Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -67,7 +67,7 @@ var _ = ginkgo.Describe("import execution non-image asset wiki links", ginkgo.La
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/Setup.md"), TargetPath: newFixtureRoutePath("guides/setup"), Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -110,10 +110,10 @@ var _ = ginkgo.Describe("import execution wiki-link basename resolution", ginkgo
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Home.md", TargetPath: "home", Title: "Home", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "Daily/Brainstorm.md", TargetPath: "daily/brainstorm", Title: "Brainstorm", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "Daily/Meeting Notes.md", TargetPath: "daily/meeting-notes", Title: "Meeting Notes", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "Archive/Meeting Notes.md", TargetPath: "archive/meeting-notes", Title: "Meeting Notes", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Home.md"), TargetPath: newFixtureRoutePath("home"), Title: "Home", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Daily/Brainstorm.md"), TargetPath: newFixtureRoutePath("daily/brainstorm"), Title: "Brainstorm", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Daily/Meeting Notes.md"), TargetPath: newFixtureRoutePath("daily/meeting-notes"), Title: "Meeting Notes", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Archive/Meeting Notes.md"), TargetPath: newFixtureRoutePath("archive/meeting-notes"), Title: "Meeting Notes", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -154,8 +154,8 @@ var _ = ginkgo.Describe("import execution wiki-link path suffix resolution", gin
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "knowledge-main/tools/kubernetes/resources/StatefulSet.md", TargetPath: "knowledge-main/tools/kubernetes/resources/statefulset", Title: "StatefulSet", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "knowledge-main/tools/kubernetes/resources/Deployment.md", TargetPath: "knowledge-main/tools/kubernetes/resources/deployment", Title: "Deployment", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("knowledge-main/tools/kubernetes/resources/StatefulSet.md"), TargetPath: newFixtureRoutePath("knowledge-main/tools/kubernetes/resources/statefulset"), Title: "StatefulSet", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("knowledge-main/tools/kubernetes/resources/Deployment.md"), TargetPath: newFixtureRoutePath("knowledge-main/tools/kubernetes/resources/deployment"), Title: "Deployment", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -194,7 +194,7 @@ var _ = ginkgo.Describe("import execution unresolved wiki links", ginkgo.Label("
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Home.md", TargetPath: "home", Title: "Home", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Home.md"), TargetPath: newFixtureRoutePath("home"), Title: "Home", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -242,8 +242,8 @@ var _ = ginkgo.Describe("import execution code-block link preservation", ginkgo.
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "Reference/Endpoints.md", TargetPath: "reference/endpoints", Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/Setup.md"), TargetPath: newFixtureRoutePath("guides/setup"), Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Reference/Endpoints.md"), TargetPath: newFixtureRoutePath("reference/endpoints"), Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -293,8 +293,8 @@ var _ = ginkgo.Describe("import execution Windows-style import paths", ginkgo.La
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "Reference/Endpoints.md", TargetPath: "reference/endpoints", Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/Setup.md"), TargetPath: newFixtureRoutePath("guides/setup"), Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Reference/Endpoints.md"), TargetPath: newFixtureRoutePath("reference/endpoints"), Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -329,7 +329,7 @@ var _ = ginkgo.Describe("import execution Windows drive-letter links", ginkgo.La
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/Setup.md"), TargetPath: newFixtureRoutePath("guides/setup"), Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}

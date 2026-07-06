@@ -17,14 +17,14 @@ import (
 var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func() {
 	ginkgo.It("rejects resume state without a tree hash before processing items", func() {
 		executor := NewExecutor(
-			&PlanResult{TreeHash: "h1", Items: []PlanItem{{SourcePath: "a.md", Action: PlanActionCreate}}},
+			&PlanResult{TreeHash: "h1", Items: []PlanItem{{SourcePath: newFixtureWorkspaceSourcePath("a.md"), Action: PlanActionCreate}}},
 			&PlanOptions{SourceBasePath: importerTempDir()},
 			0,
 			&fakeExecWiki{hash: "h1"},
 			slog.Default(),
 		).WithResumeState(1, nil)
 
-		result, err := executor.Execute("user-1")
+		result, err := executor.Execute(newFixtureUserID("user-1"))
 		Expect(result).To(BeNil())
 		Expect(err).To(MatchError(ErrImportResumeTreeHashMissing))
 	})
@@ -34,7 +34,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			&PlanResult{
 				TreeHash: "h1",
 				Items: []PlanItem{
-					{SourcePath: "a.md", TargetPath: "a", Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+					{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("a"), Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 				},
 			},
 			&PlanOptions{SourceBasePath: importerTempDir()},
@@ -45,7 +45,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			return true
 		})
 
-		result, err := executor.Execute("user-1")
+		result, err := executor.Execute(newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrImportCanceled))
 		Expect(result).To(MatchExecutionResultCounts(0, 0, BeEmpty()))
 	})
@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 					var missingCreatedPage *tree.Page
 					return missingCreatedPage, nil
 				}
-				return &tree.Page{PageNode: &tree.PageNode{ID: "p1", Title: title, Slug: "slug", Kind: *kind}}, nil
+				return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 			},
 			updateFn: func(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
 				return nil, updateFailedErr
@@ -72,9 +72,9 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			&PlanResult{
 				TreeHash: "h1",
 				Items: []PlanItem{
-					{SourcePath: "nil.md", TargetPath: "nil-page", Title: "Nil", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-					{SourcePath: "missing.md", TargetPath: "missing", Title: "Missing", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-					{SourcePath: "update.md", TargetPath: "update", Title: "Update", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+					{SourcePath: newFixtureWorkspaceSourcePath("nil.md"), TargetPath: newFixtureRoutePath("nil-page"), Title: "Nil", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+					{SourcePath: newFixtureWorkspaceSourcePath("missing.md"), TargetPath: newFixtureRoutePath("missing"), Title: "Missing", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+					{SourcePath: newFixtureWorkspaceSourcePath("update.md"), TargetPath: newFixtureRoutePath("update"), Title: "Update", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 				},
 			},
 			&PlanOptions{SourceBasePath: tmp},
@@ -83,7 +83,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			slog.Default(),
 		)
 
-		result, err := executor.Execute("user-1")
+		result, err := executor.Execute(newFixtureUserID("user-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(MatchExecutionResultCounts(0, 3, ConsistOf(
 			HaveExecutionItemErrorCode(ImportErrorCodeCreatePageFailed),
@@ -106,7 +106,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 				if targetPath == "render-error" {
 					pageID = "."
 				}
-				return &tree.Page{PageNode: &tree.PageNode{ID: pageID, Title: title, Slug: "slug", Kind: *kind}}, nil
+				return &tree.Page{PageNode: &tree.PageNode{ID: pageID, Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 			},
 			uploadFn: func(userID tree.UserID, pageID tree.PageID, file multipart.File, filename tree.AssetName, byteCap shared.MaxBytes) (string, error) {
 				return "", uploadFailedErr
@@ -117,8 +117,8 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			&PlanResult{
 				TreeHash: "h1",
 				Items: []PlanItem{
-					{SourcePath: "asset-error.md", TargetPath: "asset-error", Title: "Asset Error", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-					{SourcePath: "render-error.md", TargetPath: "render-error", Title: "Render Error", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+					{SourcePath: newFixtureWorkspaceSourcePath("asset-error.md"), TargetPath: newFixtureRoutePath("asset-error"), Title: "Asset Error", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+					{SourcePath: newFixtureWorkspaceSourcePath("render-error.md"), TargetPath: newFixtureRoutePath("render-error"), Title: "Render Error", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 				},
 			},
 			&PlanOptions{SourceBasePath: tmp},
@@ -127,7 +127,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			slog.Default(),
 		)
 
-		result, err := executor.Execute("user-1")
+		result, err := executor.Execute(newFixtureUserID("user-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(MatchExecutionResultCounts(0, 2, ConsistOf(
 			HaveExecutionItemErrorCode(ImportErrorCodeTransformContentFailed),
@@ -144,7 +144,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			&PlanResult{
 				TreeHash: "original",
 				Items: []PlanItem{
-					{SourcePath: "resume.md", TargetPath: "resume", Title: "Resume", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+					{SourcePath: newFixtureWorkspaceSourcePath("resume.md"), TargetPath: newFixtureRoutePath("resume"), Title: "Resume", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 				},
 			},
 			&PlanOptions{SourceBasePath: tmp},
@@ -158,7 +158,7 @@ var _ = ginkgo.Describe("Executor execution edges", ginkgo.Label("unit"), func()
 			Expect(result.TreeHashBefore).To(Equal("partial"))
 		})
 
-		result, err := executor.Execute("user-1")
+		result, err := executor.Execute(newFixtureUserID("user-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.TreeHashBefore).To(Equal("partial"))
 		Expect(progresses).To(HaveExactElements(
@@ -213,21 +213,21 @@ var _ = ginkgo.Describe("stored import plan execution lifecycle", ginkgo.Label("
 	ginkgo.It("starts planned execution by resetting stale execution state", func() {
 		store := NewPlanStore()
 
-		_, err := startStoredPlanExecutionResult(store, "user-1")
+		_, err := startStoredPlanExecutionResult(store, newFixtureUserID("user-1"))
 		Expect(err).To(MatchError(ErrNoPlan))
 
 		errMsg := "previous failure"
-		currentSource := "old.md"
+		currentSource := newFixtureWorkspaceSourcePath("old.md").FilesystemPath()
 		Expect(store.Set(&StoredPlan{
 			Plan: &PlanResult{
 				ID: "plan-1",
 				Items: []PlanItem{
-					{SourcePath: "a.md"},
-					{SourcePath: "b.md"},
+					{SourcePath: newFixtureWorkspaceSourcePath("a.md")},
+					{SourcePath: newFixtureWorkspaceSourcePath("b.md")},
 				},
 			},
 			ExecutionStatus: ExecutionStatusFailed,
-			ExecutionUserID: "old-user",
+			ExecutionUserID: newFixtureUserID("old-user").MetadataValue(),
 			CancelRequested: true,
 			ExecutionResult: &ExecutionResult{ImportedCount: 9},
 			ExecutionError:  &errMsg,
@@ -238,17 +238,17 @@ var _ = ginkgo.Describe("stored import plan execution lifecycle", ginkgo.Label("
 			},
 		})).To(Succeed())
 
-		plan, err := startStoredPlanExecutionResult(store, "user-1")
+		plan, err := startStoredPlanExecutionResult(store, newFixtureUserID("user-1"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan).To(HaveFreshRunningStoredPlan(newFixtureUserID("user-1"), 2))
 
-		plan, err = startStoredPlanExecutionResult(store, "user-2")
+		plan, err = startStoredPlanExecutionResult(store, newFixtureUserID("user-2"))
 		Expect(err).To(MatchError(errImporterExecutionNotStarted))
-		Expect(plan.ExecutionUserID).To(Equal("user-1"))
+		Expect(plan.ExecutionUserID).To(Equal(newFixtureUserID("user-1").MetadataValue()))
 	})
 
 	ginkgo.It("finishes execution with completed, failed, and canceled terminal states", func() {
-		currentSource := "current.md"
+		currentSource := newFixtureWorkspaceSourcePath("current.md").FilesystemPath()
 		store := NewPlanStore()
 		Expect(store.Set(&StoredPlan{
 			Plan:            &PlanResult{ID: "plan-1"},
@@ -310,11 +310,11 @@ var _ = ginkgo.Describe("stored import plan execution lifecycle", ginkgo.Label("
 		})).To(Succeed())
 
 		now := time.Now()
-		sourcePath := "docs/current.md"
+		sourcePath := newFixtureWorkspaceSourcePath("docs/current.md").FilesystemPath()
 		partial := &ExecutionResult{
 			ImportedCount: 1,
 			Items: []ExecutionItemResult{
-				{SourcePath: "docs/old.md", TargetPath: "docs/old", Action: ExecutionActionCreated},
+				{SourcePath: newFixtureWorkspaceSourcePath("docs/old.md"), TargetPath: newFixtureRoutePath("docs/old"), Action: ExecutionActionCreated},
 			},
 		}
 

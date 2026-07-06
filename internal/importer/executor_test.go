@@ -55,7 +55,7 @@ func (f *fakeExecWiki) EnsurePath(userID tree.UserID, targetPath tree.RoutePath,
 	if f.ensureFn != nil {
 		return f.ensureFn(userID, targetPath, title, kind)
 	}
-	return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: "slug", Kind: *kind}}, nil
+	return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("p1"), Title: title, Slug: newFixtureSlug("slug"), Kind: *kind}}, nil
 }
 
 func (f *fakeExecWiki) UpdatePage(userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) (*tree.Page, error) {
@@ -119,7 +119,7 @@ var _ = ginkgo.Describe("created page execution with source frontmatter", ginkgo
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "a.md", TargetPath: "docs/a", Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("docs/a"), Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -177,7 +177,7 @@ var _ = ginkgo.Describe("created page execution with distinct metadata fields", 
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "a.md", TargetPath: "docs/a", Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("docs/a"), Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -206,7 +206,7 @@ var _ = ginkgo.Describe("skipped import items", ginkgo.Label("unit"), func() {
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "a.md", TargetPath: "docs/a", Action: PlanActionSkip},
+				{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("docs/a"), Action: PlanActionSkip},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -238,7 +238,7 @@ var _ = ginkgo.Describe("create execution when path creation fails", ginkgo.Labe
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "a.md", TargetPath: "docs/a", Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("docs/a"), Title: "A", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -259,7 +259,7 @@ var _ = ginkgo.Describe("execution of unsupported plan actions", ginkgo.Label("u
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "a.md", TargetPath: "docs/a", Action: PlanActionUpdate}, // not handled in switch
+				{SourcePath: newFixtureWorkspaceSourcePath("a.md"), TargetPath: newFixtureRoutePath("docs/a"), Action: PlanActionUpdate}, // not handled in switch
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -286,8 +286,8 @@ title: Ordner
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Ordner/index.md", TargetPath: "ordner", Title: "Ordner", Kind: tree.NodeKindSection, Action: PlanActionCreate},
-				{SourcePath: "Ordner/Ordner.md", TargetPath: "ordner/ordner", Title: "Unterseite", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Ordner/index.md"), TargetPath: newFixtureRoutePath("ordner"), Title: "Ordner", Kind: tree.NodeKindSection, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Ordner/Ordner.md"), TargetPath: newFixtureRoutePath("ordner/ordner"), Title: "Unterseite", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -337,9 +337,9 @@ var _ = ginkgo.Describe("import execution link rewriting", ginkgo.Label("unit"),
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Guides/index.md", TargetPath: "guides", Title: "Guides", Kind: tree.NodeKindSection, Action: PlanActionCreate},
-				{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "Reference/Endpoints.md", TargetPath: "reference/endpoints", Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/index.md"), TargetPath: newFixtureRoutePath("guides"), Title: "Guides", Kind: tree.NodeKindSection, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/Setup.md"), TargetPath: newFixtureRoutePath("guides/setup"), Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Reference/Endpoints.md"), TargetPath: newFixtureRoutePath("reference/endpoints"), Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}
@@ -394,8 +394,8 @@ var _ = ginkgo.Describe("import execution metadata preservation", ginkgo.Label("
 		plan := &PlanResult{
 			TreeHash: "h1",
 			Items: []PlanItem{
-				{SourcePath: "Guides/Setup.md", TargetPath: "guides/setup", Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
-				{SourcePath: "Reference/Endpoints.md", TargetPath: "reference/endpoints", Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Guides/Setup.md"), TargetPath: newFixtureRoutePath("guides/setup"), Title: "Setup", Kind: tree.NodeKindPage, Action: PlanActionCreate},
+				{SourcePath: newFixtureWorkspaceSourcePath("Reference/Endpoints.md"), TargetPath: newFixtureRoutePath("reference/endpoints"), Title: "Endpoints", Kind: tree.NodeKindPage, Action: PlanActionCreate},
 			},
 		}
 		opts := &PlanOptions{SourceBasePath: tmp}

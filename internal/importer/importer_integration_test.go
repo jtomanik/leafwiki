@@ -28,6 +28,10 @@ var errIntegrationFrontmatterMissing = errors.New("importer integration frontmat
 // Canonical Markdown links plan scenarios covered by tests in this file:
 // - Importer distinguishes folder README section from README child page
 
+func integFixtureUserID[T ~string](raw T) tree.UserID {
+	return tree.NewUserIDUnchecked(string(raw))
+}
+
 func integMustWrite(base, rel, content string) string {
 	ginkgo.GinkgoHelper()
 
@@ -140,7 +144,7 @@ var _ = ginkgo.Describe("import execution writes migrated frontmatter", ginkgo.L
 		Expect(err).To(Succeed())
 		Expect(plan.Items).To(HaveLen(1))
 
-		res, err := is.ExecuteCurrentPlan("system")
+		res, err := is.ExecuteCurrentPlan(integFixtureUserID("system"))
 		Expect(err).To(Succeed())
 		Expect(res).To(SatisfyAll(
 			HaveField("ImportedCount", Equal(1)),
@@ -182,7 +186,7 @@ var _ = ginkgo.Describe("import execution indexes metadata", ginkgo.Label("integ
 		_, err := is.CreateImportPlanFromFolder(ws, "")
 		Expect(err).To(Succeed())
 
-		_, err = is.ExecuteCurrentPlan("system")
+		_, err = is.ExecuteCurrentPlan(integFixtureUserID("system"))
 		Expect(err).To(Succeed())
 
 		tagsStore, err := tags.NewTagsStore(w.GetStorageDir())
@@ -246,7 +250,7 @@ var _ = ginkgo.Describe("import execution rewrites links and uploads assets", gi
 		Expect(err).To(Succeed())
 		Expect(plan.Items).To(HaveLen(3))
 
-		_, err = is.ExecuteCurrentPlan("system")
+		_, err = is.ExecuteCurrentPlan(integFixtureUserID("system"))
 		Expect(err).To(Succeed())
 
 		setupPage, err := probe.FindByPath("guides/setup")
@@ -282,7 +286,7 @@ var _ = ginkgo.Describe("import execution for link asset fixture packages", gink
 		Expect(err).To(Succeed())
 		Expect(plan.Items).To(HaveLen(5))
 
-		_, err = is.ExecuteCurrentPlan("system")
+		_, err = is.ExecuteCurrentPlan(integFixtureUserID("system"))
 		Expect(err).To(Succeed())
 
 		setupPage, err := probe.FindByPath("guides/setup")
@@ -335,7 +339,7 @@ var _ = ginkgo.Describe("import execution for nested LeafWiki fixture packages",
 		Expect(err).To(Succeed())
 		Expect(plan.Items).To(HaveLen(5))
 
-		_, err = is.ExecuteCurrentPlan("system")
+		_, err = is.ExecuteCurrentPlan(integFixtureUserID("system"))
 		Expect(err).To(Succeed())
 
 		introPage, err := probe.FindByPath("intro")
@@ -407,7 +411,7 @@ var _ = ginkgo.Describe("import execution for Obsidian wiki-link fixture package
 		Expect(err).To(Succeed())
 		Expect(plan.Items).To(HaveLen(5))
 
-		_, err = is.ExecuteCurrentPlan("system")
+		_, err = is.ExecuteCurrentPlan(integFixtureUserID("system"))
 		Expect(err).To(Succeed())
 
 		homePage, err := probe.FindByPath("home")
