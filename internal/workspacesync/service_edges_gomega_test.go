@@ -102,24 +102,24 @@ var _ = Describe("workspace sync service edges", Label("unit"), func() {
 		Expect(os.WriteFile(filepath.Join(rootDir, "Imported", "Section", "README.md"), []byte("# Readme\n"), 0o644)).To(Succeed())
 		service := &Service{rootDir: rootDir}
 
-		page := workspaceSyncEdgePage("page-1", "Imported Page", "imported-page", tree.NodeKindPage)
+		page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Imported Page", newFixtureSlug("imported-page"), tree.NodeKindPage)
 		page.WorkspaceSourcePath = tree.WorkspaceSourcePathFromString("Imported/Page.MD")
 		Expect(pageMarkdownPath(page)).To(Equal("Imported/Page.MD"))
 		Expect(service.currentPageMarkdownPath(page)).To(Equal("Imported/Page.MD"))
 
-		section := workspaceSyncEdgePage("section-1", "Imported Section", "section", tree.NodeKindSection)
+		section := workspaceSyncEdgePage(newFixturePageID("section-1"), "Imported Section", newFixtureSlug("section"), tree.NodeKindSection)
 		section.WorkspaceSourcePath = tree.WorkspaceSourcePathFromString("Imported/Section")
 		Expect(pageMarkdownPath(section)).To(Equal("Imported/Section/index.md"))
 		Expect(service.currentPageMarkdownPath(section)).To(Equal("Imported/Section/README.md"))
 	})
 
 	It("finds historical page content by preferred path, route path, and metadata ID", func() {
-		parent := &tree.PageNode{ID: "docs", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}
-		page := workspaceSyncEdgePage("page-1", "Page One", "page-one", tree.NodeKindPage)
+		parent := &tree.PageNode{ID: newFixturePageID("docs"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: tree.NodeKindSection}
+		page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page One", newFixtureSlug("page-one"), tree.NodeKindPage)
 		page.Parent = parent
 
 		result, err := contentForPageAtCommitResult("", page, map[string]string{
-			"docs/page-one.md": workspaceSyncEdgeMarkdown("page-1", "Page One"),
+			"docs/page-one.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page One"),
 		})
 		Expect(err).To(Succeed())
 		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -128,7 +128,7 @@ var _ = Describe("workspace sync service edges", Label("unit"), func() {
 		}))
 
 		result, err = contentForPageAtCommitResult("", page, map[string]string{
-			"archive/old.md": workspaceSyncEdgeMarkdown("page-1", "Historical Page One"),
+			"archive/old.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Historical Page One"),
 		})
 		Expect(err).To(Succeed())
 		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -137,43 +137,43 @@ var _ = Describe("workspace sync service edges", Label("unit"), func() {
 		}))
 
 		_, err = contentForPageAtCommitResult("", page, map[string]string{
-			"docs/page-one.md": workspaceSyncEdgeMarkdown("other-page", "Other"),
+			"docs/page-one.md": workspaceSyncEdgeMarkdown(newFixturePageID("other-page"), "Other"),
 		})
 		Expect(err).To(MatchError(errHistoricalContentMissing))
 	})
 
 	It("recognizes README fallback sections when deriving revision paths", func() {
-		section := workspaceSyncEdgePage("section-1", "Docs", "docs", tree.NodeKindSection)
+		section := workspaceSyncEdgePage(newFixturePageID("section-1"), "Docs", newFixtureSlug("docs"), tree.NodeKindSection)
 
 		Expect(revisionReadmeFallbackObservationFor("docs/README.md", section, "docs")).To(Equal(revisionReadmeFallbackObservation{
 			Outcome:       revisionReadmeFallbackAccepted,
 			RelPath:       tree.MarkdownPathFromString("docs/README.md"),
 			PageKind:      tree.NodeKindSection,
-			PageRoutePath: tree.RoutePathFromString("docs"),
-			Directory:     tree.RoutePathFromString("docs"),
+			PageRoutePath: newFixtureRoutePath("docs"),
+			Directory:     newFixtureRoutePath("docs"),
 		}))
 		Expect(revisionReadmeFallbackObservationFor("docs/README.md", nil, "docs")).To(Equal(revisionReadmeFallbackObservation{
 			Outcome:   revisionReadmeFallbackRejected,
 			RelPath:   tree.MarkdownPathFromString("docs/README.md"),
-			Directory: tree.RoutePathFromString("docs"),
+			Directory: newFixtureRoutePath("docs"),
 		}))
-		Expect(revisionReadmeFallbackObservationFor("docs/README.md", workspaceSyncEdgePage("page-1", "Docs", "docs", tree.NodeKindPage), "docs")).To(Equal(revisionReadmeFallbackObservation{
+		Expect(revisionReadmeFallbackObservationFor("docs/README.md", workspaceSyncEdgePage(newFixturePageID("page-1"), "Docs", newFixtureSlug("docs"), tree.NodeKindPage), "docs")).To(Equal(revisionReadmeFallbackObservation{
 			Outcome:       revisionReadmeFallbackRejected,
 			RelPath:       tree.MarkdownPathFromString("docs/README.md"),
 			PageKind:      tree.NodeKindPage,
-			PageRoutePath: tree.RoutePathFromString("docs"),
-			Directory:     tree.RoutePathFromString("docs"),
+			PageRoutePath: newFixtureRoutePath("docs"),
+			Directory:     newFixtureRoutePath("docs"),
 		}))
 		Expect(revisionReadmeFallbackObservationFor("docs/readme.md", section, "docs")).To(Equal(revisionReadmeFallbackObservation{
 			Outcome:       revisionReadmeFallbackRejected,
 			RelPath:       tree.MarkdownPathFromString("docs/readme.md"),
 			PageKind:      tree.NodeKindSection,
-			PageRoutePath: tree.RoutePathFromString("docs"),
-			Directory:     tree.RoutePathFromString("docs"),
+			PageRoutePath: newFixtureRoutePath("docs"),
+			Directory:     newFixtureRoutePath("docs"),
 		}))
 
 		Expect(revisionRouteObservationFor("", "docs/README.md", section)).To(Equal(revisionRouteObservation{
-			RoutePath: tree.RoutePathFromString("docs"),
+			RoutePath: newFixtureRoutePath("docs"),
 			Kind:      tree.NodeKindSection,
 		}))
 	})
@@ -194,15 +194,15 @@ var _ = Describe("workspace sync service edges", Label("unit"), func() {
 			"Path": Equal("workspace"),
 		})))
 
-		Expect(validationErrorsIncludeActionableMarkdownCode([]ValidationError{
-			{Code: ""},
+		Expect([]ValidationError{
+			{Code: newFixtureValidationIssueCode("")},
 			{Code: wikivalidation.IssueCodeWorkspaceScanError},
 			{Code: wikivalidation.IssueCodeWorkspaceSyncError},
 			{Code: wikivalidation.IssueCodeWorkspaceSyncValidation},
-		})).To(BeFalse())
-		Expect(validationErrorsIncludeActionableMarkdownCode([]ValidationError{
+		}).To(reportWorkspaceSyncValidationActionability(workspaceSyncValidationIgnored))
+		Expect([]ValidationError{
 			{Code: wikivalidation.IssueCodeBrokenLink},
-		})).To(BeTrue())
+		}).To(reportWorkspaceSyncValidationActionability(workspaceSyncValidationActionable))
 	})
 })
 

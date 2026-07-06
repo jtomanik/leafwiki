@@ -27,35 +27,41 @@ var _ = Describe("workspace sync canonical migration recovery", Label("unit"), f
 	It("rolls back canonical migration status for nil, failed, tree-less, reconstruct-failed, and successful rollbacks", func() {
 		service := &Service{status: SyncStatus{LastError: "primary"}}
 		service.rollbackCanonicalMarkdownMigrationLocked(nil)
-		Expect(service.status.LastError).To(Equal("primary"))
+		Expect(service.status).To(matchWorkspaceSyncLastError("primary"))
 
 		rollbackErr := errors.New("rollback failed")
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return rollbackErr })
-		Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"LastError":        Not(Equal("primary")),
-			"ValidationErrors": BeNil(),
-		}))
+		Expect(service.status).To(SatisfyAll(
+			Not(matchWorkspaceSyncLastError("primary")),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ValidationErrors": BeNil(),
+			}),
+		))
 
 		service = &Service{status: SyncStatus{LastError: "primary"}}
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return nil })
-		Expect(service.status.LastError).To(Equal("primary"))
+		Expect(service.status).To(matchWorkspaceSyncLastError("primary"))
 
 		reconstructRollbackErr := errors.New("reconstruct rollback failed")
 		reconstructTree := &fakeTreeReconstructor{err: reconstructRollbackErr}
 		service = &Service{tree: reconstructTree, status: SyncStatus{LastError: "primary"}}
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return nil })
-		Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"LastError":        Not(Equal("primary")),
-			"ValidationErrors": Not(BeEmpty()),
-		}))
+		Expect(service.status).To(SatisfyAll(
+			Not(matchWorkspaceSyncLastError("primary")),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ValidationErrors": Not(BeEmpty()),
+			}),
+		))
 		Expect(reconstructTree.reconstructCount()).To(Equal(1))
 
 		service = &Service{tree: &fakeTreeReconstructor{}, status: SyncStatus{LastError: "primary", ValidationErrors: []ValidationError{{Path: "old"}}}}
 		service.rollbackCanonicalMarkdownMigrationLocked(func() error { return nil })
-		Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"LastError":        Equal("primary"),
-			"ValidationErrors": BeNil(),
-		}))
+		Expect(service.status).To(SatisfyAll(
+			matchWorkspaceSyncLastError("primary"),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ValidationErrors": BeNil(),
+			}),
+		))
 	})
 
 	It("rolls back canonical migration when reconstruction and filesystem seams fail", func() {
@@ -67,7 +73,7 @@ var _ = Describe("workspace sync canonical migration recovery", Label("unit"), f
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "b.md"), []byte("# B\n"), 0o644)).To(Succeed())
 		secondReconstructErr := errors.New("second reconstruct failed")
 		service := workspaceSyncServiceHarness(
-			&fakeRevisionStore{capture: workspaceSyncServiceCommit("migration-second-reconstruct")},
+			&fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("migration-second-reconstruct"))},
 			&fakeTreeReconstructor{errs: []error{nil, secondReconstructErr, nil}},
 		)
 		service.rootDir = rootDir
@@ -138,7 +144,7 @@ var _ = Describe("workspace sync canonical migration recovery", Label("unit"), f
 
 		index := markdownlinks.NewIndexWithOptions([]markdownlinks.Entry{
 			{Kind: markdownlinks.EntryKindSection},
-			{Kind: markdownlinks.EntryKindPage, RoutePath: tree.RoutePathFromString("b"), ContentPath: tree.MarkdownPathFromString("b.md")},
+			{Kind: markdownlinks.EntryKindPage, RoutePath: newFixtureRoutePath("b"), ContentPath: tree.MarkdownPathFromString("b.md")},
 		}, markdownlinks.Options{})
 		workspacesyncNewMarkdownLinkIndex = func(string, markdownlinks.Options) (*markdownlinks.Index, error) {
 			return index, nil

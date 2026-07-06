@@ -34,7 +34,7 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 			Actor:  PublicEditorActor(),
 		})
 		Expect(err).To(Succeed())
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "page-1", Title: "New Page", Slug: "new-page", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("page-1"), Title: "New Page", Slug: newFixtureSlug("new-page"), Kind: tree.NodeKindPage}}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
 			Tree:    &fakeTreeReconstructor{},
@@ -67,7 +67,7 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 			Actor:  PublicEditorActor(),
 		})
 		Expect(err).To(Succeed())
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "page-1", Title: "Page", Slug: "Page", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("page-1"), Title: "Page", Slug: newFixtureSlug("Page"), Kind: tree.NodeKindPage}}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
 			DataDir: dataDir,
@@ -105,7 +105,7 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 			Actor:  PublicEditorActor(),
 		})
 		Expect(err).To(Succeed())
-		section := &tree.Page{PageNode: &tree.PageNode{ID: "section-1", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}}
+		section := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("section-1"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: tree.NodeKindSection}}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
 			Tree:    &fakeTreeReconstructor{},
@@ -139,7 +139,7 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 			Actor:  PublicEditorActor(),
 		})
 		Expect(err).To(Succeed())
-		section := &tree.Page{PageNode: &tree.PageNode{ID: "section-1", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}}
+		section := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("section-1"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: tree.NodeKindSection}}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
 			RootDir: rootDir,
@@ -157,22 +157,19 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 
 	It("rejects commits that did not change the requested document", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-a",
+			ID:    newFixturePageID("page-a"),
 			Title: "Page A",
-			Slug:  "page-a",
+			Slug:  newFixtureSlug("page-a"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
-			capture: &gitrevisions.Commit{Hash: "restore-commit"},
-			filesAt: map[CommitHash]map[string]string{
-				"page-b-change": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
-					"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
-				},
+			capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("restore-commit")},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("page-b-change"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A\n",
+				"page-b.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B changed\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"page-b-change": {"page-b.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("page-b-change"): {"page-b.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -181,7 +178,7 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.RestoreDocument(context.Background(), page, CommitHash("page-b-change"), PublicEditorActor())
+		_, err = service.RestoreDocument(context.Background(), page, newFixtureCommitHash("page-b-change"), PublicEditorActor())
 		Expect(err).To(Satisfy(func(err error) bool {
 			return errors.Is(err, ErrWorkspaceSyncDocumentUnchanged)
 		}))
@@ -190,21 +187,18 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 
 	It("uses changed content without loading full trees", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-a",
+			ID:    newFixturePageID("page-a"),
 			Title: "Page A",
-			Slug:  "page-a",
+			Slug:  newFixtureSlug("page-a"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
-			capture: &gitrevisions.Commit{Hash: "restore-commit"},
-			filesAt: map[CommitHash]map[string]string{
-				"page-a-change": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A restored\n",
-				},
+			capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("restore-commit")},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("page-a-change"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A restored\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"page-a-change": {"page-a.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("page-a-change"): {"page-a.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -213,7 +207,7 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.RestoreDocument(context.Background(), page, CommitHash("page-a-change"), PublicEditorActor())
+		_, err = service.RestoreDocument(context.Background(), page, newFixtureCommitHash("page-a-change"), PublicEditorActor())
 		Expect(err).To(Succeed())
 
 		Expect(fakeRevisionStoreRestoreContentStateFor(store)).To(SatisfyAll(
@@ -228,21 +222,18 @@ var _ = Describe("workspace restore revision capture and validation", Label("int
 	It("returns reconstruction errors with path-specific validation state", func() {
 		reconstructErr := errors.New(`duplicate leafwiki_id "page-a" in /workspace/page-a.md and /workspace/other.md`)
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-a",
+			ID:    newFixturePageID("page-a"),
 			Title: "Page A",
-			Slug:  "page-a",
+			Slug:  newFixtureSlug("page-a"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
-			capture: &gitrevisions.Commit{Hash: "restore-commit"},
-			filesAt: map[CommitHash]map[string]string{
-				"page-a-change": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A restored\n",
-				},
+			capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("restore-commit")},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("page-a-change"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A restored\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"page-a-change": {"page-a.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("page-a-change"): {"page-a.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -252,7 +243,7 @@ var _ = Describe("workspace restore revision capture and validation", Label("int
 		})
 		Expect(err).To(Succeed())
 
-		status, err := service.RestoreDocument(context.Background(), page, CommitHash("page-a-change"), PublicEditorActor())
+		status, err := service.RestoreDocument(context.Background(), page, newFixtureCommitHash("page-a-change"), PublicEditorActor())
 		Expect(err).To(MatchError(reconstructErr))
 		Expect(status.ValidationErrors).To(ConsistOf(
 			HaveField("Path", Equal("page-a.md")),
@@ -322,7 +313,7 @@ current body`)
 		})
 		Expect(err).To(Succeed())
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
-		page := &tree.Page{PageNode: &tree.PageNode{ID: "page-1", Title: "Needs Metadata", Slug: "needs-metadata", Kind: tree.NodeKindPage}}
+		page := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("page-1"), Title: "Needs Metadata", Slug: newFixtureSlug("needs-metadata"), Kind: tree.NodeKindPage}}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
 			DataDir: dataDir,
@@ -345,21 +336,18 @@ current body`)
 
 	It("rejects snapshots when a reused path belongs to another leafwiki ID", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-a",
+			ID:    newFixturePageID("page-a"),
 			Title: "Page A",
-			Slug:  "page",
+			Slug:  newFixtureSlug("page"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
-			commits: []gitrevisions.Commit{{Hash: "path-reuse"}},
-			filesAt: map[CommitHash]map[string]string{
-				"path-reuse": {
-					"page.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B\n",
-				},
+			commits: []gitrevisions.Commit{{Hash: newFixtureCommitHash("path-reuse")}},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("path-reuse"): {
+				"page.md": "---\nleafwiki_id: page-b\nleafwiki_title: Page B\n---\n# Page B\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"path-reuse": {"page.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("path-reuse"): {"page.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -368,7 +356,7 @@ current body`)
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.GetPageRevisionSnapshot(context.Background(), page, CommitHash("path-reuse"))
+		_, err = service.GetPageRevisionSnapshot(context.Background(), page, newFixtureCommitHash("path-reuse"))
 		Expect(err).To(Satisfy(func(err error) bool {
 			return errors.Is(err, ErrWorkspaceSyncDocumentUnchanged)
 		}))

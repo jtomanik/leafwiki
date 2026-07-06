@@ -24,10 +24,10 @@ var _ = Describe("workspace sync path and validation helpers", Label("unit"), fu
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "Page.MD"), []byte("# Page\n"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "route.md"), []byte("# Route\n"), 0o644)).To(Succeed())
 		service := &Service{rootDir: rootDir}
-		section := workspaceSyncEdgePage("docs", "Docs", "docs", tree.NodeKindSection)
-		page := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
-		page.Parent = &tree.PageNode{ID: "docs", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}
-		routePage := workspaceSyncEdgePage("route-1", "Route", "route", tree.NodeKindPage)
+		section := workspaceSyncEdgePage(newFixturePageID("docs"), "Docs", newFixtureSlug("docs"), tree.NodeKindSection)
+		page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page", newFixtureSlug("page"), tree.NodeKindPage)
+		page.Parent = &tree.PageNode{ID: newFixturePageID("docs"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: tree.NodeKindSection}
+		routePage := workspaceSyncEdgePage(newFixturePageID("route-1"), "Route", newFixtureSlug("route"), tree.NodeKindPage)
 		routePage.Parent = page.Parent
 
 		Expect(service.currentPageMarkdownPath(section)).To(Equal("docs/README.md"))
@@ -41,8 +41,8 @@ var _ = Describe("workspace sync path and validation helpers", Label("unit"), fu
 		Expect(service.currentSectionContentPath("", "fallback.md")).To(Equal("fallback.md"))
 
 		result, err := contentForPageAtCommitPathResult(rootDir, page, "preferred.md", map[string]string{
-			"preferred.md": workspaceSyncEdgeMarkdown("other", "Other"),
-			"docs/Page.MD": workspaceSyncEdgeMarkdown("page-1", "Page"),
+			"preferred.md": workspaceSyncEdgeMarkdown(newFixturePageID("other"), "Other"),
+			"docs/Page.MD": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page"),
 		})
 		Expect(err).To(Succeed())
 		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -50,7 +50,7 @@ var _ = Describe("workspace sync path and validation helpers", Label("unit"), fu
 			"Content": ContainSubstring("Page"),
 		}))
 		_, err = changedContentForPageAtCommitResult(rootDir, page, "preferred.md", map[string]string{
-			"preferred.md": workspaceSyncEdgeMarkdown("other", "Other"),
+			"preferred.md": workspaceSyncEdgeMarkdown(newFixturePageID("other"), "Other"),
 		})
 		Expect(err).To(MatchError(errChangedContentMissing))
 		_, err = leafWikiIDFromContentResult("---\nleafwiki_id: [broken\n---\n# Broken\n")

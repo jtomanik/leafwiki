@@ -26,7 +26,7 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 
 	It("returns snapshot pages for disabled services and propagates list failures", func() {
 		disabled := &Service{}
-		page, err := disabled.ListSnapshotPage(ctx, "", 0)
+		page, err := disabled.ListSnapshotPage(ctx, newFixtureCommitHash(""), 0)
 		Expect(err).To(Succeed())
 		Expect(page.Snapshots).To(BeEmpty())
 
@@ -38,30 +38,27 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 
 		store = &fakeRevisionStore{
 			commits: []gitrevisions.Commit{
-				workspaceSyncServiceCommitValue("c1", "a.md"),
-				workspaceSyncServiceCommitValue("c2", "b.md"),
+				workspaceSyncServiceCommitValue(newFixtureCommitHash("c1"), "a.md"),
+				workspaceSyncServiceCommitValue(newFixtureCommitHash("c2"), "b.md"),
 			},
-			changedPaths: map[CommitHash][]string{
-				"c1": {"a.md"},
-				"c2": {"b.md"},
-			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("c1"): {"a.md"}, newFixtureCommitHash("c2"): {"b.md"}},
 		}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		list, err := service.ListSnapshotPage(ctx, "", 1)
+		list, err := service.ListSnapshotPage(ctx, newFixtureCommitHash(""), 1)
 		Expect(err).To(Succeed())
 		Expect(list).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Snapshots":  HaveLen(1),
-			"NextCursor": Equal(CommitHashFromString("c1")),
+			"NextCursor": Equal(newFixtureCommitHash("c1")),
 		}))
 
 		changedPathsErr := errors.New("changed paths failed")
-		store.changedPathsErrByHash = map[CommitHash]error{"c1": changedPathsErr}
-		_, err = service.ListSnapshotPage(ctx, "", 1)
+		store.changedPathsErrByHash = map[CommitHash]error{newFixtureCommitHash("c1"): changedPathsErr}
+		_, err = service.ListSnapshotPage(ctx, newFixtureCommitHash(""), 1)
 		Expect(err).To(MatchError(changedPathsErr))
 	})
 
 	It("lists page revisions with cursor scans and propagates content lookup failures", func() {
-		page := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
+		page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page", newFixtureSlug("page"), tree.NodeKindPage)
 		disabled := &Service{}
 		revisions, err := disabled.ListPageRevisions(ctx, page, "", 0)
 		Expect(err).To(Succeed())
@@ -69,14 +66,11 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 
 		store := &fakeRevisionStore{
 			commits: []gitrevisions.Commit{
-				workspaceSyncServiceCommitValue("cursor"),
-				workspaceSyncServiceCommitValue("c1"),
-				workspaceSyncServiceCommitValue("c2"),
+				workspaceSyncServiceCommitValue(newFixtureCommitHash("cursor")),
+				workspaceSyncServiceCommitValue(newFixtureCommitHash("c1")),
+				workspaceSyncServiceCommitValue(newFixtureCommitHash("c2")),
 			},
-			changedContents: map[CommitHash]map[string]string{
-				"c1": {"page.md": workspaceSyncEdgeMarkdown("page-1", "Page v1")},
-				"c2": {"page.md": workspaceSyncEdgeMarkdown("page-1", "Page v2")},
-			},
+			changedContents: map[CommitHash]map[string]string{newFixtureCommitHash("c1"): {"page.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page v1")}, newFixtureCommitHash("c2"): {"page.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page v2")}},
 		}
 		service := workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
 		list, err := service.ListPageRevisions(ctx, page, "cursor", 1)
@@ -95,22 +89,22 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 
 	It("restores workspaces with default source metadata and propagates restore failures", func() {
 		disabled := &Service{}
-		_, err := disabled.RestoreWorkspace(ctx, "commit", PublicEditorActor())
+		_, err := disabled.RestoreWorkspace(ctx, newFixtureCommitHash("commit"), PublicEditorActor())
 		Expect(err).To(MatchError(ErrWorkspaceSyncDisabled))
 
 		restoreErr := errors.New("restore failed")
-		store := &fakeRevisionStore{capture: workspaceSyncServiceCommit("restore-error"), restoreWorkspaceErr: restoreErr}
+		store := &fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("restore-error")), restoreWorkspaceErr: restoreErr}
 		service := workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		_, err = service.RestoreWorkspaceWithSource(ctx, "commit", PublicEditorActor(), "")
+		_, err = service.RestoreWorkspaceWithSource(ctx, newFixtureCommitHash("commit"), PublicEditorActor(), "")
 		Expect(err).To(MatchError(restoreErr))
 		Expect(store.restoreWorkspaceRequests).To(ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Source": Equal(SourceSystem),
 		})))
 
-		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit("restore-reconstruct", "docs/a.md")}
+		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("restore-reconstruct"), "docs/a.md")}
 		restoreReconstructErr := errors.New("restore reconstruct failed")
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{err: restoreReconstructErr})
-		status, err := service.RestoreWorkspaceWithSource(ctx, "commit", PublicEditorActor(), SourceMCP)
+		status, err := service.RestoreWorkspaceWithSource(ctx, newFixtureCommitHash("commit"), PublicEditorActor(), SourceMCP)
 		Expect(err).To(Succeed())
 		Expect(status.ValidationErrors).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Code":      Equal(wikivalidation.IssueCodeWorkspaceSyncError),
@@ -120,59 +114,59 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 		})))
 
 		restoreAmendErr := errors.New("restore amend failed")
-		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit("restore-amend", "docs/a.md"), amendErr: restoreAmendErr}
+		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("restore-amend"), "docs/a.md"), amendErr: restoreAmendErr}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		_, err = service.RestoreWorkspaceWithSource(ctx, "commit", PublicEditorActor(), SourceMCP)
+		_, err = service.RestoreWorkspaceWithSource(ctx, newFixtureCommitHash("commit"), PublicEditorActor(), SourceMCP)
 		Expect(err).To(MatchError(restoreAmendErr))
 
-		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit("restore-after", "docs/a.md")}
+		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("restore-after"), "docs/a.md")}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
 		restoreAfterErr := errors.New("restore after failed")
 		service.SetAfterSync(func() error { return restoreAfterErr })
-		_, err = service.RestoreWorkspaceWithSource(ctx, "commit", PublicEditorActor(), SourceMCP)
+		_, err = service.RestoreWorkspaceWithSource(ctx, newFixtureCommitHash("commit"), PublicEditorActor(), SourceMCP)
 		Expect(err).To(MatchError(restoreAfterErr))
 	})
 
 	It("returns page snapshots and document restore errors with source metadata", func() {
-		page := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
+		page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page", newFixtureSlug("page"), tree.NodeKindPage)
 		disabled := &Service{}
-		_, err := disabled.GetPageRevisionSnapshot(ctx, page, "commit")
+		_, err := disabled.GetPageRevisionSnapshot(ctx, page, newFixtureCommitHash("commit"))
 		Expect(err).To(MatchError(ErrWorkspaceSyncDisabled))
-		_, err = disabled.RestoreDocument(ctx, page, "commit", PublicEditorActor())
+		_, err = disabled.RestoreDocument(ctx, page, newFixtureCommitHash("commit"), PublicEditorActor())
 		Expect(err).To(MatchError(ErrWorkspaceSyncDisabled))
 
 		changedContentsErr := errors.New("changed contents failed")
 		store := &fakeRevisionStore{changedContentsErr: changedContentsErr}
 		service := workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		_, err = service.GetPageRevisionSnapshot(ctx, page, "commit")
+		_, err = service.GetPageRevisionSnapshot(ctx, page, newFixtureCommitHash("commit"))
 		Expect(err).To(MatchError(changedContentsErr))
-		_, err = service.RestoreDocumentWithSource(ctx, page, "commit", PublicEditorActor(), "")
+		_, err = service.RestoreDocumentWithSource(ctx, page, newFixtureCommitHash("commit"), PublicEditorActor(), "")
 		Expect(err).To(MatchError(changedContentsErr))
 
-		store = &fakeRevisionStore{changedContents: map[CommitHash]map[string]string{"commit": {"other.md": workspaceSyncEdgeMarkdown("other", "Other")}}}
+		store = &fakeRevisionStore{changedContents: map[CommitHash]map[string]string{newFixtureCommitHash("commit"): {"other.md": workspaceSyncEdgeMarkdown(newFixturePageID("other"), "Other")}}}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		_, err = service.GetPageRevisionSnapshot(ctx, page, "commit")
+		_, err = service.GetPageRevisionSnapshot(ctx, page, newFixtureCommitHash("commit"))
 		Expect(err).To(MatchError(ErrWorkspaceSyncDocumentUnchanged))
-		_, err = service.RestoreDocumentWithSource(ctx, page, "commit", PublicEditorActor(), SourceMCP)
+		_, err = service.RestoreDocumentWithSource(ctx, page, newFixtureCommitHash("commit"), PublicEditorActor(), SourceMCP)
 		Expect(err).To(MatchError(ErrWorkspaceSyncDocumentUnchanged))
 
 		store = &fakeRevisionStore{
-			changedContents: map[CommitHash]map[string]string{"commit": {"page.md": workspaceSyncEdgeMarkdown("page-1", "Page")}},
+			changedContents: map[CommitHash]map[string]string{newFixtureCommitHash("commit"): {"page.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page")}},
 			getCommitErr:    errors.New("get commit failed"),
 		}
 		getCommitErr := store.getCommitErr
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		_, err = service.GetPageRevisionSnapshot(ctx, page, "commit")
+		_, err = service.GetPageRevisionSnapshot(ctx, page, newFixtureCommitHash("commit"))
 		Expect(err).To(MatchError(getCommitErr))
 
 		restoreDocumentErr := errors.New("restore document failed")
 		store = &fakeRevisionStore{
-			capture:                   workspaceSyncServiceCommit("restore-doc", "page.md"),
-			changedContents:           map[CommitHash]map[string]string{"commit": {"page.md": workspaceSyncEdgeMarkdown("page-1", "Page")}},
+			capture:                   workspaceSyncServiceCommit(newFixtureCommitHash("restore-doc"), "page.md"),
+			changedContents:           map[CommitHash]map[string]string{newFixtureCommitHash("commit"): {"page.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page")}},
 			restoreDocumentContentErr: restoreDocumentErr,
 		}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		_, err = service.RestoreDocumentWithSource(ctx, page, "commit", PublicEditorActor(), "")
+		_, err = service.RestoreDocumentWithSource(ctx, page, newFixtureCommitHash("commit"), PublicEditorActor(), "")
 		Expect(err).To(MatchError(restoreDocumentErr))
 		Expect(store.restoreDocumentContentRequests).To(ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Source": Equal(SourceSystem),
@@ -181,37 +175,37 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 		store.restoreDocumentContentErr = nil
 		documentReconstructErr := errors.New("document reconstruct failed")
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{err: documentReconstructErr})
-		_, err = service.RestoreDocumentWithSource(ctx, page, "commit", PublicEditorActor(), SourceMCP)
+		_, err = service.RestoreDocumentWithSource(ctx, page, newFixtureCommitHash("commit"), PublicEditorActor(), SourceMCP)
 		Expect(err).To(MatchError(documentReconstructErr))
 
 		documentAmendErr := errors.New("document amend failed")
 		store = &fakeRevisionStore{
-			capture:         workspaceSyncServiceCommit("restore-doc-amend", "page.md"),
-			changedContents: map[CommitHash]map[string]string{"commit": {"page.md": workspaceSyncEdgeMarkdown("page-1", "Page")}},
+			capture:         workspaceSyncServiceCommit(newFixtureCommitHash("restore-doc-amend"), "page.md"),
+			changedContents: map[CommitHash]map[string]string{newFixtureCommitHash("commit"): {"page.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page")}},
 			amendErr:        documentAmendErr,
 		}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
-		_, err = service.RestoreDocumentWithSource(ctx, page, "commit", PublicEditorActor(), SourceMCP)
+		_, err = service.RestoreDocumentWithSource(ctx, page, newFixtureCommitHash("commit"), PublicEditorActor(), SourceMCP)
 		Expect(err).To(MatchError(documentAmendErr))
 
 		store = &fakeRevisionStore{
-			capture:         workspaceSyncServiceCommit("restore-doc-after", "page.md"),
-			changedContents: map[CommitHash]map[string]string{"commit": {"page.md": workspaceSyncEdgeMarkdown("page-1", "Page")}},
+			capture:         workspaceSyncServiceCommit(newFixtureCommitHash("restore-doc-after"), "page.md"),
+			changedContents: map[CommitHash]map[string]string{newFixtureCommitHash("commit"): {"page.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Page")}},
 		}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
 		documentAfterErr := errors.New("document after failed")
 		service.SetAfterSync(func() error { return documentAfterErr })
-		_, err = service.RestoreDocumentWithSource(ctx, page, "commit", PublicEditorActor(), SourceMCP)
+		_, err = service.RestoreDocumentWithSource(ctx, page, newFixtureCommitHash("commit"), PublicEditorActor(), SourceMCP)
 		Expect(err).To(MatchError(documentAfterErr))
 	})
 
 	It("applies default list limits and resolves fallback route helpers", func() {
 		service := workspaceSyncServiceHarness(&fakeRevisionStore{}, &fakeTreeReconstructor{})
-		snapshots, err := service.ListSnapshotPage(ctx, "", 0)
+		snapshots, err := service.ListSnapshotPage(ctx, newFixtureCommitHash(""), 0)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(snapshots.Snapshots).To(BeEmpty())
 
-		page := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
+		page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page", newFixtureSlug("page"), tree.NodeKindPage)
 		revisions, err := service.ListPageRevisions(ctx, page, "", 0)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(revisions.Revisions).To(BeEmpty())
@@ -219,9 +213,9 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 		Expect(service.captureWritebacksLocked(ctx, gitrevisions.CommitRequest{}, nil, true)).To(Succeed())
 		changedContentsErr := errors.New("changed contents failed")
 		service.store = &fakeRevisionStore{changedContentsErr: changedContentsErr}
-		Expect(service.captureWritebacksLocked(ctx, gitrevisions.CommitRequest{}, workspaceSyncServiceCommit("writeback-error"), true)).To(MatchError(changedContentsErr))
+		Expect(service.captureWritebacksLocked(ctx, gitrevisions.CommitRequest{}, workspaceSyncServiceCommit(newFixtureCommitHash("writeback-error")), true)).To(MatchError(changedContentsErr))
 
-		section := workspaceSyncEdgePage("!!!", "Invalid", "!!!", tree.NodeKindSection)
+		section := workspaceSyncEdgePage(newFixturePageID("!!!"), "Invalid", newFixtureSlug("!!!"), tree.NodeKindSection)
 		routePath, kind := revisionRoutePathAndKind("", "!!!/README.md", section)
 		Expect(routePath.FilesystemPath()).To(Equal("!!!"))
 		Expect(kind).To(Equal(tree.NodeKindSection))
@@ -234,7 +228,7 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 
 		result, err := contentForPageAtCommitPathResult("", page, "preferred.md", map[string]string{
 			"bad.md": "<!-- leafwiki\nnot yaml\n-->\n# Broken\n",
-			"old.md": workspaceSyncEdgeMarkdown("page-1", "Old Page"),
+			"old.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Old Page"),
 		})
 		Expect(err).To(Succeed())
 		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -244,7 +238,7 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 
 		result, err = changedContentForPageAtCommitResult("", page, "preferred.md", map[string]string{
 			"bad.md": "<!-- leafwiki\nnot yaml\n-->\n# Broken\n",
-			"old.md": workspaceSyncEdgeMarkdown("page-1", "Old Page"),
+			"old.md": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Old Page"),
 		})
 		Expect(err).To(Succeed())
 		Expect(result).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -277,7 +271,7 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 		workspacesyncWalkDir = func(string, fs.WalkDirFunc) error {
 			return errors.New("route scan failed")
 		}
-		sectionWithReadme := workspaceSyncEdgePage("docs", "Docs", "docs", tree.NodeKindSection)
+		sectionWithReadme := workspaceSyncEdgePage(newFixturePageID("docs"), "Docs", newFixtureSlug("docs"), tree.NodeKindSection)
 		Expect((&Service{rootDir: rootDir}).currentPageMarkdownPath(sectionWithReadme)).To(Equal("docs/README.md"))
 
 		workspacesyncWalkDir = func(root string, fn fs.WalkDirFunc) error {
@@ -298,8 +292,8 @@ var _ = Describe("workspace sync revision and restore helpers", Label("unit"), f
 		_, err = currentWorkspaceMarkdownPathByRouteResult(&Service{rootDir: rootDir}, page)
 		Expect(err).To(MatchError(errChangedContentMissing))
 
-		routePage := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
-		routePage.Parent = &tree.PageNode{ID: "docs", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}
+		routePage := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page", newFixtureSlug("page"), tree.NodeKindPage)
+		routePage.Parent = &tree.PageNode{ID: newFixturePageID("docs"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: tree.NodeKindSection}
 		result, err = contentForPageAtCommitPathResult(rootDir, routePage, "preferred.md", map[string]string{
 			"docs/page.md": "# Page without metadata\n",
 		})

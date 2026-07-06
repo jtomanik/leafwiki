@@ -162,18 +162,22 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			}
 
 			service.handleWatcherBatch(context.Background(), 3, true, "")
-			Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"PendingEventCount": BeZero(),
-				"LastError":         Equal(watcherDroppedEventsStatus("")),
-			}))
+			Expect(service.status).To(SatisfyAll(
+				gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"PendingEventCount": BeZero(),
+				}),
+				matchWorkspaceSyncLastError(watcherDroppedEventsStatus("")),
+			))
 
 			service.status.LastError = ""
 			service.status.PendingEventCount = 2
 			service.handleWatcherBatch(context.Background(), 1, true, "docs/a.md")
-			Expect(service.status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"PendingEventCount": Equal(1),
-				"LastError":         Equal(watcherDroppedEventsStatus("docs/a.md")),
-			}))
+			Expect(service.status).To(SatisfyAll(
+				gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"PendingEventCount": Equal(1),
+				}),
+				matchWorkspaceSyncLastError(watcherDroppedEventsStatus("docs/a.md")),
+			))
 
 			service.status.LastError = ""
 			service.handleWatcherBatch(context.Background(), 1, false, "")
@@ -210,29 +214,27 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 		})
 
 		It("detects metadata writeback requirements in captured markdown", Label("unit"), func() {
-			store := &fakeRevisionStore{changedContents: map[CommitHash]map[string]string{
-				"metadata": {
-					"notes.txt": "not markdown",
-					"page.md":   "---\nleafwiki_id: page-1\nleafwiki_title: Page One\n---\n# Page One\n",
-				},
-				"parse-error": {
-					"page.md": "<!-- leafwiki\nnot yaml\n-->\n# Broken\n",
-				},
+			store := &fakeRevisionStore{changedContents: map[CommitHash]map[string]string{newFixtureCommitHash("metadata"): {
+				"notes.txt": "not markdown",
+				"page.md":   "---\nleafwiki_id: page-1\nleafwiki_title: Page One\n---\n# Page One\n",
+			}, newFixtureCommitHash("parse-error"): {
+				"page.md": "<!-- leafwiki\nnot yaml\n-->\n# Broken\n",
+			},
 			}}
 
-			err := capturedMarkdownRequiresMetadataWritebackResult(context.Background(), nil, "metadata")
+			err := capturedMarkdownRequiresMetadataWritebackResult(context.Background(), nil, newFixtureCommitHash("metadata"))
 			Expect(err).To(MatchError(errCapturedMarkdownAlreadyCanonical))
 
-			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, "")
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, newFixtureCommitHash(""))
 			Expect(err).To(MatchError(errCapturedMarkdownAlreadyCanonical))
 
-			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, "metadata")
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, newFixtureCommitHash("metadata"))
 			Expect(err).To(Succeed())
 
-			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), &fakeRevisionStore{changedContentsErr: errAdditionalChangedContentsFailed}, "metadata")
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), &fakeRevisionStore{changedContentsErr: errAdditionalChangedContentsFailed}, newFixtureCommitHash("metadata"))
 			Expect(err).To(MatchError(errAdditionalChangedContentsFailed))
 
-			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, "parse-error")
+			err = capturedMarkdownRequiresMetadataWritebackResult(context.Background(), store, newFixtureCommitHash("parse-error"))
 			Expect(err).To(MatchError(markdown.ErrMetadataParse))
 		})
 
@@ -242,21 +244,21 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			Expect(os.WriteFile(filepath.Join(rootDir, "docs", "README.md"), []byte("# Readme\n"), 0o644)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(rootDir, "docs", "Page.MD"), []byte("# Page\n"), 0o644)).To(Succeed())
 			service := &Service{rootDir: rootDir}
-			root := workspaceSyncEdgePage("root", "Root", "", tree.NodeKindSection)
-			page := workspaceSyncEdgePage("page-1", "Page", "page", tree.NodeKindPage)
-			page.Parent = &tree.PageNode{ID: "docs", Title: "Docs", Slug: "docs", Kind: tree.NodeKindSection}
-			section := workspaceSyncEdgePage("docs", "Docs", "docs", tree.NodeKindSection)
+			root := workspaceSyncEdgePage(newFixturePageID("root"), "Root", newFixtureSlug(""), tree.NodeKindSection)
+			page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page", newFixtureSlug("page"), tree.NodeKindPage)
+			page.Parent = &tree.PageNode{ID: newFixturePageID("docs"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: tree.NodeKindSection}
+			section := workspaceSyncEdgePage(newFixturePageID("docs"), "Docs", newFixtureSlug("docs"), tree.NodeKindSection)
 
 			Expect(pageMarkdownPath(root)).To(Equal("index.md"))
 			Expect(pageWorkspaceSourcePath(nil)).To(BeEmpty())
-			Expect(service.currentPageMarkdownPath(workspaceSyncEdgePage("missing", "Missing", "missing", tree.NodeKindPage))).To(Equal("missing.md"))
+			Expect(service.currentPageMarkdownPath(workspaceSyncEdgePage(newFixturePageID("missing"), "Missing", newFixtureSlug("missing"), tree.NodeKindPage))).To(Equal("missing.md"))
 			Expect(service.currentPageMarkdownPath(section)).To(Equal("docs/README.md"))
 			_, err := currentWorkspaceMarkdownPathByRouteResult(service, nil)
 			Expect(err).To(MatchError(errChangedContentMissing))
 			Expect(service.currentSectionContentPath("missing", "fallback.md")).To(Equal("fallback.md"))
 
 			files := map[string]string{
-				"docs/Page.MD": workspaceSyncEdgeMarkdown("page-1", "Historical Title"),
+				"docs/Page.MD": workspaceSyncEdgeMarkdown(newFixturePageID("page-1"), "Historical Title"),
 				"notes.txt":    "ignored",
 				"other.md":     "not markdown: [",
 			}
@@ -268,13 +270,13 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			}))
 			Expect(sortedMarkdownPaths(files)).To(Equal([]string{"docs/Page.MD", "other.md"}))
 			Expect(markdownPathMatchesPageRouteResult(rootDir, nil, "docs/Page.MD")).To(MatchError(errMarkdownPathMissesRoute))
-			id, err := leafWikiIDFromContentResult(workspaceSyncEdgeMarkdown("different-page", "Different"))
+			id, err := leafWikiIDFromContentResult(workspaceSyncEdgeMarkdown(newFixturePageID("different-page"), "Different"))
 			Expect(err).To(Succeed())
 			Expect(id).NotTo(Equal(page.ID))
 			_, err = leafWikiIDFromContentResult("---\nleafwiki_id: [broken\n---\n# Broken\n")
 			Expect(err).To(MatchError(errLeafWikiIDMissing))
 
-			commit := gitrevisions.Commit{Hash: CommitHashFromString("hash-1"), Message: "", AuthorID: gitrevisions.ParseActorID(""), CreatedAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)}
+			commit := gitrevisions.Commit{Hash: newFixtureCommitHash("hash-1"), Message: "", AuthorID: gitrevisions.ParseActorID(""), CreatedAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)}
 			rev := revisionForPageContent(rootDir, page, commit, "docs/Page.MD", files["docs/Page.MD"])
 			Expect(rev).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 				"AuthorID": Equal(PublicEditorActor().ID.MetadataValue()),

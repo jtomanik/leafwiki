@@ -188,7 +188,7 @@ var _ = Describe("git revision store", func() {
 		_, err = store.Capture(context.Background(), CommitRequest{
 			Reason: ReasonExplicit,
 			Source: SourceFilesystem,
-			Actor:  Actor{ID: "alice", Name: "Alice", Email: "alice@example.test"},
+			Actor:  Actor{ID: newFixtureActorID("alice"), Name: "Alice", Email: "alice@example.test"},
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -197,7 +197,7 @@ var _ = Describe("git revision store", func() {
 		Expect(commits).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Source":               Equal(SourceFilesystem),
 			"Reason":               Equal(ReasonExplicit),
-			"AuthorID":             Equal(ParseActorID("alice")),
+			"AuthorID":             Equal(newFixtureActorID("alice")),
 			"AuthorName":           Equal("Alice"),
 			"AuthorEmail":          Equal("alice@example.test"),
 			"ChangedMarkdownCount": Equal(1),
@@ -215,10 +215,10 @@ var _ = Describe("git revision store", func() {
 		_, err = store.Capture(context.Background(), CommitRequest{
 			Reason: ReasonExplicit,
 			Source: SourceWeb,
-			Actor:  Actor{ID: "alice", Name: "Alice", Email: "alice@example.test"},
+			Actor:  Actor{ID: newFixtureActorID("alice"), Name: "Alice", Email: "alice@example.test"},
 			AdditionalActors: []Actor{
-				{ID: "bob", Name: "Bob", Email: "bob@example.test"},
-				{ID: "alice", Name: "Alice", Email: "alice@example.test"},
+				{ID: newFixtureActorID("bob"), Name: "Bob", Email: "bob@example.test"},
+				{ID: newFixtureActorID("alice"), Name: "Alice", Email: "alice@example.test"},
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -228,14 +228,14 @@ var _ = Describe("git revision store", func() {
 		headCommit, err := store.repo.CommitObject(head.Hash())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commitFromObject(headCommit)).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"AuthorID": Equal(ParseActorID("alice")),
+			"AuthorID": Equal(newFixtureActorID("alice")),
 			"ActorIDs": WithTransform(actorIDStrings, Equal([]string{"alice", "bob"})),
 		}))
 
 		commits, err := store.ListCommits(context.Background(), ListRequest{Limit: 1})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commits).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"AuthorID": Equal(ParseActorID("alice")),
+			"AuthorID": Equal(newFixtureActorID("alice")),
 			"ActorIDs": WithTransform(actorIDStrings, Equal([]string{"alice", "bob"})),
 		})))
 	})

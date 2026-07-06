@@ -110,7 +110,7 @@ var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 		fakeTree := &fakeTreeReconstructor{}
 		fakeStore := &fakeRevisionStore{
 			capture: &gitrevisions.Commit{
-				Hash:                 "event-commit",
+				Hash:                 newFixtureCommitHash("event-commit"),
 				ChangedMarkdownPaths: []string{"docs/a.md"},
 			},
 		}
@@ -140,7 +140,7 @@ var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 		fakeTree := &fakeTreeReconstructor{}
 		fakeStore := &fakeRevisionStore{
 			capture: &gitrevisions.Commit{
-				Hash:                 "event-commit",
+				Hash:                 newFixtureCommitHash("event-commit"),
 				ChangedMarkdownPaths: []string{"Page.MD"},
 			},
 		}
@@ -169,7 +169,7 @@ var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 		fakeTree := &fakeTreeReconstructor{}
 		fakeStore := &fakeRevisionStore{
 			capture: &gitrevisions.Commit{
-				Hash:                 "event-commit",
+				Hash:                 newFixtureCommitHash("event-commit"),
 				ChangedMarkdownPaths: []string{"docs/a.md"},
 			},
 		}
@@ -197,7 +197,7 @@ var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 
 	It("records dropped event status and still syncs the workspace", func() {
 		fakeTree := &fakeTreeReconstructor{}
-		fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "drop-commit"}}
+		fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("drop-commit")}}
 		fakeWatcher := newFakeWatcher()
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -216,13 +216,13 @@ var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 		fakeWatcher.dropped <- watcherEvent{Path: "/workspace/docs/a.md", Dropped: true}
 
 		Eventually(fakeTree.reconstructCount).Should(Equal(1))
-		Expect(service.Status()).To(HaveField("LastError", Equal(watcherDroppedEventsStatus("docs/a.md"))))
+		Expect(service.Status()).To(matchWorkspaceSyncLastError(watcherDroppedEventsStatus("docs/a.md")))
 		Expect(fakeStore.captureCalls).To(Equal(1))
 	})
 
 	It("records watcher errors and still syncs the workspace", func() {
 		fakeTree := &fakeTreeReconstructor{}
-		fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "error-commit"}}
+		fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("error-commit")}}
 		fakeWatcher := newFakeWatcher()
 		fakeWatcher.watchErr = errors.New("watcher platform error")
 		service, err := NewService(ServiceOptions{
@@ -246,7 +246,7 @@ var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 	})
 
 	It("ignores temporary file events", func() {
-		fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "temp-commit"}}
+		fakeStore := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("temp-commit")}}
 		fakeWatcher := newFakeWatcher()
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -274,7 +274,7 @@ var _ = Describe("workspace sync file watcher", Label("integration"), func() {
 			Enabled: true,
 			RootDir: "/workspace",
 			Tree:    &fakeTreeReconstructor{},
-			Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "stop-commit"}},
+			Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("stop-commit")}},
 			WatcherFactory: func(string) (fileWatcher, error) {
 				return fakeWatcher, nil
 			},

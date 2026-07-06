@@ -25,7 +25,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 
 	It("records watcher sync failures after the watcher itself fails", func() {
 		store := &fakeRevisionStore{
-			capture:    workspaceSyncServiceCommit("unused"),
+			capture:    workspaceSyncServiceCommit(newFixtureCommitHash("unused")),
 			captureErr: errors.New("sync after watcher failed"),
 		}
 		watcher := newFakeWatcher()
@@ -41,7 +41,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 
 	It("flushes queued watcher events when event channels close", func() {
 		store := &fakeRevisionStore{
-			capture: workspaceSyncServiceCommit("closed-event", "docs/a.md"),
+			capture: workspaceSyncServiceCommit(newFixtureCommitHash("closed-event"), "docs/a.md"),
 		}
 		service := workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
 		watcher := newFakeWatcher()
@@ -65,15 +65,9 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 		service.logStartupSyncFailed(true, started, errors.New("startup failed"))
 		service.logStartupPhaseFailed(true, "phase", started, errors.New("phase failed"))
 
-		Expect(records.Records).To(ContainElements(
-			SatisfyAll(
-				HaveField("Level", Equal(slog.LevelError)),
-				HaveField("Message", Equal("workspace sync startup failed")),
-			),
-			SatisfyAll(
-				HaveField("Level", Equal(slog.LevelError)),
-				HaveField("Message", Equal("workspace sync startup phase failed")),
-			),
+		Expect(records.Records).To(reportWorkspaceSyncStartupLogEvents(
+			workspaceSyncStartupFailed,
+			workspaceSyncStartupPhaseFailed,
 		))
 	})
 
@@ -83,7 +77,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 
 		captureErr := errors.New("capture failed")
 		store := &fakeRevisionStore{
-			capture:    workspaceSyncServiceCommit("capture-failed"),
+			capture:    workspaceSyncServiceCommit(newFixtureCommitHash("capture-failed")),
 			captureErr: captureErr,
 		}
 		service := workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
@@ -91,7 +85,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 		_, err := service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
 		Expect(err).To(MatchError(captureErr))
 
-		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit("reconstruct-failed", "docs/a.md")}
+		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("reconstruct-failed"), "docs/a.md")}
 		reconstructErr := errors.New("reconstruct failed")
 		treeService := &fakeTreeReconstructor{err: reconstructErr}
 		service = workspaceSyncServiceHarness(store, treeService)
@@ -106,7 +100,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "a.md"), []byte("[B](/docs/b)\n"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "b.md"), []byte("# B\n"), 0o644)).To(Succeed())
-		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit("migration-failed")}
+		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("migration-failed"))}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
 		service.rootDir = rootDir
 		service.markdownLinkRootPrefix = "/"
@@ -123,7 +117,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 		canonicalMarkdownRewriteWriter = previousWriter
 		amendErr := errors.New("amend failed")
 		store = &fakeRevisionStore{
-			capture:  workspaceSyncServiceCommit("writeback-failed"),
+			capture:  workspaceSyncServiceCommit(newFixtureCommitHash("writeback-failed")),
 			amendErr: amendErr,
 		}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
@@ -131,7 +125,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 		_, err = service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
 		Expect(err).To(MatchError(amendErr))
 
-		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit("after-sync-failed")}
+		store = &fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("after-sync-failed"))}
 		service = workspaceSyncServiceHarness(store, &fakeTreeReconstructor{})
 		service.log = logger
 		afterSyncErr := errors.New("after sync failed")
@@ -139,10 +133,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 		_, err = service.SyncNow(ctx, SyncRequest{Reason: ReasonStartup, Source: SourceFilesystem, Actor: PublicEditorActor()})
 		Expect(err).To(MatchError(afterSyncErr))
 
-		Expect(records.Records).To(ContainElement(SatisfyAll(
-			HaveField("Level", Equal(slog.LevelError)),
-			HaveField("Message", Equal("workspace sync startup failed")),
-		)))
+		Expect(records.Records).To(reportWorkspaceSyncStartupLogEvents(workspaceSyncStartupFailed))
 	})
 
 	It("starts the default watcher and drains closed watcher channels", func() {
@@ -152,7 +143,7 @@ var _ = Describe("workspace sync watcher and startup failure handling", Label("u
 			return wrapped, nil
 		}
 		service := workspaceSyncServiceHarness(
-			&fakeRevisionStore{capture: workspaceSyncServiceCommit("default-watcher")},
+			&fakeRevisionStore{capture: workspaceSyncServiceCommit(newFixtureCommitHash("default-watcher"))},
 			&fakeTreeReconstructor{},
 		)
 

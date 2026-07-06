@@ -81,9 +81,9 @@ page:
 		status, err := service.SyncNow(context.Background(), SyncRequest{
 			Reason: ReasonExplicit,
 			Source: SourceWeb,
-			Actor:  Actor{ID: "alice", Name: "Alice", Email: "alice@example.test"},
+			Actor:  Actor{ID: newFixtureActorID("alice"), Name: "Alice", Email: "alice@example.test"},
 			AdditionalActors: []Actor{
-				{ID: "bob", Name: "Bob", Email: "bob@example.test"},
+				{ID: newFixtureActorID("bob"), Name: "Bob", Email: "bob@example.test"},
 			},
 		})
 		Expect(err).To(Succeed())
@@ -91,7 +91,7 @@ page:
 		commit, err := store.GetCommit(context.Background(), status.LastCommitHash)
 		Expect(err).To(Succeed())
 		Expect(commit).To(SatisfyAll(
-			HaveField("AuthorID", Equal(gitrevisions.ActorID("alice"))),
+			HaveField("AuthorID", Equal(newFixtureActorID("alice"))),
 			HaveField("ActorIDs", WithTransform(gitRevisionActorIDStrings, Equal([]string{"alice", "bob"}))),
 		))
 	})
@@ -118,25 +118,21 @@ page:
 	It("uses commit author metadata when listing page revisions", func() {
 		createdAt := time.Date(2026, 6, 7, 10, 0, 0, 0, time.UTC)
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-1",
+			ID:    newFixturePageID("page-1"),
 			Title: "Page One",
-			Slug:  "page-one",
+			Slug:  newFixtureSlug("page-one"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
 			commits: []gitrevisions.Commit{{
-				Hash:       "commit-1",
+				Hash:       newFixtureCommitHash("commit-1"),
 				Message:    "LeafWiki workspace sync",
-				AuthorID:   "alice",
+				AuthorID:   newFixtureActorID("alice"),
 				AuthorName: "Alice",
 				CreatedAt:  createdAt,
 			}},
-			filesAt: map[CommitHash]map[string]string{
-				"commit-1": {"page-one.md": "# Page One\n"},
-			},
-			changedPaths: map[CommitHash][]string{
-				"commit-1": {"page-one.md"},
-			},
+			filesAt:      map[CommitHash]map[string]string{newFixtureCommitHash("commit-1"): {"page-one.md": "# Page One\n"}},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("commit-1"): {"page-one.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,

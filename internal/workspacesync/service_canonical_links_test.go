@@ -149,7 +149,7 @@ leafwiki_title: Page B Duplicate Syntax
 		})
 		Expect(err).To(Succeed())
 		Expect(status.ValidationErrors).To(BeEmpty())
-		pageA, err := treeService.GetPage("page-a-duplicate-syntax")
+		pageA, err := treeService.GetPage(newFixturePageID("page-a-duplicate-syntax"))
 		Expect(err).To(Succeed())
 		linkStatus, err := linkService.GetLinkStatusForPage(pageA.ID, pageA.CalculateRoutePath())
 		Expect(err).To(Succeed())
@@ -197,7 +197,7 @@ leafwiki_title: Page B
 		})
 		Expect(err).To(Succeed())
 
-		page, err := treeService.GetPage("page-a")
+		page, err := treeService.GetPage(newFixturePageID("page-a"))
 		Expect(err).To(Succeed())
 		revisions, err := service.ListPageRevisions(context.Background(), page, "", 10)
 		Expect(err).To(Succeed())
@@ -254,15 +254,15 @@ Fully populated legacy metadata.
 		Expect(raw).NotTo(ContainSubstring("leafwiki_id: complete-legacy-page"))
 		parsed, _, err := markdown.ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(parsed.Metadata.Page).To(SatisfyAll(
-			HaveField("ID", Equal("complete-legacy-page")),
-			HaveField("Title", Equal("Complete Legacy Page")),
-			HaveField("CreatedAt", Equal("2026-03-21T10:15:30Z")),
-			HaveField("CreatorID", Equal("alice")),
-			HaveField("LastAuthorID", Equal("bob")),
+		Expect(parsed.Metadata.Page).To(matchWorkspaceSyncParsedPageMetadata(
+			newFixturePageID("complete-legacy-page"),
+			"Complete Legacy Page",
+			"2026-03-21T10:15:30Z",
+			newFixtureUserID("alice"),
+			newFixtureUserID("bob"),
 		))
 
-		page, err := treeService.GetPage("complete-legacy-page")
+		page, err := treeService.GetPage(newFixturePageID("complete-legacy-page"))
 		Expect(err).To(Succeed())
 		revisions, err := service.ListPageRevisions(context.Background(), page, "", 10)
 		Expect(err).To(Succeed())

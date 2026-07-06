@@ -13,33 +13,26 @@ import (
 var _ = Describe("page revision listing", Label("integration"), func() {
 	It("paginates page commits and returns the next cursor for the following page", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-a",
+			ID:    newFixturePageID("page-a"),
 			Title: "Page A",
-			Slug:  "page-a",
+			Slug:  newFixtureSlug("page-a"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
 			commits: []gitrevisions.Commit{
-				{Hash: "page-a-change-3", AuthorID: "alice"},
-				{Hash: "page-a-change-2", AuthorID: "alice"},
-				{Hash: "page-a-change-1", AuthorID: "alice"},
+				{Hash: newFixtureCommitHash("page-a-change-3"), AuthorID: newFixtureActorID("alice")},
+				{Hash: newFixtureCommitHash("page-a-change-2"), AuthorID: newFixtureActorID("alice")},
+				{Hash: newFixtureCommitHash("page-a-change-1"), AuthorID: newFixtureActorID("alice")},
 			},
-			filesAt: map[CommitHash]map[string]string{
-				"page-a-change-3": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v3\n",
-				},
-				"page-a-change-2": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v2\n",
-				},
-				"page-a-change-1": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v1\n",
-				},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("page-a-change-3"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v3\n",
+			}, newFixtureCommitHash("page-a-change-2"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v2\n",
+			}, newFixtureCommitHash("page-a-change-1"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v1\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"page-a-change-3": {"page-a.md"},
-				"page-a-change-2": {"page-a.md"},
-				"page-a-change-1": {"page-a.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("page-a-change-3"): {"page-a.md"}, newFixtureCommitHash("page-a-change-2"): {"page-a.md"}, newFixtureCommitHash("page-a-change-1"): {"page-a.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -65,28 +58,23 @@ var _ = Describe("page revision listing", Label("integration"), func() {
 
 	It("omits the next cursor when the final page exactly matches the limit", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-a",
+			ID:    newFixturePageID("page-a"),
 			Title: "Page A",
-			Slug:  "page-a",
+			Slug:  newFixtureSlug("page-a"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
 			commits: []gitrevisions.Commit{
-				{Hash: "page-a-change-2", AuthorID: "alice"},
-				{Hash: "page-a-change-1", AuthorID: "alice"},
+				{Hash: newFixtureCommitHash("page-a-change-2"), AuthorID: newFixtureActorID("alice")},
+				{Hash: newFixtureCommitHash("page-a-change-1"), AuthorID: newFixtureActorID("alice")},
 			},
-			filesAt: map[CommitHash]map[string]string{
-				"page-a-change-2": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v2\n",
-				},
-				"page-a-change-1": {
-					"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v1\n",
-				},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("page-a-change-2"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v2\n",
+			}, newFixtureCommitHash("page-a-change-1"): {
+				"page-a.md": "---\nleafwiki_id: page-a\nleafwiki_title: Page A\n---\n# Page A v1\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"page-a-change-2": {"page-a.md"},
-				"page-a-change-1": {"page-a.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("page-a-change-2"): {"page-a.md"}, newFixtureCommitHash("page-a-change-1"): {"page-a.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -106,28 +94,23 @@ var _ = Describe("page revision listing", Label("integration"), func() {
 
 	It("follows markdown renames by matching historical leafwiki IDs", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-1",
+			ID:    newFixturePageID("page-1"),
 			Title: "New Page",
-			Slug:  "new-page",
+			Slug:  newFixtureSlug("new-page"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
 			commits: []gitrevisions.Commit{
-				{Hash: "new-commit", AuthorID: "alice"},
-				{Hash: "old-commit", AuthorID: "alice"},
+				{Hash: newFixtureCommitHash("new-commit"), AuthorID: newFixtureActorID("alice")},
+				{Hash: newFixtureCommitHash("old-commit"), AuthorID: newFixtureActorID("alice")},
 			},
-			filesAt: map[CommitHash]map[string]string{
-				"new-commit": {
-					"new-page.md": "---\nleafwiki_id: page-1\nleafwiki_title: New Page\n---\n# New Page\n",
-				},
-				"old-commit": {
-					"old-page.md": "---\nleafwiki_id: page-1\nleafwiki_title: Old Page\n---\n# Old Page\n",
-				},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("new-commit"): {
+				"new-page.md": "---\nleafwiki_id: page-1\nleafwiki_title: New Page\n---\n# New Page\n",
+			}, newFixtureCommitHash("old-commit"): {
+				"old-page.md": "---\nleafwiki_id: page-1\nleafwiki_title: Old Page\n---\n# Old Page\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"new-commit": {"new-page.md"},
-				"old-commit": {"old-page.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("new-commit"): {"new-page.md"}, newFixtureCommitHash("old-commit"): {"old-page.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -147,21 +130,18 @@ var _ = Describe("page revision listing", Label("integration"), func() {
 
 	It("matches uppercase markdown extensions by historical leafwiki ID", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-1",
+			ID:    newFixturePageID("page-1"),
 			Title: "Page",
-			Slug:  "page",
+			Slug:  newFixtureSlug("page"),
 			Kind:  tree.NodeKindPage,
 		}}
 		store := &fakeRevisionStore{
-			commits: []gitrevisions.Commit{{Hash: "uppercase-commit", AuthorID: "alice"}},
-			filesAt: map[CommitHash]map[string]string{
-				"uppercase-commit": {
-					"Page.MD": "---\nleafwiki_id: page-1\nleafwiki_title: Page\n---\n# Page\n",
-				},
+			commits: []gitrevisions.Commit{{Hash: newFixtureCommitHash("uppercase-commit"), AuthorID: newFixtureActorID("alice")}},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("uppercase-commit"): {
+				"Page.MD": "---\nleafwiki_id: page-1\nleafwiki_title: Page\n---\n# Page\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"uppercase-commit": {"Page.MD"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("uppercase-commit"): {"Page.MD"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -178,27 +158,24 @@ var _ = Describe("page revision listing", Label("integration"), func() {
 
 	It("matches raw historical paths without metadata through normalized routes", func() {
 		page := &tree.Page{PageNode: &tree.PageNode{
-			ID:    "page-1",
+			ID:    newFixturePageID("page-1"),
 			Title: "Agent Hooks Plan",
-			Slug:  "agent-hooks-plan",
+			Slug:  newFixtureSlug("agent-hooks-plan"),
 			Kind:  tree.NodeKindPage,
 			Parent: &tree.PageNode{
-				ID:    "plans",
-				Slug:  "plans",
+				ID:    newFixturePageID("plans"),
+				Slug:  newFixtureSlug("plans"),
 				Title: "Plans",
 				Kind:  tree.NodeKindSection,
 			},
 		}}
 		store := &fakeRevisionStore{
-			commits: []gitrevisions.Commit{{Hash: "raw-normalized-commit", AuthorID: "alice"}},
-			filesAt: map[CommitHash]map[string]string{
-				"raw-normalized-commit": {
-					"plans/agent_hooks.PLAN.md": "# Agent Hooks Plan\n\nRaw content before writeback.\n",
-				},
+			commits: []gitrevisions.Commit{{Hash: newFixtureCommitHash("raw-normalized-commit"), AuthorID: newFixtureActorID("alice")}},
+			filesAt: map[CommitHash]map[string]string{newFixtureCommitHash("raw-normalized-commit"): {
+				"plans/agent_hooks.PLAN.md": "# Agent Hooks Plan\n\nRaw content before writeback.\n",
 			},
-			changedPaths: map[CommitHash][]string{
-				"raw-normalized-commit": {"plans/agent_hooks.PLAN.md"},
 			},
+			changedPaths: map[CommitHash][]string{newFixtureCommitHash("raw-normalized-commit"): {"plans/agent_hooks.PLAN.md"}},
 		}
 		service, err := NewService(ServiceOptions{
 			Enabled: true,

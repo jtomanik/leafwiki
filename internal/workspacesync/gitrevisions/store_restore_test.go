@@ -105,7 +105,7 @@ var _ = Describe("git revision store", func() {
 			Reason: ReasonExplicit,
 			Source: SourceMCP,
 			Actor: Actor{
-				ID:    ParseActorID("agent-1"),
+				ID:    newFixtureActorID("agent-1"),
 				Name:  "Agent One",
 				Email: "agent-1@example.test",
 			},
@@ -116,7 +116,7 @@ var _ = Describe("git revision store", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commit).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Hash":     Equal(captured.Hash),
-			"AuthorID": Equal(ParseActorID("agent-1")),
+			"AuthorID": Equal(newFixtureActorID("agent-1")),
 			"Source":   Equal(SourceMCP),
 			"Reason":   Equal(ReasonExplicit),
 		}))

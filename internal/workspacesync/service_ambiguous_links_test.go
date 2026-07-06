@@ -57,7 +57,7 @@ leafwiki_title: Sync Section
 		})
 		Expect(err).To(Succeed())
 		Expect(readFileStringGinkgo(sourcePath)).To(ContainSubstring("[Sync](/docs/sync)"))
-		page, err := treeService.GetPage("page-a")
+		page, err := treeService.GetPage(newFixturePageID("page-a"))
 		Expect(err).To(Succeed())
 		Expect(page.RawContent).To(ContainSubstring("[Sync](/docs/sync)"))
 		Expect(status.ValidationErrors).To(SatisfyAll(

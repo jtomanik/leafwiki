@@ -138,21 +138,21 @@ func (i workspacesyncServiceFileInfo) ModTime() time.Time { return time.Time{} }
 func (i workspacesyncServiceFileInfo) IsDir() bool        { return i.mode.IsDir() }
 func (i workspacesyncServiceFileInfo) Sys() any           { return nil }
 
-func workspaceSyncServiceCommit(hash string, paths ...string) *gitrevisions.Commit {
+func workspaceSyncServiceCommit(hash CommitHash, paths ...string) *gitrevisions.Commit {
 	GinkgoHelper()
 	commit := workspaceSyncServiceCommitValue(hash, paths...)
 	return &commit
 }
 
-func workspaceSyncServiceCommitValue(hash string, paths ...string) gitrevisions.Commit {
+func workspaceSyncServiceCommitValue(hash CommitHash, paths ...string) gitrevisions.Commit {
 	GinkgoHelper()
 	return gitrevisions.Commit{
-		Hash:                 CommitHashFromString(hash),
-		BatchID:              "batch-" + hash,
-		Message:              "commit " + hash,
-		AuthorID:             gitrevisions.ParseActorID("author-" + hash),
-		AuthorName:           "Author " + hash,
-		AuthorEmail:          hash + "@example.test",
+		Hash:                 hash,
+		BatchID:              "batch-fixture",
+		Message:              "fixture commit",
+		AuthorID:             newFixtureActorID("author"),
+		AuthorName:           "Author",
+		AuthorEmail:          "author@example.test",
 		CreatedAt:            time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
 		Reason:               ReasonExplicit,
 		Source:               SourceFilesystem,

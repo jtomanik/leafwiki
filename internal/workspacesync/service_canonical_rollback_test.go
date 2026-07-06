@@ -127,7 +127,7 @@ leafwiki_title: Page B
 			RootDir: rootDir,
 			Tree:    treeService,
 			Store: &fakeRevisionStore{
-				capture:        &gitrevisions.Commit{Hash: "initial-commit"},
+				capture:        &gitrevisions.Commit{Hash: newFixtureCommitHash("initial-commit")},
 				captureErr:     captureErr,
 				captureErrCall: 2,
 			},
@@ -145,7 +145,7 @@ leafwiki_title: Page B
 			ContainSubstring("[B](/docs/b)\n"),
 			Not(ContainSubstring("[B](/docs/b.md)")),
 		))
-		page, err := treeService.GetPage("page-a")
+		page, err := treeService.GetPage(newFixturePageID("page-a"))
 		Expect(err).To(Succeed())
 		Expect(page.RawContent).To(SatisfyAll(
 			ContainSubstring("[B](/docs/b)\n"),
@@ -192,7 +192,7 @@ leafwiki_title: Page B
 			DataDir: dataDir,
 			RootDir: rootDir,
 			Tree:    treeService,
-			Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "initial-commit"}},
+			Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("initial-commit")}},
 			AfterSync: func() error {
 				derivedRebuilds++
 				return nil
@@ -211,7 +211,7 @@ leafwiki_title: Page B
 			ContainSubstring("[B](/docs/b)\n"),
 			Not(ContainSubstring("[B](/docs/b.md)")),
 		))
-		page, err := treeService.GetPage("page-a")
+		page, err := treeService.GetPage(newFixturePageID("page-a"))
 		Expect(err).To(Succeed())
 		Expect(page.RawContent).To(SatisfyAll(
 			ContainSubstring("[B](/docs/b)\n"),
@@ -241,7 +241,7 @@ body
 			_ = os.Chmod(rootDir, 0o700)
 		})
 
-		store := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "initial-commit"}}
+		store := &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("initial-commit")}}
 		derivedRebuilds := 0
 		service, err := NewService(ServiceOptions{
 			Enabled: true,
@@ -263,10 +263,10 @@ body
 		})
 
 		Expect(err).To(Succeed())
-		Expect(status.LastError).To(ContainSubstring(filepath.Base(sourcePath)))
+		Expect(status).To(reportWorkspaceSyncLastErrorPath(rootDir, sourcePath))
 		Expect(derivedRebuilds).To(BeZero())
 		Expect(store.captureCalls).To(Equal(1))
-		_, err = treeService.GetPage("legacy-metadata")
+		_, err = treeService.GetPage(newFixturePageID("legacy-metadata"))
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 		Expect(readFileStringGinkgo(sourcePath)).NotTo(HavePrefix("<!-- leafwiki\n"))
 	})
@@ -388,7 +388,7 @@ leafwiki_title: Page A
 		for _, originalLink := range []string{"[Bad Encoding](/docs/%zz)", "[Escape](../../outside.md)"} {
 			Expect(readFileStringGinkgo(sourcePath)).To(ContainSubstring(originalLink))
 		}
-		page, err := treeService.GetPage("page-a")
+		page, err := treeService.GetPage(newFixturePageID("page-a"))
 		Expect(err).To(Succeed())
 		for _, originalLink := range []string{"[Bad Encoding](/docs/%zz)", "[Escape](../../outside.md)"} {
 			Expect(page.RawContent).To(ContainSubstring(originalLink))

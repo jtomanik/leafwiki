@@ -63,7 +63,7 @@ content`)
 		Expect(err).To(Succeed())
 
 		Expect(status.LastCommitHash).NotTo(BeEmpty())
-		page, err := treeService.GetPage("page-new")
+		page, err := treeService.GetPage(newFixturePageID("page-new"))
 		Expect(err).To(Succeed())
 		Expect(page).To(SatisfyAll(
 			HaveField("Title", Equal("New Page")),
@@ -106,7 +106,7 @@ content`)
 		Expect(err).To(Succeed())
 		Expect(status.ValidationErrors).NotTo(testmatchers.HaveValidationIssue(wikivalidation.IssueCodeInvalidSlug))
 
-		page, err := treeService.FindPageByRoutePath("plans/agent-hooks-plan")
+		page, err := treeService.FindPageByRoutePath(newFixtureRoutePath("plans/agent-hooks-plan"))
 		Expect(err).To(Succeed())
 		Expect(page).To(SatisfyAll(
 			HaveField("Title", Equal("Agent Hooks Plan")),
@@ -143,7 +143,7 @@ section content`)
 		Expect(err).To(Succeed())
 		Expect(status.LastCommitHash).NotTo(BeEmpty())
 
-		page, err := treeService.GetPage("section-docs")
+		page, err := treeService.GetPage(newFixturePageID("section-docs"))
 		Expect(err).To(Succeed())
 		Expect(page).To(SatisfyAll(
 			HaveField("Kind", Equal(tree.NodeKindSection)),
@@ -242,7 +242,7 @@ leafwiki_title: Page B
 		raw, err := os.ReadFile(filepath.Join(rootDir, "docs", "a.md"))
 		Expect(err).To(Succeed())
 		Expect(string(raw)).To(ContainSubstring("[B](/docs/b.md)"))
-		page, err := treeService.GetPage("page-a")
+		page, err := treeService.GetPage(newFixturePageID("page-a"))
 		Expect(err).To(Succeed())
 		Expect(page.RawContent).To(ContainSubstring("[B](/docs/b.md)"))
 	})

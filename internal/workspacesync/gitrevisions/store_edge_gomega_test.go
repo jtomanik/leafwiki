@@ -35,7 +35,7 @@ var _ = Describe("git revision edge behavior", func() {
 		Expect(startupCommit.Reason).To(Equal(ReasonStartup))
 		restoreCommit := commitFromObject(&object.Commit{Message: commitMessage(CommitRequest{Reason: ReasonRestore}, "batch-1", nil)})
 		Expect(restoreCommit.Reason).To(Equal(ReasonRestore))
-		Expect(commitActorIDs(CommitRequest{AdditionalActors: []Actor{{}, {ID: "public-editor"}}})).To(Equal([]ActorID{"public-editor"}))
+		Expect(commitActorIDs(CommitRequest{AdditionalActors: []Actor{{}, {ID: newFixtureActorID("public-editor")}}})).To(Equal([]ActorID{newFixtureActorID("public-editor")}))
 
 		restoreRand := setGitRevisionSeam(&gitRevisionRandRead, func([]byte) (int, error) {
 			return 0, errors.New("rand failed")
@@ -48,14 +48,14 @@ var _ = Describe("git revision edge behavior", func() {
 			"Email": Equal("public-editor@leafwiki.local"),
 		})))
 
-		Expect(signature(Actor{ID: "agent-1"})).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		Expect(signature(Actor{ID: newFixtureActorID("agent-1")})).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Name":  Equal("agent-1"),
 			"Email": Equal("agent-1@leafwiki.local"),
 		})))
 
 		title, _, actors := parseCommitMessage("Title\nnot-a-trailer\nOther: value\nLeafWiki-Actor: alice\n")
 		Expect(title).To(Equal("Title"))
-		Expect(actors).To(Equal([]ActorID{"alice"}))
+		Expect(actors).To(Equal([]ActorID{newFixtureActorID("alice")}))
 	})
 
 	It("reports Open validation and dependency failures", Label("unit"), func() {

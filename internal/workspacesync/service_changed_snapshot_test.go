@@ -109,7 +109,7 @@ page:
 			Tree:    fakeTree,
 			Store: &fakeRevisionStore{
 				capture: &gitrevisions.Commit{
-					Hash:                 "abc123",
+					Hash:                 newFixtureCommitHash("abc123"),
 					ChangedMarkdownCount: 2,
 					ChangedMarkdownPaths: []string{"docs/a.md", "docs/b.md"},
 				},
@@ -125,7 +125,7 @@ page:
 		Expect(err).To(Succeed())
 
 		Expect(status).To(SatisfyAll(
-			HaveField("LastCommitHash", Equal(CommitHash("abc123"))),
+			HaveField("LastCommitHash", Equal(newFixtureCommitHash("abc123"))),
 			HaveField("RecentChangedMarkdownPaths", Equal([]string{"docs/a.md", "docs/b.md"})),
 		))
 		Expect(fakeTree.reconstructCount()).To(Equal(1))
@@ -141,7 +141,7 @@ var _ = Describe("workspace sync startup and snapshot listing", Label("integrati
 			Tree:    &fakeTreeReconstructor{},
 			Store: &fakeRevisionStore{
 				capture: &gitrevisions.Commit{
-					Hash:                 "startup-commit",
+					Hash:                 newFixtureCommitHash("startup-commit"),
 					ChangedMarkdownPaths: []string{"docs/a.md"},
 				},
 			},
@@ -172,14 +172,14 @@ var _ = Describe("workspace sync startup and snapshot listing", Label("integrati
 			Tree:    &fakeTreeReconstructor{},
 			Store: &fakeRevisionStore{
 				commits: []gitrevisions.Commit{
-					{Hash: "abc123", ChangedMarkdownCount: 1},
+					{Hash: newFixtureCommitHash("abc123"), ChangedMarkdownCount: 1},
 				},
 				changedPathsErr: errChangedPathTrailerReadFailed,
 			},
 		})
 		Expect(err).To(Succeed())
 
-		_, err = service.ListSnapshotPage(context.Background(), CommitHash(""), 10)
+		_, err = service.ListSnapshotPage(context.Background(), newFixtureCommitHash(""), 10)
 		Expect(err).To(MatchError(errChangedPathTrailerReadFailed))
 	})
 
@@ -189,24 +189,20 @@ var _ = Describe("workspace sync startup and snapshot listing", Label("integrati
 			Tree:    &fakeTreeReconstructor{},
 			Store: &fakeRevisionStore{
 				commits: []gitrevisions.Commit{
-					{Hash: "returned", ChangedMarkdownCount: 1},
-					{Hash: "sentinel", ChangedMarkdownCount: 1},
+					{Hash: newFixtureCommitHash("returned"), ChangedMarkdownCount: 1},
+					{Hash: newFixtureCommitHash("sentinel"), ChangedMarkdownCount: 1},
 				},
-				changedPaths: map[CommitHash][]string{
-					"returned": {"returned.md"},
-				},
-				changedPathsErrByHash: map[CommitHash]error{
-					"sentinel": errors.New("sentinel diff should not be read"),
-				},
+				changedPaths:          map[CommitHash][]string{newFixtureCommitHash("returned"): {"returned.md"}},
+				changedPathsErrByHash: map[CommitHash]error{newFixtureCommitHash("sentinel"): errors.New("sentinel diff should not be read")},
 			},
 		})
 		Expect(err).To(Succeed())
 
-		page, err := service.ListSnapshotPage(context.Background(), CommitHash(""), 1)
+		page, err := service.ListSnapshotPage(context.Background(), newFixtureCommitHash(""), 1)
 		Expect(err).To(Succeed())
 		Expect(page).To(SatisfyAll(
-			HaveField("Snapshots", ConsistOf(HaveField("ID", Equal(CommitHash("returned"))))),
-			HaveField("NextCursor", Equal(CommitHash("returned"))),
+			HaveField("Snapshots", ConsistOf(HaveField("ID", Equal(newFixtureCommitHash("returned"))))),
+			HaveField("NextCursor", Equal(newFixtureCommitHash("returned"))),
 		))
 	})
 })
@@ -214,13 +210,11 @@ var _ = Describe("workspace sync startup and snapshot listing", Label("integrati
 var _ = Describe("workspace sync status under snapshot listing", Label("integration"), func() {
 	It("serves status while changed-path snapshot listing is blocked", func() {
 		store := &fakeRevisionStore{
-			capture: &gitrevisions.Commit{Hash: "sync-commit"},
+			capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("sync-commit")},
 			commits: []gitrevisions.Commit{
-				{Hash: "slow-snapshot", ChangedMarkdownCount: 1},
+				{Hash: newFixtureCommitHash("slow-snapshot"), ChangedMarkdownCount: 1},
 			},
-			changedPaths: map[CommitHash][]string{
-				"slow-snapshot": {"slow.md"},
-			},
+			changedPaths:        map[CommitHash][]string{newFixtureCommitHash("slow-snapshot"): {"slow.md"}},
 			changedPathsStarted: make(chan struct{}),
 			unblockChangedPaths: make(chan struct{}),
 		}
@@ -234,7 +228,7 @@ var _ = Describe("workspace sync status under snapshot listing", Label("integrat
 		changedPathsStarted := store.changedPathsStarted
 		listDone := make(chan error, 1)
 		go func() {
-			_, err := service.ListSnapshotPage(context.Background(), CommitHash(""), 1)
+			_, err := service.ListSnapshotPage(context.Background(), newFixtureCommitHash(""), 1)
 			listDone <- err
 		}()
 		Eventually(changedPathsStarted).Within(time.Second).Should(BeClosed())
@@ -306,7 +300,7 @@ leafwiki_title: Valid Page
 			Enabled: true,
 			RootDir: "/workspace",
 			Tree:    fakeTree,
-			Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: "abc123"}},
+			Store:   &fakeRevisionStore{capture: &gitrevisions.Commit{Hash: newFixtureCommitHash("abc123")}},
 		})
 		Expect(err).To(Succeed())
 
