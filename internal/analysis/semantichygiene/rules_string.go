@@ -205,33 +205,41 @@ func isAllowedSemanticStringConstructorCall(ctx *analysisContext, call *ast.Call
 
 func isAllowedTerminalStringCall(ctx *analysisContext, call *ast.CallExpr) bool {
 	pkgPath, name := calleePackageAndName(ctx, call)
-	switch pkgPath {
-	case "fmt":
-		switch name {
-		case "Errorf", "Fprint", "Fprintf", "Fprintln", "Print", "Printf", "Println":
-			return true
-		default:
-			return false
-		}
-	case "log":
-		switch name {
-		case "Fatal", "Fatalf", "Fatalln", "Panic", "Panicf", "Panicln", "Print", "Printf", "Println":
-			return true
-		default:
-			return false
-		}
-	case "log/slog":
-		switch name {
-		case "Debug", "Error", "Info", "Log", "Warn":
-			return true
-		default:
-			return false
-		}
-	case "net/url":
-		return name == "PathEscape" || name == "QueryEscape"
-	default:
-		return false
-	}
+	return allowedTerminalStringCalls[pkgPath][name]
+}
+
+var allowedTerminalStringCalls = map[string]map[string]bool{
+	"fmt": {
+		"Errorf":   true,
+		"Fprint":   true,
+		"Fprintf":  true,
+		"Fprintln": true,
+		"Print":    true,
+		"Printf":   true,
+		"Println":  true,
+	},
+	"log": {
+		"Fatal":   true,
+		"Fatalf":  true,
+		"Fatalln": true,
+		"Panic":   true,
+		"Panicf":  true,
+		"Panicln": true,
+		"Print":   true,
+		"Printf":  true,
+		"Println": true,
+	},
+	"log/slog": {
+		"Debug": true,
+		"Error": true,
+		"Info":  true,
+		"Log":   true,
+		"Warn":  true,
+	},
+	"net/url": {
+		"PathEscape":  true,
+		"QueryEscape": true,
+	},
 }
 
 func isAllowedExternalSemanticStringBoundary(ctx *analysisContext, call *ast.CallExpr, typeName string) bool {
@@ -252,19 +260,33 @@ func isAllowedTestStringCall(ctx *analysisContext, call *ast.CallExpr) bool {
 		return true
 	}
 	pkgPath, name := calleePackageAndName(ctx, call)
-	switch pkgPath {
-	case "path", "path/filepath", "strings":
+	if allowedTestStringCallPackages[pkgPath] {
 		return true
-	case "net/http", "net/http/httptest":
-		return name == "NewRequest" || name == "NewRequestWithContext"
 	}
-	switch callName(call) {
-	case "append":
+	if allowedHTTPTestStringCalls[pkgPath][name] {
 		return true
-	default:
-		return strings.HasPrefix(callName(call), "assert") ||
-			strings.HasPrefix(callName(call), "require")
 	}
+	name = callName(call)
+	return name == "append" ||
+		strings.HasPrefix(name, "assert") ||
+		strings.HasPrefix(name, "require")
+}
+
+var allowedTestStringCallPackages = map[string]bool{
+	"path":          true,
+	"path/filepath": true,
+	"strings":       true,
+}
+
+var allowedHTTPTestStringCalls = map[string]map[string]bool{
+	"net/http": {
+		"NewRequest":            true,
+		"NewRequestWithContext": true,
+	},
+	"net/http/httptest": {
+		"NewRequest":            true,
+		"NewRequestWithContext": true,
+	},
 }
 
 func isAllowedTestAssertionCall(call *ast.CallExpr) bool {
@@ -282,31 +304,35 @@ func isAllowedTestAssertionCall(call *ast.CallExpr) bool {
 
 func isAllowedTerminalCallBoundary(ctx *analysisContext, call *ast.CallExpr) bool {
 	for current := ctx.parent(call); current != nil; current = ctx.parent(current) {
-		switch n := current.(type) {
-		case *ast.ParenExpr:
+		if terminalCallBoundarySkips(current) {
 			continue
-		case *ast.BinaryExpr:
-			if n.Op == token.ADD {
-				continue
-			}
-			return false
-		case *ast.ReturnStmt, *ast.ExprStmt:
-			return true
-		case *ast.AssignStmt, *ast.ValueSpec:
-			return !isStringType(ctx.pass, call)
-		case *ast.KeyValueExpr:
-			return inJSONCompositeLiteral(ctx, call) ||
-				isAllowedPersistenceRowKeyValue(ctx, call) ||
-				isAllowedAdapterStringKeyValue(ctx, call)
-		case *ast.CallExpr:
-			return false
-		case *ast.FuncDecl:
-			return false
-		default:
-			return false
 		}
+		return terminalCallBoundaryAccepts(ctx, call, current)
 	}
 	return false
+}
+
+func terminalCallBoundarySkips(node ast.Node) bool {
+	if _, ok := node.(*ast.ParenExpr); ok {
+		return true
+	}
+	binary, ok := node.(*ast.BinaryExpr)
+	return ok && binary.Op == token.ADD
+}
+
+func terminalCallBoundaryAccepts(ctx *analysisContext, call *ast.CallExpr, node ast.Node) bool {
+	switch node.(type) {
+	case *ast.ReturnStmt, *ast.ExprStmt:
+		return true
+	case *ast.AssignStmt, *ast.ValueSpec:
+		return !isStringType(ctx.pass, call)
+	case *ast.KeyValueExpr:
+		return inJSONCompositeLiteral(ctx, call) ||
+			isAllowedPersistenceRowKeyValue(ctx, call) ||
+			isAllowedAdapterStringKeyValue(ctx, call)
+	default:
+		return false
+	}
 }
 
 func isAllowedSemanticConstructorTransform(ctx *analysisContext, call *ast.CallExpr, sourceTypeName string) bool {

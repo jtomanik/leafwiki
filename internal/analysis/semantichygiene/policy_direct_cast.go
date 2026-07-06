@@ -248,15 +248,18 @@ func isAllowedStructFieldFile(filename string) bool {
 }
 
 func isTestFixtureStructName(name string) bool {
-	canonical := canonicalName(name)
-	return strings.Contains(canonical, "fixture") ||
-		strings.Contains(canonical, "stub") ||
-		strings.Contains(canonical, "mock") ||
-		strings.Contains(canonical, "fake") ||
-		strings.Contains(canonical, "wire") ||
-		strings.Contains(canonical, "dto") ||
-		strings.Contains(canonical, "request") ||
-		strings.Contains(canonical, "response")
+	return containsAnyCanonical(canonicalName(name), testFixtureStructNameFragments)
+}
+
+var testFixtureStructNameFragments = []string{
+	"dto",
+	"fake",
+	"fixture",
+	"mock",
+	"request",
+	"response",
+	"stub",
+	"wire",
 }
 
 func isDTOTypeName(name string) bool {

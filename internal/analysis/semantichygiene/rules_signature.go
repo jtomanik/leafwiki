@@ -66,22 +66,29 @@ func checkTestHelperSignature(ctx *analysisContext, fn *ast.FuncDecl) {
 		if !isRawStringCarrier(ctx.pass.TypesInfo.TypeOf(field.Type)) {
 			continue
 		}
-		for _, name := range field.Names {
-			if name == nil {
-				continue
-			}
-			if semanticType, ok := semanticTypeForTestHelperParamName(name.Name, fn.Name.Name); ok {
-				ctx.report(ruleSemanticRawSignature, name, testHelperSemanticParameterDiagnostic(fn.Name.Name, name.Name, semanticType))
-				continue
-			}
-			if testHelperMessageParamName(name.Name, fn.Name.Name) {
-				ctx.report(ruleI18nMessageParameter, name, testHelperMessageParameterDiagnostic(fn.Name.Name, name.Name))
-				continue
-			}
-			if testHelperFieldParamName(name.Name, fn.Name.Name) {
-				ctx.report(ruleSemanticRawField, name, testHelperFieldParameterDiagnostic(fn.Name.Name, name.Name))
-			}
+		checkTestHelperStringFieldSignature(ctx, fn, field)
+	}
+}
+
+func checkTestHelperStringFieldSignature(ctx *analysisContext, fn *ast.FuncDecl, field *ast.Field) {
+	for _, name := range field.Names {
+		if name != nil {
+			checkTestHelperStringNameSignature(ctx, fn.Name.Name, name)
 		}
+	}
+}
+
+func checkTestHelperStringNameSignature(ctx *analysisContext, funcName string, name *ast.Ident) {
+	if semanticType, ok := semanticTypeForTestHelperParamName(name.Name, funcName); ok {
+		ctx.report(ruleSemanticRawSignature, name, testHelperSemanticParameterDiagnostic(funcName, name.Name, semanticType))
+		return
+	}
+	if testHelperMessageParamName(name.Name, funcName) {
+		ctx.report(ruleI18nMessageParameter, name, testHelperMessageParameterDiagnostic(funcName, name.Name))
+		return
+	}
+	if testHelperFieldParamName(name.Name, funcName) {
+		ctx.report(ruleSemanticRawField, name, testHelperFieldParameterDiagnostic(funcName, name.Name))
 	}
 }
 

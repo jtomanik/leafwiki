@@ -32,28 +32,11 @@ func isTestAssertionMatcherContractContext(ctx *analysisContext, matcher *ast.Ca
 	if matcherCallHasStructuredProtocolKey(matcher) {
 		return true
 	}
-	for current := ctx.parent(matcher); current != nil; current = ctx.parent(current) {
-		call, ok := current.(*ast.CallExpr)
-		if !ok {
-			if _, ok := current.(*ast.FuncDecl); ok {
-				return false
-			}
-			continue
-		}
-		if !isGomegaAssertionMethod(callName(call)) {
-			continue
-		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		expectCall, ok := selector.X.(*ast.CallExpr)
-		if !ok || !isGomegaExpectCall(callName(expectCall)) || len(expectCall.Args) == 0 {
-			return false
-		}
-		return exprSuggestsTestContract(expectCall.Args[0])
+	subject, ok := gomegaExpectationSubjectForMatcher(ctx, matcher)
+	if !ok {
+		return false
 	}
-	return false
+	return exprSuggestsTestContract(subject)
 }
 
 func isTestAssertionMatcherLocalizedProseContext(ctx *analysisContext, matcher *ast.CallExpr) bool {
@@ -63,52 +46,56 @@ func isTestAssertionMatcherLocalizedProseContext(ctx *analysisContext, matcher *
 	if matcherCallHasRenderedProseProtocolKey(matcher) {
 		return true
 	}
+	subject, ok := gomegaExpectationSubjectForMatcher(ctx, matcher)
+	if !ok {
+		return false
+	}
+	return exprSuggestsTestRenderedProseContract(subject)
+}
+
+func gomegaExpectationSubjectForMatcher(ctx *analysisContext, matcher *ast.CallExpr) (ast.Expr, bool) {
 	for current := ctx.parent(matcher); current != nil; current = ctx.parent(current) {
 		call, ok := current.(*ast.CallExpr)
 		if !ok {
 			if _, ok := current.(*ast.FuncDecl); ok {
-				return false
+				return nil, false
 			}
 			continue
 		}
-		if !isGomegaAssertionMethod(callName(call)) {
-			continue
+		if isGomegaAssertionMethod(callName(call)) {
+			return gomegaAssertionSubject(call)
 		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		expectCall, ok := selector.X.(*ast.CallExpr)
-		if !ok || !isGomegaExpectCall(callName(expectCall)) || len(expectCall.Args) == 0 {
-			return false
-		}
-		return exprSuggestsTestRenderedProseContract(expectCall.Args[0])
 	}
-	return false
+	return nil, false
+}
+
+func gomegaAssertionSubject(call *ast.CallExpr) (ast.Expr, bool) {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+	expectCall, ok := selector.X.(*ast.CallExpr)
+	if !ok || !isGomegaExpectCall(callName(expectCall)) || len(expectCall.Args) == 0 {
+		return nil, false
+	}
+	return expectCall.Args[0], true
 }
 
 func matcherCallHasStructuredProtocolKey(call *ast.CallExpr) bool {
-	if !isMatcherNamed(call, "HaveKeyWithValue") || len(call.Args) == 0 {
-		return false
-	}
-	key, ok := stringArgValue(call.Args[0])
+	key, ok := matcherCallProtocolKey(call)
 	return ok && structuredProtocolKeyName(key)
 }
 
 func matcherCallHasRenderedProseProtocolKey(call *ast.CallExpr) bool {
+	key, ok := matcherCallProtocolKey(call)
+	return ok && canonicalMatchesAny(canonicalName(key), renderedProseProtocolKeys)
+}
+
+func matcherCallProtocolKey(call *ast.CallExpr) (string, bool) {
 	if !isMatcherNamed(call, "HaveKeyWithValue") || len(call.Args) == 0 {
-		return false
+		return "", false
 	}
-	key, ok := stringArgValue(call.Args[0])
-	if !ok {
-		return false
-	}
-	switch canonicalName(key) {
-	case "error", "message":
-		return true
-	default:
-		return false
-	}
+	return stringArgValue(call.Args[0])
 }
 
 func stringArgValue(expr ast.Expr) (string, bool) {
@@ -142,25 +129,14 @@ func isGomegaExpectCall(name string) bool {
 }
 
 func exprSuggestsTestContract(expr ast.Expr) bool {
-	found := false
-	ast.Inspect(expr, func(node ast.Node) bool {
-		if found || node == nil {
-			return false
-		}
-		switch n := node.(type) {
-		case *ast.Ident:
-			found = nameSuggestsTestSubjectContract(n.Name)
-		case *ast.SelectorExpr:
-			found = nameSuggestsTestSubjectContract(n.Sel.Name)
-		case *ast.CallExpr:
-			found = nameSuggestsTestSubjectContract(callName(n))
-		}
-		return !found
-	})
-	return found
+	return exprHasNameMatching(expr, nameSuggestsTestSubjectContract)
 }
 
 func exprSuggestsTestRenderedProseContract(expr ast.Expr) bool {
+	return exprHasNameMatching(expr, nameSuggestsTestRenderedProseSubject)
+}
+
+func exprHasNameMatching(expr ast.Expr, match func(string) bool) bool {
 	found := false
 	ast.Inspect(expr, func(node ast.Node) bool {
 		if found || node == nil {
@@ -168,11 +144,11 @@ func exprSuggestsTestRenderedProseContract(expr ast.Expr) bool {
 		}
 		switch n := node.(type) {
 		case *ast.Ident:
-			found = nameSuggestsTestRenderedProseSubject(n.Name)
+			found = match(n.Name)
 		case *ast.SelectorExpr:
-			found = nameSuggestsTestRenderedProseSubject(n.Sel.Name)
+			found = match(n.Sel.Name)
 		case *ast.CallExpr:
-			found = nameSuggestsTestRenderedProseSubject(callName(n))
+			found = match(callName(n))
 		}
 		return !found
 	})
@@ -184,14 +160,7 @@ func nameSuggestsTestSubjectContract(name string) bool {
 	if strings.Contains(canonical, "diagnostic") {
 		return false
 	}
-	return canonical == "body" ||
-		strings.Contains(canonical, "code") ||
-		strings.Contains(canonical, "error") ||
-		strings.Contains(canonical, "message") ||
-		strings.Contains(canonical, "messageid") ||
-		strings.Contains(canonical, "toolid") ||
-		strings.Contains(canonical, "issue") ||
-		strings.Contains(canonical, "validation")
+	return canonical == "body" || containsAnyCanonical(canonical, testSubjectContractFragments)
 }
 
 func nameSuggestsTestRenderedProseSubject(name string) bool {
@@ -199,23 +168,9 @@ func nameSuggestsTestRenderedProseSubject(name string) bool {
 	if strings.Contains(canonical, "diagnostic") {
 		return false
 	}
-	if identifierHasWord(name, "err") {
-		return true
-	}
-	return canonical == "err" ||
-		canonical == "error" ||
-		canonical == "logs" ||
-		canonical == "message" ||
-		canonical == "output" ||
-		identifierHasWord(name, "log") ||
-		identifierHasWord(name, "logs") ||
-		identifierHasWord(name, "panic") ||
-		identifierHasWord(name, "fatal") ||
-		strings.Contains(canonical, "error") ||
-		strings.Contains(canonical, "message") ||
-		strings.Contains(canonical, "output") ||
-		strings.Contains(canonical, "stderr") ||
-		strings.Contains(canonical, "stdout")
+	return canonicalMatchesAny(canonical, testRenderedProseExactNames) ||
+		identifierHasAnyWord(name, testRenderedProseWords) ||
+		containsAnyCanonical(canonical, testRenderedProseFragments)
 }
 
 func isTestContractAssertionCall(ctx *analysisContext, call *ast.CallExpr) bool {
@@ -234,15 +189,7 @@ func isTestSemanticAssertionHelper(name string) bool {
 }
 
 func nameSuggestsTestContract(name string) bool {
-	canonical := canonicalName(name)
-	return strings.Contains(canonical, "structured") ||
-		strings.Contains(canonical, "localized") ||
-		strings.Contains(canonical, "error") ||
-		strings.Contains(canonical, "message") ||
-		strings.Contains(canonical, "code") ||
-		strings.Contains(canonical, "validation") ||
-		strings.Contains(canonical, "issue") ||
-		strings.Contains(canonical, "tool")
+	return containsAnyCanonical(canonicalName(name), testContractFragments)
 }
 
 func semanticTypeForTestHelperParamName(paramName string, funcName string) (string, bool) {
@@ -257,19 +204,23 @@ func semanticTypeForTestHelperParamName(paramName string, funcName string) (stri
 	switch {
 	case strings.Contains(canonicalParam, "messageid"):
 		return "MessageID", true
-	case strings.Contains(canonicalParam, "toolid") || strings.Contains(canonicalParam, "toolname"):
+	case containsAnyCanonical(canonicalParam, toolParamFragments):
 		return "ToolID", true
 	case strings.Contains(canonicalParam, "code"):
-		switch {
-		case strings.Contains(canonicalFunc, "field"):
-			return "FieldErrorCode", true
-		case strings.Contains(canonicalFunc, "issue") || strings.Contains(canonicalFunc, "validationissue"):
-			return "IssueCode", true
-		default:
-			return "ErrorCode", true
-		}
+		return semanticCodeTypeForTestHelperFunction(canonicalFunc), true
 	default:
 		return "", false
+	}
+}
+
+func semanticCodeTypeForTestHelperFunction(canonicalFunc string) string {
+	switch {
+	case strings.Contains(canonicalFunc, "field"):
+		return "FieldErrorCode"
+	case containsAnyCanonical(canonicalFunc, issueCodeFunctionFragments):
+		return "IssueCode"
+	default:
+		return "ErrorCode"
 	}
 }
 
@@ -290,21 +241,12 @@ func testHelperMessageParamName(paramName string, funcName string) bool {
 	canonicalParam := canonicalName(paramName)
 	canonicalFunc := canonicalName(funcName)
 	if canonicalParam == "message" {
-		return strings.Contains(canonicalFunc, "structured") ||
-			strings.Contains(canonicalFunc, "localized") ||
-			strings.Contains(canonicalFunc, "error")
+		return containsAnyCanonical(canonicalFunc, testHelperMessageFunctionFragments)
 	}
 	if !isRenderedOutputParamName(canonicalParam) {
 		return false
 	}
-	return strings.Contains(canonicalFunc, "structured") ||
-		strings.Contains(canonicalFunc, "localized") ||
-		strings.Contains(canonicalFunc, "error") ||
-		strings.Contains(canonicalFunc, "fatal") ||
-		strings.Contains(canonicalFunc, "message") ||
-		strings.Contains(canonicalFunc, "output") ||
-		strings.Contains(canonicalFunc, "stderr") ||
-		strings.Contains(canonicalFunc, "stdout")
+	return containsAnyCanonical(canonicalFunc, testHelperRenderedOutputFunctionFragments)
 }
 
 func isRenderedOutputParamName(canonicalParam string) bool {
@@ -320,10 +262,7 @@ func testHelperFieldParamName(paramName string, funcName string) bool {
 	if canonicalName(paramName) != "field" {
 		return false
 	}
-	canonicalFunc := canonicalName(funcName)
-	return strings.Contains(canonicalFunc, "field") ||
-		strings.Contains(canonicalFunc, "validation") ||
-		strings.Contains(canonicalFunc, "error")
+	return containsAnyCanonical(canonicalName(funcName), testHelperFieldFunctionFragments)
 }
 
 func testTableParamSuggestsContract(paramName string) bool {
@@ -340,8 +279,113 @@ func testTableParamSuggestsRenderedProseContract(paramName string) bool {
 	if strings.Contains(canonical, "diagnostic") {
 		return false
 	}
-	return strings.Contains(canonical, "error") ||
-		strings.Contains(canonical, "message") ||
-		strings.Contains(canonical, "stderr") ||
-		strings.Contains(canonical, "stdout")
+	return containsAnyCanonical(canonical, testTableRenderedProseFragments)
+}
+
+func canonicalMatchesAny(canonical string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if canonical == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func identifierHasAnyWord(name string, words []string) bool {
+	for _, word := range words {
+		if identifierHasWord(name, word) {
+			return true
+		}
+	}
+	return false
+}
+
+var renderedProseProtocolKeys = []string{
+	"error",
+	"message",
+}
+
+var testSubjectContractFragments = []string{
+	"code",
+	"error",
+	"issue",
+	"message",
+	"messageid",
+	"toolid",
+	"validation",
+}
+
+var testRenderedProseExactNames = []string{
+	"err",
+	"error",
+	"logs",
+	"message",
+	"output",
+}
+
+var testRenderedProseWords = []string{
+	"err",
+	"fatal",
+	"log",
+	"logs",
+	"panic",
+}
+
+var testRenderedProseFragments = []string{
+	"error",
+	"message",
+	"output",
+	"stderr",
+	"stdout",
+}
+
+var testContractFragments = []string{
+	"code",
+	"error",
+	"issue",
+	"localized",
+	"message",
+	"structured",
+	"tool",
+	"validation",
+}
+
+var toolParamFragments = []string{
+	"toolid",
+	"toolname",
+}
+
+var issueCodeFunctionFragments = []string{
+	"issue",
+	"validationissue",
+}
+
+var testHelperMessageFunctionFragments = []string{
+	"error",
+	"localized",
+	"structured",
+}
+
+var testHelperRenderedOutputFunctionFragments = []string{
+	"error",
+	"fatal",
+	"localized",
+	"message",
+	"output",
+	"stderr",
+	"stdout",
+	"structured",
+}
+
+var testHelperFieldFunctionFragments = []string{
+	"error",
+	"field",
+	"validation",
+}
+
+var testTableRenderedProseFragments = []string{
+	"error",
+	"message",
+	"stderr",
+	"stdout",
 }

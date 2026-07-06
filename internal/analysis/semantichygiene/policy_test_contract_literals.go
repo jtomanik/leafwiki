@@ -146,17 +146,9 @@ func nameSuggestsRuntimeRoleHealth(name string) bool {
 }
 
 func isTestAssertionLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
-	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
-		switch n := current.(type) {
-		case *ast.CallExpr:
-			if isGomegaAssertionMethod(callName(n)) {
-				return true
-			}
-		case *ast.FuncDecl:
-			return false
-		}
-	}
-	return false
+	return literalHasAncestorCallBeforeFunc(ctx, lit, func(call *ast.CallExpr) bool {
+		return isGomegaAssertionMethod(callName(call))
+	})
 }
 
 func isTestTrailerIndexLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
@@ -192,31 +184,19 @@ func isTestContractLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool 
 }
 
 func isTestStringMatcherLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
-	for current := ast.Node(lit); current != nil; current = ctx.parent(current) {
-		switch n := current.(type) {
-		case *ast.CallExpr:
-			if isTestAssertionMatcherCall(callName(n)) && callContainsArg(n, lit) {
-				return matcherEventuallyUsedByTestAssertionOrHelper(ctx, n)
-			}
-		case *ast.FuncDecl:
-			return false
-		}
-	}
-	return false
+	return literalHasAncestorCallBeforeFunc(ctx, lit, func(call *ast.CallExpr) bool {
+		return isTestAssertionMatcherCall(callName(call)) &&
+			callContainsArg(call, lit) &&
+			matcherEventuallyUsedByTestAssertionOrHelper(ctx, call)
+	})
 }
 
 func matcherEventuallyUsedByTestAssertionOrHelper(ctx *analysisContext, matcher *ast.CallExpr) bool {
-	for current := ctx.parent(matcher); current != nil; current = ctx.parent(current) {
-		switch n := current.(type) {
-		case *ast.CallExpr:
-			if isGomegaAssertionMethod(callName(n)) {
-				return true
-			}
-		case *ast.FuncDecl:
-			return isTestSemanticAssertionHelper(n.Name.Name)
-		}
-	}
-	return false
+	return callHasAncestorOrFunc(ctx, matcher, func(call *ast.CallExpr) bool {
+		return isGomegaAssertionMethod(callName(call))
+	}, func(fn *ast.FuncDecl) bool {
+		return isTestSemanticAssertionHelper(fn.Name.Name)
+	})
 }
 
 func isTestLocalizedProseContractLiteralContext(ctx *analysisContext, lit *ast.BasicLit) bool {
@@ -272,17 +252,7 @@ func directArgIndex(call *ast.CallExpr, lit *ast.BasicLit) (int, bool) {
 }
 
 func isBDDContractDataLiteral(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) bool {
-	if !isBDDEntryCall(callName(call)) {
-		return false
-	}
-	if keyName, ok := bddEntryDataKeyName(ctx, call, lit); ok {
-		return testTableParamSuggestsContract(keyName)
-	}
-	index, ok := bddEntryDataArgIndex(ctx, call, lit)
-	if !ok || index == 0 {
-		return false
-	}
-	paramName, ok := bddEntryTableParamName(ctx, call, index-1)
+	paramName, ok := bddEntryDataParamName(ctx, call, lit)
 	if !ok {
 		return false
 	}
@@ -290,21 +260,25 @@ func isBDDContractDataLiteral(ctx *analysisContext, call *ast.CallExpr, lit *ast
 }
 
 func isBDDRenderedProseDataLiteral(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) bool {
-	if !isBDDEntryCall(callName(call)) {
-		return false
-	}
-	if keyName, ok := bddEntryDataKeyName(ctx, call, lit); ok {
-		return testTableParamSuggestsRenderedProseContract(keyName)
-	}
-	index, ok := bddEntryDataArgIndex(ctx, call, lit)
-	if !ok || index == 0 {
-		return false
-	}
-	paramName, ok := bddEntryTableParamName(ctx, call, index-1)
+	paramName, ok := bddEntryDataParamName(ctx, call, lit)
 	if !ok {
 		return false
 	}
 	return testTableParamSuggestsRenderedProseContract(paramName)
+}
+
+func bddEntryDataParamName(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) (string, bool) {
+	if !isBDDEntryCall(callName(call)) {
+		return "", false
+	}
+	if keyName, ok := bddEntryDataKeyName(ctx, call, lit); ok {
+		return keyName, true
+	}
+	index, ok := bddEntryDataArgIndex(ctx, call, lit)
+	if !ok || index == 0 {
+		return "", false
+	}
+	return bddEntryTableParamName(ctx, call, index-1)
 }
 
 func bddEntryDataKeyName(ctx *analysisContext, call *ast.CallExpr, lit *ast.BasicLit) (string, bool) {
@@ -348,6 +322,35 @@ func directChildWithin(ctx *analysisContext, node ast.Node, parent ast.Node) ast
 		current = next
 	}
 	return nil
+}
+
+func literalHasAncestorCallBeforeFunc(ctx *analysisContext, lit *ast.BasicLit, accept func(*ast.CallExpr) bool) bool {
+	return callHasAncestorBeforeFunc(ctx, lit, accept)
+}
+
+func callHasAncestorBeforeFunc(ctx *analysisContext, node ast.Node, accept func(*ast.CallExpr) bool) bool {
+	return callHasAncestorOrFunc(ctx, node, accept, func(*ast.FuncDecl) bool {
+		return false
+	})
+}
+
+func callHasAncestorOrFunc(
+	ctx *analysisContext,
+	node ast.Node,
+	acceptCall func(*ast.CallExpr) bool,
+	acceptFunc func(*ast.FuncDecl) bool,
+) bool {
+	for current := ast.Node(node); current != nil; current = ctx.parent(current) {
+		switch n := current.(type) {
+		case *ast.CallExpr:
+			if acceptCall(n) {
+				return true
+			}
+		case *ast.FuncDecl:
+			return acceptFunc(n)
+		}
+	}
+	return false
 }
 
 func isBDDEntryCall(name string) bool {
