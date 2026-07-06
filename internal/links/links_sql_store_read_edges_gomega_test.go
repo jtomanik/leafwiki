@@ -58,28 +58,28 @@ var _ = Describe("links SQL store persistence edge behavior", func() {
 		Expect(outgoing).To(ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"ToPageID": BeEmpty(),
 		})))
-		broken, err := nullRowsStore.GetBrokenIncomingForPathAndKind("/docs/target", tree.NodeKindPage)
+		broken, err := nullRowsStore.GetBrokenIncomingForPathAndKind(newFixtureRoutePath("/docs/target"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(broken).To(ContainElement(matchBacklink(gstruct.Fields{
 			"ToPageID": BeEmpty(),
 		})))
 
 		validBrokenStore := newAdditionalLinksStore()
-		Expect(validBrokenStore.AddLinks("broken-source", "Broken Source", []TargetLink{{
-			TargetPageID:   "target-page",
+		Expect(validBrokenStore.AddLinks(newFixturePageID("broken-source"), "Broken Source", []TargetLink{{
+			TargetPageID:   newFixturePageID("target-page"),
 			TargetPagePath: "/docs/target",
 			TargetKind:     TargetKindPage,
 			Broken:         true,
 		}})).To(Succeed())
-		broken, err = validBrokenStore.GetBrokenIncomingForPathAndKind("/docs/target", tree.NodeKindPage)
+		broken, err = validBrokenStore.GetBrokenIncomingForPathAndKind(newFixtureRoutePath("/docs/target"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(broken).To(ConsistOf(matchBacklink(gstruct.Fields{
 			"ToPageID": Equal(newFixturePageID("target-page")),
 		})))
 
 		statusTree := newLoadedLinksTreeService()
-		sourcePage := createLoadedLinksPage(statusTree, "Source", "source", "")
-		targetPage := createLoadedLinksPage(statusTree, "Target", "target", "")
+		sourcePage := createLoadedLinksPage(statusTree, "Source", newFixtureSlug("source"), "")
+		targetPage := createLoadedLinksPage(statusTree, "Target", newFixtureSlug("target"), "")
 		Expect(store.AddLinks(sourcePage.ID, sourcePage.Title, []TargetLink{{
 			TargetPageID:   targetPage.ID,
 			TargetPagePath: targetPage.CalculateRoutePath().WikiPath(),
@@ -101,7 +101,7 @@ var _ = Describe("links SQL store persistence edge behavior", func() {
 				return &linksScriptedRows{}, nil
 			},
 		})
-		_, err = NewLinkService("", nil, statusStore).GetLinkStatusForPage("source-page", "/docs/source")
+		_, err = NewLinkService("", nil, statusStore).GetLinkStatusForPage(newFixturePageID("source-page"), newFixtureRoutePath("/docs/source"))
 		Expect(err).To(MatchError(brokenErr))
 
 		outgoingErr := errors.New("outgoing failed")
@@ -113,7 +113,7 @@ var _ = Describe("links SQL store persistence edge behavior", func() {
 				return &linksScriptedRows{}, nil
 			},
 		})
-		_, err = NewLinkService("", nil, statusStore).GetLinkStatusForPage("source-page", "/docs/source")
+		_, err = NewLinkService("", nil, statusStore).GetLinkStatusForPage(newFixturePageID("source-page"), newFixtureRoutePath("/docs/source"))
 		Expect(err).To(MatchError(outgoingErr))
 	})
 })

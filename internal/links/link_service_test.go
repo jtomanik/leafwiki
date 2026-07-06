@@ -98,7 +98,7 @@ var _ = ginkgo.Describe("link service refactor matches", ginkgo.Label("integrati
 		})).To(Succeed())
 
 		service := NewLinkService(linksTempDir(), nil, store)
-		matches, err := service.GetRefactorMatchesForPrefixAndKind(tree.RoutePath("docs/guide"), tree.NodeKindSection)
+		matches, err := service.GetRefactorMatchesForPrefixAndKind(newFixtureRoutePath("docs/guide"), tree.NodeKindSection)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(matches).To(HaveLen(2))
 	})

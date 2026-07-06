@@ -13,9 +13,9 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("keeps query strings and fragments attached to rewritten destinations", ginkgo.Label("unit"), func() {
 		content := `[Link](/docs/b?mode=1#intro)`
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/guides/b",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/guides/b"),
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -25,9 +25,9 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("rewrites destinations containing parentheses without corrupting them", ginkgo.Label("unit"), func() {
 		content := `[Draft](./page_(draft))`
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
-			OldPath: "/docs/page_(draft)",
-			NewPath: "/guides/page_(draft)",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/page_(draft)"),
+			NewPath: newFixtureRoutePath("/guides/page_(draft)"),
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -37,9 +37,9 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("changes only the link destination segment when labels and titles contain punctuation", ginkgo.Label("unit"), func() {
 		content := `[Label with (parens)](/docs/b "Title")`
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/guides/b",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/guides/b"),
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -53,12 +53,12 @@ var _ = ginkgo.Describe("markdown refactor path-change rewriting", ginkgo.Label(
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
 			content,
-			"/test-link-refactoring/seite-b",
-			"/patrick/techtalk/seite-b",
+			newFixtureRoutePath("/test-link-refactoring/seite-b"),
+			newFixtureRoutePath("/patrick/techtalk/seite-b"),
 			[]RewriteRule{
 				{
-					OldPath: "/test-link-refactoring/seite-b",
-					NewPath: "/patrick/techtalk/seite-b",
+					OldPath: newFixtureRoutePath("/test-link-refactoring/seite-b"),
+					NewPath: newFixtureRoutePath("/patrick/techtalk/seite-b"),
 				},
 			},
 		)
@@ -72,8 +72,8 @@ var _ = ginkgo.Describe("markdown refactor path-change rewriting", ginkgo.Label(
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
 			content,
-			"/docs/a/current",
-			"/archive/a/current",
+			newFixtureRoutePath("/docs/a/current"),
+			newFixtureRoutePath("/archive/a/current"),
 			nil,
 		)
 
@@ -86,12 +86,12 @@ var _ = ginkgo.Describe("markdown refactor path-change rewriting", ginkgo.Label(
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
 			content,
-			"/docs/a",
-			"/guides/a",
+			newFixtureRoutePath("/docs/a"),
+			newFixtureRoutePath("/guides/a"),
 			[]RewriteRule{
 				{
-					OldPath: "/docs/a",
-					NewPath: "/guides/a",
+					OldPath: newFixtureRoutePath("/docs/a"),
+					NewPath: newFixtureRoutePath("/guides/a"),
 				},
 			},
 		)
@@ -106,12 +106,12 @@ var _ = ginkgo.Describe("markdown refactor path-change rewriting", ginkgo.Label(
 
 		result := NewMarkdownRefactorEngine().RewriteRelativeLinksForPathChange(
 			content,
-			"/docs/a/current",
-			"/archive/a/current",
+			newFixtureRoutePath("/docs/a/current"),
+			newFixtureRoutePath("/archive/a/current"),
 			[]RewriteRule{
 				{
-					OldPath: "/docs/a",
-					NewPath: "/archive/a",
+					OldPath: newFixtureRoutePath("/docs/a"),
+					NewPath: newFixtureRoutePath("/archive/a"),
 				},
 			},
 		)

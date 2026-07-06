@@ -115,7 +115,7 @@ func productionErrorCodeMessageIDs(repoRoot string) []string {
 				return err
 			}
 			for _, match := range re.FindAllStringSubmatch(string(raw), -1) {
-				ids[messageIDForErrorCode(match[1])] = struct{}{}
+				ids[messageIDForExtractedCatalogLiteral(match[1])] = struct{}{}
 			}
 			return nil
 		})
@@ -128,10 +128,10 @@ func productionErrorCodeMessageIDs(repoRoot string) []string {
 	return out
 }
 
-func messageIDForErrorCode(code string) string {
-	head, tail, ok := strings.Cut(strings.TrimSpace(code), "_")
+func messageIDForExtractedCatalogLiteral(raw string) string {
+	head, tail, ok := strings.Cut(strings.TrimSpace(raw), "_")
 	if !ok || strings.TrimSpace(tail) == "" {
-		return "errors." + code
+		return "errors." + raw
 	}
 	return "errors." + head + "." + tail
 }

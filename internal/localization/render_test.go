@@ -39,30 +39,28 @@ var _ = Describe("English renderer", Label("unit"), func() {
 	It("renders catalog messages with positional arguments", func() {
 		rendered := English.Render("errors.page.version_conflict", "fallback", "docs.md", "README.md")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
-			"Message": SatisfyAll(
+		Expect(rendered).To(matchRenderedLocalizationMessage(
+			SatisfyAll(
 				ContainSubstring("docs.md"),
 				ContainSubstring("README.md"),
 			),
-			"Err": Not(HaveOccurred()),
-		}))
+			Not(HaveOccurred()),
+		))
 	})
 
 	It("renders the fallback template and marks missing catalog entries", func() {
 		rendered := English.Render("errors.test.missing", missingCatalogFallbackTemplate, "value")
 
-		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
-			"Message": Equal(missingCatalogFallbackRendered),
-		}))
+		Expect(rendered).To(matchMissingLocalizationMessage(Equal(missingCatalogFallbackRendered)))
 	})
 
 	It("uses the fallback template when catalog data cannot render safely", func() {
 		rendered := English.Render(messageIDPageVersionConflict, safeFallbackTemplate, "page.md")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
-			"Message": Equal(safeFallbackRendered),
-			"Err":     matchTemplateDataMismatch(messageIDPageVersionConflict),
-		}))
+		Expect(rendered).To(matchRenderedLocalizationMessage(
+			Equal(safeFallbackRendered),
+			matchTemplateDataMismatch(messageIDPageVersionConflict),
+		))
 	})
 
 	It("rejects duplicate message IDs with conflicting English defaults", func() {
@@ -131,10 +129,7 @@ var _ = Describe("localization fallback and catalog validation contracts", Label
 
 		rendered := renderer.Render(MessageIDCLIHelpUsage, genericFallbackTemplate, "value")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
-			"Message": Equal(genericFallbackRendered),
-			"Err":     Not(HaveOccurred()),
-		}))
+		Expect(rendered).To(matchRenderedLocalizationMessage(Equal(genericFallbackRendered), Not(HaveOccurred())))
 	})
 
 	It("nil renderer reports missing catalog IDs", func() {
@@ -146,44 +141,31 @@ var _ = Describe("localization fallback and catalog validation contracts", Label
 	It("empty message IDs use the fallback message", func() {
 		rendered := English.Render("", genericFallbackTemplate, "value")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
-			"Message": Equal(genericFallbackRendered),
-			"Err":     Not(HaveOccurred()),
-		}))
+		Expect(rendered).To(matchRenderedLocalizationMessage(Equal(genericFallbackRendered), Not(HaveOccurred())))
 	})
 
 	It("message IDs implementing String render through catalog lookup", func() {
 		rendered := English.Render(stringMessageID(MessageIDCLIHelpUsage), "fallback")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
-			"Message": Not(Equal("fallback")),
-			"Err":     Not(HaveOccurred()),
-		}))
+		Expect(rendered).To(matchRenderedLocalizationMessage(Not(Equal("fallback")), Not(HaveOccurred())))
 	})
 
 	It("non-string message IDs are stringified before fallback rendering", func() {
 		rendered := English.Render(123, genericFallbackTemplate, "value")
 
-		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
-			"Message": Equal(genericFallbackRendered),
-			"Err":     matchMissingCatalogMessage(fmt.Sprint(123)),
-		}))
+		Expect(rendered).To(matchMissingLocalizationMessage(Equal(genericFallbackRendered), matchMissingCatalogMessage(fmt.Sprint(123))))
 	})
 
 	It("fallback rendering returns literal default when template is invalid", func() {
 		rendered := English.Render("errors.test.missing", invalidFallbackTemplate)
 
-		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
-			"Message": Equal(invalidFallbackTemplate),
-		}))
+		Expect(rendered).To(matchMissingLocalizationMessage(Equal(invalidFallbackTemplate)))
 	})
 
 	It("fallback rendering returns literal default when arguments are missing", func() {
 		rendered := English.Render("errors.test.missing", missingArgumentFallbackTemplate, "value")
 
-		Expect(rendered).To(matchMissingRenderResult(gstruct.Fields{
-			"Message": Equal(missingArgumentFallbackTemplate),
-		}))
+		Expect(rendered).To(matchMissingLocalizationMessage(Equal(missingArgumentFallbackTemplate)))
 	})
 
 	It("rejects registry definitions without a message ID", func() {
@@ -213,10 +195,7 @@ var _ = Describe("localization fallback and catalog validation contracts", Label
 
 		rendered := renderer.Render(MessageIDCLIHelpUsage, "fallback")
 
-		Expect(rendered).To(matchRenderResult(gstruct.Fields{
-			"Message": Not(Equal("fallback")),
-			"Err":     Not(HaveOccurred()),
-		}))
+		Expect(rendered).To(matchRenderedLocalizationMessage(Not(Equal("fallback")), Not(HaveOccurred())))
 	})
 
 	It("Definitions include derived error and shell run messages", func() {
@@ -389,6 +368,14 @@ func matchRenderResult(fields gstruct.Fields) types.GomegaMatcher {
 	}).WithMessage("resolve a localization message")
 }
 
+func matchRenderedLocalizationMessage(message types.GomegaMatcher, errMatcher types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	return matchRenderResult(gstruct.Fields{
+		"Message": message,
+		"Err":     errMatcher,
+	})
+}
+
 func matchMissingRenderResult(fields gstruct.Fields) types.GomegaMatcher {
 	GinkgoHelper()
 	return gcustom.MakeMatcher(func(result Result) (bool, error) {
@@ -397,6 +384,15 @@ func matchMissingRenderResult(fields gstruct.Fields) types.GomegaMatcher {
 		}
 		return gstruct.MatchFields(gstruct.IgnoreExtras, fields).Match(result)
 	}).WithMessage("fall back for a missing localization message")
+}
+
+func matchMissingLocalizationMessage(message types.GomegaMatcher, errMatchers ...types.GomegaMatcher) types.GomegaMatcher {
+	GinkgoHelper()
+	fields := gstruct.Fields{"Message": message}
+	if len(errMatchers) > 0 {
+		fields["Err"] = errMatchers[0]
+	}
+	return matchMissingRenderResult(fields)
 }
 
 func missCatalogMessage(id string) types.GomegaMatcher {

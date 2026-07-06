@@ -21,18 +21,28 @@ func newFixtureUserID[T ~string](raw T) tree.UserID {
 	return tree.NewUserIDUnchecked(string(raw))
 }
 
-func matchResolvedTargetLink(pageID tree.PageID, targetPath string) types.GomegaMatcher {
+func newFixtureRoutePath[T ~string](raw T) tree.RoutePath {
+	return tree.RoutePathFromString(raw)
+}
+
+func newFixtureMarkdownPath[T ~string](raw T) tree.MarkdownPath {
+	return tree.MarkdownPathFromString(raw)
+}
+
+var emptyFixtureTargetKind TargetKind
+
+func matchResolvedTargetLink(pageID tree.PageID, targetPath tree.RoutePath) types.GomegaMatcher {
 	return gomega.WithTransform(targetLinkObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"TargetPageID":   gomega.Equal(pageID),
-		"TargetPagePath": gomega.Equal(targetPath),
+		"TargetPagePath": gomega.Equal(targetPath.WikiPath()),
 		"State":          gomega.Equal(linkResolutionResolved),
 	}))
 }
 
-func matchBrokenTargetLink(targetPath string) types.GomegaMatcher {
+func matchBrokenTargetLink(targetPath tree.RoutePath) types.GomegaMatcher {
 	return gomega.WithTransform(targetLinkObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"TargetPageID":   gomega.Equal(tree.PageID("")),
-		"TargetPagePath": gomega.Equal(targetPath),
+		"TargetPageID":   gomega.Equal(newFixturePageID("")),
+		"TargetPagePath": gomega.Equal(targetPath.WikiPath()),
 		"State":          gomega.Equal(linkResolutionBroken),
 	}))
 }
@@ -88,7 +98,7 @@ func matchResolvedOutgoingResultItem(fromPageID tree.PageID, toPageID tree.PageI
 func matchBrokenOutgoingResultItem(fromPageID tree.PageID, targetPath tree.RoutePath) types.GomegaMatcher {
 	return gomega.WithTransform(outgoingResultObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"FromPageID": gomega.Equal(fromPageID),
-		"ToPageID":   gomega.Equal(tree.PageID("")),
+		"ToPageID":   gomega.Equal(newFixturePageID("")),
 		"ToPath":     gomega.Equal(targetPath),
 		"State":      gomega.Equal(linkResolutionBroken),
 	}))
@@ -137,7 +147,7 @@ func matchBacklinkResultItemFromKind(fromKind tree.NodeKind) types.GomegaMatcher
 func matchBrokenBacklink(fromPageID tree.PageID) types.GomegaMatcher {
 	return gomega.WithTransform(backlinkObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"FromPageID": gomega.Equal(fromPageID),
-		"ToPageID":   gomega.Equal(tree.PageID("")),
+		"ToPageID":   gomega.Equal(newFixturePageID("")),
 		"FromTitle":  gomega.Not(gomega.BeEmpty()),
 		"State":      gomega.Equal(linkResolutionBroken),
 	}))

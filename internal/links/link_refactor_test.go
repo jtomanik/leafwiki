@@ -22,9 +22,9 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 ![Image](/docs/b.png)
 `
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/guides/b",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/guides/b"),
 		}})
 
 		Expect(result.Count()).To(Equal(3))
@@ -40,9 +40,9 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("keeps canonical page markdown extensions on absolute and relative rewritten links", ginkgo.Label("unit"), func() {
 		content := "[Absolute](/docs/b.md)\n[Relative](./b.md)"
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/guides/b",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/guides/b"),
 		}})
 
 		Expect(result.Count()).To(Equal(2))
@@ -57,10 +57,10 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 
 		result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
 			MarkdownLinkRootPrefix: "/docs",
-		}).Rewrite(content, "/sync/source", []RewriteRule{{
-			OldPath: "/sync/old",
-			NewPath: "/sync/new",
-			Kind:    "page",
+		}).Rewrite(content, newFixtureRoutePath("/sync/source"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/sync/old"),
+			NewPath: newFixtureRoutePath("/sync/new"),
+			Kind:    TargetKindPage,
 		}})
 
 		Expect(result.Count()).To(Equal(2))
@@ -75,10 +75,10 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 
 		result := NewMarkdownRefactorEngineWithOptions(MarkdownRefactorOptions{
 			MarkdownLinkRootPrefix: "/docs",
-		}).Rewrite(content, "/sync/source", []RewriteRule{{
-			OldPath: "/sync/old",
-			NewPath: "/sync/new",
-			Kind:    "page",
+		}).Rewrite(content, newFixtureRoutePath("/sync/source"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/sync/old"),
+			NewPath: newFixtureRoutePath("/sync/new"),
+			Kind:    TargetKindPage,
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -88,10 +88,10 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("preserves explicit dot-slash style for same-directory page links", ginkgo.Label("unit"), func() {
 		content := "[Relative](./b.md)"
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/docs/c",
-			Kind:    "page",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/docs/c"),
+			Kind:    TargetKindPage,
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -101,10 +101,10 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("rewrites canonical page links without healing legacy extensionless page links", ginkgo.Label("unit"), func() {
 		content := "[Target](/target)\n[Canonical](/target.md)"
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/source", []RewriteRule{{
-			OldPath: "/target",
-			NewPath: "/renamed-target",
-			Kind:    "page",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/source"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/target"),
+			NewPath: newFixtureRoutePath("/renamed-target"),
+			Kind:    TargetKindPage,
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -117,10 +117,10 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("ignores link-like text separated from a destination by whitespace", ginkgo.Label("unit"), func() {
 		content := "[Space] (/docs/b.md)\n[Newline]\n(/docs/b.md)\n[Canonical](/docs/b.md)"
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/docs/c",
-			Kind:    "page",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/source"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/docs/c"),
+			Kind:    TargetKindPage,
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -134,16 +134,16 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("rewrites only the real destination when title text looks like a link", ginkgo.Label("unit"), func() {
 		content := `[Outer](/docs/a.md "[Inner](/docs/b.md)")`
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/source"), []RewriteRule{
 			{
-				OldPath: "/docs/a",
-				NewPath: "/docs/renamed-a",
-				Kind:    "page",
+				OldPath: newFixtureRoutePath("/docs/a"),
+				NewPath: newFixtureRoutePath("/docs/renamed-a"),
+				Kind:    TargetKindPage,
 			},
 			{
-				OldPath: "/docs/b",
-				NewPath: "/docs/renamed-b",
-				Kind:    "page",
+				OldPath: newFixtureRoutePath("/docs/b"),
+				NewPath: newFixtureRoutePath("/docs/renamed-b"),
+				Kind:    TargetKindPage,
 			},
 		})
 
@@ -154,10 +154,10 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("does not cross-rewrite a same-basename section link during a page refactor", ginkgo.Label("unit"), func() {
 		content := "[Page](/docs/sync.md)\n[Section](/docs/sync)"
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
-			OldPath: "/docs/sync",
-			NewPath: "/docs/sync-page",
-			Kind:    "page",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/source"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/sync"),
+			NewPath: newFixtureRoutePath("/docs/sync-page"),
+			Kind:    TargetKindPage,
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -170,11 +170,11 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 	ginkgo.It("rewrites only the exact healed target for legacy page override rules", ginkgo.Label("unit"), func() {
 		content := "[Sync page](/docs/sync)\n[Sync child](/docs/sync/child.md)"
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/source", []RewriteRule{{
-			OldPath:    "/docs/sync",
-			NewPath:    "/docs/sync-page",
-			Kind:       "section",
-			OutputKind: "page",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/source"), []RewriteRule{{
+			OldPath:    newFixtureRoutePath("/docs/sync"),
+			NewPath:    newFixtureRoutePath("/docs/sync-page"),
+			Kind:       TargetKindSection,
+			OutputKind: TargetKindPage,
 		}})
 
 		Expect(result.Content).To(Equal("[Sync page](/docs/sync-page.md)\n[Sync child](/docs/sync/child.md)"))
@@ -187,9 +187,9 @@ var _ = ginkgo.Describe("markdown refactor destination rewriting", ginkgo.Label(
 [Wiki](/docs/b)
 `
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/guides/b",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/guides/b"),
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -205,9 +205,9 @@ var _ = ginkgo.Describe("markdown refactor relative path semantics", ginkgo.Labe
 	ginkgo.It("uses source-file directory semantics for moved section links", ginkgo.Label("unit"), func() {
 		content := "[Section](../b)"
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/current", []RewriteRule{{
-			OldPath: "/docs/b",
-			NewPath: "/guides/b",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a/current"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/b"),
+			NewPath: newFixtureRoutePath("/guides/b"),
 		}})
 
 		Expect(result.Count()).To(Equal(1))
@@ -217,9 +217,9 @@ var _ = ginkgo.Describe("markdown refactor relative path semantics", ginkgo.Labe
 	ginkgo.It("recalculates relative links against the moved source path", ginkgo.Label("unit"), func() {
 		content := `[Relative](../shared)`
 
-		result := NewMarkdownRefactorEngine().Rewrite(content, "/docs/a/page", []RewriteRule{{
-			OldPath: "/docs",
-			NewPath: "/archive/docs",
+		result := NewMarkdownRefactorEngine().Rewrite(content, newFixtureRoutePath("/docs/a/page"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs"),
+			NewPath: newFixtureRoutePath("/archive/docs"),
 		}})
 
 		Expect(result.Count()).To(Equal(1))

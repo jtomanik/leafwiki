@@ -11,11 +11,11 @@ var _ = ginkgo.Describe("broken incoming link filtering", ginkgo.Label("integrat
 	ginkgo.It("returns only broken links for the requested path", func() {
 		svc, ts, store := setupLinkService()
 
-		aIDPtr, err := ts.CreateNode("system", nil, "Page A", "a", pageNodeKind())
+		aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page A", newFixtureSlug("a"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
-		bIDPtr, err := ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
+		bIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page B", newFixtureSlug("b"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageBID := *bIDPtr
 
@@ -34,13 +34,13 @@ var _ = ginkgo.Describe("broken incoming link filtering", ginkgo.Label("integrat
 		Expect(svc.IndexAllPages()).To(Succeed())
 
 		// Test: Should only return broken links for "/missing1"
-		broken1, err := store.GetBrokenIncomingForPath("/missing1")
+		broken1, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/missing1"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(broken1).To(ConsistOf(matchBrokenBacklink(pageAID)))
 
 		// Test: Should only return broken links for "/missing2"
-		broken2, err := store.GetBrokenIncomingForPath("/missing2")
+		broken2, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/missing2"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(broken2).To(ConsistOf(matchBrokenBacklink(pageBID)))
@@ -52,11 +52,11 @@ var _ = ginkgo.Describe("broken incoming link queries without matching links", g
 	ginkgo.It("returns empty results for healthy and unused paths", func() {
 		svc, ts, store := setupLinkService()
 
-		aIDPtr, err := ts.CreateNode("system", nil, "Page A", "a", pageNodeKind())
+		aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page A", newFixtureSlug("a"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
-		_, err = ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
+		_, err = ts.CreateNode(newFixtureUserID("system"), nil, "Page B", newFixtureSlug("b"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 
 		// Page A links to existing Page B (not broken)
@@ -68,13 +68,13 @@ var _ = ginkgo.Describe("broken incoming link queries without matching links", g
 		Expect(svc.IndexAllPages()).To(Succeed())
 
 		// Test: Should return empty for "/b" since the link is not broken
-		brokenLinks, err := store.GetBrokenIncomingForPath("/b")
+		brokenLinks, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/b"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(brokenLinks).To(HaveLen(0))
 
 		// Test: Should return empty for a path that has no links at all
-		noLinks, err := store.GetBrokenIncomingForPath("/never-linked")
+		noLinks, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/never-linked"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(noLinks).To(HaveLen(0))
@@ -87,13 +87,13 @@ var _ = ginkgo.Describe("broken incoming link ordering", ginkgo.Label("integrati
 		svc, ts, store := setupLinkService()
 
 		// Create three pages with titles that should be ordered alphabetically
-		zIDPtr, err := ts.CreateNode("system", nil, "Zebra Page", "z", pageNodeKind())
+		zIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Zebra Page", newFixtureSlug("z"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 
-		aIDPtr, err := ts.CreateNode("system", nil, "Alpha Page", "a", pageNodeKind())
+		aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Alpha Page", newFixtureSlug("a"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 
-		mIDPtr, err := ts.CreateNode("system", nil, "Middle Page", "m", pageNodeKind())
+		mIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Middle Page", newFixtureSlug("m"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 
 		// All three pages link to the same non-existent page
@@ -108,7 +108,7 @@ var _ = ginkgo.Describe("broken incoming link ordering", ginkgo.Label("integrati
 		Expect(svc.IndexAllPages()).To(Succeed())
 
 		// Test: Results should be ordered by from_title ASC
-		brokenLinks, err := store.GetBrokenIncomingForPath("/missing")
+		brokenLinks, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/missing"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(brokenLinks).To(HaveExactElements(
@@ -125,7 +125,7 @@ var _ = ginkgo.Describe("broken incoming link healing", ginkgo.Label("integratio
 		svc, ts, store := setupLinkService()
 
 		// Create Page A that links to a non-existent page
-		aIDPtr, err := ts.CreateNode("system", nil, "Page A", "a", pageNodeKind())
+		aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page A", newFixtureSlug("a"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
@@ -138,12 +138,12 @@ var _ = ginkgo.Describe("broken incoming link healing", ginkgo.Label("integratio
 		Expect(svc.IndexAllPages()).To(Succeed())
 
 		// Verify the broken link exists
-		brokenBefore, err := store.GetBrokenIncomingForPath("/b")
+		brokenBefore, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/b"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(brokenBefore).To(HaveLen(1))
 
 		// Now create Page B - this should heal the link
-		bIDPtr, err := ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
+		bIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page B", newFixtureSlug("b"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageBID := *bIDPtr
 
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("broken incoming link healing", ginkgo.Label("integratio
 		Expect(svc.HealLinksForExactPath(pageB)).To(Succeed())
 
 		// Verify the link is no longer broken
-		brokenAfter, err := store.GetBrokenIncomingForPath("/b")
+		brokenAfter, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/b"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(brokenAfter).To(HaveLen(0))
 
@@ -172,7 +172,7 @@ var _ = ginkgo.Describe("extensionless link healing", ginkgo.Label("integration"
 	ginkgo.It("homes extensionless links to matching sections instead of page twins", func() {
 		svc, ts, _ := setupLinkService()
 
-		sourceIDPtr, err := ts.CreateNode("system", nil, "Source", "source", pageNodeKind())
+		sourceIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Source", newFixtureSlug("source"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		sourceID := *sourceIDPtr
 		source, err := ts.GetPage(sourceID)
@@ -187,7 +187,7 @@ var _ = ginkgo.Describe("extensionless link healing", ginkgo.Label("integration"
 		Expect(err).NotTo(HaveOccurred())
 		Expect(initialStatus.Counts).To(matchLinkStatusCounts(0, 0, 0, 1))
 
-		pageIDPtr, err := ts.CreateNode("system", nil, "X Page", "x", pageNodeKind())
+		pageIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "X Page", newFixtureSlug("x"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageTarget, err := ts.GetPage(*pageIDPtr)
 		Expect(err).NotTo(HaveOccurred())
@@ -199,7 +199,7 @@ var _ = ginkgo.Describe("extensionless link healing", ginkgo.Label("integration"
 		Expect(err).NotTo(HaveOccurred())
 		Expect(statusAfterPageHeal.Counts).To(matchLinkStatusCounts(0, 0, 0, 1))
 
-		sectionIDPtr, err := ts.CreateNode("system", nil, "X Section", "x", sectionNodeKind())
+		sectionIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "X Section", newFixtureSlug("x"), sectionNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		sectionTarget, err := ts.GetPage(*sectionIDPtr)
 		Expect(err).NotTo(HaveOccurred())

@@ -14,11 +14,11 @@ var _ = ginkgo.Describe("batch link updates and healing", ginkgo.Label("integrat
 	ginkgo.It("updates and heals multiple source pages in one pass", func() {
 		svc, ts, _ := setupLinkService()
 
-		aIDPtr, err := ts.CreateNode("system", nil, "Page A", "a", pageNodeKind())
+		aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page A", newFixtureSlug("a"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
-		cIDPtr, err := ts.CreateNode("system", nil, "Page C", "c", pageNodeKind())
+		cIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page C", newFixtureSlug("c"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageCID := *cIDPtr
 
@@ -34,12 +34,12 @@ var _ = ginkgo.Describe("batch link updates and healing", ginkgo.Label("integrat
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		bIDPtr, err := ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
+		bIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page B", newFixtureSlug("b"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageB, err := ts.GetPage(*bIDPtr)
 		Expect(err).NotTo(HaveOccurred())
 
-		dIDPtr, err := ts.CreateNode("system", nil, "Page D", "d", pageNodeKind())
+		dIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page D", newFixtureSlug("d"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageD, err := ts.GetPage(*dIDPtr)
 		Expect(err).NotTo(HaveOccurred())
@@ -49,13 +49,13 @@ var _ = ginkgo.Describe("batch link updates and healing", ginkgo.Label("integrat
 		outA, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outA).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(pageAID, pageB.ID, tree.RoutePath("/b")),
+			matchResolvedOutgoingResultItem(pageAID, pageB.ID, newFixtureRoutePath("/b")),
 		))
 
 		outC, err := svc.GetOutgoingLinksForPage(pageCID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outC).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(pageCID, pageD.ID, tree.RoutePath("/d")),
+			matchResolvedOutgoingResultItem(pageCID, pageD.ID, newFixtureRoutePath("/d")),
 		))
 
 	})
@@ -65,7 +65,7 @@ var _ = ginkgo.Describe("batch healing for extensionless links", ginkgo.Label("i
 	ginkgo.It("leaves extensionless links broken until a matching section exists", func() {
 		svc, ts, _ := setupLinkService()
 
-		sourceIDPtr, err := ts.CreateNode("system", nil, "Source", "source", pageNodeKind())
+		sourceIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Source", newFixtureSlug("source"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		source, err := ts.GetPage(*sourceIDPtr)
 		Expect(err).NotTo(HaveOccurred())
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("batch healing for extensionless links", ginkgo.Label("i
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		pageIDPtr, err := ts.CreateNode("system", nil, "Target", "target", pageNodeKind())
+		pageIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Target", newFixtureSlug("target"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageTarget, err := ts.GetPage(*pageIDPtr)
 		Expect(err).NotTo(HaveOccurred())
@@ -86,10 +86,10 @@ var _ = ginkgo.Describe("batch healing for extensionless links", ginkgo.Label("i
 		outAfterPage, err := svc.GetOutgoingLinksForPage(source.ID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outAfterPage).To(matchOutgoingResult(1,
-			matchBrokenOutgoingResultItem(source.ID, tree.RoutePath("/target")),
+			matchBrokenOutgoingResultItem(source.ID, newFixtureRoutePath("/target")),
 		))
 
-		sectionIDPtr, err := ts.CreateNode("system", nil, "Target Section", "target", sectionNodeKind())
+		sectionIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Target Section", newFixtureSlug("target"), sectionNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		sectionTarget, err := ts.GetPage(*sectionIDPtr)
 		Expect(err).NotTo(HaveOccurred())
@@ -132,14 +132,14 @@ leafwiki_title: Target
 		store, err := NewLinksStore(dataDir)
 		Expect(err).NotTo(HaveOccurred())
 		svc := NewLinkService(dataDir, ts, store)
-		sourceA, err := ts.GetPage("source-a")
+		sourceA, err := ts.GetPage(newFixturePageID("source-a"))
 		Expect(err).NotTo(HaveOccurred())
-		sourceB, err := ts.GetPage("source-b")
+		sourceB, err := ts.GetPage(newFixturePageID("source-b"))
 		Expect(err).NotTo(HaveOccurred())
 		calls := countMarkdownRootIndexBuilds(markdownlinks.NewIndex([]markdownlinks.Entry{
-			{Kind: markdownlinks.EntryKindPage, Path: "source-a.md"},
-			{Kind: markdownlinks.EntryKindPage, Path: "source-b.md"},
-			{Kind: markdownlinks.EntryKindPage, Path: "target.md"},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("source-a.md")},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("source-b.md")},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("target.md")},
 		}))
 
 		Expect(svc.UpdateLinksAndHealForPages([]*tree.Page{sourceA, sourceB})).To(Succeed())
@@ -204,21 +204,21 @@ leafwiki_title: New Target
 		Expect(err).NotTo(HaveOccurred())
 		svc := NewLinkService(dataDir, ts, store)
 		Expect(svc.IndexAllPages()).To(Succeed())
-		sourceA, err := ts.GetPage("source-a")
+		sourceA, err := ts.GetPage(newFixturePageID("source-a"))
 		Expect(err).NotTo(HaveOccurred())
-		sourceB, err := ts.GetPage("source-b")
+		sourceB, err := ts.GetPage(newFixturePageID("source-b"))
 		Expect(err).NotTo(HaveOccurred())
 		calls := countMarkdownRootIndexBuilds(markdownlinks.NewIndex([]markdownlinks.Entry{
-			{Kind: markdownlinks.EntryKindPage, Path: "source-a.md"},
-			{Kind: markdownlinks.EntryKindPage, Path: "source-b.md"},
-			{Kind: markdownlinks.EntryKindPage, Path: "old-target.md"},
-			{Kind: markdownlinks.EntryKindPage, Path: "new-target.md"},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("source-a.md")},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("source-b.md")},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("old-target.md")},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("new-target.md")},
 		}))
 
 		Expect(svc.UpdateRewrittenLinksAndHealForPages([]*tree.Page{sourceA, sourceB}, []RewriteRule{{
-			OldPath: "/old-target",
-			NewPath: "/new-target",
-			Kind:    "page",
+			OldPath: newFixtureRoutePath("/old-target"),
+			NewPath: newFixtureRoutePath("/new-target"),
+			Kind:    TargetKindPage,
 		}})).To(Succeed())
 
 		Expect(*calls).To(Equal(1))
@@ -250,11 +250,11 @@ var _ = ginkgo.Describe("source page reindexing during batch healing", ginkgo.La
 	ginkgo.It("moves backlinks from old targets to new targets after source content changes", func() {
 		svc, ts, _ := setupLinkService()
 
-		sourceIDPtr, err := ts.CreateNode("system", nil, "Source", "source", pageNodeKind())
+		sourceIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Source", newFixtureSlug("source"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		sourceID := *sourceIDPtr
 
-		oldTargetIDPtr, err := ts.CreateNode("system", nil, "Old Target", "old-target", pageNodeKind())
+		oldTargetIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Old Target", newFixtureSlug("old-target"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		oldTargetID := *oldTargetIDPtr
 
@@ -265,7 +265,7 @@ var _ = ginkgo.Describe("source page reindexing during batch healing", ginkgo.La
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
-		newTargetIDPtr, err := ts.CreateNode("system", nil, "New Target", "new-target", pageNodeKind())
+		newTargetIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "New Target", newFixtureSlug("new-target"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		newTargetID := *newTargetIDPtr
 

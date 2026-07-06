@@ -16,7 +16,7 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
-var _ = Describe("branding service edge cases", func() {
+var _ = Describe("branding service boundary behavior", func() {
 	It("accepts a trimmed site name at the maximum length", Label("integration"), func() {
 		svc, dir := newTestBrandingService()
 		exactName := strings.Repeat("x", 100)

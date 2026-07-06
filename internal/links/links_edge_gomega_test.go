@@ -66,11 +66,11 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		service := NewLinkService("", nil, store)
 		Expect(seedAdditionalLinks(store)).To(Succeed())
 
-		matches, err := service.GetRefactorMatchesForPrefix("/docs/topic")
+		matches, err := service.GetRefactorMatchesForPrefix(newFixtureRoutePath("/docs/topic"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(matches).To(HaveLen(3))
 
-		sourceIDs, err := service.GetRefactorSourcePageIDsForPrefix("/docs/topic")
+		sourceIDs, err := service.GetRefactorSourcePageIDsForPrefix(newFixtureRoutePath("/docs/topic"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sourceIDs).To(ConsistOf(
 			newFixturePageID("source-page"),
@@ -79,7 +79,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		))
 
 		Expect(service.MarkIncomingLinksBrokenForPage(newFixturePageID("target-page"))).To(Succeed())
-		brokenPage, err := store.GetBrokenIncomingForPathAndKind("/docs/topic", tree.NodeKindPage)
+		brokenPage, err := store.GetBrokenIncomingForPathAndKind(newFixtureRoutePath("/docs/topic"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(brokenPage).To(ConsistOf(matchBrokenStoredBacklink(newFixturePageID("source-page"))))
 
@@ -92,13 +92,13 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 			TargetKindPage,
 		)))
 
-		Expect(service.MarkLinksBrokenForPath("docs/topic")).To(Succeed())
-		allBroken, err := store.GetBrokenIncomingForPath("/docs/topic")
+		Expect(service.MarkLinksBrokenForPath(newFixtureRoutePath("docs/topic"))).To(Succeed())
+		allBroken, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/docs/topic"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(allBroken).To(HaveLen(2))
 
 		Expect(service.MarkLinksBrokenForPrefix("docs/topic")).To(Succeed())
-		descendant, err := store.GetBrokenIncomingForPath("/docs/topic/child")
+		descendant, err := store.GetBrokenIncomingForPath(newFixtureRoutePath("/docs/topic/child"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(descendant).To(HaveLen(1))
 	})
@@ -138,9 +138,9 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenLink), "docs/page.md")).To(Equal(TargetKindPage))
 		Expect(unresolvedStoredTargetKind(markdownlinksResolution(markdownlinks.IssueCodeBrokenLink), "docs/unknown")).To(Equal(unknownStoredTargetKind))
 
-		Expect(storedTargetMarkdownHref("/", defaultStoredTargetKind)).To(Equal("/"))
-		Expect(storedTargetMarkdownHref("/docs/page.md", defaultStoredTargetKind)).To(Equal("/docs/page.md"))
-		Expect(storedTargetMarkdownHref("/docs/section", sectionStoredTargetKind)).To(Equal("/docs/section"))
+		Expect(storedTargetMarkdownHref(newFixtureRoutePath("/"), defaultStoredTargetKind)).To(Equal("/"))
+		Expect(storedTargetMarkdownHref(newFixtureRoutePath("/docs/page.md"), defaultStoredTargetKind)).To(Equal("/docs/page.md"))
+		Expect(storedTargetMarkdownHref(newFixtureRoutePath("/docs/section"), sectionStoredTargetKind)).To(Equal("/docs/section"))
 
 		Expect(relativeWikiLinkPath("/docs/source", "/docs/target")).To(Equal("../target"))
 		Expect(relativeWikiLinkPath("/docs/source", "/other/target")).To(Equal("../../other/target"))
@@ -148,9 +148,9 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(splitWikiPathSegments("/docs/topic")).To(Equal([]string{"docs", "topic"}))
 		Expect(splitWikiPathSegments("/")).To(BeNil())
 
-		Expect(relativeMarkdownFileLinkPath("/docs/source", "/docs/target")).To(Equal("target.md"))
-		Expect(relativeMarkdownDestinationForSource("/docs/source", MarkdownSourceKindSection, "/docs/source", false)).To(Equal("."))
-		Expect(sourceMarkdownFileForKind("/docs/source", MarkdownSourceKindSection).FilesystemPath()).To(Equal(filepath.ToSlash("docs/source/index.md")))
+		Expect(relativeMarkdownFileLinkPath(newFixtureRoutePath("/docs/source"), newFixtureRoutePath("/docs/target"))).To(Equal("target.md"))
+		Expect(relativeMarkdownDestinationForSource(newFixtureRoutePath("/docs/source"), MarkdownSourceKindSection, newFixtureRoutePath("/docs/source"), false)).To(Equal("."))
+		Expect(sourceMarkdownFileForKind(newFixtureRoutePath("/docs/source"), MarkdownSourceKindSection).FilesystemPath()).To(Equal(filepath.ToSlash("docs/source/index.md")))
 	})
 
 	It("deduplicates rewrite warnings and reports rewrite-rule application results", Label("unit"), func() {
@@ -164,24 +164,24 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 			{Message: "different"},
 		}))
 
-		Expect(applyRewriteRulesResult("/docs/old", []RewriteRule{{
-			OldPath: "/docs/old",
-			NewPath: "/docs/new",
-		}})).To(matchAppliedRewriteRule(tree.RoutePathFromString("/docs/new").Clean()))
+		Expect(applyRewriteRulesResult(newFixtureRoutePath("/docs/old"), []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/old"),
+			NewPath: newFixtureRoutePath("/docs/new"),
+		}})).To(matchAppliedRewriteRule(newFixtureRoutePath("/docs/new").Clean()))
 
-		Expect(applyRewriteRulesForKindResult("/docs/old/child", TargetKindPage, []RewriteRule{{
-			OldPath: "/docs/old",
-			NewPath: "/docs/new",
+		Expect(applyRewriteRulesForKindResult(newFixtureRoutePath("/docs/old/child"), TargetKindPage, []RewriteRule{{
+			OldPath: newFixtureRoutePath("/docs/old"),
+			NewPath: newFixtureRoutePath("/docs/new"),
 			Kind:    TargetKindPage,
 		}})).To(matchUnappliedRewriteRule())
 
-		Expect(applyRewriteRulesForKindResult("/docs/old/child", TargetKindPage, []RewriteRule{{
-			OldPath:    "/docs/old",
-			NewPath:    "/docs/new",
+		Expect(applyRewriteRulesForKindResult(newFixtureRoutePath("/docs/old/child"), TargetKindPage, []RewriteRule{{
+			OldPath:    newFixtureRoutePath("/docs/old"),
+			NewPath:    newFixtureRoutePath("/docs/new"),
 			OutputKind: TargetKindPage,
 		}})).To(matchUnappliedRewriteRule())
 
-		Expect(rewriteRuleKindEligibilityFor(RewriteRule{Kind: TargetKindPage}, "")).To(Equal(rewriteRuleKindRejected))
+		Expect(rewriteRuleKindEligibilityFor(RewriteRule{Kind: TargetKindPage}, emptyFixtureTargetKind)).To(Equal(rewriteRuleKindRejected))
 	})
 
 	It("uses the in-memory markdown index fallback for loaded trees", Label("integration"), func() {
@@ -206,25 +206,25 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		root.Children[0].Children[0].Parent = root.Children[0]
 
 		index := markdownLinkIndexFromLoadedTree(root)
-		resolved := index.Resolve("docs/index.md", "topic.md")
-		Expect(resolved.RoutePath).To(Equal(tree.RoutePathFromString("/docs/topic").Clean()))
+		resolved := index.Resolve(newFixtureMarkdownPath("docs/index.md"), "topic.md")
+		Expect(resolved.RoutePath).To(Equal(newFixtureRoutePath("/docs/topic").Clean()))
 
 		indexWithPrefix := markdownLinkIndexFromLoadedTreeWithOptions(root, markdownlinks.Options{MarkdownLinkRootPrefix: "/wiki"})
-		resolved = indexWithPrefix.Resolve("docs/index.md", "/wiki/docs/topic.md")
-		Expect(resolved.RoutePath).To(Equal(tree.RoutePathFromString("/docs/topic").Clean()))
+		resolved = indexWithPrefix.Resolve(newFixtureMarkdownPath("docs/index.md"), "/wiki/docs/topic.md")
+		Expect(resolved.RoutePath).To(Equal(newFixtureRoutePath("/docs/topic").Clean()))
 	})
 
 	It("returns empty fallbacks for unloaded tree resolution and missing result targets", Label("integration"), func() {
 		unloadedTree := tree.NewTreeService(linksTempDir())
 
-		Expect(resolveTargetLinksForSourceKind(unloadedTree, "/docs/source", tree.NodeKindPage, []string{"/docs/target.md"})).To(BeNil())
-		Expect(resolveTargetLinksWithIndex(nil, nil, "/docs/source", tree.NodeKindPage, []string{"/docs/target.md"})).To(BeNil())
+		Expect(resolveTargetLinksForSourceKind(unloadedTree, newFixtureRoutePath("/docs/source"), tree.NodeKindPage, []string{"/docs/target.md"})).To(BeNil())
+		Expect(resolveTargetLinksWithIndex(nil, nil, newFixtureRoutePath("/docs/source"), tree.NodeKindPage, []string{"/docs/target.md"})).To(BeNil())
 
 		loadedTree := newLoadedLinksTreeService()
-		_ = resolveTargetLinksWithIndex(loadedTree, nil, "/docs/source", tree.NodeKindPage, []string{"missing.md"})
+		_ = resolveTargetLinksWithIndex(loadedTree, nil, newFixtureRoutePath("/docs/source"), tree.NodeKindPage, []string{"missing.md"})
 
-		Expect(markdownSourceFileForRoute("", tree.NodeKindSection)).To(Equal(tree.MarkdownPathFromString("index.md")))
-		Expect(markdownSourceFileForRoute("/docs/ bad", tree.NodeKindPage)).To(BeEmpty())
+		Expect(markdownSourceFileForRoute(newFixtureRoutePath(""), tree.NodeKindSection)).To(Equal(newFixtureMarkdownPath("index.md")))
+		Expect(markdownSourceFileForRoute(newFixtureRoutePath("/docs/ bad"), tree.NodeKindPage)).To(BeEmpty())
 
 		Expect(toBacklinkResultItem(unloadedTree, Backlink{FromPageID: newFixturePageID("source-page")})).To(Equal(BacklinkResultItem{}))
 		Expect(toBacklinkResultItem(loadedTree, Backlink{FromPageID: newFixturePageID("missing-page")})).To(Equal(BacklinkResultItem{}))
@@ -232,7 +232,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		outgoing := toOutgoingResultItem(unloadedTree, Outgoing{
 			FromPageID: newFixturePageID("source-page"),
 			ToPageID:   newFixturePageID("target-page"),
-			ToPath:     "/docs/target",
+			ToPath:     newFixtureRoutePath("/docs/target"),
 			ToKind:     nonCanonicalPageStoredTarget,
 		})
 		Expect(outgoing).To(matchOutgoingResultItem(gstruct.Fields{
@@ -243,7 +243,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		outgoing = toOutgoingResultItem(loadedTree, Outgoing{
 			FromPageID: newFixturePageID("source-page"),
 			ToPageID:   newFixturePageID("missing-page"),
-			ToPath:     "/docs/target",
+			ToPath:     newFixtureRoutePath("/docs/target"),
 			ToKind:     defaultStoredTargetKind,
 		})
 		Expect(outgoing).To(matchOutgoingResultItem(gstruct.Fields{
@@ -253,7 +253,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 
 	It("propagates store failures through service operations without nil-store panics", Label("integration"), func() {
 		loadedTree := newLoadedLinksTreeService()
-		page := createLoadedLinksPage(loadedTree, "Source", "source", "[Target](target.md)")
+		page := createLoadedLinksPage(loadedTree, "Source", newFixtureSlug("source"), "[Target](target.md)")
 
 		clearErr := errors.New("links service clear failed")
 		clearService := NewLinkService("", loadedTree, linksStoreWithExecError(clearErr))
@@ -273,7 +273,7 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 
 	It("propagates store operation failures from the database layer", Label("integration"), func() {
 		pageID := newFixturePageID("source-page")
-		target := tree.RoutePathFromString("/docs/target")
+		target := newFixtureRoutePath("/docs/target")
 
 		schemaErr := errors.New("links schema query failed")
 		Expect(linksStoreWithQueryError(schemaErr).ensureSchema()).To(matchLinksError(schemaErr))
@@ -300,11 +300,11 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 
 		prepareErr := errors.New("links store prepare failed")
 		Expect(newScriptedLinksStore(&linksScriptedDBScript{
-			prepare: prepareErrorWhen("DELETE FROM links WHERE from_page_id", prepareErr),
+			prepare: prepareErrorWhen(linksSQLDeleteOutgoing, prepareErr),
 		}).ReplaceLinksAndHeal([]PageLinkUpdate{{
 			FromPageID: pageID,
 			FromTitle:  "Source",
-			ToPath:     "/docs/source",
+			ToPath:     newFixtureRoutePath("/docs/source"),
 			ToKind:     tree.NodeKindPage,
 		}})).To(matchLinksError(prepareErr))
 
@@ -316,17 +316,17 @@ var _ = Describe("links persistence and rewrite edge behavior", func() {
 		Expect(err).To(matchLinksError(queryErr))
 		_, err = queryStore.GetOutgoingLinksForPages([]tree.PageID{pageID})
 		Expect(err).To(matchLinksError(queryErr))
-		_, err = queryStore.GetRefactorMatchesForPrefix("/docs")
+		_, err = queryStore.GetRefactorMatchesForPrefix(newFixtureRoutePath("/docs"))
 		Expect(err).To(matchLinksError(queryErr))
-		_, err = queryStore.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindPage)
+		_, err = queryStore.GetRefactorMatchesForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
 		Expect(err).To(matchLinksError(queryErr))
-		_, err = queryStore.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindSection)
+		_, err = queryStore.GetRefactorMatchesForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindSection)
 		Expect(err).To(matchLinksError(queryErr))
-		_, err = queryStore.GetRefactorSourcePageIDsForPrefix("/docs")
+		_, err = queryStore.GetRefactorSourcePageIDsForPrefix(newFixtureRoutePath("/docs"))
 		Expect(err).To(matchLinksError(queryErr))
-		_, err = queryStore.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindPage)
+		_, err = queryStore.GetRefactorSourcePageIDsForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
 		Expect(err).To(matchLinksError(queryErr))
-		_, err = queryStore.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindSection)
+		_, err = queryStore.GetRefactorSourcePageIDsForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindSection)
 		Expect(err).To(matchLinksError(queryErr))
 		_, err = queryStore.GetBrokenIncomingForPath(target)
 		Expect(err).To(matchLinksError(queryErr))

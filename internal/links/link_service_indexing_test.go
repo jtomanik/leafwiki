@@ -66,7 +66,7 @@ leafwiki_title: Sync Section
 		store, err := NewLinksStore(dataDir)
 		Expect(err).NotTo(HaveOccurred())
 		svc := NewLinkService(dataDir, ts, store)
-		source, err := ts.GetPage("source")
+		source, err := ts.GetPage(newFixturePageID("source"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
@@ -74,8 +74,8 @@ leafwiki_title: Sync Section
 		outgoing, err := svc.GetOutgoingLinksForPage(source.ID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outgoing).To(matchOutgoingResult(2,
-			matchResolvedOutgoingResultItem(source.ID, newFixturePageID("sync-page"), tree.RoutePath("/docs/sync")),
-			matchResolvedOutgoingResultItem(source.ID, newFixturePageID("sync-section"), tree.RoutePath("/docs/sync")),
+			matchResolvedOutgoingResultItem(source.ID, newFixturePageID("sync-page"), newFixtureRoutePath("/docs/sync")),
+			matchResolvedOutgoingResultItem(source.ID, newFixturePageID("sync-section"), newFixtureRoutePath("/docs/sync")),
 		))
 
 		pageBacklinks, err := svc.GetBacklinksForPage(newFixturePageID("sync-page"))
@@ -120,17 +120,17 @@ leafwiki_title: Glossary
 		svc := NewLinkServiceWithOptions(dataDir, ts, store, LinkServiceOptions{
 			MarkdownLinkRootPrefix: "/docs",
 		})
-		source, err := ts.GetPage("source")
+		source, err := ts.GetPage(newFixturePageID("source"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(svc.IndexAllPages()).To(Succeed())
 
 		outgoing, err := svc.GetOutgoingLinksForPage(source.ID)
 		Expect(err).NotTo(HaveOccurred())
-		glossary, err := ts.GetPage("glossary")
+		glossary, err := ts.GetPage(newFixturePageID("glossary"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outgoing).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(source.ID, glossary.ID, tree.RoutePath("/sync/glossary")),
+			matchResolvedOutgoingResultItem(source.ID, glossary.ID, newFixtureRoutePath("/sync/glossary")),
 		))
 
 	})
@@ -163,17 +163,17 @@ leafwiki_title: Glossary
 		svc := NewLinkServiceWithOptions(dataDir, ts, store, LinkServiceOptions{
 			MarkdownLinkRootPrefix: "/docs",
 		})
-		source, err := ts.GetPage("source")
+		source, err := ts.GetPage(newFixturePageID("source"))
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(svc.UpdateLinksForPage(source, source.Content)).To(Succeed())
 
 		outgoing, err := svc.GetOutgoingLinksForPage(source.ID)
 		Expect(err).NotTo(HaveOccurred())
-		glossary, err := ts.GetPage("glossary")
+		glossary, err := ts.GetPage(newFixturePageID("glossary"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outgoing).To(matchOutgoingResult(1,
-			matchResolvedOutgoingResultItem(source.ID, glossary.ID, tree.RoutePath("/sync/glossary")),
+			matchResolvedOutgoingResultItem(source.ID, glossary.ID, newFixtureRoutePath("/sync/glossary")),
 		))
 
 	})
@@ -208,9 +208,9 @@ leafwiki_title: Target
 		Expect(err).NotTo(HaveOccurred())
 		svc := NewLinkService(dataDir, ts, store)
 		calls := countMarkdownRootIndexBuilds(markdownlinks.NewIndex([]markdownlinks.Entry{
-			{Kind: markdownlinks.EntryKindPage, Path: "source-a.md"},
-			{Kind: markdownlinks.EntryKindPage, Path: "source-b.md"},
-			{Kind: markdownlinks.EntryKindPage, Path: "target.md"},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("source-a.md")},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("source-b.md")},
+			{Kind: markdownlinks.EntryKindPage, Path: newFixtureMarkdownPath("target.md")},
 		}))
 
 		Expect(svc.IndexAllPages()).To(Succeed())
@@ -291,7 +291,7 @@ var _ = ginkgo.Describe("outgoing link queries", ginkgo.Label("integration"), fu
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(matchOutgoingResult(1,
 			SatisfyAll(
-				matchResolvedOutgoingResultItem(pageAID, pageBID, tree.RoutePath("/b")),
+				matchResolvedOutgoingResultItem(pageAID, pageBID, newFixtureRoutePath("/b")),
 				matchOutgoingResultItemTitle(pageB.Title),
 			),
 		))
@@ -303,7 +303,7 @@ var _ = ginkgo.Describe("outgoing link queries for pages without links", ginkgo.
 	ginkgo.It("returns an empty outgoing result", func() {
 		svc, ts, _ := setupLinkService()
 
-		aIDPtr, err := ts.CreateNode("system", nil, "Lonely Page", "lonely", pageNodeKind())
+		aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Lonely Page", newFixtureSlug("lonely"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		lonelyID := *aIDPtr
 
@@ -327,11 +327,11 @@ var _ = ginkgo.Describe("asset link filtering during indexing", ginkgo.Label("in
 	ginkgo.It("excludes asset links from outgoing and broken-link sets", func() {
 		svc, ts, _ := setupLinkService()
 
-		aIDPtr, err := ts.CreateNode("system", nil, "Page A", "a", pageNodeKind())
+		aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page A", newFixtureSlug("a"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageAID := *aIDPtr
 
-		bIDPtr, err := ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
+		bIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page B", newFixtureSlug("b"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		pageBID := *bIDPtr
 
@@ -345,10 +345,10 @@ var _ = ginkgo.Describe("asset link filtering during indexing", ginkgo.Label("in
 		outgoing, err := svc.GetOutgoingLinksForPage(pageAID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(outgoing).To(matchOutgoingResult(1,
-			matchBrokenOutgoingResultItem(pageAID, tree.RoutePath("/b")),
+			matchBrokenOutgoingResultItem(pageAID, newFixtureRoutePath("/b")),
 		))
 
-		status, err := svc.GetLinkStatusForPage(pageAID, "/a")
+		status, err := svc.GetLinkStatusForPage(pageAID, newFixtureRoutePath("/a"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(status.Counts).To(matchLinkStatusCounts(0, 0, 0, 1))
 

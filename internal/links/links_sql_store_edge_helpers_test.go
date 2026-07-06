@@ -251,21 +251,45 @@ func cloneDriverValues(values [][]driver.Value) [][]driver.Value {
 	return cloned
 }
 
-func execErrorWhen(fragment string, err error) func(string, []driver.NamedValue) (driver.Result, error) {
+type linksSQLWriteOperation uint8
+
+const (
+	linksSQLDeleteOutgoing linksSQLWriteOperation = iota
+	linksSQLInsertOutgoing
+	linksSQLHealPageLinks
+	linksSQLHealSectionLinks
+)
+
+func execErrorWhen(operation linksSQLWriteOperation, err error) func(string, []driver.NamedValue) (driver.Result, error) {
 	return func(query string, _ []driver.NamedValue) (driver.Result, error) {
-		if strings.Contains(query, fragment) {
+		if linksSQLQueryMatches(query, operation) {
 			return nil, err
 		}
 		return linksScriptedResult{rowsAffected: 1}, nil
 	}
 }
 
-func prepareErrorWhen(fragment string, err error) func(string) (driver.Stmt, error) {
+func prepareErrorWhen(operation linksSQLWriteOperation, err error) func(string) (driver.Stmt, error) {
 	return func(query string) (driver.Stmt, error) {
-		if strings.Contains(query, fragment) {
+		if linksSQLQueryMatches(query, operation) {
 			return nil, err
 		}
 		return &linksScriptedStmt{script: &linksScriptedDBScript{}, query: query}, nil
+	}
+}
+
+func linksSQLQueryMatches(query string, operation linksSQLWriteOperation) bool {
+	switch operation {
+	case linksSQLDeleteOutgoing:
+		return strings.Contains(query, "DELETE FROM links WHERE from_page_id")
+	case linksSQLInsertOutgoing:
+		return strings.Contains(query, "INSERT OR REPLACE INTO links")
+	case linksSQLHealPageLinks:
+		return strings.Contains(query, "WHERE to_path = ? AND to_kind = ? AND broken = 1")
+	case linksSQLHealSectionLinks:
+		return strings.Contains(query, "UPDATE OR REPLACE links")
+	default:
+		return false
 	}
 }
 
@@ -274,27 +298,27 @@ func expectAllReadMethodsSucceed(store *LinksStore) {
 
 	_, err := store.linksTableColumns()
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetBacklinksForPage("target-page")
+	_, err = store.GetBacklinksForPage(newFixturePageID("target-page"))
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetOutgoingLinksForPage("source-page")
+	_, err = store.GetOutgoingLinksForPage(newFixturePageID("source-page"))
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetOutgoingLinksForPages([]tree.PageID{"source-page"})
+	_, err = store.GetOutgoingLinksForPages([]tree.PageID{newFixturePageID("source-page")})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetRefactorMatchesForPrefix("/docs")
+	_, err = store.GetRefactorMatchesForPrefix(newFixtureRoutePath("/docs"))
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindPage)
+	_, err = store.GetRefactorMatchesForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindSection)
+	_, err = store.GetRefactorMatchesForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindSection)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetRefactorSourcePageIDsForPrefix("/docs")
+	_, err = store.GetRefactorSourcePageIDsForPrefix(newFixtureRoutePath("/docs"))
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindPage)
+	_, err = store.GetRefactorSourcePageIDsForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindSection)
+	_, err = store.GetRefactorSourcePageIDsForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindSection)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetBrokenIncomingForPath("/docs")
+	_, err = store.GetBrokenIncomingForPath(newFixtureRoutePath("/docs"))
 	Expect(err).NotTo(HaveOccurred())
-	_, err = store.GetBrokenIncomingForPathAndKind("/docs", tree.NodeKindPage)
+	_, err = store.GetBrokenIncomingForPathAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
 	Expect(err).NotTo(HaveOccurred())
 }
 
@@ -319,16 +343,16 @@ func HaveReadMethodsPropagate(target error) types.GomegaMatcher {
 func collectLinksReadMethodErrors(store *LinksStore) linksReadMethodErrors {
 	var errs linksReadMethodErrors
 	_, errs.TableColumns = store.linksTableColumns()
-	_, errs.Backlinks = store.GetBacklinksForPage("target-page")
-	_, errs.OutgoingForPage = store.GetOutgoingLinksForPage("source-page")
-	_, errs.OutgoingForPages = store.GetOutgoingLinksForPages([]tree.PageID{"source-page"})
-	_, errs.RefactorMatches = store.GetRefactorMatchesForPrefix("/docs")
-	_, errs.RefactorMatchesForPageKind = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindPage)
-	_, errs.RefactorMatchesForSectionKind = store.GetRefactorMatchesForPrefixAndKind("/docs", tree.NodeKindSection)
-	_, errs.RefactorSourceIDs = store.GetRefactorSourcePageIDsForPrefix("/docs")
-	_, errs.RefactorSourceIDsForPageKind = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindPage)
-	_, errs.RefactorSourceIDsForSectionKind = store.GetRefactorSourcePageIDsForPrefixAndKind("/docs", tree.NodeKindSection)
-	_, errs.BrokenIncomingForPath = store.GetBrokenIncomingForPath("/docs")
-	_, errs.BrokenIncomingForPathAndTargetKind = store.GetBrokenIncomingForPathAndKind("/docs", tree.NodeKindPage)
+	_, errs.Backlinks = store.GetBacklinksForPage(newFixturePageID("target-page"))
+	_, errs.OutgoingForPage = store.GetOutgoingLinksForPage(newFixturePageID("source-page"))
+	_, errs.OutgoingForPages = store.GetOutgoingLinksForPages([]tree.PageID{newFixturePageID("source-page")})
+	_, errs.RefactorMatches = store.GetRefactorMatchesForPrefix(newFixtureRoutePath("/docs"))
+	_, errs.RefactorMatchesForPageKind = store.GetRefactorMatchesForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
+	_, errs.RefactorMatchesForSectionKind = store.GetRefactorMatchesForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindSection)
+	_, errs.RefactorSourceIDs = store.GetRefactorSourcePageIDsForPrefix(newFixtureRoutePath("/docs"))
+	_, errs.RefactorSourceIDsForPageKind = store.GetRefactorSourcePageIDsForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
+	_, errs.RefactorSourceIDsForSectionKind = store.GetRefactorSourcePageIDsForPrefixAndKind(newFixtureRoutePath("/docs"), tree.NodeKindSection)
+	_, errs.BrokenIncomingForPath = store.GetBrokenIncomingForPath(newFixtureRoutePath("/docs"))
+	_, errs.BrokenIncomingForPathAndTargetKind = store.GetBrokenIncomingForPathAndKind(newFixtureRoutePath("/docs"), tree.NodeKindPage)
 	return errs
 }

@@ -23,7 +23,7 @@ var _ = ginkgo.Describe("target link resolution", ginkgo.Label("integration"), f
 
 		targets := resolveTargetLinks(ts, tree.RoutePathFromString(currentPath), links)
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(page2ID, "/docs/page2")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(page2ID, newFixtureRoutePath("/docs/page2"))))
 	})
 
 	// - Canonical .md page link indexes as outgoing link
@@ -35,7 +35,7 @@ var _ = ginkgo.Describe("target link resolution", ginkgo.Label("integration"), f
 
 		targets := resolveTargetLinks(ts, page1.CalculateRoutePath(), []string{"./page2.md"})
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(page2ID, "/docs/page2")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(page2ID, newFixtureRoutePath("/docs/page2"))))
 	})
 
 	// - Relative section links are resolved from the source file directory
@@ -44,20 +44,20 @@ var _ = ginkgo.Describe("target link resolution", ginkgo.Label("integration"), f
 		ts := tree.NewTreeService(storageDir)
 		Expect(ts.LoadTree()).To(Succeed())
 
-		docsID, err := ts.CreateNode("system", nil, "Docs", "docs", sectionNodeKind())
+		docsID, err := ts.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), sectionNodeKind())
 		Expect(err).NotTo(HaveOccurred())
-		aID, err := ts.CreateNode("system", docsID, "A", "a", sectionNodeKind())
+		aID, err := ts.CreateNode(newFixtureUserID("system"), docsID, "A", newFixtureSlug("a"), sectionNodeKind())
 		Expect(err).NotTo(HaveOccurred())
-		currentID, err := ts.CreateNode("system", aID, "Current", "current", pageNodeKind())
+		currentID, err := ts.CreateNode(newFixtureUserID("system"), aID, "Current", newFixtureSlug("current"), pageNodeKind())
 		Expect(err).NotTo(HaveOccurred())
-		bID, err := ts.CreateNode("system", docsID, "B", "b", sectionNodeKind())
+		bID, err := ts.CreateNode(newFixtureUserID("system"), docsID, "B", newFixtureSlug("b"), sectionNodeKind())
 		Expect(err).NotTo(HaveOccurred())
 		current, err := ts.GetPage(*currentID)
 		Expect(err).NotTo(HaveOccurred())
 
 		targets := resolveTargetLinks(ts, current.CalculateRoutePath(), []string{"../b"})
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(*bID, "/docs/b")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(*bID, newFixtureRoutePath("/docs/b"))))
 	})
 
 	ginkgo.It("resolves section default files through README fallback links", func() {
@@ -80,14 +80,14 @@ leafwiki_title: Guides
 
 		ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		Expect(ts.LoadTree()).To(Succeed())
-		source, err := ts.GetPage("page-source")
+		source, err := ts.GetPage(newFixturePageID("page-source"))
 		Expect(err).NotTo(HaveOccurred())
-		guides, err := ts.GetPage("section-guides")
+		guides, err := ts.GetPage(newFixturePageID("section-guides"))
 		Expect(err).NotTo(HaveOccurred())
 
 		targets := resolveTargetLinks(ts, source.CalculateRoutePath(), extractLinksFromMarkdown(source.Content))
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(guides.ID, "/guides")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(guides.ID, newFixtureRoutePath("/guides"))))
 	})
 
 	// - Canonical section link indexes as outgoing link
@@ -117,12 +117,12 @@ leafwiki_title: Sync Section
 
 		ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		Expect(ts.LoadTree()).To(Succeed())
-		source, err := ts.GetPage("page-a")
+		source, err := ts.GetPage(newFixturePageID("page-a"))
 		Expect(err).NotTo(HaveOccurred())
 
 		targets := resolveTargetLinks(ts, source.CalculateRoutePath(), extractLinksFromMarkdown(source.Content))
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID("sync-section"), "/docs/sync")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID("sync-section"), newFixtureRoutePath("/docs/sync"))))
 	})
 
 	ginkgo.It("uses the section source file when same-basename page and section nodes both exist", func() {
@@ -153,12 +153,12 @@ leafwiki_title: Sync Child
 
 		ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		Expect(ts.LoadTree()).To(Succeed())
-		source, err := ts.GetPage("sync-section")
+		source, err := ts.GetPage(newFixturePageID("sync-section"))
 		Expect(err).NotTo(HaveOccurred())
 
 		targets := resolveTargetLinksForSourceKind(ts, source.CalculateRoutePath(), source.Kind, extractLinksFromMarkdown(source.Content))
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID("sync-child"), "/docs/sync/child")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID("sync-child"), newFixtureRoutePath("/docs/sync/child"))))
 	})
 
 	ginkgo.It("uses the page source file when same-basename page and section nodes both exist", func() {
@@ -193,12 +193,12 @@ leafwiki_title: Nested Sibling
 
 		ts := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		Expect(ts.LoadTree()).To(Succeed())
-		source, err := ts.GetPage("sync-page")
+		source, err := ts.GetPage(newFixturePageID("sync-page"))
 		Expect(err).NotTo(HaveOccurred())
 
 		targets := resolveTargetLinksForSourceKind(ts, source.CalculateRoutePath(), source.Kind, extractLinksFromMarkdown(source.Content))
 
-		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID("sync-sibling"), "/docs/sibling")))
+		Expect(targets).To(ConsistOf(matchResolvedTargetLink(newFixturePageID("sync-sibling"), newFixtureRoutePath("/docs/sibling"))))
 	})
 
 	// - Broken canonical .md page link is reported as broken
@@ -217,8 +217,8 @@ leafwiki_title: Nested Sibling
 		targets := resolveTargetLinks(ts, tree.RoutePathFromString(currentPath), links)
 
 		Expect(targets).To(ConsistOf(
-			matchBrokenTargetLink("/docs/does-not-exist"),
-			matchBrokenTargetLink("/docs/unknown"),
+			matchBrokenTargetLink(newFixtureRoutePath("/docs/does-not-exist")),
+			matchBrokenTargetLink(newFixtureRoutePath("/docs/unknown")),
 		))
 	})
 

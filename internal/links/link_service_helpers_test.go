@@ -59,14 +59,14 @@ func setupTreeForLinksTest() (*tree.TreeService, tree.PageID, tree.PageID) {
 	Expect(ts.LoadTree()).To(Succeed())
 
 	// create "docs" under root
-	docsIDPtr, err := ts.CreateNode("system", nil, "Docs", "docs", pageNodeKind())
+	docsIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Docs", newFixtureSlug("docs"), pageNodeKind())
 	Expect(err).NotTo(HaveOccurred())
 	docsID := *docsIDPtr
 
 	// create "page1" and "page2" under docs
-	page1IDPtr, err := ts.CreateNode("system", &docsID, "Page 1", "page1", pageNodeKind())
+	page1IDPtr, err := ts.CreateNode(newFixtureUserID("system"), &docsID, "Page 1", newFixtureSlug("page1"), pageNodeKind())
 	Expect(err).NotTo(HaveOccurred())
-	page2IDPtr, err := ts.CreateNode("system", &docsID, "Page 2", "page2", pageNodeKind())
+	page2IDPtr, err := ts.CreateNode(newFixtureUserID("system"), &docsID, "Page 2", newFixtureSlug("page2"), pageNodeKind())
 	Expect(err).NotTo(HaveOccurred())
 
 	return ts, *page1IDPtr, *page2IDPtr
@@ -90,11 +90,11 @@ func setupLinkService() (*LinkService, *tree.TreeService, *LinksStore) {
 func createSimpleLinkedPages(ts *tree.TreeService) (pageAID, pageBID tree.PageID) {
 	ginkgo.GinkgoHelper()
 
-	aIDPtr, err := ts.CreateNode("system", nil, "Page A", "a", pageNodeKind())
+	aIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page A", newFixtureSlug("a"), pageNodeKind())
 	Expect(err).NotTo(HaveOccurred())
 	pageAID = *aIDPtr
 
-	bIDPtr, err := ts.CreateNode("system", nil, "Page B", "b", pageNodeKind())
+	bIDPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, "Page B", newFixtureSlug("b"), pageNodeKind())
 	Expect(err).NotTo(HaveOccurred())
 	pageBID = *bIDPtr
 

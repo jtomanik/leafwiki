@@ -134,7 +134,7 @@ func matchRewrittenLinkDestination(destination string) types.GomegaMatcher {
 	return WithTransform(rewriteDestinationObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Destination":      Equal(destination),
 		"State":            Equal(rewriteDestinationChanged),
-		"WarningMessageID": Equal(sharederrors.MessageID("")),
+		"WarningMessageID": Equal(emptyWarningMessageID),
 	}))
 }
 
@@ -142,9 +142,11 @@ func matchUnchangedLinkDestinationWithoutWarning(destination string) types.Gomeg
 	return WithTransform(rewriteDestinationObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Destination":      Equal(destination),
 		"State":            Equal(rewriteDestinationUnchanged),
-		"WarningMessageID": Equal(sharederrors.MessageID("")),
+		"WarningMessageID": Equal(emptyWarningMessageID),
 	}))
 }
+
+var emptyWarningMessageID sharederrors.MessageID
 
 type rewriteDestinationState uint8
 
@@ -303,14 +305,14 @@ func newLoadedLinksTreeService() *tree.TreeService {
 	return treeService
 }
 
-func createLoadedLinksPage(treeService *tree.TreeService, title string, slug string, content string) *tree.Page {
+func createLoadedLinksPage(treeService *tree.TreeService, title string, slug tree.Slug, content string) *tree.Page {
 	GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode(newFixtureUserID("links-tester"), nil, title, tree.SlugFromString(slug), &kind)
+	pageID, err := treeService.CreateNode(newFixtureUserID("links-tester"), nil, title, slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(pageID).NotTo(BeNil())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("links-tester"), *pageID, title, tree.SlugFromString(slug), &content, false)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("links-tester"), *pageID, title, slug, &content, false)).To(Succeed())
 
 	page, err := treeService.GetPage(*pageID)
 	Expect(err).NotTo(HaveOccurred())
