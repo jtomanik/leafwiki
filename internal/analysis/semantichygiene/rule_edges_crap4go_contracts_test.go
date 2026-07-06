@@ -348,18 +348,17 @@ func leak(id WorkspaceID) {
 func basicLiteralArg(call *ast.CallExpr, index int) *ast.BasicLit {
 	ginkgo.GinkgoHelper()
 
+	var selected ast.Expr
 	for argIndex, arg := range call.Args {
-		if argIndex != index {
-			continue
+		if argIndex == index {
+			selected = arg
+			break
 		}
-		lit, ok := arg.(*ast.BasicLit)
-		if ok {
-			return lit
-		}
-		ginkgo.Fail("selected call argument should be a basic literal")
 	}
-	ginkgo.Fail("selected call argument should exist")
-	return nil
+	Expect(selected).NotTo(BeNil(), "selected call argument should exist")
+	lit, _ := selected.(*ast.BasicLit)
+	Expect(lit).NotTo(BeNil(), "selected call argument should be a basic literal")
+	return lit
 }
 
 func observeBDDEntryTableParam(ctx *analysisContext, entry *ast.CallExpr, dataIndex int) bddEntryParamObservation {

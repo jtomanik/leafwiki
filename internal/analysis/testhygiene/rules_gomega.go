@@ -18,6 +18,20 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if !isTestFile(ctx.filename(call.Pos())) {
 		return
 	}
+	checkStandaloneGomegaMatcherPolicy(ctx, call)
+	assertion, ok := gomegaAssertionFromCall(ctx, call)
+	if !ok {
+		return
+	}
+	checkGomegaErrorAssertionPolicy(ctx, assertion)
+	checkGomegaStringAssertionPolicy(ctx, assertion)
+	checkGomegaBooleanAssertionPolicy(ctx, assertion)
+	checkGomegaHTTPAssertionPolicy(ctx, assertion)
+	checkGomegaValueShapeAssertionPolicy(ctx, assertion)
+	checkGomegaStructuredAssertionPolicy(ctx, assertion)
+}
+
+func checkStandaloneGomegaMatcherPolicy(ctx *analysisContext, call *ast.CallExpr) {
 	if callLaundersBooleanToStringState(ctx, call) {
 		ctx.report(ruleGomegaProxyBoolean, call, gomegaBooleanStateStringDiagnostic())
 	}
@@ -42,10 +56,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if matcherCallIsNestedBooleanMatcherValue(ctx, call) {
 		ctx.report(ruleGomegaProxyBoolean, call, gomegaProxyBooleanDiagnostic())
 	}
-	assertion, ok := gomegaAssertionFromCall(ctx, call)
-	if !ok {
-		return
-	}
+}
+
+func checkGomegaErrorAssertionPolicy(ctx *analysisContext, assertion gomegaAssertion) {
 	if assertionUsesErrError(ctx, assertion) && isMatcherNamed(assertion.matcher, "Equal", "ContainSubstring") {
 		ctx.report(ruleGomegaErrorString, assertion.actual, gomegaErrorStringMatcherDiagnostic())
 	}
@@ -73,6 +86,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesMultiReturnErrorMatcher(ctx, assertion) {
 		ctx.report(ruleGomegaMultiReturnErrorMatcher, assertion.actual, gomegaMultiReturnErrorMatcherDiagnostic())
 	}
+}
+
+func checkGomegaStringAssertionPolicy(ctx *analysisContext, assertion gomegaAssertion) {
 	if assertionUsesStringsContains(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaStringsContains, assertion.actual, gomegaStringsContainsMatcherDiagnostic())
 	}
@@ -91,6 +107,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesRegexpMatchString(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaRegexpMatchString, assertion.actual, gomegaRegexpMatchStringDiagnostic())
 	}
+}
+
+func checkGomegaBooleanAssertionPolicy(ctx *analysisContext, assertion gomegaAssertion) {
 	if assertionUsesErrorsIs(ctx, assertion) && isBooleanMatcher(assertion.matcher) {
 		ctx.report(ruleGomegaErrorsIsMatcher, assertion.actual, gomegaErrorsIsMatcherDiagnostic())
 	}
@@ -124,6 +143,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesProxyBoolean(ctx, assertion) {
 		ctx.report(ruleGomegaProxyBoolean, assertion.actual, gomegaProxyBooleanDiagnostic())
 	}
+}
+
+func checkGomegaHTTPAssertionPolicy(ctx *analysisContext, assertion gomegaAssertion) {
 	if assertionUsesMapIndexEqual(ctx, assertion) {
 		ctx.report(ruleGomegaMapIndex, assertion.actual, gomegaMapIndexMatcherDiagnostic())
 	}
@@ -142,6 +164,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesResponseHeaderMatcherOnRequest(ctx, assertion) {
 		ctx.report(ruleGomegaHTTPHeader, assertion.matcher, gomegaHTTPHeaderResponseMatcherOnRequestDiagnostic())
 	}
+}
+
+func checkGomegaValueShapeAssertionPolicy(ctx *analysisContext, assertion gomegaAssertion) {
 	if assertionUsesNumericBeEquivalentTo(ctx, assertion) {
 		ctx.report(ruleGomegaNumericEquivalent, assertion.matcher, gomegaNumericEquivalentDiagnostic())
 	}
@@ -166,6 +191,9 @@ func checkGomegaSemanticMatcher(ctx *analysisContext, call *ast.CallExpr) {
 	if assertionUsesCollectionIndexAssertion(ctx, assertion) {
 		ctx.report(ruleGomegaCollectionIndexAssertion, assertion.actual, gomegaCollectionIndexAssertionDiagnostic())
 	}
+}
+
+func checkGomegaStructuredAssertionPolicy(ctx *analysisContext, assertion gomegaAssertion) {
 	if fieldName, ok := assertionMatchesStructuredErrorField(ctx, assertion); ok {
 		ctx.report(ruleGomegaStructuredErrorMatcher, assertion.actual, gomegaStructuredErrorMatcherDiagnostic(fieldName))
 	}
