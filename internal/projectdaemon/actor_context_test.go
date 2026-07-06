@@ -5,7 +5,6 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/workspaceid"
 )
@@ -20,7 +19,7 @@ var _ = ginkgo.Describe("actor context envelopes", ginkgo.Label("unit"), func() 
 			Username:    "admin",
 			Role:        "admin",
 			Scopes:      []string{"leafwiki:workspace:read", "leafwiki:workspace:write", "leafwiki:mcp"},
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			AuthMethod:  "disabled",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),
@@ -32,18 +31,14 @@ var _ = ginkgo.Describe("actor context envelopes", ginkgo.Label("unit"), func() 
 
 		decoded, err := DecodeActorContext(encoded, ActorContextValidation{
 			Now:         now.Add(time.Minute),
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(decoded).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Subject":    Equal("user:admin"),
-			"Role":       Equal("admin"),
-			"AuthMethod": Equal("disabled"),
-		}))
+		Expect(decoded).To(matchActorContextIdentity("admin", "admin", "disabled"))
 	})
 
 	ginkgo.It("keeps validation workspace IDs semantically typed", func() {
-		validation := ActorContextValidation{WorkspaceID: workspaceid.WorkspaceID("current")}
+		validation := ActorContextValidation{WorkspaceID: mustDecodeWorkspaceID("current")}
 
 		var _ workspaceid.WorkspaceID = validation.WorkspaceID
 	})
@@ -66,7 +61,7 @@ var _ = ginkgo.Describe("actor context envelopes", ginkgo.Label("unit"), func() 
 				Subject:     "user:admin",
 				Username:    "admin",
 				Role:        "admin",
-				WorkspaceID: "current",
+				WorkspaceID: mustDecodeWorkspaceID("current"),
 				AuthMethod:  "cookie",
 				IssuedAt:    now,
 				ExpiresAt:   now.Add(5 * time.Minute),
@@ -75,21 +70,21 @@ var _ = ginkgo.Describe("actor context envelopes", ginkgo.Label("unit"), func() 
 
 			encoded, err := EncodeActorContext(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			_, err = DecodeActorContext(encoded, ActorContextValidation{Now: now, WorkspaceID: "current"})
+			_, err = DecodeActorContext(encoded, ActorContextValidation{Now: now, WorkspaceID: mustDecodeWorkspaceID("current")})
 			Expect(err).To(matchActorContextValidationRejection())
 		},
 		ginkgo.Entry("expired envelope", func(ctx *ActorContext) {
 			ctx.ExpiresAt = time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC).Add(-time.Second)
 		}),
 		ginkgo.Entry("wrong issuer", func(ctx *ActorContext) { ctx.Issuer = "frontd" }),
-		ginkgo.Entry("wrong workspace", func(ctx *ActorContext) { ctx.WorkspaceID = "other" }),
+		ginkgo.Entry("wrong workspace", func(ctx *ActorContext) { ctx.WorkspaceID = mustDecodeWorkspaceID("other") }),
 		ginkgo.Entry("missing subject", func(ctx *ActorContext) { ctx.Subject = "" }),
 	)
 
 	ginkgo.It("rejects malformed private envelopes before decoding actor metadata", func() {
 		now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
-		_, err := DecodeActorContext("not json", ActorContextValidation{Now: now, WorkspaceID: "current"})
+		_, err := DecodeActorContext("not json", ActorContextValidation{Now: now, WorkspaceID: mustDecodeWorkspaceID("current")})
 
 		Expect(err).To(MatchError(errDecodeActorContext))
 	})

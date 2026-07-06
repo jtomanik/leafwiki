@@ -1,10 +1,11 @@
 package auth
 
 import (
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/core/auth"

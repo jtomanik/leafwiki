@@ -68,7 +68,7 @@ func requirePrivateActorContext(opts PrivateAuthOptions) gin.HandlerFunc {
 			return
 		}
 		c.Set("user", &coreauth.User{
-			ID:       actor.SubjectID(),
+			ID:       coreauth.UserIDFromString(actor.SubjectID()),
 			Username: actor.Username,
 			Email:    actor.Email,
 			Role:     actor.Role,

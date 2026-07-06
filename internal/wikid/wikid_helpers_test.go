@@ -9,7 +9,6 @@ import (
 	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/projectdaemon"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("wikid support stores and supervisors", func() {
@@ -56,18 +55,18 @@ var _ = ginkgo.Describe("wikid support stores and supervisors", func() {
 		now := time.Date(2026, 6, 25, 11, 0, 0, 0, time.UTC)
 		supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{Now: func() time.Time { return now }})
 
-		supervisor.MarkStatus(WorkspaceStatus{WorkspaceID: workspaceid.WorkspaceID("zulu"), State: WorkspaceStateRunning, PID: 9})
-		supervisor.MarkStarting(workspaceid.WorkspaceID("alpha"))
+		supervisor.MarkStatus(WorkspaceStatus{WorkspaceID: mustDecodeWorkspaceID("zulu"), State: WorkspaceStateRunning, PID: 9})
+		supervisor.MarkStarting(mustDecodeWorkspaceID("alpha"))
 		supervisor.MarkStatus(WorkspaceStatus{})
 
 		Expect(supervisor.Statuses()).To(HaveExactElements(
 			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"WorkspaceID": Equal(workspaceid.WorkspaceID("alpha")),
+				"WorkspaceID": Equal(mustDecodeWorkspaceID("alpha")),
 				"State":       Equal(WorkspaceStateStarting),
 				"UpdatedAt":   BeTemporally("==", now),
 			}),
 			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"WorkspaceID": Equal(workspaceid.WorkspaceID("zulu")),
+				"WorkspaceID": Equal(mustDecodeWorkspaceID("zulu")),
 				"UpdatedAt":   BeTemporally("==", now),
 			}),
 		))

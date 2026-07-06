@@ -2,12 +2,13 @@ package http_test
 
 import (
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/markdown"
 )
@@ -32,7 +33,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Delete Me", "delete-me", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Delete Me", newFixtureSlug("delete-me"), nil, pageNodeKind())
 		rec := authenticatedRequest(router, http.MethodDelete, "/api/pages/"+page.ID+"?version="+page.Version, nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
 
@@ -62,8 +63,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		parent := createPageViaAPI(router, "Parent", "parent", nil, pageNodeKind())
-		createPageViaAPI(router, "Child", "child", &parent.ID, pageNodeKind())
+		parent := createPageViaAPI(router, "Parent", newFixtureSlug("parent"), nil, pageNodeKind())
+		createPageViaAPI(router, "Child", newFixtureSlug("child"), &parent.ID, pageNodeKind())
 
 		rec := authenticatedRequest(router, http.MethodDelete, "/api/pages/"+parent.ID+"?version="+parent.Version, nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected 400 Bad Request, got %d", rec.Code)
@@ -78,8 +79,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		parent := createPageViaAPI(router, "Parent", "parent", nil, pageNodeKind())
-		createPageViaAPI(router, "Child", "child", &parent.ID, pageNodeKind())
+		parent := createPageViaAPI(router, "Parent", newFixtureSlug("parent"), nil, pageNodeKind())
+		createPageViaAPI(router, "Child", newFixtureSlug("child"), &parent.ID, pageNodeKind())
 
 		rec := authenticatedRequest(router, http.MethodDelete, "/api/pages/"+parent.ID+"?recursive=true&version="+parent.Version, nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d", rec.Code)
@@ -97,7 +98,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Original Title", newFixtureSlug("original-title"), nil, pageNodeKind())
 
 		payload := map[string]string{
 			"version": page.Version,
@@ -129,7 +130,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Original Title", newFixtureSlug("original-title"), nil, pageNodeKind())
 
 		payload := map[string]interface{}{
 			"version": page.Version,
@@ -173,7 +174,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Original Title", newFixtureSlug("original-title"), nil, pageNodeKind())
 
 		firstPayload := map[string]interface{}{
 			"version": page.Version,
@@ -239,7 +240,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Metadata Preserve", "metadata-preserve", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Metadata Preserve", newFixtureSlug("metadata-preserve"), nil, pageNodeKind())
 
 		firstPayload := map[string]interface{}{
 			"version": page.Version,
@@ -367,7 +368,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Original Title", newFixtureSlug("original-title"), nil, pageNodeKind())
 
 		payload := map[string]interface{}{
 			"version": page.Version,
@@ -401,9 +402,9 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		pageA := createPageViaAPI(router, "Page A", "page-a", nil, pageNodeKind())
-		pageB := createPageViaAPI(router, "Page B", "page-b", nil, pageNodeKind())
-		pageC := createPageViaAPI(router, "Page C", "page-c", nil, pageNodeKind())
+		pageA := createPageViaAPI(router, "Page A", newFixtureSlug("page-a"), nil, pageNodeKind())
+		pageB := createPageViaAPI(router, "Page B", newFixtureSlug("page-b"), nil, pageNodeKind())
+		pageC := createPageViaAPI(router, "Page C", newFixtureSlug("page-c"), nil, pageNodeKind())
 
 		updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
 			payload := map[string]interface{}{

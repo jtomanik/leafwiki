@@ -55,11 +55,11 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(store.Save(GrantDocument{})).To(MatchError(ErrGrantSchemaVersion))
 			Expect(store.Save(GrantDocument{
 				SchemaVersion: GrantSchemaVersion,
-				Grants:        []Grant{{Subject: "user:missing", WorkspaceID: "missing", Role: GrantRoleViewer}},
+				Grants:        []Grant{{Subject: "user:missing", WorkspaceID: mustDecodeWorkspaceID("missing"), Role: GrantRoleViewer}},
 			})).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 			Expect(store.ReplaceSubjectGrants(" \t ", nil)).To(MatchError(ErrGrantSubjectRequired))
 			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{Subject: "user:2", WorkspaceID: home.ID, Role: GrantRoleViewer}})).To(MatchError(ErrGrantSubjectMismatch))
-			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{WorkspaceID: home.ID, Role: GrantRole("owner")}})).To(MatchError(ErrUnknownGrantRole))
+			Expect(store.ReplaceSubjectGrants("user:1", []Grant{{WorkspaceID: home.ID, Role: mustDecodeGrantRole("owner")}})).To(MatchError(ErrUnknownGrantRole))
 		})
 
 		ginkgo.It("surfaces grant delete failures from SQLite triggers", ginkgo.Label("integration"), func() {
@@ -137,7 +137,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			store := NewRegistryStore(layout.DBPath)
 			result, err := store.RegisterWorkspaceWithResultAndGrants(
 				WorkspaceRecord{
-					ID:          "docs",
+					ID:          mustDecodeWorkspaceID("docs"),
 					DisplayName: "Docs",
 					DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
 					RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
@@ -151,7 +151,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(matchCreatedWorkspaceRegistration(workspaceid.WorkspaceID("docs")))
+			Expect(result).To(matchCreatedWorkspaceRegistration(mustDecodeWorkspaceID("docs")))
 			grants, err := NewGrantStore(layout.DBPath).GrantsForSubject("user:1")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(grants).To(Equal([]Grant{{Subject: "user:1", WorkspaceID: result.Workspace.ID, Role: GrantRoleEditor}}))
@@ -161,7 +161,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			layout := newWikidEdgeLayout()
 			store := NewRegistryStore(layout.DBPath)
 			workspace := WorkspaceRecord{
-				ID:          "docs",
+				ID:          mustDecodeWorkspaceID("docs"),
 				DisplayName: "Docs",
 				DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
 				RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
@@ -175,11 +175,11 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			})
 			Expect(err).To(MatchError(callbackErr))
 
-			workspace.ID = "docs-two"
+			workspace.ID = mustDecodeWorkspaceID("docs-two")
 			workspace.DataDir = filepath.Join(wikidTestTempDir(), "docs-two-data")
 			workspace.RootDir = filepath.Join(wikidTestTempDir(), "docs-two-root")
 			_, err = store.RegisterWorkspaceWithResultAndGrants(workspace, time.Now, func(RegisterWorkspaceResult) ([]Grant, error) {
-				return []Grant{{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer}}, nil
+				return []Grant{{Subject: "user:1", WorkspaceID: mustDecodeWorkspaceID("bad/id"), Role: GrantRoleViewer}}, nil
 			})
 			Expect(err).To(matchWikidWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
 		})
@@ -219,7 +219,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 		ginkgo.It("reports invalid direct store registration inputs before opening a transaction", ginkgo.Label("unit"), func() {
 			store := NewRegistryStore(filepath.Join(wikidTestTempDir(), "wikid.db"))
 
-			_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{ID: "bad/id"}, time.Now, nil)
+			_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{ID: mustDecodeWorkspaceID("bad/id")}, time.Now, nil)
 			Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 
 			_, err = store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
@@ -318,11 +318,11 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 
 			err = saveRegistryDocument(context.Background(), conn, RegistryDocument{
 				SchemaVersion: RegistrySchemaVersion,
-				Workspaces:    []WorkspaceRecord{testWorkspaceRecord("edge-save")},
+				Workspaces:    []WorkspaceRecord{testWorkspaceRecord(mustDecodeWorkspaceID("edge-save"))},
 			})
 			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
-			err = upsertWorkspace(context.Background(), conn, WorkspaceRecord{ID: "bad/id", DataDir: "/tmp/data", RootDir: "/tmp/root"})
+			err = upsertWorkspace(context.Background(), conn, WorkspaceRecord{ID: mustDecodeWorkspaceID("bad/id"), DataDir: "/tmp/data", RootDir: "/tmp/root"})
 			Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
 		})
 
@@ -340,18 +340,18 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			registerLoadDB := rawSQLiteDBAt(registerLoadLayout.DBPath)
 			Expect(execRawSQL(registerLoadDB, `CREATE TABLE workspaces (id TEXT)`)).To(Succeed())
 			Expect(registerLoadDB.Close()).To(Succeed())
-			_, err = NewRegistryStore(registerLoadLayout.DBPath).RegisterWorkspaceWithResultAndGrants(testWorkspaceRecord("load-fail"), time.Now, nil)
+			_, err = NewRegistryStore(registerLoadLayout.DBPath).RegisterWorkspaceWithResultAndGrants(testWorkspaceRecord(mustDecodeWorkspaceID("load-fail")), time.Now, nil)
 			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_ERROR))
 
 			insertFailLayout := newWikidEdgeLayout()
 			insertFailDB := mustOpenInitializedWikidDB(insertFailLayout.DBPath)
 			Expect(execRawSQL(insertFailDB, `CREATE TRIGGER fail_workspace_insert BEFORE INSERT ON workspaces BEGIN SELECT RAISE(FAIL, '`+wikidWorkspaceInsertBlockedFixture+`'); END`)).To(Succeed())
-			_, err = NewRegistryStore(insertFailLayout.DBPath).RegisterWorkspaceWithResultAndGrants(testWorkspaceRecord("insert-fail"), time.Now, nil)
+			_, err = NewRegistryStore(insertFailLayout.DBPath).RegisterWorkspaceWithResultAndGrants(testWorkspaceRecord(mustDecodeWorkspaceID("insert-fail")), time.Now, nil)
 			Expect(err).To(matchWikidSQLitePrimaryError(sqlite3.SQLITE_CONSTRAINT))
 
 			updateFailLayout := newWikidEdgeLayout()
 			updateStore := NewRegistryStore(updateFailLayout.DBPath)
-			workspace := testWorkspaceRecord("update-fail")
+			workspace := testWorkspaceRecord(mustDecodeWorkspaceID("update-fail"))
 			_, err = updateStore.RegisterWorkspaceWithResultAndGrants(workspace, time.Now, nil)
 			Expect(err).NotTo(HaveOccurred())
 			updateFailDB := mustOpenInitializedWikidDB(updateFailLayout.DBPath)

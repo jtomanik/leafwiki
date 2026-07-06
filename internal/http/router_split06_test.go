@@ -3,8 +3,6 @@ package http_test
 import (
 	"bytes"
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/importer"
@@ -34,7 +35,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			MaxAssetUploadSizeBytes: 32,
 		})
 
-		page := createPageViaAPI(router, "Asset Limit Test", "asset-limit-test", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Asset Limit Test", newFixtureSlug("asset-limit-test"), nil, pageNodeKind())
 
 		loginBody := `{"identifier": "admin", "password": "admin"}`
 		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
@@ -318,7 +319,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 
 		}
 
-		assets := listAssetsViaAPI(router, setupPage.ID)
+		assets := listAssetsViaAPI(router, apiPageDTOID(setupPage))
 		Expect(assets).To(HaveLen(2), "expected 2 uploaded assets, got %#v", assets)
 
 		_ = getPageByPathViaAPI(router, "reference/api-1")

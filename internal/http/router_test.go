@@ -23,6 +23,7 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/wiki"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -39,6 +40,35 @@ func (panicRegistrar) RegisterRoutes(ctx httpinternal.RouterContext) {
 func pageNodeKind() *tree.NodeKind {
 	kind := tree.NodeKindPage
 	return &kind
+}
+
+func newFixturePageID[T ~string](raw T) tree.PageID {
+	return tree.NewPageIDUnchecked(raw)
+}
+
+func newFixtureSlug[T ~string](raw T) tree.Slug {
+	return tree.NewSlugUnchecked(raw)
+}
+
+func newFixtureRoutePath[T ~string](raw T) tree.RoutePath {
+	return tree.NewRoutePathUnchecked(string(raw))
+}
+
+func newFixtureMarkdownPath[T ~string](raw T) tree.MarkdownPath {
+	return tree.NewMarkdownPathUnchecked(string(raw))
+}
+
+func newFixtureWorkspaceID[T ~string](raw T) workspaceid.WorkspaceID {
+	payload, err := json.Marshal(string(raw))
+	Expect(err).To(Succeed())
+	var id workspaceid.WorkspaceID
+	Expect(json.Unmarshal(payload, &id)).To(Succeed())
+	return id
+}
+
+func apiPageDTOID(page *apiPageDTO) tree.PageID {
+	GinkgoHelper()
+	return tree.PageIDFromString(page.ID)
 }
 func httpTestTempDir() string {
 	GinkgoHelper()

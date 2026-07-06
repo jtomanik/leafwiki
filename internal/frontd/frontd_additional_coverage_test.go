@@ -104,7 +104,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/mcp/workspaces/alpha", nil))
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
-		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha")))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("alpha")))
 	})
 
 	DescribeTable("ingress base-path routing", Label("integration"),

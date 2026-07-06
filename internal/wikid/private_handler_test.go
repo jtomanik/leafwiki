@@ -1,13 +1,14 @@
 package wikid
 
 import (
-	ginkgo "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 
 	"github.com/perber/wiki/internal/frontd"
 	"github.com/perber/wiki/internal/projectdaemon"

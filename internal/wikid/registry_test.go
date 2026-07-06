@@ -173,7 +173,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		now := time.Now().UTC()
 		doc := NewRegistryDocument()
 		doc.Workspaces = append(doc.Workspaces, WorkspaceRecord{
-			ID:          "bad/id",
+			ID:          mustDecodeWorkspaceID("bad/id"),
 			DisplayName: "Bad",
 			DataDir:     filepath.Join(wikidTestTempDir(), "bad-data"),
 			RootDir:     filepath.Join(wikidTestTempDir(), "bad-root"),
@@ -199,7 +199,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 			_, err := firstStore.Update(func(doc RegistryDocument) (RegistryDocument, error) {
 				close(firstEntered)
 				Eventually(releaseFirst).Should(BeClosed())
-				doc.Workspaces = append(doc.Workspaces, testWorkspaceRecord("first"))
+				doc.Workspaces = append(doc.Workspaces, testWorkspaceRecord(mustDecodeWorkspaceID("first")))
 				return doc, nil
 			})
 			firstDone <- err
@@ -210,7 +210,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 		go func() {
 			defer ginkgo.GinkgoRecover()
 			_, err := secondStore.Update(func(doc RegistryDocument) (RegistryDocument, error) {
-				doc.Workspaces = append(doc.Workspaces, testWorkspaceRecord("second"))
+				doc.Workspaces = append(doc.Workspaces, testWorkspaceRecord(mustDecodeWorkspaceID("second")))
 				return doc, nil
 			})
 			secondDone <- err
@@ -242,7 +242,7 @@ var _ = ginkgo.Describe("wikid registry", func() {
 			return []Grant{{
 				Subject:     "user:agent",
 				WorkspaceID: registration.Workspace.ID,
-				Role:        GrantRole("owner"),
+				Role:        mustDecodeGrantRole("owner"),
 			}}, nil
 		})
 
@@ -312,17 +312,14 @@ var _ = ginkgo.Describe("wikid registry", func() {
 	})
 })
 
-func testWorkspaceRecord(id string) WorkspaceRecord {
+func testWorkspaceRecord(id workspaceid.WorkspaceID) WorkspaceRecord {
 	now := time.Now().UTC()
-	workspaceID, err := workspaceid.ParseWorkspaceID(id)
-	if err != nil {
-		panic(err)
-	}
+	storageKey := id.StorageKey()
 	return WorkspaceRecord{
-		ID:          workspaceID,
-		DisplayName: id,
-		DataDir:     filepath.Join(os.TempDir(), id+"-data"),
-		RootDir:     filepath.Join(os.TempDir(), id+"-root"),
+		ID:          id,
+		DisplayName: storageKey,
+		DataDir:     filepath.Join(os.TempDir(), storageKey+"-data"),
+		RootDir:     filepath.Join(os.TempDir(), storageKey+"-root"),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

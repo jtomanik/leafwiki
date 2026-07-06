@@ -23,15 +23,15 @@ var _ = Describe("workspace MCP session routing", func() {
 	It("rejects rebinding a session to a different workspace", Label("unit"), func() {
 		bindings := NewMCPSessionBindings()
 
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("beta"))).To(MatchError(ErrMCPSessionWorkspaceMismatch))
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("alpha"))).To(Succeed())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("alpha"))).To(Succeed())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("beta"))).To(MatchError(ErrMCPSessionWorkspaceMismatch))
 	})
 
 	It("rejects invalid workspace identifiers before binding", Label("unit"), func() {
 		bindings := NewMCPSessionBindings()
 
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID(" alpha "))).To(matchFrontdWorkspaceIDError(workspaceid.ErrCodeWorkspaceIDWhitespace))
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID(" alpha "))).To(matchFrontdWorkspaceIDError(workspaceid.ErrCodeWorkspaceIDWhitespace))
 		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("session-1")))
 	})
 
@@ -58,7 +58,7 @@ var _ = Describe("workspace MCP session routing", func() {
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusAccepted))
 		Expect(seenPath).To(Equal("/mcp"))
-		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("home")))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("home")))
 
 		req = httptest.NewRequest(http.MethodPost, "/mcp/workspaces/alpha", nil)
 		req.Header.Set("Mcp-Session-Id", "session-1")
@@ -77,7 +77,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
-				return WorkspaceRoute{WorkspaceID: workspaceid.WorkspaceID("alpha"), Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
+				return WorkspaceRoute{WorkspaceID: mustDecodeWorkspaceID("alpha"), Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
 			},
 			Proxy: func(route WorkspaceRoute) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -93,12 +93,12 @@ var _ = Describe("workspace MCP session routing", func() {
 		handler.ServeHTTP(rec, req)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusAccepted))
-		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session-1"), workspaceid.WorkspaceID("alpha")))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session-1"), mustDecodeWorkspaceID("alpha")))
 	})
 
 	It("routes root MCP through an existing session binding", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("alpha"))).To(Succeed())
 		var seenID workspaceid.WorkspaceID
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
@@ -122,12 +122,12 @@ var _ = Describe("workspace MCP session routing", func() {
 		handler.ServeHTTP(rec, req)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusAccepted))
-		Expect(seenID).To(Equal(workspaceid.WorkspaceID("alpha")))
+		Expect(seenID).To(Equal(mustDecodeWorkspaceID("alpha")))
 	})
 
 	It("clears a session binding after a successful DELETE", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), workspaceid.WorkspaceID("alpha"))).To(Succeed())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("alpha"))).To(Succeed())
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
 			ResolveRoot: func(*http.Request) (workspaceid.WorkspaceID, error) {
@@ -220,9 +220,9 @@ var _ = Describe("workspace MCP session routing", func() {
 			Expect(seenID).To(Equal(tc.wantSeenID))
 		},
 		Entry("routes the only available workspace", rootMCPWorkspaceResolutionCase{
-			rootID:     workspaceid.WorkspaceID("only"),
+			rootID:     mustDecodeWorkspaceID("only"),
 			wantStatus: http.StatusAccepted,
-			wantSeenID: workspaceid.WorkspaceID("only"),
+			wantSeenID: mustDecodeWorkspaceID("only"),
 		}),
 		Entry("rejects an empty workspace list", rootMCPWorkspaceResolutionCase{
 			rootErr:    ErrWorkspaceForbidden,

@@ -2,14 +2,15 @@ package http_test
 
 import (
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
-	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	wikipages "github.com/perber/wiki/internal/wiki/pages"
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/wiki"
@@ -64,7 +65,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Original Title", newFixtureSlug("original-title"), nil, pageNodeKind())
 
 		payload := map[string]interface{}{
 			"version": page.Version,
@@ -112,7 +113,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		router := createRouterTestInstance(w)
 
 		// Create a page
-		page := createPageViaAPI(router, "Welcome", "welcome", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Welcome", newFixtureSlug("welcome"), nil, pageNodeKind())
 		{
 			_, err := os.Stat(filepath.Join(rootDir, "welcome.md"))
 			Expect(err).NotTo(HaveOccurred(), "expected API-created page in root dir: %v", err)
@@ -265,7 +266,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		router := createRouterTestInstance(w)
 
 		// Create a standalone page (no children – adding children auto-converts it to a section)
-		createPageViaAPI(router, "My Page", "my-page", nil, pageNodeKind())
+		createPageViaAPI(router, "My Page", newFixtureSlug("my-page"), nil, pageNodeKind())
 
 		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=my-page", nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d - %s", rec.Code, rec.Body.String())
@@ -294,9 +295,9 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		sectionKind := tree.NodeKindSection
 
 		// Create a section with a child page that itself has a grandchild
-		section := createPageViaAPI(router, "My Section", "my-section", nil, &sectionKind)
-		child := createPageViaAPI(router, "Child Page", "child-page", &section.ID, pageNodeKind())
-		createPageViaAPI(router, "Grandchild Page", "grandchild-page", &child.ID, pageNodeKind())
+		section := createPageViaAPI(router, "My Section", newFixtureSlug("my-section"), nil, &sectionKind)
+		child := createPageViaAPI(router, "Child Page", newFixtureSlug("child-page"), &section.ID, pageNodeKind())
+		createPageViaAPI(router, "Grandchild Page", newFixtureSlug("grandchild-page"), &child.ID, pageNodeKind())
 
 		rec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=my-section", nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected status 200, got %d - %s", rec.Code, rec.Body.String())

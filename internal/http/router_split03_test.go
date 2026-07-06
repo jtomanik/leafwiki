@@ -2,13 +2,14 @@ package http_test
 
 import (
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	httpinternal "github.com/perber/wiki/internal/http"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	httpinternal "github.com/perber/wiki/internal/http"
 
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/shared"

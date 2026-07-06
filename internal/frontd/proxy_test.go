@@ -74,7 +74,7 @@ var _ = Describe("frontd proxy routing", Label("integration"), func() {
 					Subject:     "user:admin",
 					Username:    "admin",
 					Role:        "admin",
-					WorkspaceID: "current",
+					WorkspaceID: mustDecodeWorkspaceID("current"),
 					AuthMethod:  "cookie",
 					IssuedAt:    now,
 					ExpiresAt:   now.Add(5 * time.Minute),
@@ -102,10 +102,10 @@ var _ = Describe("frontd proxy routing", Label("integration"), func() {
 			HaveField("Authorization", BeEmpty()),
 			HaveField("Cookie", BeEmpty()),
 		))
-		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: "current"})
+		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: mustDecodeWorkspaceID("current")})
 		Expect(err).To(Succeed())
 		Expect(decoded).To(SatisfyAll(
-			HaveField("Subject", Equal("user:admin")),
+			matchFrontdActorSubjectID("admin"),
 			HaveField("AuthMethod", Equal("cookie")),
 		))
 	})
@@ -134,7 +134,7 @@ var _ = Describe("frontd proxy routing", Label("integration"), func() {
 					Subject:     "user:editor-1",
 					Username:    "editor",
 					Role:        "editor",
-					WorkspaceID: "current",
+					WorkspaceID: mustDecodeWorkspaceID("current"),
 					AuthMethod:  "oauth",
 					IssuedAt:    now,
 					ExpiresAt:   now.Add(5 * time.Minute),
@@ -158,10 +158,10 @@ var _ = Describe("frontd proxy routing", Label("integration"), func() {
 			HaveField("Authorization", BeEmpty()),
 			HaveField("Cookie", BeEmpty()),
 		))
-		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: "current"})
+		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: mustDecodeWorkspaceID("current")})
 		Expect(err).To(Succeed())
 		Expect(decoded).To(SatisfyAll(
-			HaveField("Subject", Equal("user:editor-1")),
+			matchFrontdActorSubjectID("editor-1"),
 			HaveField("AuthMethod", Equal("oauth")),
 		))
 	})
@@ -178,7 +178,7 @@ var _ = Describe("frontd proxy routing", Label("integration"), func() {
 					Subject:     "user:editor",
 					Username:    "editor",
 					Role:        "editor",
-					WorkspaceID: "current",
+					WorkspaceID: mustDecodeWorkspaceID("current"),
 					AuthMethod:  "cookie",
 					IssuedAt:    now,
 					ExpiresAt:   now.Add(5 * time.Minute),

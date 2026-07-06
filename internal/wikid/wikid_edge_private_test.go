@@ -38,7 +38,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 					return WorkspaceSubject{Subject: " \t "}, nil
 				}},
 				{name: "invalid role", subject: func(*http.Request) (WorkspaceSubject, error) {
-					return WorkspaceSubject{Subject: "user:1", Role: GrantRole("owner")}, nil
+					return WorkspaceSubject{Subject: "user:1", Role: mustDecodeGrantRole("owner")}, nil
 				}},
 			} {
 				tc := tc
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 			Expect(grantsRec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, errCodePrivateGrantsLoadFailed, sharederrors.MessageIDForCode(errCodePrivateGrantsLoadFailed)))
 		})
 
-	ginkgo.It("returns registered workspace state for status and default ensure when no supervisor is configured", ginkgo.Label("integration"), func() {
+		ginkgo.It("returns registered workspace state for status and default ensure when no supervisor is configured", ginkgo.Label("integration"), func() {
 			layout := newWikidEdgeLayout()
 			registry := NewRegistryService(NewRegistryStore(layout.DBPath), layout)
 			home, err := registry.BootstrapHome()

@@ -3,13 +3,14 @@ package http_test
 import (
 	"bytes"
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	httpinternal "github.com/perber/wiki/internal/http"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	httpinternal "github.com/perber/wiki/internal/http"
 )
 
 var _ = Describe("HTTP router", Label("unit"), func() {

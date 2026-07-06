@@ -2,10 +2,11 @@ package http_test
 
 import (
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"net/http"
 	"strings"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/tree"
 )
@@ -17,7 +18,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Page A", "page-a", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Page A", newFixtureSlug("page-a"), nil, pageNodeKind())
 
 		payload := map[string]interface{}{
 			"version": page.Version,
@@ -52,8 +53,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		reactPage := createPageViaAPI(router, "React Search Match", "react-search-match", nil, pageNodeKind())
-		plainPage := createPageViaAPI(router, "Plain Search Match", "plain-search-match", nil, pageNodeKind())
+		reactPage := createPageViaAPI(router, "React Search Match", newFixtureSlug("react-search-match"), nil, pageNodeKind())
+		plainPage := createPageViaAPI(router, "Plain Search Match", newFixtureSlug("plain-search-match"), nil, pageNodeKind())
 
 		updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
 			payload := map[string]interface{}{
@@ -109,8 +110,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		reactPage := createPageViaAPI(router, "React Tag Match", "react-tag-match", nil, pageNodeKind())
-		plainPage := createPageViaAPI(router, "Plain Tag Match", "plain-tag-match", nil, pageNodeKind())
+		reactPage := createPageViaAPI(router, "React Tag Match", newFixtureSlug("react-tag-match"), nil, pageNodeKind())
+		plainPage := createPageViaAPI(router, "Plain Tag Match", newFixtureSlug("plain-tag-match"), nil, pageNodeKind())
 
 		updatePage := func(page *apiPageDTO, title, slug, content string, tags []string) {
 			payload := map[string]interface{}{
@@ -165,7 +166,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "React Tag Match", "react-tag-match-bounds", nil, pageNodeKind())
+		page := createPageViaAPI(router, "React Tag Match", newFixtureSlug("react-tag-match-bounds"), nil, pageNodeKind())
 
 		payload := map[string]interface{}{
 			"version": page.Version,
@@ -232,9 +233,9 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 
 		}
 
-		pageOne := createPageViaAPI(router, "Facet Alpha", "facet-alpha", nil, pageNodeKind())
-		pageTwo := createPageViaAPI(router, "Facet Beta", "facet-beta", nil, pageNodeKind())
-		pageThree := createPageViaAPI(router, "Facet Gamma", "facet-gamma", nil, pageNodeKind())
+		pageOne := createPageViaAPI(router, "Facet Alpha", newFixtureSlug("facet-alpha"), nil, pageNodeKind())
+		pageTwo := createPageViaAPI(router, "Facet Beta", newFixtureSlug("facet-beta"), nil, pageNodeKind())
+		pageThree := createPageViaAPI(router, "Facet Gamma", newFixtureSlug("facet-gamma"), nil, pageNodeKind())
 
 		updatePage(pageOne, "Facet Alpha", "facet-alpha", "Body with facet token.", []string{"alpha", "shared"})
 		updatePage(pageTwo, "Facet Beta", "facet-beta", "Body with facet token.", []string{"beta", "shared"})
@@ -287,7 +288,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Excerpt Page", "excerpt-page", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Excerpt Page", newFixtureSlug("excerpt-page"), nil, pageNodeKind())
 
 		payload := map[string]interface{}{
 			"version": page.Version,
@@ -329,8 +330,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		pageA := createPageViaAPI(router, "Page A", "page-a", nil, pageNodeKind())
-		pageB := createPageViaAPI(router, "Page B", "page-b", nil, pageNodeKind())
+		pageA := createPageViaAPI(router, "Page A", newFixtureSlug("page-a"), nil, pageNodeKind())
+		pageB := createPageViaAPI(router, "Page B", newFixtureSlug("page-b"), nil, pageNodeKind())
 
 		updatePageTags := func(page *apiPageDTO, title, slug string, tags []string) {
 			payload := map[string]interface{}{
@@ -386,7 +387,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		router := createRouterTestInstance(w)
 
 		// Create a page
-		created := createPageViaAPI(router, "Immutable Slug", "immutable-slug", nil, pageNodeKind())
+		created := createPageViaAPI(router, "Immutable Slug", newFixtureSlug("immutable-slug"), nil, pageNodeKind())
 
 		// Update title, but reuse slug
 		payload := map[string]string{
@@ -417,8 +418,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		page := createPageViaAPI(router, "Original Title", "original-title", nil, pageNodeKind())
-		createPageViaAPI(router, "Conflict Title", "conflict-title", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Original Title", newFixtureSlug("original-title"), nil, pageNodeKind())
+		createPageViaAPI(router, "Conflict Title", newFixtureSlug("conflict-title"), nil, pageNodeKind())
 
 		payload := map[string]string{
 			"version": page.Version,

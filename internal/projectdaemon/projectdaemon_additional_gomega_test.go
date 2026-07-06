@@ -87,7 +87,7 @@ var _ = ginkgo.Describe("project daemon configuration, descriptor, and registry 
 			Version:     1,
 			Issuer:      ActorContextIssuerWikid,
 			Subject:     "user:admin",
-			WorkspaceID: "home",
+			WorkspaceID: mustDecodeWorkspaceID("home"),
 			ExpiresAt:   now.Add(time.Minute),
 		}
 		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(Succeed())
@@ -113,9 +113,9 @@ var _ = ginkgo.Describe("project daemon configuration, descriptor, and registry 
 		valid.Version = 2
 		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextVersion))
 		valid.Version = 1
-		valid.WorkspaceID = ""
+		valid.WorkspaceID = mustDecodeWorkspaceID("")
 		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextWorkspaceRequired))
-		valid.WorkspaceID = "home"
+		valid.WorkspaceID = mustDecodeWorkspaceID("home")
 		valid.ExpiresAt = time.Time{}
 		Expect(validateActorContext(valid, ActorContextValidation{Now: now})).To(MatchError(errActorContextExpired))
 	})

@@ -1,11 +1,12 @@
 package wikid
 
 import (
+	"path/filepath"
+	"time"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
-	"path/filepath"
-	"time"
 
 	"github.com/perber/wiki/internal/workspaceid"
 )
@@ -34,7 +35,7 @@ func lookupRegistryWorkspace(doc RegistryDocument, workspaceID workspaceid.Works
 
 var _ = ginkgo.Describe("wikid workspace semantic typing", func() {
 	ginkgo.It("preserves typed workspace identifiers across registry, grant, and supervisor models", ginkgo.Label("unit"), func() {
-		workspaceID := workspaceid.WorkspaceID("home")
+		workspaceID := mustDecodeWorkspaceID("home")
 
 		doc := RegistryDocument{
 			SchemaVersion: RegistrySchemaVersion,
@@ -64,7 +65,7 @@ var _ = ginkgo.Describe("wikid workspace semantic typing", func() {
 		now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
 
 		_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
-			ID:          workspaceid.WorkspaceID(" docs "),
+			ID:          mustDecodeWorkspaceID(" docs "),
 			DisplayName: "Docs",
 			DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
 			RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),
@@ -84,7 +85,7 @@ var _ = ginkgo.Describe("wikid workspace semantic typing", func() {
 		now := func() time.Time { return time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC) }
 
 		_, err := store.RegisterWorkspaceWithResultAndGrants(WorkspaceRecord{
-			ID:          workspaceid.WorkspaceID("docs"),
+			ID:          mustDecodeWorkspaceID("docs"),
 			DisplayName: "Docs",
 			DataDir:     filepath.Join(wikidTestTempDir(), "docs-data"),
 			RootDir:     filepath.Join(wikidTestTempDir(), "docs-root"),

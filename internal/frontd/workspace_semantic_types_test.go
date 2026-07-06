@@ -13,13 +13,13 @@ import (
 var _ = Describe("workspace router semantic IDs", Label("unit"), func() {
 	It("parses workspace routes into typed workspace identifiers", func() {
 		Expect(workspaceAPIPathResult("/api/workspaces/home/tree")).To(ResolveWorkspaceAPIPath(
-			workspaceid.WorkspaceID("home"),
+			mustDecodeWorkspaceID("home"),
 			"/api/tree",
 		))
 	})
 
 	It("accepts typed workspace callbacks for resolver and actor dependencies", func() {
-		route := WorkspaceRoute{WorkspaceID: workspaceid.WorkspaceID("home")}
+		route := WorkspaceRoute{WorkspaceID: mustDecodeWorkspaceID("home")}
 		var _ workspaceid.WorkspaceID = route.WorkspaceID
 
 		opts := WorkspaceRouterProxyOptions{

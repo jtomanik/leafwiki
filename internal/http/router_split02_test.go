@@ -4,9 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	httpinternal "github.com/perber/wiki/internal/http"
 	"io/fs"
 	"mime/multipart"
 	"net/http"
@@ -15,6 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing/fstest"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	httpinternal "github.com/perber/wiki/internal/http"
 
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
@@ -171,12 +172,12 @@ type createPagePayloadDTO struct {
 	Kind     tree.NodeKind `json:"kind,omitempty"`
 }
 
-func createPageViaAPI(router http.Handler, title, slug string, parentID *string, kind *tree.NodeKind) *apiPageDTO {
+func createPageViaAPI(router http.Handler, title string, slug tree.Slug, parentID *string, kind *tree.NodeKind) *apiPageDTO {
 	GinkgoHelper()
 
 	payload := createPagePayloadDTO{
 		Title: title,
-		Slug:  slug,
+		Slug:  slug.FilesystemPath(),
 	}
 	if parentID != nil {
 		payload.ParentID = *parentID
@@ -215,10 +216,10 @@ func getPageByPathViaAPI(router http.Handler, path string) *apiPageDTO {
 	return &page
 }
 
-func getPermalinkTargetViaAPI(router http.Handler, id string) *apiPermalinkTargetDTO {
+func getPermalinkTargetViaAPI(router http.Handler, id tree.PageID) *apiPermalinkTargetDTO {
 	GinkgoHelper()
 
-	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/permalink/"+id, nil)
+	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/permalink/"+id.String(), nil)
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var target apiPermalinkTargetDTO
@@ -245,10 +246,10 @@ func getTreeViaAPI(router http.Handler) *apiPageDTO {
 	return &node
 }
 
-func deletePageViaAPI(router http.Handler, pageID string, version string, recursive bool) {
+func deletePageViaAPI(router http.Handler, pageID tree.PageID, version string, recursive bool) {
 	GinkgoHelper()
 
-	url := "/api/pages/" + pageID + "?version=" + version
+	url := "/api/pages/" + pageID.String() + "?version=" + version
 	if recursive {
 		url += "&recursive=true"
 	}
@@ -258,10 +259,10 @@ func deletePageViaAPI(router http.Handler, pageID string, version string, recurs
 
 }
 
-func listAssetsViaAPI(router http.Handler, pageID string) []string {
+func listAssetsViaAPI(router http.Handler, pageID tree.PageID) []string {
 	GinkgoHelper()
 
-	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+pageID+"/assets", nil)
+	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+pageID.String()+"/assets", nil)
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var resp struct {

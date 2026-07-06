@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("grant store validation", ginkgo.Label("integration"), f
 		err := store.Upsert(Grant{
 			Subject:     "user:1",
 			WorkspaceID: HomeWorkspaceID,
-			Role:        GrantRole("owner"),
+			Role:        mustDecodeGrantRole("owner"),
 		})
 		Expect(err).To(MatchError(ErrUnknownGrantRole))
 	})
@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("grant store validation", ginkgo.Label("integration"), f
 
 		err := store.Upsert(Grant{
 			Subject:     "user:1",
-			WorkspaceID: "bad/id",
+			WorkspaceID: mustDecodeWorkspaceID("bad/id"),
 			Role:        GrantRoleViewer,
 		})
 		Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("grant store validation", ginkgo.Label("integration"), f
 
 		err := store.Upsert(Grant{
 			Subject:     "user:1",
-			WorkspaceID: workspaceid.WorkspaceID(" docs "),
+			WorkspaceID: mustDecodeWorkspaceID(" docs "),
 			Role:        GrantRoleViewer,
 		})
 		Expect(err).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDWhitespace)))

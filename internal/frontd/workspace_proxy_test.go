@@ -55,7 +55,7 @@ var _ = Describe("workspace router proxy", Label("integration"), func() {
 
 		proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
-				return WorkspaceRoute{WorkspaceID: workspaceid.WorkspaceID("home"), Upstream: upstream.URL, DaemonToken: "private-token"}, nil
+				return WorkspaceRoute{WorkspaceID: mustDecodeWorkspaceID("home"), Upstream: upstream.URL, DaemonToken: "private-token"}, nil
 			},
 			Actor: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
 				return projectdaemon.ActorContext{
@@ -85,9 +85,9 @@ var _ = Describe("workspace router proxy", Label("integration"), func() {
 			HaveField("Body", Equal("body")),
 			HaveField("Token", Equal("private-token")),
 		))
-		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: "home"})
+		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: mustDecodeWorkspaceID("home")})
 		Expect(err).To(Succeed())
-		Expect(decoded.Subject).To(Equal("user:admin"))
+		Expect(decoded).To(matchFrontdActorSubjectID("admin"))
 	})
 
 	It("rewrites workspace asset paths to the static asset route", func() {
@@ -101,7 +101,7 @@ var _ = Describe("workspace router proxy", Label("integration"), func() {
 
 		proxy := NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
-				return WorkspaceRoute{WorkspaceID: workspaceid.WorkspaceID("docs"), Upstream: upstream.URL, DaemonToken: "private-token"}, nil
+				return WorkspaceRoute{WorkspaceID: mustDecodeWorkspaceID("docs"), Upstream: upstream.URL, DaemonToken: "private-token"}, nil
 			},
 			Actor: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
 				now := time.Now().UTC()
@@ -179,7 +179,7 @@ var _ = Describe("workspace router proxy", Label("integration"), func() {
 		Entry("reports missing actor resolver dependency", workspaceRouterProxyDependencyErrorCase{
 			opts: WorkspaceRouterProxyOptions{
 				Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
-					return WorkspaceRoute{WorkspaceID: "home", Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
+					return WorkspaceRoute{WorkspaceID: mustDecodeWorkspaceID("home"), Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
 				},
 			},
 			wantCode:      errCodeWorkspaceActorContextUnavailable,

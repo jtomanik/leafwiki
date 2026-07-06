@@ -36,10 +36,10 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 			"SessionIDHash": Equal(event.SessionIDHash),
 			"FirstSeenAt":   BeTemporally("==", now),
 			"LastSeenAt":    BeTemporally("==", now),
-			"LastEvent":     Equal(agenthooks.AgentEventName("PreToolUse")),
+			"LastEvent":     Equal(agenthooks.AgentEventPreToolUse),
 			"Model":         Equal("gpt-5.4"),
 			"Source":        Equal(agenthooks.AgentSourceCLI),
-			"ToolName":      Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
+			"ToolName":      Equal(mustDecodeAgentToolName("mcp__leafwiki__wiki_get_page")),
 		})))
 		Expect(counts).To(Equal([]int{1}))
 
@@ -56,7 +56,7 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 			"Provider":  Equal(agenthooks.ProviderCodex),
 			"LastEvent": Equal(agenthooks.AgentEventPreToolUse),
 			"Source":    Equal(agenthooks.AgentSourceCLI),
-			"ToolName":  Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
+			"ToolName":  Equal(mustDecodeAgentToolName("mcp__leafwiki__wiki_get_page")),
 		}))
 	})
 
@@ -64,14 +64,14 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 		registry := NewAgentPresenceRegistry(DefaultIdleTimeout, nil)
 		event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"PreToolUse","session_id":"codex-session","model":"gpt-5.4","tool_name":"mcp__leafwiki__wiki_get_page"}`)
 		event.Model = "/Users/example/token-model"
-		event.Source = "/Users/example/.codex/session.jsonl"
+		event.Source = mustDecodeAgentSource("/Users/example/.codex/session.jsonl")
 
 		registry.Record(event)
 
 		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
 			"Model":    BeEmpty(),
 			"Source":   BeEmpty(),
-			"ToolName": Equal(agenthooks.AgentToolName("mcp__leafwiki__wiki_get_page")),
+			"ToolName": Equal(mustDecodeAgentToolName("mcp__leafwiki__wiki_get_page")),
 		})))
 	})
 
@@ -106,8 +106,8 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 		Expect(registry.List()).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
 			"FirstSeenAt": BeTemporally("==", time.Date(2026, 6, 7, 14, 0, 0, 0, time.UTC)),
 			"LastSeenAt":  BeTemporally("==", now),
-			"LastEvent":   Equal(agenthooks.AgentEventName("PreToolUse")),
-			"ToolName":    Equal(agenthooks.AgentToolName("Read")),
+			"LastEvent":   Equal(agenthooks.AgentEventPreToolUse),
+			"ToolName":    Equal(mustDecodeAgentToolName("Read")),
 		})))
 		Expect(counts).To(Equal([]int{1}))
 
@@ -169,17 +169,17 @@ var _ = ginkgo.Describe("agent presence registry", ginkgo.Label("unit"), func() 
 			return agenthooks.Event{
 				Provider:      agenthooks.ProviderCodex,
 				SessionIDHash: "raw-session-secret",
-				EventName:     "SessionStart",
+				EventName:     agenthooks.AgentEventSessionStart,
 			}
 		}),
 		ginkgo.Entry("unsupported provider", func() agenthooks.Event {
 			event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
-			event.Provider = "sidecar"
+			event.Provider = mustDecodeProviderID("sidecar")
 			return event
 		}),
 		ginkgo.Entry("unsupported event", func() agenthooks.Event {
 			event := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"safe-session"}`)
-			event.EventName = "MadeUpHook"
+			event.EventName = mustDecodeAgentEventName("MadeUpHook")
 			return event
 		}),
 		ginkgo.Entry("mismatched subagent delta", func() agenthooks.Event {

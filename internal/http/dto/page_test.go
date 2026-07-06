@@ -32,6 +32,14 @@ func matchAPINodeID(expected tree.PageID) types.GomegaMatcher {
 	}, Equal(expected))
 }
 
+func newFixturePageID[T ~string](raw T) tree.PageID {
+	return tree.NewPageIDUnchecked(raw)
+}
+
+func newFixtureSlug[T ~string](raw T) tree.Slug {
+	return tree.NewSlugUnchecked(raw)
+}
+
 func matchReadmeFallbackContentPath(path string) types.GomegaMatcher {
 	GinkgoHelper()
 	return WithTransform(apiNodeContentPathFor, Equal(apiNodeContentPath{
@@ -95,11 +103,11 @@ var _ = Describe("page DTO mapping", func() {
 			"Tags":       SatisfyAll(BeEmpty(), Not(BeNil())),
 			"Properties": SatisfyAll(BeEmpty(), Not(BeNil())),
 			"Node": matchAPINode(gstruct.Fields{
-				"ID":   Equal("intro"),
+				"ID":   matchAPINodeID(child.ID),
 				"Path": Equal("docs/intro"),
 				"Metadata": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-					"Creator":    Equal(&coreauth.UserLabel{ID: root.Metadata.CreatorID.String(), Username: "creator"}),
-					"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}),
+					"Creator":    Equal(&coreauth.UserLabel{ID: root.Metadata.CreatorID, Username: "creator"}),
+					"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID, Username: "last-author"}),
 				}),
 			}),
 		}))
@@ -209,7 +217,7 @@ var _ = Describe("property and tag DTO mapping", func() {
 		}, resolver)
 
 		Expect(page).To(matchPropertyPage(gstruct.Fields{
-			"ID":    Equal("intro"),
+			"ID":    matchAPINodeID(child.ID),
 			"Title": Equal("Intro"),
 			"Path":  Equal("docs/intro"),
 			"Properties": Equal(map[string]PropertyEntry{
@@ -217,12 +225,12 @@ var _ = Describe("property and tag DTO mapping", func() {
 			}),
 			"CreatedAt":  Equal("2026-06-26T10:00:00Z"),
 			"UpdatedAt":  Equal("2026-06-26T11:00:00Z"),
-			"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}),
+			"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID, Username: "last-author"}),
 		}))
 	})
 
 	It("leaves optional property timestamps empty when metadata times are zero", Label("unit"), func() {
-		node := &tree.PageNode{ID: "untimed", Title: "Untimed", Slug: "untimed", Kind: tree.NodeKindPage}
+		node := &tree.PageNode{ID: newFixturePageID("untimed"), Title: "Untimed", Slug: newFixtureSlug("untimed"), Kind: tree.NodeKindPage}
 
 		page := ToPropertyPage(node, nil, nil)
 
@@ -241,14 +249,14 @@ var _ = Describe("property and tag DTO mapping", func() {
 		emptyTags := ToTaggedPage(root, nil, "", nil)
 
 		Expect(tagged).To(matchTaggedPage(gstruct.Fields{
-			"ID":         Equal("intro"),
+			"ID":         matchAPINodeID(child.ID),
 			"Kind":       Equal(tree.NodeKindPage),
 			"Path":       Equal("docs/intro"),
 			"Excerpt":    Equal("Intro excerpt"),
 			"Tags":       Equal([]string{"go", "wiki"}),
 			"CreatedAt":  Equal("2026-06-26T10:00:00Z"),
 			"UpdatedAt":  Equal("2026-06-26T11:00:00Z"),
-			"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID.String(), Username: "last-author"}),
+			"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID, Username: "last-author"}),
 		}))
 		Expect(emptyTags).To(matchTaggedPage(gstruct.Fields{
 			"Tags": SatisfyAll(BeEmpty(), Not(BeNil())),
@@ -260,9 +268,9 @@ func dtoTestTree() (*tree.PageNode, *tree.PageNode, *tree.PageNode) {
 	created := time.Date(2026, 6, 26, 10, 0, 0, 0, time.UTC)
 	updated := time.Date(2026, 6, 26, 11, 0, 0, 0, time.UTC)
 	root := &tree.PageNode{
-		ID:       "docs",
+		ID:       newFixturePageID("docs"),
 		Title:    "Docs",
-		Slug:     "docs",
+		Slug:     newFixtureSlug("docs"),
 		Kind:     tree.NodeKindSection,
 		Position: 1,
 		Metadata: tree.PageMetadata{
@@ -273,18 +281,18 @@ func dtoTestTree() (*tree.PageNode, *tree.PageNode, *tree.PageNode) {
 		},
 	}
 	child := &tree.PageNode{
-		ID:       "intro",
+		ID:       newFixturePageID("intro"),
 		Title:    "Intro",
-		Slug:     "intro",
+		Slug:     newFixtureSlug("intro"),
 		Kind:     tree.NodeKindPage,
 		Position: 2,
 		Parent:   root,
 		Metadata: root.Metadata,
 	}
 	grandchild := &tree.PageNode{
-		ID:       "deep",
+		ID:       newFixturePageID("deep"),
 		Title:    "Deep",
-		Slug:     "deep",
+		Slug:     newFixtureSlug("deep"),
 		Kind:     tree.NodeKindPage,
 		Position: 3,
 		Parent:   child,

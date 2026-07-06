@@ -124,7 +124,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 			SchemaVersion:    DescriptorSchemaVersion,
 			RuntimeStack:     RuntimeStackWikidFrontd,
 			Role:             RoleWorkspaced,
-			WorkspaceID:      "home",
+			WorkspaceID:      mustDecodeWorkspaceID("home"),
 			PID:              1234,
 			StartedAt:        time.Now().UTC().Truncate(time.Second),
 			DataDir:          dataDir,
@@ -140,7 +140,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 			ControlToken:     "control-token",
 			Config: Config{
 				RuntimeStack:    RuntimeStackWikidFrontd,
-				WorkspaceID:     "home",
+				WorkspaceID:     mustDecodeWorkspaceID("home"),
 				DataDir:         dataDir,
 				RootDir:         rootDir,
 				PrivateMCPURL:   "http://127.0.0.1:23456/mcp",

@@ -221,18 +221,15 @@ var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integrati
 	})
 
 	ginkgo.It("exposes structured control error text and status matching", func() {
-		conflictCode := sharederrors.ErrorCode("daemon_control_conflict")
-		err := &ControlHTTPError{
-			StatusCode: http.StatusConflict,
-			Code:       conflictCode,
-			MessageID:  sharederrors.MessageIDForCode(conflictCode),
-		}
+		conflictCode := mustDecodeErrorCode("daemon_control_conflict")
+			err := &ControlHTTPError{
+				StatusCode: http.StatusConflict,
+				Code:       conflictCode,
+				MessageID:  sharederrors.MessageIDForCode(conflictCode),
+				Message:    conflictCode.String(),
+			}
 
-		Expect(err).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"StatusCode": Equal(http.StatusConflict),
-			"Code":       Equal(conflictCode),
-			"MessageID":  Equal(sharederrors.MessageIDForCode(conflictCode)),
-		})))
+		Expect(err).To(matchControlHTTPError(http.StatusConflict, conflictCode))
 		Expect(err).To(haveControlStatus(http.StatusConflict))
 		Expect(fmt.Errorf("wrapped: %w", err)).To(haveControlStatus(http.StatusConflict))
 		Expect(err).NotTo(haveControlStatus(http.StatusUnauthorized))

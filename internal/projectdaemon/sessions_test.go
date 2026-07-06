@@ -23,7 +23,7 @@ var _ = ginkgo.Describe("session registry", ginkgo.Label("unit"), func() {
 
 		id, err := registry.Register()
 		Expect(err).NotTo(HaveOccurred())
-		registry.Release("missing-session")
+		registry.Release(newFixtureSessionID("missing-session"))
 		Expect(counts).To(Equal([]int{1}))
 
 		registry.Heartbeat(id)

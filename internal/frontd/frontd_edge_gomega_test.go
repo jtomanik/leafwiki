@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(basePathResult("/path", "")).To(ResolveBasePathTo("/path"))
 		Expect(ensureLeadingSlash("api")).To(Equal("/api"))
 		Expect(workspaceAPIPathResult(PublicWorkspacesPrefix + "/home/tree")).To(ResolveWorkspaceAPIPath(
-			workspaceid.WorkspaceID("home"),
+			mustDecodeWorkspaceID("home"),
 			"/api/tree",
 		))
 	})
@@ -146,8 +146,8 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		encodeActorContext = originalEncodeActorContext
 
 		for _, route := range []WorkspaceRoute{
-			{WorkspaceID: "home", Upstream: "", DaemonToken: "token"},
-			{WorkspaceID: "home", Upstream: "://bad", DaemonToken: "token"},
+			{WorkspaceID: mustDecodeWorkspaceID("home"), Upstream: "", DaemonToken: "token"},
+			{WorkspaceID: mustDecodeWorkspaceID("home"), Upstream: "://bad", DaemonToken: "token"},
 		} {
 			route := route
 			handler = NewWorkspaceRouterProxy(WorkspaceRouterProxyOptions{
@@ -166,7 +166,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(workspaceAPIPathResult(PublicWorkspacesPrefix + "/bad id/tree")).To(RejectWorkspaceAPIPath())
 		Expect(workspaceAPIPathResult("/api/other/home/tree")).To(RejectWorkspaceAPIPath())
 		Expect(workspaceAPIPathResult(PublicWorkspacesPrefix + "/home/assets/logo.png")).To(ResolveWorkspaceAPIPath(
-			workspaceid.WorkspaceID("home"),
+			mustDecodeWorkspaceID("home"),
 			"/assets/logo.png",
 		))
 	})
@@ -232,7 +232,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp/workspaces/home", nil))
 		Expect(rec).To(HaveHTTPStatus(http.StatusNoContent))
-		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session"), workspaceid.WorkspaceID("other")))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session"), mustDecodeWorkspaceID("other")))
 	})
 
 	ginkgo.It("maps wikid single-workspace resolver responses into routing errors", ginkgo.Label("integration"), func() {
@@ -350,7 +350,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		route, err := resolver(nil, "home")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"WorkspaceID": Equal(workspaceid.WorkspaceID("home")),
+			"WorkspaceID": Equal(mustDecodeWorkspaceID("home")),
 			"Upstream":    Equal("http://workspaced"),
 		}))
 
@@ -363,7 +363,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		route, err = resolver(nil, "home")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"WorkspaceID": Equal(workspaceid.WorkspaceID("body-id")),
+			"WorkspaceID": Equal(mustDecodeWorkspaceID("body-id")),
 		}))
 
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {}))

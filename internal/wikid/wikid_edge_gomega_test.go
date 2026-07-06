@@ -94,7 +94,7 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 					{ID: HomeWorkspaceID, DisplayName: "Other", DataDir: "/tmp/other-data", RootDir: "/tmp/other-root", CreatedAt: now, UpdatedAt: now},
 				},
 			}.Validate()).To(MatchError(ErrDuplicateWorkspaceID))
-			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: "bad/id", DataDir: "/tmp/data", RootDir: "/tmp/root"})).To(testmatchers.HaveStructuredError(workspaceid.ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(workspaceid.ErrCodeWorkspaceIDInvalid)))
+			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: mustDecodeWorkspaceID("bad/id"), DataDir: "/tmp/data", RootDir: "/tmp/root"})).To(testmatchers.HaveStructuredError(workspaceid.ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(workspaceid.ErrCodeWorkspaceIDInvalid)))
 			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, RootDir: "/tmp/root"})).To(MatchError(ErrWorkspaceDataDirRequired))
 			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data"})).To(MatchError(ErrWorkspaceRootDirRequired))
 			Expect(validateWorkspaceRecord(WorkspaceRecord{ID: HomeWorkspaceID, DataDir: "/tmp/data", RootDir: "/tmp/root", MarkdownLinkRootPrefix: "docs/"})).To(MatchError(ErrWorkspaceMarkdownLinkRootPrefixNotNormalized))
@@ -104,9 +104,9 @@ var _ = ginkgo.Describe("wikid persistence and private route edge behavior", fun
 		ginkgo.It("reports grant document validation failures", func() {
 			Expect((GrantDocument{}).Validate()).To(MatchError(ErrGrantSchemaVersion))
 			Expect(validateGrant(Grant{WorkspaceID: HomeWorkspaceID, Role: GrantRoleViewer})).To(MatchError(ErrGrantSubjectRequired))
-			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: "bad/id", Role: GrantRoleViewer})).To(matchWikidWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
-			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: HomeWorkspaceID, Role: GrantRole("owner")})).To(MatchError(ErrUnknownGrantRole))
-			Expect(CapabilitiesForRole(GrantRole("owner"))).Error().To(MatchError(ErrUnknownGrantRole))
+			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: mustDecodeWorkspaceID("bad/id"), Role: GrantRoleViewer})).To(matchWikidWorkspaceIDValidationError(workspaceid.ErrCodeWorkspaceIDInvalid))
+			Expect(validateGrant(Grant{Subject: "user:1", WorkspaceID: HomeWorkspaceID, Role: mustDecodeGrantRole("owner")})).To(MatchError(ErrUnknownGrantRole))
+			Expect(CapabilitiesForRole(mustDecodeGrantRole("owner"))).Error().To(MatchError(ErrUnknownGrantRole))
 		})
 
 		ginkgo.It("canonicalizes paths through existing symlink ancestors and missing suffixes", func() {

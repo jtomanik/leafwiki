@@ -2,16 +2,17 @@ package http_test
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	httpinternal "github.com/perber/wiki/internal/http"
 	authmw "github.com/perber/wiki/internal/http/middleware/auth"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	wikiauth "github.com/perber/wiki/internal/wiki/auth"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"time"
 
 	"github.com/perber/wiki/internal/core/assets"
 )

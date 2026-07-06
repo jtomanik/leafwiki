@@ -138,7 +138,7 @@ func RequireSelfOrAdmin(authDisabled bool) gin.HandlerFunc {
 		}
 
 		// Check if user is trying to access their own resource
-		isSelf := user.ID == c.Param("id")
+		isSelf := user.ID == coreauth.UserIDFromString(c.Param("id"))
 
 		// Allow users to access their own resources
 		if isSelf {
@@ -214,7 +214,7 @@ func RequireSelf() gin.HandlerFunc {
 		}
 
 		user, ok := userValue.(*coreauth.User)
-		if !ok || user.ID != c.Param("id") {
+		if !ok || user.ID != coreauth.UserIDFromString(c.Param("id")) {
 			abortAuthMiddlewareError(c, http.StatusForbidden, errCodeAuthSelfRequired, "You can only access your own account")
 			return
 		}

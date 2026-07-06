@@ -41,10 +41,10 @@ func performRoleRequirementRequest(middleware gin.HandlerFunc, scenario roleRequ
 	return rec
 }
 
-func testUser(id string, role string) *coreauth.User {
+func testUser(id coreauth.UserID, role string) *coreauth.User {
 	return &coreauth.User{
 		ID:       id,
-		Username: id,
+		Username: id.String(),
 		Role:     role,
 	}
 }
@@ -59,7 +59,7 @@ var _ = DescribeTable("admin-only route authorization",
 		}
 	},
 	Entry("allows an admin user", roleRequirementScenario{
-		user:           testUser("admin", coreauth.RoleAdmin),
+		user:           testUser(coreauth.UserIDFromString("admin"), coreauth.RoleAdmin),
 		setUser:        true,
 		route:          "/admin",
 		target:         "/admin",
@@ -79,7 +79,7 @@ var _ = DescribeTable("admin-only route authorization",
 		expectedCode:   expectedAuthUserNotAuthenticated,
 	}),
 	Entry("rejects a non-admin user", roleRequirementScenario{
-		user:           testUser("viewer", coreauth.RoleViewer),
+		user:           testUser(coreauth.UserIDFromString("viewer"), coreauth.RoleViewer),
 		setUser:        true,
 		route:          "/admin",
 		target:         "/admin",
@@ -106,21 +106,21 @@ var _ = DescribeTable("self-or-admin route authorization",
 		}
 	},
 	Entry("allows a user to access themself", roleRequirementScenario{
-		user:           testUser("alice", coreauth.RoleViewer),
+		user:           testUser(coreauth.UserIDFromString("alice"), coreauth.RoleViewer),
 		setUser:        true,
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusOK,
 	}),
 	Entry("allows an admin to access another user", roleRequirementScenario{
-		user:           testUser("admin", coreauth.RoleAdmin),
+		user:           testUser(coreauth.UserIDFromString("admin"), coreauth.RoleAdmin),
 		setUser:        true,
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusOK,
 	}),
 	Entry("rejects another non-admin user", roleRequirementScenario{
-		user:           testUser("bob", coreauth.RoleViewer),
+		user:           testUser(coreauth.UserIDFromString("bob"), coreauth.RoleViewer),
 		setUser:        true,
 		route:          "/users/:id",
 		target:         "/users/alice",
@@ -160,21 +160,21 @@ var _ = DescribeTable("editor-or-admin route authorization",
 		}
 	},
 	Entry("allows an admin user", roleRequirementScenario{
-		user:           testUser("admin", coreauth.RoleAdmin),
+		user:           testUser(coreauth.UserIDFromString("admin"), coreauth.RoleAdmin),
 		setUser:        true,
 		route:          "/edit",
 		target:         "/edit",
 		expectedStatus: http.StatusOK,
 	}),
 	Entry("allows an editor user", roleRequirementScenario{
-		user:           testUser("editor", coreauth.RoleEditor),
+		user:           testUser(coreauth.UserIDFromString("editor"), coreauth.RoleEditor),
 		setUser:        true,
 		route:          "/edit",
 		target:         "/edit",
 		expectedStatus: http.StatusOK,
 	}),
 	Entry("rejects a viewer user", roleRequirementScenario{
-		user:           testUser("viewer", coreauth.RoleViewer),
+		user:           testUser(coreauth.UserIDFromString("viewer"), coreauth.RoleViewer),
 		setUser:        true,
 		route:          "/edit",
 		target:         "/edit",
@@ -207,14 +207,14 @@ var _ = DescribeTable("self-only route authorization",
 		}
 	},
 	Entry("allows a user to access themself", roleRequirementScenario{
-		user:           testUser("alice", coreauth.RoleViewer),
+		user:           testUser(coreauth.UserIDFromString("alice"), coreauth.RoleViewer),
 		setUser:        true,
 		route:          "/users/:id",
 		target:         "/users/alice",
 		expectedStatus: http.StatusOK,
 	}),
 	Entry("rejects a different user", roleRequirementScenario{
-		user:           testUser("bob", coreauth.RoleViewer),
+		user:           testUser(coreauth.UserIDFromString("bob"), coreauth.RoleViewer),
 		setUser:        true,
 		route:          "/users/:id",
 		target:         "/users/alice",
@@ -249,7 +249,7 @@ var _ = DescribeTable("optional user context lookup",
 	},
 	Entry("returns nil when user is missing", nil, false, nil),
 	Entry("returns nil when user has the wrong type", "not-a-user", true, nil),
-	Entry("returns the context user when valid", testUser("alice", coreauth.RoleEditor), true, testUser("alice", coreauth.RoleEditor)),
+	Entry("returns the context user when valid", testUser(coreauth.UserIDFromString("alice"), coreauth.RoleEditor), true, testUser(coreauth.UserIDFromString("alice"), coreauth.RoleEditor)),
 )
 
 var _ = DescribeTable("remote-user auth source detection",

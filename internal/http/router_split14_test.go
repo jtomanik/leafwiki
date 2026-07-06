@@ -2,15 +2,16 @@ package http_test
 
 import (
 	"errors"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	httpinternal "github.com/perber/wiki/internal/http"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	httpinternal "github.com/perber/wiki/internal/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/core/assets"

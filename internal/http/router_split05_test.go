@@ -3,14 +3,15 @@ package http_test
 import (
 	"context"
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/assets"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -303,8 +304,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 			EnableLinkRefactor:      true,
 		})
-		target := createPageViaAPI(router, "Target", "target", nil, pageNodeKind())
-		ref := createPageViaAPI(router, "Ref", "ref", nil, pageNodeKind())
+		target := createPageViaAPI(router, "Target", newFixtureSlug("target"), nil, pageNodeKind())
+		ref := createPageViaAPI(router, "Ref", newFixtureSlug("ref"), nil, pageNodeKind())
 
 		updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
 		updateRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)
@@ -349,7 +350,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			EnableLinkRefactor:      false,
 		})
 
-		target := createPageViaAPI(router, "Target", "target", nil, pageNodeKind())
+		target := createPageViaAPI(router, "Target", newFixtureSlug("target"), nil, pageNodeKind())
 		previewBody := strings.NewReader(`{"kind":"rename","title":"Target","slug":"target-renamed"}`)
 		previewRec := authenticatedRequest(router, http.MethodPost, "/api/pages/"+target.ID+"/refactor/preview", previewBody)
 		Expect(previewRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected 404 when link refactor is disabled, got %d - %s", previewRec.Code, previewRec.Body.String())
@@ -375,8 +376,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			EnableLinkRefactor:      true,
 		})
 
-		target := createPageViaAPI(router, "Target", "target", nil, pageNodeKind())
-		ref := createPageViaAPI(router, "Ref", "ref", nil, pageNodeKind())
+		target := createPageViaAPI(router, "Target", newFixtureSlug("target"), nil, pageNodeKind())
+		ref := createPageViaAPI(router, "Ref", newFixtureSlug("ref"), nil, pageNodeKind())
 
 		updateBody := strings.NewReader(`{"version":"` + ref.Version + `","title":"Ref","slug":"ref","content":"[Target](/target.md)"}`)
 		updateRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+ref.ID, updateBody)

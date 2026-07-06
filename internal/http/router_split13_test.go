@@ -3,16 +3,17 @@ package http_test
 import (
 	"bytes"
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	httpinternal "github.com/perber/wiki/internal/http"
-	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
-	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	httpinternal "github.com/perber/wiki/internal/http"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	wikiassets "github.com/perber/wiki/internal/wiki/assets"
 
 	"github.com/gin-gonic/gin"
 	"github.com/perber/wiki/internal/wiki"
@@ -124,7 +125,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		}
 
 		// Step 1: Create page direkt über Wiki-API
-		page := createPageViaAPI(router, "Assets Page", "assets-page", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Assets Page", newFixtureSlug("assets-page"), nil, pageNodeKind())
 
 		// Step 2: Upload file
 		body := &bytes.Buffer{}
@@ -237,7 +238,7 @@ func uploadTestAsset(router *gin.Engine, w *wiki.Wiki, content string, needsAuth
 
 	pageID := ""
 	if needsAuth {
-		pageID = createPageViaAPI(router, "Test Page", "test-page", nil, pageNodeKind()).ID
+		pageID = createPageViaAPI(router, "Test Page", newFixtureSlug("test-page"), nil, pageNodeKind()).ID
 	}
 
 	// Prepare the file upload

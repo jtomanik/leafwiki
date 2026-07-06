@@ -2,16 +2,17 @@ package http_test
 
 import (
 	"encoding/json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
-	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	wikipages "github.com/perber/wiki/internal/wiki/pages"
 
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
@@ -156,7 +157,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		router := createRouterTestInstance(w)
 
 		sectionKind := tree.NodeKindSection
-		page := createPageViaAPI(router, "Sync Page", "sync", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Sync Page", newFixtureSlug("sync"), nil, pageNodeKind())
 		body := `{"path":"sync","title":"Sync Section","kind":"section"}`
 		rec := authenticatedRequest(router, http.MethodPost, "/api/pages/ensure", strings.NewReader(body))
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on ensure, got %d - %s", rec.Code, rec.Body.String())
@@ -203,9 +204,9 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		docs := createPageViaAPI(router, "Docs", "docs", nil, pageNodeKind())
-		guide := createPageViaAPI(router, "Guide", "guide", &docs.ID, pageNodeKind())
-		archive := createPageViaAPI(router, "Archive", "archive", nil, pageNodeKind())
+		docs := createPageViaAPI(router, "Docs", newFixtureSlug("docs"), nil, pageNodeKind())
+		guide := createPageViaAPI(router, "Guide", newFixtureSlug("guide"), &docs.ID, pageNodeKind())
+		archive := createPageViaAPI(router, "Archive", newFixtureSlug("archive"), nil, pageNodeKind())
 
 		movePayload := `{"version":"` + guide.Version + `","parentId":"` + archive.ID + `"}`
 		moveRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+guide.ID+"/move", strings.NewReader(movePayload))
@@ -217,7 +218,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		updateRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+guide.ID, strings.NewReader(updatePayload))
 		Expect(updateRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on update, got %d - %s", updateRec.Code, updateRec.Body.String())
 
-		target := getPermalinkTargetViaAPI(router, guide.ID)
+		target := getPermalinkTargetViaAPI(router, apiPageDTOID(guide))
 		Expect(target).To(SatisfyAll(
 			HaveField("ID", guide.ID),
 			HaveField("Slug", "user-guide"),
@@ -243,7 +244,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			HideLinkMetadataSection: false,
 		})
 
-		page := createPageViaAPI(router, "Public Page", "public-page", nil, pageNodeKind())
+		page := createPageViaAPI(router, "Public Page", newFixtureSlug("public-page"), nil, pageNodeKind())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/pages/permalink/"+page.ID, nil)
 		rec := httptest.NewRecorder()
@@ -271,8 +272,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		router := createRouterTestInstance(w)
 
 		// Create two pages a and b
-		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
-		b := createPageViaAPI(router, "Section B", "section-b", nil, pageNodeKind())
+		a := createPageViaAPI(router, "Section A", newFixtureSlug("section-a"), nil, pageNodeKind())
+		b := createPageViaAPI(router, "Section B", newFixtureSlug("section-b"), nil, pageNodeKind())
 
 		// Move a under b
 		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"`+b.ID+`"}`))
@@ -331,7 +332,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
+		a := createPageViaAPI(router, "Section A", newFixtureSlug("section-a"), nil, pageNodeKind())
 
 		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"not-found-id"}`))
 		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404, got %d", rec.Code)
@@ -346,8 +347,8 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
-		b := createPageViaAPI(router, "Section B", "section-b", &a.ID, pageNodeKind())
+		a := createPageViaAPI(router, "Section A", newFixtureSlug("section-a"), nil, pageNodeKind())
+		b := createPageViaAPI(router, "Section B", newFixtureSlug("section-b"), &a.ID, pageNodeKind())
 
 		// Verschiebe a → unter b
 		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+b.ID+"/move", strings.NewReader(`{"version":"`+b.Version+`","parentId":"`+a.ID+`"}`))
@@ -363,11 +364,11 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
-		createPageViaAPI(router, "Section B", "section-b", nil, pageNodeKind())
+		a := createPageViaAPI(router, "Section A", newFixtureSlug("section-a"), nil, pageNodeKind())
+		createPageViaAPI(router, "Section B", newFixtureSlug("section-b"), nil, pageNodeKind())
 
 		// Create Conflict Page in b
-		conflictPage := createPageViaAPI(router, "Section B", "section-b", &a.ID, pageNodeKind())
+		conflictPage := createPageViaAPI(router, "Section B", newFixtureSlug("section-b"), &a.ID, pageNodeKind())
 
 		// move conflictPage under root (where section-b already exists)
 		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+conflictPage.ID+"/move", strings.NewReader(`{"version":"`+conflictPage.Version+`","parentId":"root"}`))
@@ -383,7 +384,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
-		a := createPageViaAPI(router, "Section A", "section-a", nil, pageNodeKind())
+		a := createPageViaAPI(router, "Section A", newFixtureSlug("section-a"), nil, pageNodeKind())
 
 		rec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+a.ID+"/move", strings.NewReader(`{"version":"`+a.Version+`","parentId":"root"}`))
 		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "Expected status 400, got %d", rec.Code)
@@ -399,11 +400,11 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		router := createRouterTestInstance(w)
 
 		// Create pages
-		page1 := createPageViaAPI(router, "Page 1", "page-1", nil, pageNodeKind())
-		page2 := createPageViaAPI(router, "Page 2", "page-2", nil, pageNodeKind())
-		page3 := createPageViaAPI(router, "Page 3", "page-3", nil, pageNodeKind())
+		page1 := createPageViaAPI(router, "Page 1", newFixtureSlug("page-1"), nil, pageNodeKind())
+		page2 := createPageViaAPI(router, "Page 2", newFixtureSlug("page-2"), nil, pageNodeKind())
+		page3 := createPageViaAPI(router, "Page 3", newFixtureSlug("page-3"), nil, pageNodeKind())
 		welcomePage := getPageByPathViaAPI(router, "welcome-to-leafwiki")
-		deletePageViaAPI(router, welcomePage.ID, welcomePage.Version, false)
+		deletePageViaAPI(router, apiPageDTOID(welcomePage), welcomePage.Version, false)
 
 		// Sort pages
 		payload := map[string]interface{}{

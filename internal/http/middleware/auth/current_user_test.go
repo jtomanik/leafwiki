@@ -1,9 +1,10 @@
 package auth_test
 
 import (
-	. "github.com/onsi/gomega"
 	"net/http"
 	"net/http/httptest"
+
+	. "github.com/onsi/gomega"
 
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"

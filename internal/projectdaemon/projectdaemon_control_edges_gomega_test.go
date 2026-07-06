@@ -53,14 +53,14 @@ var _ = ginkgo.Describe("project daemon control, configuration, and descriptor f
 		failingClient.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, transportErr
 		})}
-		err = failingClient.ReleaseSession(context.Background(), "session")
+		err = failingClient.ReleaseSession(context.Background(), newFixtureSessionID("session"))
 		Expect(err).To(MatchError(transportErr))
 
 		noBodyClient := NewClient(server.URL, "control-token")
 		err = noBodyClient.doJSON(context.Background(), http.MethodGet, "/health", nil, nil)
 		Expect(err).To(Succeed())
 
-		var _ workspaceid.WorkspaceID = "home"
+		var _ workspaceid.WorkspaceID = mustDecodeWorkspaceID("home")
 	})
 
 	ginkgo.It("surfaces actor-context and config failure paths", ginkgo.Label("unit"), func() {
@@ -89,7 +89,7 @@ var _ = ginkgo.Describe("project daemon control, configuration, and descriptor f
 			Version:     1,
 			Issuer:      ActorContextIssuerWikid,
 			Subject:     "user:admin",
-			WorkspaceID: "home",
+			WorkspaceID: mustDecodeWorkspaceID("home"),
 			ExpiresAt:   time.Now().Add(time.Minute),
 		}, ActorContextValidation{})).To(Succeed())
 

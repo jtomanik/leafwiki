@@ -11,7 +11,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/projectdaemon"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 type observedWikidResolverRequest struct {
@@ -52,7 +51,7 @@ var _ = Describe("wikid workspace resolver", Label("integration"), func() {
 		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil)
 		req.Header.Set("Authorization", "Bearer public-token")
 
-		route, err := resolve(req, workspaceid.WorkspaceID("docs"))
+		route, err := resolve(req, mustDecodeWorkspaceID("docs"))
 		Expect(err).To(Succeed())
 
 		Expect(seen).To(SatisfyAll(
@@ -62,7 +61,7 @@ var _ = Describe("wikid workspace resolver", Label("integration"), func() {
 			HaveField("OriginalPath", Equal("/api/workspaces/docs/tree")),
 		))
 		Expect(route).To(SatisfyAll(
-			HaveField("WorkspaceID", Equal(workspaceid.WorkspaceID("docs"))),
+			HaveField("WorkspaceID", Equal(mustDecodeWorkspaceID("docs"))),
 			HaveField("Upstream", Equal("http://127.0.0.1:49152")),
 			HaveField("PrivateMCPURL", Equal("http://127.0.0.1:49152/mcp")),
 		))
@@ -81,7 +80,7 @@ var _ = Describe("wikid workspace resolver", Label("integration"), func() {
 		resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
 		Expect(err).To(Succeed())
 
-		_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/%20docs/tree", nil), workspaceid.WorkspaceID(" docs"))
+		_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/%20docs/tree", nil), mustDecodeWorkspaceID(" docs"))
 		Expect(err).To(MatchError(ErrWorkspaceNotFound))
 	})
 
@@ -101,7 +100,7 @@ var _ = Describe("wikid workspace resolver", Label("integration"), func() {
 		workspaceID, err := resolve(httptest.NewRequest(http.MethodPost, "/mcp", nil))
 		Expect(err).To(Succeed())
 
-		Expect(workspaceID).To(Equal(workspaceid.WorkspaceID("home")))
+		Expect(workspaceID).To(Equal(mustDecodeWorkspaceID("home")))
 		Expect(seen).To(SatisfyAll(
 			HaveField("Path", Equal("/__leafwiki/workspaces")),
 			HaveField("OriginalPath", Equal("/mcp")),
@@ -131,7 +130,7 @@ var _ = Describe("wikid workspace resolver", Label("integration"), func() {
 			resolve, err := NewWikidWorkspaceResolver(upstream.URL, "daemon-token")
 			Expect(err).To(Succeed())
 
-			_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), workspaceid.WorkspaceID("docs"))
+			_, err = resolve(httptest.NewRequest(http.MethodGet, "/api/workspaces/docs/tree", nil), mustDecodeWorkspaceID("docs"))
 			Expect(err).To(MatchError(tt.want))
 		},
 		Entry("maps not-found responses", workspaceResolverAccessErrorCase{code: http.StatusNotFound, want: ErrWorkspaceNotFound}),
