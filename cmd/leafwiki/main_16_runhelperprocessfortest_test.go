@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/coverage"
 	"strconv"
 	"strings"
 	"syscall"
@@ -69,11 +70,13 @@ func runLeafWikiHelperProcessForTest() bool {
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 		<-signals
+		flushLeafwikiHelperCoverage()
 		os.Exit(0)
 	}
 	os.Args = append([]string{"leafwiki"}, args...)
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	main()
+	flushLeafwikiHelperCoverage()
 	os.Exit(0)
 	return true
 }
@@ -115,7 +118,7 @@ func startLeafwikiHelperWithOptions(args []string, env map[string]string, stdin 
 	stderr, err := os.Create(stderrPath)
 	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("create stderr file: %v", err))
 
-	cmdArgs := append([]string{"-test.run=TestLeafWikiSuite", "--"}, args...)
+	cmdArgs := leafwikiHelperCommandArgs(args)
 	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	cmd.Env = leafwikiHelperEnv(args, env)
 	cmd.Stdin = stdin
@@ -158,7 +161,7 @@ func startLeafwikiHelperWithStdinPipe(args []string, env map[string]string) (*le
 	stderr, err := os.Create(stderrPath)
 	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("create stderr file: %v", err))
 
-	cmdArgs := append([]string{"-test.run=TestLeafWikiSuite", "--"}, args...)
+	cmdArgs := leafwikiHelperCommandArgs(args)
 	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	cmd.Env = leafwikiHelperEnv(args, env)
 	stdin, err := cmd.StdinPipe()
@@ -293,6 +296,24 @@ func nativeStdioListToolsInput() string {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
 		"",
 	}, "\n")
+}
+
+func leafwikiHelperCommandArgs(args []string) []string {
+	cmdArgs := []string{"-test.run=TestLeafWikiSuite"}
+	if coverDir := strings.TrimSpace(os.Getenv("GOCOVERDIR")); coverDir != "" {
+		cmdArgs = append(cmdArgs, "-test.gocoverdir="+coverDir)
+	}
+	cmdArgs = append(cmdArgs, "--")
+	return append(cmdArgs, args...)
+}
+
+func flushLeafwikiHelperCoverage() {
+	coverDir := strings.TrimSpace(os.Getenv("GOCOVERDIR"))
+	if coverDir == "" {
+		return
+	}
+	_ = coverage.WriteMetaDir(coverDir)
+	_ = coverage.WriteCountersDir(coverDir)
 }
 
 func nativeStdioToolCallInput(id int, name string, args map[string]any) string {

@@ -121,6 +121,17 @@ func terminateProjectDaemonProcess(pid int) {
 		return
 	}
 	_ = process.Signal(os.Interrupt)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && processExists(pid) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !processExists(pid) {
+		return
+	}
+	_ = process.Kill()
+	Eventually(func() processLivenessState {
+		return classifyProcessExists(pid)
+	}).WithTimeout(5 * time.Second).WithPolling(50 * time.Millisecond).Should(Equal(processNotRunning))
 }
 
 func processExists(pid int) bool {
@@ -135,6 +146,20 @@ func processExists(pid int) bool {
 		return true
 	}
 	return process.Signal(syscall.Signal(0)) == nil
+}
+
+func leafwikiInternalProcessPID(pid int) bool {
+	ginkgo.GinkgoHelper()
+	if pid <= 0 || runtime.GOOS == "windows" {
+		return false
+	}
+	raw, err := exec.Command("ps", "-p", fmt.Sprint(pid), "-o", "command=").Output()
+	if err != nil {
+		return false
+	}
+	command := string(raw)
+	return strings.Contains(command, "--internal-project-daemon") ||
+		strings.Contains(command, "--internal-runtime-role")
 }
 
 func findRoleHealth(roles []projectdaemon.RoleHealth, name projectdaemon.RoleName) (projectdaemon.RoleHealth, bool) {

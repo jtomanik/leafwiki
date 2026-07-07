@@ -366,6 +366,10 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			ginkgo.Skip(fmt.Sprint("process-group signaling is not available on this platform"))
 		}
 
+		var ownerPID int
+		ginkgo.DeferCleanup(func() {
+			terminateProjectDaemonProcess(ownerPID)
+		})
 		baseDir := leafwikiTempDir()
 		dataDir := filepath.Join(baseDir, "data")
 		rootDir := filepath.Join(baseDir, "content")
@@ -378,6 +382,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--port", port,
 			"--log-target", "stderr",
 		}, map[string]string{"LEAFWIKI_DAEMON_IDLE_TIMEOUT": "1s"})
+		ownerPID = waitForProjectDaemonDescriptor(dataDir).PID
 
 		waitForLeafwikiReady(proc, port)
 		waitForForegroundSignalHandler()

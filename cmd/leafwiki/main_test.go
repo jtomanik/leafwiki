@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,8 +50,33 @@ func leafwikiTempDir() string {
 	ginkgo.GinkgoHelper()
 	dir, err := os.MkdirTemp("", "leafwiki-test-*")
 	Expect(err).NotTo(HaveOccurred())
-	ginkgo.DeferCleanup(os.RemoveAll, dir)
+	ginkgo.DeferCleanup(func() {
+		terminateProjectDaemonDescriptorsUnder(dir)
+		Expect(os.RemoveAll(dir)).To(Succeed())
+	})
 	return dir
+}
+
+func terminateProjectDaemonDescriptorsUnder(root string) {
+	ginkgo.GinkgoHelper()
+
+	Expect(filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if entry == nil || entry.IsDir() || filepath.Ext(path) != ".json" {
+			return nil
+		}
+		desc, readDescriptorErr := projectdaemon.ReadTrustedDescriptor(path)
+		if readDescriptorErr != nil || desc.PID == os.Getpid() || !leafwikiInternalProcessPID(desc.PID) {
+			return nil
+		}
+		terminateProjectDaemonProcess(desc.PID)
+		return nil
+	})).To(Succeed())
 }
 
 func leafwikiSetenv(key string, value string) {
