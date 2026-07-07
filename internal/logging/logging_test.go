@@ -97,6 +97,31 @@ var _ = Describe("logging configuration", Label("unit"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.FilePath).To(Equal(logPath))
 	})
+
+	DescribeTable("stream target resolution",
+		func(input ConfigInput, want loggingTargetResolution) {
+			cfg, err := Resolve(input)
+
+			Expect(err).To(Succeed())
+			Expect(loggingTargetResolutionFor(cfg)).To(Equal(want))
+		},
+		Entry("selects stdout without requiring a data directory", ConfigInput{
+			Target:          " stdout ",
+			TargetSet:       true,
+			LevelFromConfig: "debug",
+		}, loggingTargetResolution{
+			Target: TargetStdout,
+			Level:  slog.LevelDebug,
+		}),
+		Entry("selects stderr without requiring a data directory", ConfigInput{
+			Target:          " STDERR ",
+			TargetSet:       true,
+			LevelFromConfig: "warn",
+		}, loggingTargetResolution{
+			Target: TargetStderr,
+			Level:  slog.LevelWarn,
+		}),
+	)
 })
 
 type resolveErrorCase struct {
@@ -323,4 +348,16 @@ func loggingTempDir() string {
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(os.RemoveAll, dir)
 	return dir
+}
+
+type loggingTargetResolution struct {
+	Target Target
+	Level  slog.Level
+}
+
+func loggingTargetResolutionFor(cfg Config) loggingTargetResolution {
+	return loggingTargetResolution{
+		Target: cfg.Target,
+		Level:  cfg.Level,
+	}
 }

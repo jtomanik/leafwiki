@@ -301,6 +301,8 @@ var _ = DescribeTable("provider permission response protocol",
 	Entry("codex", allowResponseCase{provider: rawProviderCodexFixture, want: "{}\n"}),
 	Entry("claude", allowResponseCase{provider: rawProviderClaudeFixture, want: "{}\n"}),
 	Entry("cursor", allowResponseCase{provider: rawProviderCursorFixture, want: "{\"permission\":\"allow\"}\n"}),
+	Entry("codex with mixed case and whitespace", allowResponseCase{provider: " CoDeX ", want: "{}\n"}),
+	Entry("cursor with mixed case and whitespace", allowResponseCase{provider: " CuRsOr ", want: "{\"permission\":\"allow\"}\n"}),
 	Entry("unknown", allowResponseCase{provider: rawProviderUnknownFixture, want: ""}),
 	Entry("unsupported", allowResponseCase{provider: rawProviderUnsupportedFixture, want: ""}),
 )
