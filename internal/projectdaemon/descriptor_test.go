@@ -226,23 +226,17 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 
 	ginkgo.DescribeTable("global descriptor paths for daemon roles",
 		ginkgo.Label("unit"),
-		func(role RoleName, want globalDescriptorPathObservation) {
+		func(roleFixture descriptorRoleFixture, want descriptorPathBaseName) {
 			runtimeDir := filepath.Join(tempProjectdaemonDir(), ".leafwiki", "runtime")
+			role, err := roleFixture.roleName()
 
-			Expect(globalDescriptorPathFor(runtimeDir, role)).To(Equal(want))
+			Expect(err).To(Succeed())
+			Expect(globalDescriptorPathBaseNameFor(runtimeDir, role)).To(Equal(want))
 		},
-		ginkgo.Entry("uses the wikid role descriptor filename", RoleWikid, globalDescriptorPathObservation{
-			Filename: "wikid.json",
-		}),
-		ginkgo.Entry("uses the frontd role descriptor filename", RoleFrontd, globalDescriptorPathObservation{
-			Filename: "frontd.json",
-		}),
-		ginkgo.Entry("uses the workspaced role descriptor filename", RoleWorkspaced, globalDescriptorPathObservation{
-			Filename: "workspaced.json",
-		}),
-		ginkgo.Entry("uses a fallback descriptor filename for unknown roles", RoleName("sidecar"), globalDescriptorPathObservation{
-			Filename: "unknown-role.json",
-		}),
+		ginkgo.Entry("uses the wikid role descriptor filename", descriptorRoleWikid, descriptorPathBaseWikid),
+		ginkgo.Entry("uses the frontd role descriptor filename", descriptorRoleFrontd, descriptorPathBaseFrontd),
+		ginkgo.Entry("uses the workspaced role descriptor filename", descriptorRoleWorkspaced, descriptorPathBaseWorkspaced),
+		ginkgo.Entry("uses a fallback descriptor filename for unknown roles", descriptorRoleSidecar, descriptorPathBaseUnknownRole),
 	)
 
 	ginkgo.It("removes missing and existing descriptors idempotently", ginkgo.Label("unit"), func() {
@@ -336,13 +330,60 @@ func matchPrivateReadyWorkspacedRoleHealth(updatedAt time.Time) types.GomegaMatc
 	})
 }
 
-type globalDescriptorPathObservation struct {
-	Filename string
+type descriptorRoleFixture uint8
+
+const (
+	descriptorRoleWikid descriptorRoleFixture = iota + 1
+	descriptorRoleFrontd
+	descriptorRoleWorkspaced
+	descriptorRoleSidecar
+)
+
+func (fixture descriptorRoleFixture) roleName() (RoleName, error) {
+	switch fixture {
+	case descriptorRoleWikid:
+		return RoleWikid, nil
+	case descriptorRoleFrontd:
+		return RoleFrontd, nil
+	case descriptorRoleWorkspaced:
+		return RoleWorkspaced, nil
+	case descriptorRoleSidecar:
+		var wire struct {
+			Role RoleName `json:"role"`
+		}
+		if err := json.Unmarshal([]byte(`{"role":"sidecar"}`), &wire); err != nil {
+			var role RoleName
+			return role, err
+		}
+		return wire.Role, nil
+	default:
+		var role RoleName
+		return role, nil
+	}
 }
 
-func globalDescriptorPathFor(runtimeDir string, role RoleName) globalDescriptorPathObservation {
+type descriptorPathBaseName uint8
+
+const (
+	descriptorPathBaseUnexpected descriptorPathBaseName = iota
+	descriptorPathBaseWikid
+	descriptorPathBaseFrontd
+	descriptorPathBaseWorkspaced
+	descriptorPathBaseUnknownRole
+)
+
+func globalDescriptorPathBaseNameFor(runtimeDir string, role RoleName) descriptorPathBaseName {
 	path := GlobalDescriptorPath(runtimeDir, role)
-	return globalDescriptorPathObservation{
-		Filename: filepath.Base(path),
+	switch filepath.Base(path) {
+	case "wikid.json":
+		return descriptorPathBaseWikid
+	case "frontd.json":
+		return descriptorPathBaseFrontd
+	case "workspaced.json":
+		return descriptorPathBaseWorkspaced
+	case "unknown-role.json":
+		return descriptorPathBaseUnknownRole
+	default:
+		return descriptorPathBaseUnexpected
 	}
 }
