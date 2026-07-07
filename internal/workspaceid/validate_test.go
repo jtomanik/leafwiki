@@ -75,10 +75,12 @@ var _ = Describe("workspace ID validation errors", Label("unit"), func() {
 		}))
 	})
 
-	It("returns empty error text for a nil validation error", func() {
+	It("reports no structured workspace validation state for a nil validation error", func() {
 		var validationErr *ValidationError
 
-		Expect(workspaceValidationErrorMessageObservation(validationErr)).To(Equal(workspaceValidationMessageAbsent))
+		Expect(workspaceValidationCodeObservationFor(validationErr)).To(Equal(workspaceValidationCodeObservation{
+			State: workspaceValidationCodeAbsent,
+		}))
 	})
 
 	It("returns no workspace error code for non-validation errors", func() {
@@ -136,13 +138,6 @@ func unsupportedWorkspaceIDScanSourceError(value any) error {
 	return fmt.Errorf("workspace ID scan source %T is not supported", value)
 }
 
-type workspaceValidationErrorMessageState uint8
-
-const (
-	workspaceValidationMessageAbsent workspaceValidationErrorMessageState = iota
-	workspaceValidationMessagePresent
-)
-
 type workspaceIDBoundaryState uint8
 
 const (
@@ -173,13 +168,6 @@ type workspaceValidationCodeObservation struct {
 	State     workspaceValidationCodeState
 	Code      sharederrors.ErrorCode
 	MessageID sharederrors.MessageID
-}
-
-func workspaceValidationErrorMessageObservation(err *ValidationError) workspaceValidationErrorMessageState {
-	if err.Error() != "" {
-		return workspaceValidationMessagePresent
-	}
-	return workspaceValidationMessageAbsent
 }
 
 func workspaceIDBoundaryFixtureFor(raw string) workspaceIDBoundaryFixture {
