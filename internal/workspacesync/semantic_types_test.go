@@ -22,6 +22,10 @@ var _ = Describe("workspace sync commit hash contracts", Label("unit"), func() {
 		Expect(actorIDPresenceOf(ActorIDFromUserID(tree.UserIDFromString("   ")))).To(Equal(actorIDAbsent))
 		Expect(actorIDPresenceOf(ActorIDFromUserID(tree.UserIDFromString("editor-1")))).To(Equal(actorIDPresent))
 	})
+
+	It("converts revision IDs into commit hashes for restore boundaries", func() {
+		Expect(CommitHashFromRevisionID(newFixtureRevisionID("commit-1"))).To(Equal(newFixtureCommitHash("commit-1")))
+	})
 })
 
 type actorIDPresence uint8
