@@ -16,7 +16,7 @@ import (
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
-var _ = ginkgo.Describe("wikid persistence and private route edge behavior", func() {
+var _ = ginkgo.Describe("wikid auth storage and document validation", func() {
 	ginkgo.Describe("auth storage", func() {
 		ginkgo.It("joins legacy cleanup errors and propagates auth directory setup failures", ginkgo.Label("integration"), func() {
 			dataDir := wikidTestTempDir()

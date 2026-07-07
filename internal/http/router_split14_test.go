@@ -17,7 +17,7 @@ import (
 	"github.com/perber/wiki/internal/core/assets"
 )
 
-var _ = Describe("router edge behavior", func() {
+var _ = Describe("router frontend bootstrap and asset behavior", func() {
 	It("sets Gin release mode in production", Label("integration"), func() {
 		previous := httpinternal.Environment
 		httpinternal.Environment = "production"

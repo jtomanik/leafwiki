@@ -15,7 +15,7 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
-var _ = ginkgo.Describe("wikid persistence and private route edge behavior", func() {
+var _ = ginkgo.Describe("wikid private workspace routing", func() {
 	ginkgo.Describe("private workspace API", func() {
 		ginkgo.It("routes not-found and malformed workspace paths before authorization", ginkgo.Label("integration"), func() {
 			api := NewPrivateWorkspaceAPI(PrivateWorkspaceAPIOptions{})

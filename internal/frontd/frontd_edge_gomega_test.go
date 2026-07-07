@@ -31,7 +31,7 @@ func validFrontdActor(workspaceID workspaceid.WorkspaceID) projectdaemon.ActorCo
 	}
 }
 
-var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
+var _ = ginkgo.Describe("frontd workspace routing and proxy contracts", func() {
 	ginkgo.It("validates proxy constructors and small path helpers", ginkgo.Label("unit"), func() {
 		_, err := NewControlPlaneProxy("://bad", "token")
 		Expect(err).To(MatchError(errInvalidWikidUpstream))

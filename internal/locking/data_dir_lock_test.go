@@ -145,7 +145,7 @@ var _ = Describe("directory locking", Label("unit"), func() {
 	})
 })
 
-var _ = Describe("directory lock edge behavior", Label("unit"), func() {
+var _ = Describe("directory lock receiver and filesystem failure behavior", Label("unit"), func() {
 	It("returns an empty path for a nil lock receiver", func() {
 		var lock *DataDirLock
 

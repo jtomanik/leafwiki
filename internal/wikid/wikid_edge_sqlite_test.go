@@ -14,7 +14,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-var _ = ginkgo.Describe("wikid persistence and private route edge behavior", func() {
+var _ = ginkgo.Describe("wikid SQLite persistence helpers", func() {
 	ginkgo.Describe("sqlite helpers", func() {
 		ginkgo.It("returns open errors for invalid database paths", ginkgo.Label("integration"), func() {
 			_, err := openWikidDB(wikidDBPathInsideFile())
