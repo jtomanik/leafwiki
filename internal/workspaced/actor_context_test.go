@@ -1,6 +1,7 @@
 package workspaced
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/assets"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
@@ -207,6 +209,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			WorkspaceID: mustDecodeWorkspaceID("current"),
 			Now:         func() time.Time { return now },
 		})
+		actorUserID := tree.UserIDFromString("editor-1")
 		actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 			Version:     1,
 			Issuer:      projectdaemon.ActorContextIssuerWikid,
@@ -221,9 +224,11 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		req := newPrivateRequest(http.MethodGet, "/api/tree", "private-token", actor)
+		req := newPrivateRequest(http.MethodPost, "/api/pages", "private-token", actor)
+		req.Body = io.NopCloser(strings.NewReader(`{"kind":"page","slug":"actor-page","title":"Actor Page"}`))
+		req.Header.Set("Content-Type", "application/json")
 		rec := requestWithRequest(router, req)
-		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
+		Expect(rec).To(matchCreatedWorkspacedPage(tree.RoutePathFromString("actor-page"), actorUserID))
 	})
 
 	ginkgo.It("allows private mutations without a public CSRF cookie", ginkgo.Label("integration"), func() {
@@ -242,6 +247,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			WorkspaceID: mustDecodeWorkspaceID("current"),
 			Now:         func() time.Time { return now },
 		})
+		actorUserID := tree.UserIDFromString("editor-1")
 		actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
 			Version:     1,
 			Issuer:      projectdaemon.ActorContextIssuerWikid,
@@ -259,7 +265,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		req.Body = io.NopCloser(strings.NewReader(`{"kind":"page","slug":"private-mutation","title":"Private Mutation"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := requestWithRequest(router, req)
-		Expect(rec).To(HaveHTTPStatus(http.StatusCreated), rec.Body.String())
+		Expect(rec).To(matchCreatedWorkspacedPage(tree.RoutePathFromString("private-mutation"), actorUserID))
 	})
 })
 
@@ -285,4 +291,40 @@ func requestWithRequest(router http.Handler, req *http.Request) *httptest.Respon
 func matchStructuredPrivateAuthError(code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return testmatchers.HaveHTTPStructuredError(http.StatusUnauthorized, code, sharederrors.MessageIDForCode(code))
+}
+
+type workspacedCreatedPageObservation struct {
+	Status       int
+	RoutePath    tree.RoutePath
+	LastAuthorID tree.UserID
+}
+
+type workspacedCreatedPageResponse struct {
+	Path     string `json:"path"`
+	Metadata struct {
+		LastAuthorID string `json:"lastAuthorId"`
+	} `json:"metadata"`
+}
+
+func matchCreatedWorkspacedPage(routePath tree.RoutePath, lastAuthorID tree.UserID) types.GomegaMatcher {
+	return WithTransform(observeCreatedWorkspacedPage, Equal(workspacedCreatedPageObservation{
+		Status:       http.StatusCreated,
+		RoutePath:    routePath.Clean(),
+		LastAuthorID: lastAuthorID,
+	}))
+}
+
+func observeCreatedWorkspacedPage(rec *httptest.ResponseRecorder) workspacedCreatedPageObservation {
+	if rec == nil {
+		return workspacedCreatedPageObservation{}
+	}
+	var response workspacedCreatedPageResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		return workspacedCreatedPageObservation{Status: rec.Code}
+	}
+	return workspacedCreatedPageObservation{
+		Status:       rec.Code,
+		RoutePath:    tree.RoutePathFromString(response.Path).Clean(),
+		LastAuthorID: tree.UserIDFromString(response.Metadata.LastAuthorID),
+	}
 }
