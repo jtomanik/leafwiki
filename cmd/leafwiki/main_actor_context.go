@@ -79,6 +79,14 @@ func frontdActorUser(req *http.Request, w *wiki.Wiki, cfg leafwikiRuntimeConfig)
 	return nil, "", errFrontdWorkspaceCredentialsMissing
 }
 
+func leafwikiUserSubject(userID coreauth.UserID) string {
+	return "user:" + userID.MetadataValue()
+}
+
+func leafwikiSDKTokenUserID(userID coreauth.UserID) string {
+	return userID.MetadataValue()
+}
+
 func actorContextForUser(user *coreauth.User, method string, cfg leafwikiRuntimeConfig) (projectdaemon.ActorContext, error) {
 	if user == nil {
 		return projectdaemon.ActorContext{}, errRuntimeActorUserRequired
@@ -87,7 +95,7 @@ func actorContextForUser(user *coreauth.User, method string, cfg leafwikiRuntime
 	return projectdaemon.ActorContext{
 		Version:     1,
 		Issuer:      projectdaemon.ActorContextIssuerWikid,
-		Subject:     "user:" + user.ID,
+		Subject:     leafwikiUserSubject(user.ID),
 		Username:    user.Username,
 		Email:       user.Email,
 		Role:        user.Role,
@@ -282,7 +290,7 @@ func handleWikidActorContext(w http.ResponseWriter, req *http.Request, identity 
 		if userRole == wikid.GrantRoleAdmin {
 			role = wikid.GrantRoleAdmin
 		} else {
-			subject := "user:" + user.ID
+			subject := leafwikiUserSubject(user.ID)
 			userGrants, err := grantsForSubjectForRuntime(grants, subject)
 			if err != nil {
 				http.Error(w, "load workspace grants", http.StatusInternalServerError)

@@ -21,6 +21,8 @@ type runSeedErrorCase struct {
 	wantFailure seedCommandFailureReport
 }
 
+const seedCommandFailure = 1
+
 type seedCommandFailureKind string
 
 const (
@@ -208,7 +210,7 @@ func (s *fakeSeedUsers) InitDefaultAdmin(string) error {
 	if s.initErr != nil {
 		return s.initErr
 	}
-	s.users["admin"] = &coreauth.User{ID: "admin-id", Username: "admin", Email: "admin@localhost", Role: coreauth.RoleAdmin}
+	s.users["admin"] = &coreauth.User{ID: coreauth.UserIDFromString("admin-id"), Username: "admin", Email: "admin@localhost", Role: coreauth.RoleAdmin}
 	return nil
 }
 
@@ -227,7 +229,7 @@ func (s *fakeSeedUsers) CreateUser(username string, email string, _ string, role
 	if err := s.createErrFor[username]; err != nil {
 		return nil, err
 	}
-	user := &coreauth.User{ID: username + "-id", Username: username, Email: email, Role: role}
+	user := &coreauth.User{ID: coreauth.UserIDFromString(username + "-id"), Username: username, Email: email, Role: role}
 	s.users[username] = user
 	return user, nil
 }

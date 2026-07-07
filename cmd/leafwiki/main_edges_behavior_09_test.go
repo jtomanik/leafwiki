@@ -44,7 +44,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		})
 
 		baseCfg := leafwikiRuntimeConfig{
-			Workspace:           wiki.Workspace{ID: "home", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
+			Workspace:           wiki.Workspace{ID: newFixtureWorkspaceID("home"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
 			Host:                "127.0.0.1",
 			Port:                "0",
 			DisableAuth:         true,
@@ -325,7 +325,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		badDescriptorManager := newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(leafwikiTempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		err = badDescriptorManager.writeWorkspaceDescriptor(
-			wikid.WorkspaceRecord{ID: "workspace-a", DataDir: "bad\x00data", RootDir: leafwikiTempDir()},
+			wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-a"), DataDir: "bad\x00data", RootDir: leafwikiTempDir()},
 			leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: "bad\x00data", RootDir: leafwikiTempDir()}},
 			internalRuntimeRoleReady{Role: projectdaemon.RoleWorkspaced, PID: os.Getpid(), URL: "http://workspace.local"},
 		)
@@ -343,7 +343,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		writeFailManager.writeDescriptor = func(wikid.WorkspaceRecord, leafwikiRuntimeConfig, internalRuntimeRoleReady) error {
 			return writeDescriptorErr
 		}
-		_, err = writeFailManager.Ensure(context.Background(), wikid.WorkspaceRecord{ID: "workspace-b", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()})
+		_, err = writeFailManager.Ensure(context.Background(), wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-b"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()})
 		Expect(err).To(MatchError(writeDescriptorErr))
 
 		previousHash := configHashForRuntime
@@ -358,7 +358,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		})
 		descriptorManager := newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(leafwikiTempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		err = descriptorManager.writeWorkspaceDescriptor(
-			wikid.WorkspaceRecord{ID: "workspace-c", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
+			wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-c"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
 			leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}},
 			internalRuntimeRoleReady{Role: projectdaemon.RoleWorkspaced, PID: os.Getpid(), URL: "http://workspace.local"},
 		)
@@ -370,7 +370,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return descriptorWriteErr
 		}
 		err = descriptorManager.writeWorkspaceDescriptor(
-			wikid.WorkspaceRecord{ID: "workspace-d", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
+			wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-d"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
 			leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}},
 			internalRuntimeRoleReady{Role: projectdaemon.RoleWorkspaced, PID: os.Getpid(), URL: "http://workspace.local"},
 		)
@@ -379,7 +379,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		writeDescriptorAtomicForRuntime = previousWriteDescriptor
 		removeTargetManager := newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.Layout{RuntimeDir: blockingFile}, wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		err = removeTargetManager.writeWorkspaceDescriptor(
-			wikid.WorkspaceRecord{ID: "workspace-e", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
+			wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-e"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
 			leafwikiRuntimeConfig{Workspace: wiki.Workspace{DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}},
 			internalRuntimeRoleReady{Role: projectdaemon.RoleWorkspaced, PID: os.Getpid(), URL: "http://workspace.local"},
 		)

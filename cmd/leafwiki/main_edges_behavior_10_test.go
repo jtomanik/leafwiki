@@ -58,10 +58,10 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			AdminPassword: "admin",
 		})).To(MatchFederatedFirstContactError(coreauth.ErrInvalidToken))
 
-		Expect(ensureFederatedWorkspace(context.Background(), nil, "workspace-a", leafwikiRuntimeConfig{})).To(MatchError(errGlobalWikidDescriptorUnavailable))
+		Expect(ensureFederatedWorkspace(context.Background(), nil, newFixtureWorkspaceID("workspace-a"), leafwikiRuntimeConfig{})).To(MatchError(errGlobalWikidDescriptorUnavailable))
 		invalidEnsureDesc := *globalDesc
 		invalidEnsureDesc.ControlURL = "http://[::1"
-		Expect(ensureFederatedWorkspace(context.Background(), &invalidEnsureDesc, "workspace-a", leafwikiRuntimeConfig{})).To(MatchURLError())
+		Expect(ensureFederatedWorkspace(context.Background(), &invalidEnsureDesc, newFixtureWorkspaceID("workspace-a"), leafwikiRuntimeConfig{})).To(MatchURLError())
 		ensureServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			Expect(req.Header).To(HaveKeyWithValue(http.CanonicalHeaderKey(projectdaemon.ControlTokenHeader), ContainElement("daemon-token")))
 			Expect(req.Header).To(HaveKeyWithValue("Authorization", ContainElement("Bearer stdio-key")))
@@ -74,8 +74,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ginkgo.DeferCleanup(ensureServer.Close)
 		ensureDesc := *globalDesc
 		ensureDesc.ControlURL = ensureServer.URL
-		Expect(ensureFederatedWorkspace(context.Background(), &ensureDesc, "workspace-denied", leafwikiRuntimeConfig{APIKey: "stdio-key"})).To(MatchWikidPrivateEndpoint(http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied))
-		Expect(ensureFederatedWorkspace(context.Background(), &ensureDesc, "workspace-ok", leafwikiRuntimeConfig{APIKey: "stdio-key"})).To(Succeed())
+		Expect(ensureFederatedWorkspace(context.Background(), &ensureDesc, newFixtureWorkspaceID("workspace-denied"), leafwikiRuntimeConfig{APIKey: "stdio-key"})).To(MatchWikidPrivateEndpoint(http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied))
+		Expect(ensureFederatedWorkspace(context.Background(), &ensureDesc, newFixtureWorkspaceID("workspace-ok"), leafwikiRuntimeConfig{APIKey: "stdio-key"})).To(Succeed())
 
 		previousReadHealthy := readHealthyProjectDaemonForAttach
 		previousVerifyKey := verifyStdioAPIKeyFromStorageForAttach
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(registerErr))
 
 		registerFederatedFirstContactForAttach = func(wikid.Layout, projectdaemon.Config, leafwikiRuntimeConfig) (wikid.WorkspaceRecord, bool, error) {
-			return wikid.WorkspaceRecord{ID: "workspace-a"}, false, nil
+			return wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-a")}, false, nil
 		}
 		ensureErr := errors.New("ensure failed")
 		ensureFederatedWorkspaceForAttach = func(context.Context, *projectdaemon.Descriptor, workspaceid.WorkspaceID, leafwikiRuntimeConfig) error {

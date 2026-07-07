@@ -20,7 +20,6 @@ import (
 	"github.com/perber/wiki/internal/projectdaemon"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wikid"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("leafwiki command helper edges", func() {
@@ -193,10 +192,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		logStartupValidationFailure(leaflogging.Config{Target: leaflogging.TargetFile, FilePath: filepath.Join(parentFile, "startup.log")}, "ignored")
 
 		Expect(os.MkdirAll(authStorageDirForRuntime(dataDir), 0o755)).To(Succeed())
-		output := captureLeafwikiStdout(func() {
+		captureLeafwikiStdout(func() {
 			resetAdminPasswordCommand(dataDir)
 		})
-		Expect(output).To(ContainSubstring("admin"))
+		resetStore, err := coreauth.NewUserStore(authStorageDirForRuntime(dataDir))
+		Expect(err).NotTo(HaveOccurred())
+		ginkgo.DeferCleanup(resetStore.Close)
+		adminUser, err := resetStore.GetAdminUser()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(adminUser.Role).To(Equal(coreauth.RoleAdmin))
 		cleanupFailureDir := filepath.Join(leafwikiTempDir(), "cleanup-failure")
 		Expect(os.MkdirAll(filepath.Join(cleanupFailureDir, "users.db", "child"), 0o755)).To(Succeed())
 		Expect(func() {
@@ -234,7 +238,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 					Username:    "stdio",
 					Role:        coreauth.RoleEditor,
 					Scopes:      []string{"leafwiki:workspace:read", "leafwiki:workspace:write"},
-					WorkspaceID: "workspace-a",
+					WorkspaceID: newFixtureWorkspaceID("workspace-a"),
 					AuthMethod:  "api_key",
 					IssuedAt:    now,
 					ExpiresAt:   now.Add(time.Hour),
@@ -247,15 +251,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}))
 		ginkgo.DeferCleanup(privateServer.Close)
 
-		desc := &projectdaemon.Descriptor{ControlURL: privateServer.URL, ControlToken: "daemon-token", WorkspaceID: "workspace-a"}
+		desc := &projectdaemon.Descriptor{ControlURL: privateServer.URL, ControlToken: "daemon-token", WorkspaceID: newFixtureWorkspaceID("workspace-a")}
 		encoded, err := daemonStdioActorContext(context.Background(), desc, leafwikiRuntimeConfig{APIKey: " stdio-key "})
 		Expect(err).NotTo(HaveOccurred())
-		decoded, err := projectdaemon.DecodeActorContext(encoded, projectdaemon.ActorContextValidation{Now: now, WorkspaceID: "workspace-a"})
+		decoded, err := projectdaemon.DecodeActorContext(encoded, projectdaemon.ActorContextValidation{Now: now, WorkspaceID: newFixtureWorkspaceID("workspace-a")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(decoded.Subject).To(Equal("user:stdio"))
+		Expect(decoded).To(HaveActorSubjectForUser(newFixtureUserID("stdio")))
 		Expect(privateControlTokens).To(ContainElement("daemon-token"))
 		Expect(privateAuthorizations).To(ContainElement("Bearer stdio-key"))
-		Expect(privateWorkspaceIDs).To(ContainElement(workspaceid.WorkspaceID("workspace-a").HTTPHeaderValue()))
+		Expect(privateWorkspaceIDs).To(ContainElement(newFixtureWorkspaceID("workspace-a").HTTPHeaderValue()))
 
 		_, err = daemonStdioActorContext(context.Background(), desc, leafwikiRuntimeConfig{APIKey: "rejected"})
 		Expect(err).To(MatchWikidPrivateEndpointStatus(http.StatusUnauthorized))
@@ -290,17 +294,17 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
 		Expect(registerFederatedFirstContactResult(layout, homeCfg, leafwikiRuntimeConfig{})).To(MatchHomeFederatedFirstContact())
-		grant, err := federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{}, "workspace-a")
+		grant, err := federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{}, newFixtureWorkspaceID("workspace-a"))
 		Expect(err).To(MatchError(errWorkspaceGrantAbsent))
 		Expect(grant).To(Equal(wikid.Grant{}))
-		_, err = federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{APIKey: "lwk_key_missing"}, "workspace-a")
+		_, err = federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{APIKey: "lwk_key_missing"}, newFixtureWorkspaceID("workspace-a"))
 		Expect(err).To(MatchError(coreauth.ErrInvalidToken))
 		unsupportedRoleAuthDir := authStorageDirForRuntime(layout.HomeDir)
 		Expect(os.MkdirAll(unsupportedRoleAuthDir, 0o755)).To(Succeed())
 		userStore, err := coreauth.NewUserStore(unsupportedRoleAuthDir)
 		Expect(err).NotTo(HaveOccurred())
 		ginkgo.DeferCleanup(userStore.Close)
-		unsupportedRoleUser := &coreauth.User{ID: "unsupported-role-user", Username: "unsupported-role", Email: "unsupported@example.test", Password: "hash", Role: "owner"}
+		unsupportedRoleUser := &coreauth.User{ID: newFixtureUserID("unsupported-role-user"), Username: "unsupported-role", Email: "unsupported@example.test", Password: "hash", Role: "owner"}
 		Expect(userStore.CreateUser(unsupportedRoleUser)).To(Succeed())
 		apiKeyStore, err := coreauth.NewAPIKeyStore(unsupportedRoleAuthDir)
 		Expect(err).NotTo(HaveOccurred())
@@ -308,7 +312,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ginkgo.DeferCleanup(apiKeyService.Close)
 		unsupportedRoleKey, err := apiKeyService.CreateAPIKey(coreauth.UserIDFromString(unsupportedRoleUser.ID), "unsupported role", coreauth.UserIDFromString(unsupportedRoleUser.ID))
 		Expect(err).NotTo(HaveOccurred())
-		_, err = federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{APIKey: unsupportedRoleKey.Secret}, "workspace-a")
+		_, err = federatedStdioAPIKeyWorkspaceGrantResult(layout, leafwikiRuntimeConfig{APIKey: unsupportedRoleKey.Secret}, newFixtureWorkspaceID("workspace-a"))
 		Expect(err).To(MatchError(errNativeStdioWorkspaceAccessDenied))
 
 		workspaceData := filepath.Join(leafwikiTempDir(), "workspace-data")

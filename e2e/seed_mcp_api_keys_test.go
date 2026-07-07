@@ -71,7 +71,7 @@ var _ = ginkgo.Describe("seed MCP API keys", func() {
 
 			code := runSeedMCPAPIKeys(tc.args, &stderr)
 
-			Expect(code).To(Equal(1))
+			Expect(code).To(Equal(seedCommandFailure))
 			Expect(seedCommandFailureReportFrom(stderr.String())).To(Equal(tc.wantFailure))
 		},
 		ginkgo.Entry("rejects unknown command flags", runSeedErrorCase{

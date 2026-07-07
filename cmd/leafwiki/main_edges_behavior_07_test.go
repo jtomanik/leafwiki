@@ -26,15 +26,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 	ginkgo.It("keeps direct manager, storage, and environment helpers deterministic", ginkgo.Label("integration"), func() {
 
 		var manager *federatedWorkspaceManager
-		manager.MarkReady("workspace-a", 1, "http://workspace.local")
-		_, err := manager.Ensure(context.Background(), wikid.WorkspaceRecord{ID: "workspace-a"})
+		manager.MarkReady(newFixtureWorkspaceID("workspace-a"), 1, "http://workspace.local")
+		_, err := manager.Ensure(context.Background(), wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-a")})
 		Expect(err).To(MatchError(errWorkspaceManagerUnavailable))
 
 		manager = newFederatedWorkspaceManager(leafwikiRuntimeConfig{}, "daemon-token", "http://wikid.local", wikid.GlobalLayout(leafwikiTempDir()), wikid.NewWorkspaceSupervisor(wikid.WorkspaceSupervisorOptions{}))
 		_, err = manager.Ensure(context.Background(), wikid.WorkspaceRecord{})
 		Expect(err).To(MatchError(errWorkspaceIDRequired))
 
-		workspace := wikid.WorkspaceRecord{ID: "workspace-a", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
+		workspace := wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-a"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
 		manager.supervisor.MarkReady(workspace.ID, os.Getpid(), "http://workspace.local")
 		status, err := manager.ensureWorkspace(workspace.ID, workspace)
 		Expect(err).NotTo(HaveOccurred())
@@ -46,7 +46,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		manager.removeDescriptors([]string{"descriptor.json"})
 		Expect((*federatedWorkspaceManager)(nil).stop(context.Background())).To(Succeed())
 		manager.stopped = true
-		manager.restartWorkspaceAfter(wikid.WorkspaceRecord{ID: "workspace-a"}, time.Now().Add(-time.Second))
+		manager.restartWorkspaceAfter(wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("workspace-a")}, time.Now().Add(-time.Second))
 
 		processStopErr := errors.New("process stop failed")
 		stoppedProcDone := make(chan error, 1)

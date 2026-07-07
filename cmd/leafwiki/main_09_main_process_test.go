@@ -18,7 +18,6 @@ import (
 
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wikid"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("leafwiki main process", func() {
@@ -276,7 +275,7 @@ var _ = ginkgo.Describe("federated STDIO attach", func() {
 			RootDir:     requestCfg.RootDir,
 		})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("register beta workspace: %v", err))
-		Expect(registered.ID).NotTo(Equal(workspaceid.WorkspaceID("alpha")), fmt.Sprintf("registered workspace ID unexpectedly matched stale descriptor ID"))
+		Expect(registered.ID).NotTo(Equal(newFixtureWorkspaceID("alpha")), fmt.Sprintf("registered workspace ID unexpectedly matched stale descriptor ID"))
 
 		const privateToken = "private-token"
 		privateMCP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -289,7 +288,7 @@ var _ = ginkgo.Describe("federated STDIO attach", func() {
 		defer privateMCP.Close()
 
 		alphaCfg := requestCfg
-		alphaCfg.WorkspaceID = "alpha"
+		alphaCfg.WorkspaceID = newFixtureWorkspaceID("alpha")
 		configHash, err := projectdaemon.ConfigHash(alphaCfg)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("config hash: %v", err))
 
@@ -298,7 +297,7 @@ var _ = ginkgo.Describe("federated STDIO attach", func() {
 			SchemaVersion:   projectdaemon.DescriptorSchemaVersion,
 			RuntimeStack:    projectdaemon.RuntimeStackWikidFrontd,
 			Role:            projectdaemon.RoleWorkspaced,
-			WorkspaceID:     "alpha",
+			WorkspaceID:     newFixtureWorkspaceID("alpha"),
 			PID:             os.Getpid(),
 			StartedAt:       time.Now().UTC(),
 			DataDir:         requestCfg.DataDir,
@@ -310,7 +309,7 @@ var _ = ginkgo.Describe("federated STDIO attach", func() {
 		})).To(Succeed())
 
 		_, err = attachOrStartFederatedProjectDaemon(context.Background(), cfg, requestCfg, descriptorPath)
-		Expect(err).To(MatchProjectDaemonWorkspaceIDMismatch("alpha", registered.ID))
+		Expect(err).To(MatchProjectDaemonWorkspaceIDMismatch(newFixtureWorkspaceID("alpha"), registered.ID))
 
 	})
 })
@@ -352,7 +351,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 		}
 
 		workspace := wikid.WorkspaceRecord{
-			ID:      "alpha",
+			ID:      newFixtureWorkspaceID("alpha"),
 			DataDir: leafwikiTempDir(),
 			RootDir: leafwikiTempDir(),
 		}
@@ -434,7 +433,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 			}, nil
 		}
 
-		workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
+		workspace := wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("alpha"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
 		firstDone := make(chan error, 1)
 		go func() {
 			_, err := manager.Ensure(context.Background(), workspace)

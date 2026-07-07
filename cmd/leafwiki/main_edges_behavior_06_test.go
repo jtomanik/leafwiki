@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 				Username:    "stdio",
 				Role:        coreauth.RoleEditor,
 				Scopes:      []string{"leafwiki:mcp"},
-				WorkspaceID: "workspace-a",
+				WorkspaceID: newFixtureWorkspaceID("workspace-a"),
 				AuthMethod:  "api_key",
 				IssuedAt:    now,
 				ExpiresAt:   now.Add(time.Hour),
@@ -89,7 +89,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		rt := stdioActorContextRoundTripper{
 			AuthControlURL:   authServer.URL,
 			AuthControlToken: "daemon-token",
-			WorkspaceID:      "workspace-a",
+			WorkspaceID:      newFixtureWorkspaceID("workspace-a"),
 			APIKey:           "stdio-key",
 		}
 		resp, err := rt.RoundTrip(httptest.NewRequest(http.MethodGet, upstream.URL, nil))
@@ -333,7 +333,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		actor, err := wikidControlMCPActorResolver("", leafwikiRuntimeConfig{DisableAuth: true})(httptest.NewRequest(http.MethodPost, "/mcp", nil))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor.Subject).To(Equal("user:public-editor"))
+		Expect(actor).To(HaveActorSubjectForUser(newFixtureUserID("public-editor")))
 
 		_, err = wikidControlMCPActorResolver(leafwikiTempDir(), leafwikiRuntimeConfig{})(httptest.NewRequest(http.MethodPost, "/mcp", nil))
 		Expect(err).To(MatchError(errNativeStdioAPIKeyRequired))
@@ -369,12 +369,12 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		badRegistryLayout := wikid.GlobalLayout(leafwikiTempDir())
 		badRegistry := wikid.NewRegistryService(wikid.NewRegistryStore(filepath.Join(blockingFile, "registry.db")), badRegistryLayout)
 		rec := httptest.NewRecorder()
-		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, badRegistry, nil)
+		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}, badRegistry, nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 
 		badGrantStore := wikid.NewGrantStore(filepath.Join(blockingFile, "grants.db"))
 		rec = httptest.NewRecorder()
-		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil, badGrantStore)
+		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}, nil, badGrantStore)
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		previousGrantsForSubject := grantsForSubjectForRuntime
 		previousActorContextForGrant := actorContextForWorkspaceGrantForRuntime
@@ -387,7 +387,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		validGrantStore := wikid.NewGrantStore(filepath.Join(leafwikiTempDir(), "grants.db"))
 		rec = httptest.NewRecorder()
-		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil, validGrantStore)
+		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}, nil, validGrantStore)
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		grantsForSubjectForRuntime = previousGrantsForSubject
 
@@ -395,7 +395,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return projectdaemon.ActorContext{}, errors.New("actor context failed")
 		}
 		rec = httptest.NewRecorder()
-		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil, nil)
+		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}, nil, nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		actorContextForWorkspaceGrantForRuntime = previousActorContextForGrant
 

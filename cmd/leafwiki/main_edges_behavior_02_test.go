@@ -21,7 +21,6 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
 	"github.com/perber/wiki/internal/wikid"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("leafwiki command helper edges", func() {
@@ -32,7 +31,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		cfg := leafwikiRuntimeConfig{
 			Workspace: wiki.Workspace{
-				ID:      "home",
+				ID:      newFixtureWorkspaceID("home"),
 				DataDir: dataDir,
 				RootDir: rootDir,
 			},
@@ -63,7 +62,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		expectedDataDir, expectedRootDir, err := projectdaemon.CanonicalizeProject(dataDir, rootDir)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(daemonCfg).To(MatchWorkspaceSyncEnabledDaemonConfig(gstruct.Fields{
-			"WorkspaceID":            Equal(workspaceid.WorkspaceID("home")),
+			"WorkspaceID":            Equal(newFixtureWorkspaceID("home")),
 			"DataDir":                Equal(expectedDataDir),
 			"RootDir":                Equal(expectedRootDir),
 			"LogFile":                Equal(filepath.Join(expectedDataDir, ".leafwiki", "logs", "leafwiki.log")),
@@ -143,23 +142,23 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).To(MatchError(errRuntimeActorUserRequired))
 
 		actor, err := actorContextForUser(&coreauth.User{
-			ID:       "u1",
+			ID:       newFixtureUserID("u1"),
 			Username: "ada",
 			Email:    "ada@example.test",
 			Role:     coreauth.RoleEditor,
-		}, "api_key", leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: "workspace-a"}})
+		}, string(leafwikiActorAuthMethodAPIKey), leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("workspace-a")}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Subject":     Equal("user:u1"),
-			"WorkspaceID": Equal(workspaceid.WorkspaceID("workspace-a")),
-			"Scopes":      ContainElement("leafwiki:mcp"),
-		}))
+		Expect(actor).To(SatisfyAll(
+			HaveActorSubjectForUser(newFixtureUserID("u1")),
+			HaveActorWorkspace(newFixtureWorkspaceID("workspace-a")),
+			HaveField("Scopes", ContainElement("leafwiki:mcp")),
+		))
 
 		Expect(wikidGrantRoleForCoreRole(coreauth.RoleViewer)).To(Equal(wikid.GrantRoleViewer))
 		Expect(wikidGrantRoleForCoreRole(coreauth.RoleEditor)).To(Equal(wikid.GrantRoleEditor))
 		Expect(wikidGrantRoleForCoreRole(coreauth.RoleAdmin)).To(Equal(wikid.GrantRoleAdmin))
 		Expect(wikidGrantRoleForCoreRole("owner")).To(BeEmpty())
-		Expect(scopesForGrantRole("owner")).To(BeNil())
+		Expect(scopesForGrantRole(newFixtureGrantRole("owner"))).To(BeNil())
 		Expect(ensureRuntimeHomeGrant(nil, nil)).To(MatchError(errRuntimeHomeGrantUserRequired))
 		Expect(ensureRuntimeHomeGrant(nil, &coreauth.User{Role: "owner"})).To(Succeed())
 
@@ -185,14 +184,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
 			Name:      projectdaemon.RoleWorkspaced,
 			State:     projectdaemon.RoleStateStopped,
-			Error:     "stopped",
+			Error:     string(leafwikiRuntimeFailureStopped),
 			UpdatedAt: now.Add(time.Second),
 		}})
 		status = supervisor.Status(wikid.HomeWorkspaceID)
-		Expect(status).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"State": Equal(wikid.WorkspaceStateCrashed),
-			"Error": Equal("stopped"),
-		}))
+		Expect(status).To(MatchWorkspaceStatusFailure(wikid.WorkspaceStateCrashed, leafwikiRuntimeFailureStopped))
 
 		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
 			Name:      projectdaemon.RoleWorkspaced,
@@ -206,17 +202,17 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		w := newFrontdActorTestWiki()
 		ginkgo.DeferCleanup(w.Close)
 		cfg := leafwikiRuntimeConfig{
-			Workspace:   wiki.Workspace{ID: "home"},
+			Workspace:   wiki.Workspace{ID: newFixtureWorkspaceID("home")},
 			DisableAuth: true,
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 		actor, err := frontdActorResolver(w, cfg)(req)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Subject":    Equal("user:public-editor"),
-			"AuthMethod": Equal("disabled"),
-		}))
+		Expect(actor).To(SatisfyAll(
+			HaveActorSubjectForUser(newFixtureUserID("public-editor")),
+			HaveActorAuthMethod(leafwikiActorAuthMethodDisabled),
+		))
 
 		_, err = frontdMCPTokenVerifier(&wiki.Wiki{})(context.Background(), "not-an-api-key", req)
 		Expect(err).To(MatchError(sdkauth.ErrInvalidToken))
@@ -230,7 +226,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		info, err := frontdMCPTokenVerifier(w)(context.Background(), created.Secret, req)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(info.UserID).To(Equal(string(editor.ID)))
+		Expect(info).To(MatchSDKTokenUserID(editorID))
 
 		rec := httptest.NewRecorder()
 		handleWikidTokenVerify(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/token/verify", nil), w)
@@ -247,7 +243,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		validReq.Header.Set("Authorization", "Bearer "+created.Secret)
 		handleWikidTokenVerify(rec, validReq, w)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(string(editor.ID))))
+		Expect(rec).To(HaveHTTPBody(MatchTokenVerifyUserID(editorID)))
 
 		authenticatedResolver := frontdMCPActorResolver(&wiki.Wiki{}, leafwikiRuntimeConfig{})
 		_, err = authenticatedResolver(req)
@@ -256,9 +252,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		disabledResolver := frontdMCPActorResolver(w, cfg)
 		actor, err = disabledResolver(req)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"AuthMethod": Equal("disabled"),
-		}))
+		Expect(actor).To(HaveActorAuthMethod(leafwikiActorAuthMethodDisabled))
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -320,7 +314,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			supervisor: wikid.NewSupervisor(wikid.SupervisorOptions{}),
 			processes:  map[projectdaemon.RoleName]*internalRuntimeRoleProcess{},
 		}
-		activeRuntime.restartRole(projectdaemon.RoleName("unsupported"))
+		activeRuntime.restartRole(newFixtureRoleName("unsupported"))
 	})
 
 	ginkgo.It("resolves private endpoints, wikid tokens, and frontd actors", ginkgo.Label("integration"), func() {
@@ -349,7 +343,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 				})
 			case "/__leafwiki/actor-context":
 				writeRuntimeJSON(rw, map[string]any{
-					"actor": projectdaemon.ActorContext{Subject: "user:" + editor.ID, Username: editor.Username},
+					"actor": projectdaemon.ActorContext{Subject: "user:" + editor.ID.String(), Username: editor.Username},
 				})
 			case "/discard":
 				rw.WriteHeader(http.StatusNoContent)
@@ -364,7 +358,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		info, err := wikidMCPTokenVerifier(privateServer.URL+"/", "daemon-token")(context.Background(), " edge-token ", nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(info).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"UserID": Equal(editor.ID),
+			"UserID": MatchUserIDString(coreauth.UserIDFromString(editor.ID)),
 			"Scopes": ContainElement("leafwiki:mcp"),
 		})))
 		Expect(struct {
@@ -386,7 +380,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Actor projectdaemon.ActorContext `json:"actor"`
 		}
 		Expect(callWikidPrivateEndpoint(context.Background(), privateServer.URL, "daemon-token", "/__leafwiki/actor-context", req, &out)).To(Succeed())
-		Expect(out.Actor.Subject).To(Equal("user:" + editor.ID))
+		Expect(out.Actor).To(HaveActorSubjectForUser(coreauth.UserIDFromString(editor.ID)))
 		Expect(callWikidPrivateEndpoint(context.Background(), privateServer.URL, "daemon-token", "/discard", nil, nil)).To(Succeed())
 		nilHeaderSource := &http.Request{Method: http.MethodPut, URL: &url.URL{Path: "/nil-header"}}
 		Expect(callWikidPrivateEndpoint(context.Background(), privateServer.URL, "daemon-token", "/discard", nilHeaderSource, nil)).To(Succeed())
@@ -394,7 +388,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		actor, err := wikidActorResolver(privateServer.URL, "daemon-token")(httptest.NewRequest(http.MethodGet, "/mcp", nil))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(actor.Subject).To(Equal("user:" + editor.ID))
+		Expect(actor).To(HaveActorSubjectForUser(coreauth.UserIDFromString(editor.ID)))
 		_, err = wikidActorResolver("http://[::1", "daemon-token")(httptest.NewRequest(http.MethodGet, "/mcp", nil))
 		Expect(err).To(MatchURLError())
 
@@ -410,7 +404,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}))
 		Expect(endpointErr).To(testmatchers.HaveStructuredError(errCodeStdioAuthAPIKeyInvalid, sharederrors.MessageIDForCode(errCodeStdioAuthAPIKeyInvalid)))
 		Expect((*wikidPrivateEndpointError)(nil).Error()).To(BeEmpty())
-		Expect((&wikidPrivateEndpointError{Path: "/empty", StatusCode: 499}).StatusCode).To(Equal(499))
+		Expect(observeWikidPrivateEndpointStatus(&wikidPrivateEndpointError{Path: "/empty", StatusCode: 499})).To(Equal(wikidPrivateEndpointStatusObservation{Status: 499}))
 		Expect(classifyWikidPrivateAuthFailure(errors.New("plain"))).To(Equal(wikidPrivateAuthFailureOther))
 		Expect(classifyWikidPrivateAuthFailure(&wikidPrivateEndpointError{StatusCode: http.StatusInternalServerError})).To(Equal(wikidPrivateAuthFailureOther))
 
@@ -419,25 +413,23 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		_, err = wikidMCPTokenVerifier(privateServer.URL, "daemon-token")(context.Background(), "edge-token", httptest.NewRequest(http.MethodGet, "/missing", nil))
 		Expect(err).NotTo(HaveOccurred())
 
-		cfg := leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: "workspace-a"}}
+		cfg := leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("workspace-a")}}
 		resolver := frontdMCPActorResolver(w, cfg)
-		resolved, resolveErr := resolveWithSDKToken(resolver, apiKey.Secret, editor.ID)
+		resolved, resolveErr := resolveWithSDKToken(resolver, apiKey.Secret, coreauth.UserIDFromString(editor.ID))
 		Expect(resolveErr).NotTo(HaveOccurred())
-		Expect(resolved).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Subject":    Equal("user:" + editor.ID),
-			"AuthMethod": Equal("api_key"),
-		}))
+		Expect(resolved).To(SatisfyAll(
+			HaveActorSubjectForUser(coreauth.UserIDFromString(editor.ID)),
+			HaveActorAuthMethod(leafwikiActorAuthMethodAPIKey),
+		))
 
-		resolved, resolveErr = resolveWithSDKToken(resolver, "oauth-token", editor.ID)
+		resolved, resolveErr = resolveWithSDKToken(resolver, "oauth-token", coreauth.UserIDFromString(editor.ID))
 		Expect(resolveErr).NotTo(HaveOccurred())
-		Expect(resolved).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"AuthMethod": Equal("oauth"),
-		}))
+		Expect(resolved).To(HaveActorAuthMethod(leafwikiActorAuthMethodOAuth))
 
-		_, resolveErr = resolveWithSDKToken(frontdMCPActorResolver(&wiki.Wiki{}, cfg), "oauth-token", editor.ID)
+		_, resolveErr = resolveWithSDKToken(frontdMCPActorResolver(&wiki.Wiki{}, cfg), "oauth-token", coreauth.UserIDFromString(editor.ID))
 		Expect(resolveErr).To(MatchError(errFrontdMCPUserServiceUnavailable))
 
-		_, resolveErr = resolveWithSDKToken(resolver, "oauth-token", "missing-user")
+		_, resolveErr = resolveWithSDKToken(resolver, "oauth-token", newFixtureUserID("missing-user"))
 		Expect(resolveErr).To(MatchError(coreauth.ErrUserNotFound))
 
 		_, _, err = frontdActorUser(httptest.NewRequest(http.MethodGet, "/mcp", nil), &wiki.Wiki{}, leafwikiRuntimeConfig{})
@@ -465,7 +457,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		publicReq := httptest.NewRequest(http.MethodGet, "/", nil)
 		publicUser, method, err := frontdActorUser(publicReq, &wiki.Wiki{}, leafwikiRuntimeConfig{PublicAccess: true})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(publicUser.ID).To(Equal("public-viewer"))
-		Expect(method).To(Equal("public_access"))
+		Expect(publicUser).To(HaveCoreAuthUserID(newFixtureUserID("public-viewer")))
+		Expect(method).To(Equal(string(leafwikiActorAuthMethodPublicAccess)))
 	})
 })

@@ -21,7 +21,6 @@ import (
 	"github.com/perber/wiki/internal/agenthooks"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	httpinternal "github.com/perber/wiki/internal/http"
-	"github.com/perber/wiki/internal/localization"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wiki"
 	"github.com/perber/wiki/internal/wikid"
@@ -326,53 +325,7 @@ func haveDaemonStdioBridgeHTTPClient(controlToken string, bearerToken string) ty
 
 var _ = ginkgo.Describe("leafwiki usage output", func() {
 	ginkgo.It("documents MCP transport selector", ginkgo.Label("unit"), func() {
-		var buf bytes.Buffer
-
-		writeUsage(&buf)
-
-		output := buf.String()
-		Expect(output).To(ContainSubstring("Usage: leafwiki [command]"), fmt.Sprintf("expected usage output to include catalog-backed usage line, got %q", output))
-		Expect(output).To(ContainSubstring("leafwiki --jwt-secret <SECRET> --admin-password <PASSWORD> [--host <HOST>] [--port <PORT>] [--data-dir <DIR>] [--root-dir <DIR>]"), fmt.Sprintf("expected authenticated startup usage to include --root-dir, got %q", output))
-
-		for _, expected := range []string{
-			"--jwt-secret",
-			"--admin-password",
-			"--allow-insecure",
-			"--data-dir",
-			"--root-dir",
-			"--log-target",
-			"--log-file",
-			"--mcp",
-			"--api-key",
-			"Federated runtime idle timeout",
-			"leafwiki daemon reads ~/.leafwiki/leafwiki.yml",
-			"--config",
-			"leafwiki agent-hook <codex|claude|cursor|unknown>",
-			"LEAFWIKI_ROOT_DIR",
-			"LEAFWIKI_LOG_TARGET",
-			"LEAFWIKI_LOG_FILE",
-			"LEAFWIKI_MCP",
-			"LEAFWIKI_MCP_API_KEY",
-		} {
-			Expect(output).To(ContainSubstring(expected), fmt.Sprintf("expected usage output to contain %q, got %q", expected, output))
-
-		}
-		for _, removed := range []string{
-			"--enable-revision",
-			"--enable-workspace-sync",
-			"--max-revision-history",
-			"--enable-mcp",
-			"--mcp-stdio",
-			"LEAFWIKI_ENABLE_REVISION",
-			"LEAFWIKI_ENABLE_WORKSPACE_SYNC",
-			"LEAFWIKI_MAX_REVISION_HISTORY",
-			"LEAFWIKI_RUNTIME_STACK",
-			"LEAFWIKI_ENABLE_MCP",
-			"LEAFWIKI_MCP_STDIO",
-		} {
-			Expect(output).NotTo(ContainSubstring(removed), fmt.Sprintf("usage output contains removed MCP option %q: %q", removed, output))
-
-		}
+		Expect(leafwikiUsage()).To(MatchLeafwikiUsageContract())
 
 	})
 })
@@ -383,9 +336,8 @@ var _ = ginkgo.Describe("leafwiki usage output", func() {
 
 		writeUsage(&buf)
 
-		rendered := localization.English.Render("cli.help.body", "").Message
-		Expect(rendered).NotTo(BeEmpty(), fmt.Sprintf("cli.help.body rendered empty"))
-		Expect(buf.String()).To(ContainSubstring(rendered), fmt.Sprintf("usage output did not include catalog help body"))
+		Expect(leafwikiUsage().MessageIDs).To(ContainElement(leafwikiUsageMessageCLIHelpBody))
+		Expect(buf.String()).To(ContainRenderedLeafwikiUsageMessage(leafwikiUsageMessageCLIHelpBody), fmt.Sprintf("usage output did not include catalog help body"))
 
 	})
 })
@@ -448,7 +400,7 @@ var _ = ginkgo.Describe("daemon runtime configuration", func() {
 	ginkgo.It("includes workspace ID", ginkgo.Label("unit"), func() {
 		cfg := leafwikiRuntimeConfig{
 			Workspace: wiki.Workspace{
-				ID:      "home",
+				ID:      newFixtureWorkspaceID("home"),
 				DataDir: filepath.Join(leafwikiTempDir(), "data"),
 				RootDir: filepath.Join(leafwikiTempDir(), "root"),
 			},

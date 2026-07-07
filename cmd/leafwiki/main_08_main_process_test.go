@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, nativeStdioListToolsInput(), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("stdio startup should attach to non-loopback plain web owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(haveNativeStdioToolListResponse(2, "wiki_create_page"), fmt.Sprintf("stdout = %q, want tools/list response from private MCP bridge", stdout))
+		Expect(stdout).To(haveNativeStdioToolListResponse(2, newFixtureAgentToolName("wiki_create_page")), fmt.Sprintf("stdout = %q, want tools/list response from private MCP bridge", stdout))
 		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet private MCP bridge attach", stderr))
 
 	})
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, nativeStdioListToolsInput(), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("stdio startup should proxy MCP frames to existing plain owner, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(haveNativeStdioToolListResponse(2, "wiki_create_page"), fmt.Sprintf("stdout = %q, want tools/list response from private MCP bridge", stdout))
+		Expect(stdout).To(haveNativeStdioToolListResponse(2, newFixtureAgentToolName("wiki_create_page")), fmt.Sprintf("stdout = %q, want tools/list response from private MCP bridge", stdout))
 		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet private MCP bridge proxy", stderr))
 
 		resp, err := http.Get("http://127.0.0.1:" + port + "/mcp")

@@ -89,24 +89,18 @@ var _ = ginkgo.Describe("home workspace status synchronization", func() {
 			State:     projectdaemon.RoleStateRestarting,
 			PID:       123,
 			URL:       "http://127.0.0.1:41001",
-			Error:     "exit status 2",
+			Error:     string(leafwikiRuntimeFailureExitStatus),
 			UpdatedAt: now.Add(time.Second),
 		}})
-		Expect(supervisor.Status(wikid.HomeWorkspaceID)).To(SatisfyAll(
-			HaveField("State", Equal(wikid.WorkspaceStateRestarting)),
-			HaveField("Error", Equal("exit status 2")),
-		))
+		Expect(supervisor.Status(wikid.HomeWorkspaceID)).To(MatchWorkspaceStatusFailure(wikid.WorkspaceStateRestarting, leafwikiRuntimeFailureExitStatus))
 
 		syncHomeWorkspaceStatus(supervisor, []projectdaemon.RoleHealth{{
 			Name:      projectdaemon.RoleWorkspaced,
 			State:     projectdaemon.RoleStateCrashed,
-			Error:     "restart limit",
+			Error:     string(leafwikiRuntimeFailureRestartLimit),
 			UpdatedAt: now.Add(2 * time.Second),
 		}})
-		Expect(supervisor.Status(wikid.HomeWorkspaceID)).To(SatisfyAll(
-			HaveField("State", Equal(wikid.WorkspaceStateCrashed)),
-			HaveField("Error", Equal("restart limit")),
-		))
+		Expect(supervisor.Status(wikid.HomeWorkspaceID)).To(MatchWorkspaceStatusFailure(wikid.WorkspaceStateCrashed, leafwikiRuntimeFailureRestartLimit))
 
 	})
 })
@@ -145,7 +139,7 @@ var _ = ginkgo.Describe("wikid actor context handler", func() {
 		w := newFrontdActorTestWiki()
 		defer closeBestEffort(w)
 		cfg := leafwikiRuntimeConfig{
-			Workspace:           wiki.Workspace{ID: "current"},
+			Workspace:           wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 			Host:                "127.0.0.1",
 			AllowInsecure:       true,
 			AccessTokenTimeout:  15 * time.Minute,
@@ -171,7 +165,7 @@ var _ = ginkgo.Describe("wikid actor context handler", func() {
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed(), fmt.Sprintf("decode actor context: %v", err))
 		Expect(body.Actor).To(SatisfyAll(
 			HaveField("Username", Equal("admin")),
-			HaveField("AuthMethod", Equal("oauth")),
+			HaveActorAuthMethod(leafwikiActorAuthMethodOAuth),
 		), fmt.Sprintf("actor = %#v, want OAuth admin actor", body.Actor))
 
 	})
@@ -182,7 +176,7 @@ var _ = ginkgo.Describe("wikid actor context handler", func() {
 		w := newFrontdActorTestWiki()
 		defer closeBestEffort(w)
 		cfg := leafwikiRuntimeConfig{
-			Workspace:     wiki.Workspace{ID: "current"},
+			Workspace:     wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 			PublicAccess:  true,
 			AllowInsecure: true,
 			MCPTransports: mcpTransports{HTTP: true},
@@ -406,7 +400,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			ContainElement(haveJSONLogEntry(leafwikiHTTPRequestLogMessage,
 				HaveKeyWithValue("method", http.MethodGet),
 				HaveKeyWithValue("path", "/api/health"),
-				HaveKeyWithValue("status", float64(http.StatusOK)),
+				MatchJSONLogHTTPStatus(http.StatusOK),
 			)),
 		))
 

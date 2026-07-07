@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/perber/wiki/internal/wikid"
 	"github.com/perber/wiki/internal/workspaceid"
 )
+
+const grantWorkspaceCommandFailure = 1
 
 var _ = ginkgo.Describe("grant-workspaces command", ginkgo.Label("unit"), func() {
 	ginkgo.It("default seams read process args and create the concrete grant store", func() {
@@ -66,7 +69,7 @@ var _ = ginkgo.Describe("grant-workspaces command", ginkgo.Label("unit"), func()
 		Expect(storePath).To(Equal(wikid.GlobalLayout("/tmp/global").DBPath))
 		Expect(store.grants).To(Equal([]wikid.Grant{{
 			Subject:     "frontd",
-			WorkspaceID: workspaceid.WorkspaceID("home"),
+			WorkspaceID: fixtureGrantWorkspaceID("home"),
 			Role:        wikid.GrantRoleAdmin,
 		}}))
 	})
@@ -84,7 +87,7 @@ var _ = ginkgo.Describe("grant-workspaces command", ginkgo.Label("unit"), func()
 
 			code := runGrantWorkspaces(tc.args, tc.stdin, &stderr)
 
-			Expect(code).To(Equal(1))
+			Expect(code).To(Equal(grantWorkspaceCommandFailure))
 			Expect(grantWorkspaceFailureReportFrom(stderr.String())).To(Equal(tc.wantFailure))
 		},
 		ginkgo.Entry("reports flag parsing failures", grantWorkspaceFailureCase{
@@ -113,11 +116,18 @@ var _ = ginkgo.Describe("grant-workspaces command", ginkgo.Label("unit"), func()
 			wantFailure: grantWorkspaceFailureReport{
 				Kind:        grantWorkspaceFailureUpsert,
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureGrantWorkspaceID("home"),
 			},
 		}),
 	)
 })
+
+func fixtureGrantWorkspaceID(raw string) workspaceid.WorkspaceID {
+	ginkgo.GinkgoHelper()
+	id, err := workspaceid.ParseWorkspaceID(raw)
+	Expect(err).To(Succeed(), fmt.Sprintf("parse fixture workspace ID %q", raw))
+	return id
+}
 
 type grantWorkspaceFailureCase struct {
 	args        []string

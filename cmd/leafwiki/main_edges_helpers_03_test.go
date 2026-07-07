@@ -22,9 +22,35 @@ import (
 	"github.com/onsi/gomega/gcustom"
 	"github.com/onsi/gomega/types"
 
+	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/wikid"
 )
+
+func MatchJSONLogHTTPStatus(status int) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return HaveKeyWithValue("status", float64(status))
+}
+
+type leafwikiParsedBoolState uint8
+
+const (
+	leafwikiParsedBoolEnabled leafwikiParsedBoolState = iota
+	leafwikiParsedBoolDisabled
+	leafwikiParsedBoolRejected
+)
+
+func observeParsedBool(raw string) leafwikiParsedBoolState {
+	parsed, err := parseBoolResult(raw)
+	switch {
+	case err != nil:
+		return leafwikiParsedBoolRejected
+	case parsed:
+		return leafwikiParsedBoolEnabled
+	default:
+		return leafwikiParsedBoolDisabled
+	}
+}
 
 func waitForLeafwikiContextCancellation(ctx context.Context) error {
 	ginkgo.GinkgoHelper()
@@ -295,14 +321,14 @@ func (w *leafwikiFailingResponseWriter) WriteHeader(statusCode int) {
 	w.statuses = append(w.statuses, statusCode)
 }
 
-func resolveWithSDKToken(resolver func(*http.Request) (projectdaemon.ActorContext, error), bearer string, userID string) (projectdaemon.ActorContext, error) {
+func resolveWithSDKToken(resolver func(*http.Request) (projectdaemon.ActorContext, error), bearer string, userID coreauth.UserID) (projectdaemon.ActorContext, error) {
 	ginkgo.GinkgoHelper()
 
 	var actor projectdaemon.ActorContext
 	var resolverErr error
 	handler := sdkauth.RequireBearerToken(func(context.Context, string, *http.Request) (*sdkauth.TokenInfo, error) {
 		return &sdkauth.TokenInfo{
-			UserID:     userID,
+			UserID:     leafwikiSDKTokenUserID(userID),
 			Scopes:     []string{"leafwiki:mcp"},
 			Expiration: time.Now().Add(time.Hour),
 		}, nil

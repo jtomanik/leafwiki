@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -12,6 +13,8 @@ import (
 	"github.com/perber/wiki/internal/wikid"
 	"github.com/perber/wiki/internal/workspaceid"
 )
+
+const wikidStoreCommandFailure = 1
 
 type wikidStoreReadRegistryCase struct {
 	store      func() *fakeRegistryStore
@@ -130,7 +133,14 @@ func haveWikidStoreReplaceAttempts(attempts types.GomegaMatcher) types.GomegaMat
 }
 
 func fakeWorkspaceRecord() wikid.WorkspaceRecord {
-	return wikid.WorkspaceRecord{ID: workspaceid.WorkspaceID("home"), DisplayName: "Home", DataDir: "/data", RootDir: "/root"}
+	return wikid.WorkspaceRecord{ID: fixtureWikidStoreWorkspaceID("home"), DisplayName: "Home", DataDir: "/data", RootDir: "/root"}
+}
+
+func fixtureWikidStoreWorkspaceID(raw string) workspaceid.WorkspaceID {
+	ginkgo.GinkgoHelper()
+	id, err := workspaceid.ParseWorkspaceID(raw)
+	Expect(err).To(Succeed(), fmt.Sprintf("parse fixture workspace ID %q", raw))
+	return id
 }
 
 type fakeRegistryStore struct {

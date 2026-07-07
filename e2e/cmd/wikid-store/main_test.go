@@ -10,7 +10,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/wikid"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 const (
@@ -198,12 +197,12 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 		Expect(store).To(haveWikidStoreGrantUpserts(
 			Equal([]wikid.Grant{{
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}}),
 			Equal([]wikid.Grant{{
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}}),
 		))
@@ -216,20 +215,20 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 			io.Discard,
 			&stderr,
 		)
-		Expect(code).To(Equal(1))
+		Expect(code).To(Equal(wikidStoreCommandFailure))
 		Expect(store).To(haveWikidStoreGrantUpserts(
 			Equal([]wikid.Grant{{
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}, {
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}}),
 			Equal([]wikid.Grant{{
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}}),
 		))
@@ -241,20 +240,20 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 			io.Discard,
 			&stderr,
 		)
-		Expect(code).To(Equal(1))
+		Expect(code).To(Equal(wikidStoreCommandFailure))
 		Expect(store).To(haveWikidStoreGrantUpserts(
 			Equal([]wikid.Grant{{
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}, {
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}}),
 			Equal([]wikid.Grant{{
 				Subject:     "frontd",
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}}),
 		))
@@ -275,7 +274,7 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 			io.Discard,
 			&stderr,
 		)
-		Expect(code).To(Equal(1))
+		Expect(code).To(Equal(wikidStoreCommandFailure))
 		Expect(store).To(haveRecordedWikidStoreReplace("", BeNil()))
 		Expect(store).To(haveWikidStoreReplaceAttempts(BeEmpty()))
 
@@ -291,7 +290,7 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 		Expect(store).To(haveWikidStoreReplaceAttempts(Equal([]wikidStoreReplaceSnapshot{{
 			Subject: "frontd",
 			Grants: []wikid.Grant{{
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}},
 		}})))
@@ -303,12 +302,12 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 			io.Discard,
 			&stderr,
 		)
-		Expect(code).To(Equal(1))
+		Expect(code).To(Equal(wikidStoreCommandFailure))
 		Expect(store).To(haveRecordedWikidStoreReplace("frontd", HaveLen(1)))
 		Expect(store).To(haveWikidStoreReplaceAttempts(Equal([]wikidStoreReplaceSnapshot{{
 			Subject: "frontd",
 			Grants: []wikid.Grant{{
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}},
 		}})))
@@ -321,12 +320,12 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 			io.Discard,
 			&stderr,
 		)
-		Expect(code).To(Equal(1))
+		Expect(code).To(Equal(wikidStoreCommandFailure))
 		Expect(store).To(haveRecordedWikidStoreReplace("frontd", HaveLen(1)))
 		Expect(store).To(haveWikidStoreReplaceAttempts(Equal([]wikidStoreReplaceSnapshot{{
 			Subject: "frontd",
 			Grants: []wikid.Grant{{
-				WorkspaceID: workspaceid.WorkspaceID("home"),
+				WorkspaceID: fixtureWikidStoreWorkspaceID("home"),
 				Role:        wikid.GrantRoleAdmin,
 			}},
 		}, {
@@ -341,7 +340,7 @@ var _ = ginkgo.Describe("wikid-store command", ginkgo.Label("unit"), func() {
 
 			code := runWikidStore(args, strings.NewReader(""), io.Discard, &stderr)
 
-			Expect(code).To(Equal(1))
+			Expect(code).To(Equal(wikidStoreCommandFailure))
 		},
 		ginkgo.Entry("requires a command", nil),
 		ginkgo.Entry("rejects unknown read-registry flags", []string{"read-registry", "--unknown"}),

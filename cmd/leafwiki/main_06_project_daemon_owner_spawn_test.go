@@ -458,7 +458,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 		Expect(client.RecordAgentPresence(ctx, agenthooks.Event{
 			Provider:      agenthooks.ProviderCodex,
 			SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
-			EventName:     "SessionStart",
+			EventName:     newFixtureAgentEventName("SessionStart"),
 			SeenAt:        time.Now(),
 		})).To(Succeed(), fmt.Sprintf("stderr:\n%s", readFileString(first.stderrPath)))
 		sessions, err := client.ListAgentPresence(ctx)

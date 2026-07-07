@@ -102,7 +102,7 @@ func goI18nRolloutEvidence(title string) (canonicalPlanEvidence, bool) {
 	case "MCP structured error keeps _meta.error compatibility":
 		return evidence("internal/wiki/mcp/mcp_integration_tool_call_helpers_test.go", "matchMCPStructuredError"), true
 	case "CLI help renders catalog-backed text to stdout":
-		return evidence("cmd/leafwiki/main_test.go", "catalog-backed usage line"), true
+		return evidence("cmd/leafwiki/main_edges_behavior_01_test.go", "ContainRenderedLeafwikiUsageMessage(leafwikiUsageMessageCLIHelpUsage)"), true
 	case "run.sh help uses generated catalog text",
 		"Shell wrapper redacts secrets after message generation":
 		return evidence("scripts/test-run.sh", "scripts/run_messages.sh"), true

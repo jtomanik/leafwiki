@@ -60,7 +60,7 @@ var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
 				Subject:     "user:editor",
 				Username:    "editor",
 				Role:        coreauth.RoleEditor,
-				WorkspaceID: "workspace-a",
+				WorkspaceID: newFixtureWorkspaceID("workspace-a"),
 				AuthMethod:  "api_key",
 				IssuedAt:    now,
 				ExpiresAt:   now.Add(5 * time.Minute),
@@ -76,11 +76,11 @@ var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
 
 			actor, err := projectdaemon.DecodeActorContext(req.Header.Get(projectdaemon.ActorContextHeader), projectdaemon.ActorContextValidation{
 				Now:         now.Add(time.Minute),
-				WorkspaceID: "workspace-a",
+				WorkspaceID: newFixtureWorkspaceID("workspace-a"),
 			})
 			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("private MCP actor context invalid: %v", err))
 			Expect(actor).To(SatisfyAll(
-				HaveField("Subject", Equal("user:editor")),
+				HaveActorSubjectForUser(newFixtureUserID("editor")),
 				HaveField("Role", Equal(coreauth.RoleEditor)),
 			), fmt.Sprintf("private MCP actor context = %#v, want refreshed editor actor", actor))
 
@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
 			ControlToken:     "private-token",
 			AuthControlURL:   control.URL,
 			AuthControlToken: "control-token",
-			WorkspaceID:      "workspace-a",
+			WorkspaceID:      newFixtureWorkspaceID("workspace-a"),
 			APIKey:           "stdio-api-key",
 			ActorContext:     "stale-actor-context",
 		})
@@ -110,7 +110,7 @@ var _ = ginkgo.Describe("daemon STDIO bridge HTTP client", func() {
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
-		Expect(err).To(MatchWikidPrivateEndpoint(http.StatusUnauthorized, ""))
+		Expect(err).To(MatchWikidPrivateEndpoint(http.StatusUnauthorized, newFixtureErrorCode("")))
 		Expect(verifyCalls).To(Equal(2), fmt.Sprintf("revoked bridge verification calls = %d, want 2", verifyCalls))
 		Expect(upstreamCalls).To(Equal(1), fmt.Sprintf("revoked bridge upstream calls = %d, want 1", upstreamCalls))
 
@@ -131,7 +131,7 @@ var _ = ginkgo.Describe("daemon STDIO actor context", func() {
 		transport := stdioActorContextRoundTripper{
 			AuthControlURL:   control.URL,
 			AuthControlToken: "control-token",
-			WorkspaceID:      "workspace-b",
+			WorkspaceID:      newFixtureWorkspaceID("workspace-b"),
 			APIKey:           "valid-but-ungranted-key",
 		}
 		_, err := transport.actorContext(httptest.NewRequest(http.MethodGet, "/mcp", nil))
@@ -150,7 +150,7 @@ var _ = ginkgo.Describe("daemon heartbeat", func() {
 		client := projectdaemon.NewClient(server.URL, "control-token")
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		err := runDaemonHeartbeat(ctx, client, "missing-session", 10*time.Millisecond)
+		err := runDaemonHeartbeat(ctx, client, newFixtureSessionID("missing-session"), 10*time.Millisecond)
 		Expect(err).To(MatchProjectDaemonControlStatus(http.StatusNotFound))
 
 	})
@@ -222,7 +222,7 @@ var _ = ginkgo.Describe("project daemon activity count", func() {
 		presence.Record(agenthooks.Event{
 			Provider:      agenthooks.ProviderCodex,
 			SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
-			EventName:     "SessionStart",
+			EventName:     newFixtureAgentEventName("SessionStart"),
 			SeenAt:        time.Now(),
 		})
 		Expect(projectDaemonActivityCount(sessions, presence)).To(Equal(2))
@@ -248,7 +248,7 @@ var _ = ginkgo.Describe("leafwiki command behavior", func() {
 		presence.Record(agenthooks.Event{
 			Provider:      agenthooks.ProviderCodex,
 			SessionIDHash: agentHookSessionHash(agenthooks.ProviderCodex, "codex"),
-			EventName:     "SessionStart",
+			EventName:     newFixtureAgentEventName("SessionStart"),
 			SeenAt:        time.Now(),
 		})
 		Consistently(ctx.Done()).WithTimeout(25 * time.Millisecond).ShouldNot(BeClosed())

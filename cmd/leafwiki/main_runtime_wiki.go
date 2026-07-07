@@ -271,7 +271,7 @@ func frontdMCPTokenVerifier(w *wiki.Wiki) sdkauth.TokenVerifier {
 				return nil, fmt.Errorf("%w: invalid api key", sdkauth.ErrInvalidToken)
 			}
 			return &sdkauth.TokenInfo{
-				UserID:     verified.User.ID,
+				UserID:     leafwikiSDKTokenUserID(verified.User.ID),
 				Scopes:     []string{wikioauth.ScopeMCP},
 				Expiration: time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
 			}, nil

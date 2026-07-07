@@ -84,7 +84,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		canceledHeartbeat, cancelHeartbeat := context.WithCancel(context.Background())
 		cancelHeartbeat()
-		Expect(runDaemonHeartbeat(canceledHeartbeat, nil, "", 0)).To(MatchError(context.Canceled))
+		Expect(runDaemonHeartbeat(canceledHeartbeat, nil, newFixtureSessionID(""), 0)).To(MatchError(context.Canceled))
 
 		projectDaemonWaitTimeout = time.Millisecond
 		waitErrPath := filepath.Join(leafwikiTempDir(), "startup.err")
@@ -276,13 +276,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 	ginkgo.It("normalizes workspace ensure results and daemon auth callbacks", ginkgo.Label("integration"), func() {
 
-		status, err := federatedEnsureResultStatus("workspace-a", wikid.WorkspaceStatus{State: wikid.WorkspaceStateRunning}, nil)
+		status, err := federatedEnsureResultStatus(newFixtureWorkspaceID("workspace-a"), wikid.WorkspaceStatus{State: wikid.WorkspaceStateRunning}, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(status.State).To(Equal(wikid.WorkspaceStateRunning))
-		_, err = federatedEnsureResultStatus("workspace-a", "unexpected", nil)
-		Expect(err).To(MatchFederatedEnsureUnexpectedResult("workspace-a", "string"))
+		_, err = federatedEnsureResultStatus(newFixtureWorkspaceID("workspace-a"), "unexpected", nil)
+		Expect(err).To(MatchFederatedEnsureUnexpectedResult(newFixtureWorkspaceID("workspace-a"), "string"))
 		resultErr := errors.New("ensure failed")
-		_, err = federatedEnsureResultStatus("workspace-a", "unexpected", resultErr)
+		_, err = federatedEnsureResultStatus(newFixtureWorkspaceID("workspace-a"), "unexpected", resultErr)
 		Expect(err).To(MatchError(resultErr))
 
 		var routed []string
@@ -329,7 +329,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		}
 		rec := httptest.NewRecorder()
 		frontdWorkspaceMCPProxy(frontd.WorkspaceRoute{
-			WorkspaceID: "workspace-a",
+			WorkspaceID: newFixtureWorkspaceID("workspace-a"),
 			Upstream:    "http://127.0.0.1:1",
 			DaemonToken: "daemon-token",
 		}, func(*http.Request) (projectdaemon.ActorContext, error) {
@@ -341,13 +341,13 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				actor, actorErr := opts.Actor(req)
 				Expect(actorErr).NotTo(HaveOccurred())
-				Expect(actor.WorkspaceID).To(Equal(workspaceid.WorkspaceID("workspace-a")))
+				Expect(actor.WorkspaceID).To(Equal(newFixtureWorkspaceID("workspace-a")))
 				w.WriteHeader(http.StatusNoContent)
 			}), nil
 		}
 		rec = httptest.NewRecorder()
 		frontdWorkspaceMCPProxy(frontd.WorkspaceRoute{
-			WorkspaceID: "workspace-a",
+			WorkspaceID: newFixtureWorkspaceID("workspace-a"),
 			Upstream:    "http://127.0.0.1:1",
 			DaemonToken: "daemon-token",
 		}, func(req *http.Request) (projectdaemon.ActorContext, error) {
@@ -388,15 +388,15 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		ensureRuntimeHomeGrantForOwner = func(*wikid.GrantStore, *coreauth.User) error {
 			return homeGrantErr
 		}
-		_, err = runtimeWorkspaceSubject(httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/home/ensure", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil)
+		_, err = runtimeWorkspaceSubject(httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/home/ensure", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}, nil)
 		Expect(err).To(MatchError(homeGrantErr))
 		ensureRuntimeHomeGrantForOwner = previousEnsureHomeGrant
 		ensureRuntimeHomeGrantForOwner = func(*wikid.GrantStore, *coreauth.User) error {
 			return nil
 		}
-		subject, err := runtimeWorkspaceSubject(httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/home/ensure", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: "home"}}, nil)
+		subject, err := runtimeWorkspaceSubject(httptest.NewRequest(http.MethodPost, "/__leafwiki/workspaces/home/ensure", nil), w, leafwikiRuntimeConfig{DisableAuth: true, Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}, nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(subject.Subject).To(Equal("user:public-editor"))
+		Expect(subject).To(HaveActorSubjectForUser(newFixtureUserID("public-editor")))
 		ensureRuntimeHomeGrantForOwner = previousEnsureHomeGrant
 
 		rec = httptest.NewRecorder()

@@ -175,7 +175,7 @@ func federatedStdioAPIKeyWorkspaceGrant(layout wikid.Layout, cfg leafwikiRuntime
 	if role == "" {
 		return wikid.Grant{}, false, fmt.Errorf("native STDIO API-key user role %q cannot access workspaces: %w", user.Role, errNativeStdioWorkspaceAccessDenied)
 	}
-	return wikid.Grant{Subject: "user:" + user.ID, WorkspaceID: workspaceID, Role: role}, true, nil
+	return wikid.Grant{Subject: leafwikiUserSubject(user.ID), WorkspaceID: workspaceID, Role: role}, true, nil
 }
 
 func federatedWorkspaceDisplayName(cfg projectdaemon.Config) string {

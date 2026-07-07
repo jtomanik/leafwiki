@@ -261,7 +261,7 @@ func runtimeWorkspaceSubject(req *http.Request, controlPlaneWiki *wiki.Wiki, cfg
 		return wikid.WorkspaceSubject{}, err
 	}
 	return wikid.WorkspaceSubject{
-		Subject: "user:" + user.ID,
+		Subject: leafwikiUserSubject(user.ID),
 		Role:    wikidGrantRoleForCoreRole(user.Role),
 	}, nil
 }
@@ -378,7 +378,7 @@ func ensureRuntimeHomeGrant(store *wikid.GrantStore, user *coreauth.User) error 
 	if role == "" {
 		return nil
 	}
-	return store.Upsert(wikid.Grant{Subject: "user:" + user.ID, WorkspaceID: wikid.HomeWorkspaceID, Role: role})
+	return store.Upsert(wikid.Grant{Subject: leafwikiUserSubject(user.ID), WorkspaceID: wikid.HomeWorkspaceID, Role: role})
 }
 
 func wikidGrantRoleForCoreRole(role string) wikid.GrantRole {

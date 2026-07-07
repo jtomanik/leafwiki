@@ -24,7 +24,6 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
 	"github.com/perber/wiki/internal/wikid"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("leafwiki command helper edges", func() {
@@ -34,7 +33,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		editor, err := w.UserService().CreateUser("remote-editor", "remote-editor@example.com", "password", coreauth.RoleEditor)
 		Expect(err).NotTo(HaveOccurred())
 
-		cfg := leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: "home"}}
+		cfg := leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}
 		rec := httptest.NewRecorder()
 		handleWikidActorContext(rec, httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil), &wiki.Wiki{}, cfg, nil, nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusUnauthorized))
@@ -49,7 +48,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		registry := wikid.NewRegistryService(wikid.NewRegistryStore(layout.DBPath), layout)
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
-		req.Header.Set(projectdaemon.WorkspaceIDHeader, workspaceid.WorkspaceID("missing-workspace").HTTPHeaderValue())
+		req.Header.Set(projectdaemon.WorkspaceIDHeader, newFixtureWorkspaceID("missing-workspace").HTTPHeaderValue())
 		handleWikidActorContext(rec, req, w, leafwikiRuntimeConfig{DisableAuth: true}, registry, nil)
 		Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))
 
@@ -98,14 +97,14 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		adminReq := httptest.NewRequest(http.MethodPost, "/__leafwiki/actor-context", nil)
 		adminReq.AddCookie(&http.Cookie{Name: "leafwiki_at", Value: token.Token})
-		adminReq.Header.Set(projectdaemon.WorkspaceIDHeader, workspaceid.WorkspaceID("admin-workspace").HTTPHeaderValue())
+		adminReq.Header.Set(projectdaemon.WorkspaceIDHeader, newFixtureWorkspaceID("admin-workspace").HTTPHeaderValue())
 		rec = httptest.NewRecorder()
 		handleWikidActorContext(rec, adminReq, w, cfg, nil, grants)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 		Expect(json.Unmarshal(rec.Body.Bytes(), &actorContextBody)).To(Succeed())
 		Expect(actorContextBody.Actor.Scopes).To(ContainElement("leafwiki:workspace:admin"))
 
-		_, err = actorContextForWorkspaceGrant(nil, "api_key", cfg, "workspace-a", wikid.GrantRoleViewer)
+		_, err = actorContextForWorkspaceGrant(nil, string(leafwikiActorAuthMethodAPIKey), cfg, newFixtureWorkspaceID("workspace-a"), wikid.GrantRoleViewer)
 		Expect(err).To(MatchError(errRuntimeActorUserRequired))
 		Expect(seedRuntimeHomeGrants(grants, leafwikiRuntimeConfig{DisableAuth: true, PublicAccess: true})).To(Succeed())
 
@@ -130,8 +129,8 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 
 		user, method, err = frontdRemoteUserResult(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(user.ID).To(Equal(editor.ID))
-		Expect(method).To(Equal("remote_user"))
+		Expect(user).To(HaveCoreAuthUserID(coreauth.UserIDFromString(editor.ID)))
+		Expect(method).To(Equal(string(leafwikiActorAuthMethodRemoteUser)))
 
 		remoteReq.Header.Set("Remote-User", "missing-user")
 		_, _, err = frontdRemoteUserResult(remoteReq, w, leafwikiRuntimeConfig{EnableHTTPRemoteUser: true, TrustedProxyIPsRaw: "127.0.0.1"})

@@ -443,11 +443,11 @@ var _ = ginkgo.Describe("STDIO attach daemon config comparison", func() {
 var _ = ginkgo.Describe("project daemon descriptor comparison", func() {
 	ginkgo.It("checks top level workspace ID", ginkgo.Label("unit"), func() {
 		requested := completeDaemonCompareConfig()
-		requested.WorkspaceID = "beta"
+		requested.WorkspaceID = newFixtureWorkspaceID("beta")
 		descriptorConfig := requested
 		desc := &projectdaemon.Descriptor{
 			Role:            projectdaemon.RoleWorkspaced,
-			WorkspaceID:     "alpha",
+			WorkspaceID:     newFixtureWorkspaceID("alpha"),
 			PrivateMCPURL:   "http://127.0.0.1:1/mcp",
 			PrivateMCPToken: "token",
 			Config:          descriptorConfig,

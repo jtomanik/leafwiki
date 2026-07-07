@@ -35,14 +35,97 @@ const (
 	errCodeMCPActorContextInvalid                 sharederrors.ErrorCode = "mcp_actor_context_invalid"
 )
 
-func writeUsage(w io.Writer) {
-	usageLine := localization.English.Render(localization.MessageIDCLIHelpUsage, "").Message
-	if _, err := fmt.Fprintln(w, usageLine); err != nil {
-		panic(err)
+type leafwikiUsageToken string
+type leafwikiUsageMessageID string
+
+const (
+	leafwikiUsageTokenJWTSecret          leafwikiUsageToken     = "--jwt-secret"
+	leafwikiUsageTokenAdminPassword      leafwikiUsageToken     = "--admin-password"
+	leafwikiUsageTokenAllowInsecure      leafwikiUsageToken     = "--allow-insecure"
+	leafwikiUsageTokenDataDir            leafwikiUsageToken     = "--data-dir"
+	leafwikiUsageTokenRootDir            leafwikiUsageToken     = "--root-dir"
+	leafwikiUsageTokenLogTarget          leafwikiUsageToken     = "--log-target"
+	leafwikiUsageTokenLogFile            leafwikiUsageToken     = "--log-file"
+	leafwikiUsageTokenMCP                leafwikiUsageToken     = "--mcp"
+	leafwikiUsageTokenAPIKey             leafwikiUsageToken     = "--api-key"
+	leafwikiUsageTokenDaemonIdleTimeout  leafwikiUsageToken     = "--daemon-idle-timeout"
+	leafwikiUsageTokenConfig             leafwikiUsageToken     = "--config"
+	leafwikiUsageTokenAgentHookCommand   leafwikiUsageToken     = "agent-hook"
+	leafwikiUsageTokenDaemonCommand      leafwikiUsageToken     = "daemon"
+	leafwikiUsageTokenRootDirEnv         leafwikiUsageToken     = "LEAFWIKI_ROOT_DIR"
+	leafwikiUsageTokenLogTargetEnv       leafwikiUsageToken     = "LEAFWIKI_LOG_TARGET"
+	leafwikiUsageTokenLogFileEnv         leafwikiUsageToken     = "LEAFWIKI_LOG_FILE"
+	leafwikiUsageTokenMCPEnv             leafwikiUsageToken     = "LEAFWIKI_MCP"
+	leafwikiUsageTokenMCPAPIKeyEnv       leafwikiUsageToken     = "LEAFWIKI_MCP_API_KEY"
+	leafwikiUsageTokenEnableRevision     leafwikiUsageToken     = "--enable-revision"
+	leafwikiUsageTokenWorkspaceSync      leafwikiUsageToken     = "--enable-workspace-sync"
+	leafwikiUsageTokenRevisionHistory    leafwikiUsageToken     = "--max-revision-history"
+	leafwikiUsageTokenEnableMCP          leafwikiUsageToken     = "--enable-mcp"
+	leafwikiUsageTokenMCPStdio           leafwikiUsageToken     = "--mcp-stdio"
+	leafwikiUsageTokenEnableRevisionEnv  leafwikiUsageToken     = "LEAFWIKI_ENABLE_REVISION"
+	leafwikiUsageTokenWorkspaceSyncEnv   leafwikiUsageToken     = "LEAFWIKI_ENABLE_WORKSPACE_SYNC"
+	leafwikiUsageTokenRevisionHistoryEnv leafwikiUsageToken     = "LEAFWIKI_MAX_REVISION_HISTORY"
+	leafwikiUsageTokenRuntimeStackEnv    leafwikiUsageToken     = "LEAFWIKI_RUNTIME_STACK"
+	leafwikiUsageTokenEnableMCPEnv       leafwikiUsageToken     = "LEAFWIKI_ENABLE_MCP"
+	leafwikiUsageTokenMCPStdioEnv        leafwikiUsageToken     = "LEAFWIKI_MCP_STDIO"
+	leafwikiUsageMessageCLIHelpUsage     leafwikiUsageMessageID = localization.MessageIDCLIHelpUsage
+	leafwikiUsageMessageCLIHelpBody      leafwikiUsageMessageID = localization.MessageIDCLIHelpBody
+)
+
+type leafwikiUsageContract struct {
+	MessageIDs    []leafwikiUsageMessageID
+	Supported     []leafwikiUsageToken
+	RemovedLegacy []leafwikiUsageToken
+}
+
+func leafwikiUsage() leafwikiUsageContract {
+	return leafwikiUsageContract{
+		MessageIDs: []leafwikiUsageMessageID{
+			leafwikiUsageMessageCLIHelpUsage,
+			leafwikiUsageMessageCLIHelpBody,
+		},
+		Supported: []leafwikiUsageToken{
+			leafwikiUsageTokenJWTSecret,
+			leafwikiUsageTokenAdminPassword,
+			leafwikiUsageTokenAllowInsecure,
+			leafwikiUsageTokenDataDir,
+			leafwikiUsageTokenRootDir,
+			leafwikiUsageTokenLogTarget,
+			leafwikiUsageTokenLogFile,
+			leafwikiUsageTokenMCP,
+			leafwikiUsageTokenAPIKey,
+			leafwikiUsageTokenDaemonIdleTimeout,
+			leafwikiUsageTokenConfig,
+			leafwikiUsageTokenAgentHookCommand,
+			leafwikiUsageTokenDaemonCommand,
+			leafwikiUsageTokenRootDirEnv,
+			leafwikiUsageTokenLogTargetEnv,
+			leafwikiUsageTokenLogFileEnv,
+			leafwikiUsageTokenMCPEnv,
+			leafwikiUsageTokenMCPAPIKeyEnv,
+		},
+		RemovedLegacy: []leafwikiUsageToken{
+			leafwikiUsageTokenEnableRevision,
+			leafwikiUsageTokenWorkspaceSync,
+			leafwikiUsageTokenRevisionHistory,
+			leafwikiUsageTokenEnableMCP,
+			leafwikiUsageTokenMCPStdio,
+			leafwikiUsageTokenEnableRevisionEnv,
+			leafwikiUsageTokenWorkspaceSyncEnv,
+			leafwikiUsageTokenRevisionHistoryEnv,
+			leafwikiUsageTokenRuntimeStackEnv,
+			leafwikiUsageTokenEnableMCPEnv,
+			leafwikiUsageTokenMCPStdioEnv,
+		},
 	}
-	helpBody := localization.English.Render(localization.MessageIDCLIHelpBody, "").Message
-	if _, err := fmt.Fprintln(w, helpBody); err != nil {
-		panic(err)
+}
+
+func writeUsage(w io.Writer) {
+	for _, messageID := range leafwikiUsage().MessageIDs {
+		rendered := localization.English.Render(string(messageID), "").Message
+		if _, err := fmt.Fprintln(w, rendered); err != nil {
+			panic(err)
+		}
 	}
 }
 

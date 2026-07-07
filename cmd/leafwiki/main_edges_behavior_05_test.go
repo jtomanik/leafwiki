@@ -212,7 +212,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			err:  acceptErr,
 		}, http.NotFoundHandler(), 0)).To(MatchError(acceptErr))
 
-		_, err := newRuntimeWiki(leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: "home"}}, projectdaemon.Config{DataDir: "bad\x00data", RootDir: validRuntime.Workspace.RootDir}, runtimeWikiFull)
+		_, err := newRuntimeWiki(leafwikiRuntimeConfig{Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("home")}}, projectdaemon.Config{DataDir: "bad\x00data", RootDir: validRuntime.Workspace.RootDir}, runtimeWikiFull)
 		Expect(err).To(MatchPathError())
 
 		badPathRuntime := validRuntime

@@ -54,7 +54,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 			}, nil
 		}
 
-		workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
+		workspace := wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("alpha"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
 		_, err := manager.Ensure(context.Background(), workspace)
 		Expect(err).To(MatchError(firstStartErr))
 		status, err := manager.Ensure(context.Background(), workspace)
@@ -110,8 +110,8 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 		}
 
 		workspaces := []wikid.WorkspaceRecord{
-			{ID: "alpha", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
-			{ID: "beta", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
+			{ID: newFixtureWorkspaceID("alpha"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
+			{ID: newFixtureWorkspaceID("beta"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()},
 		}
 		var wg sync.WaitGroup
 		errs := make(chan error, len(workspaces))
@@ -134,8 +134,8 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 			}
 		}).WithTimeout(2 * time.Second).Should(Succeed())
 		Expect(seen).To(SatisfyAll(
-			HaveKey(workspaceid.WorkspaceID("alpha")),
-			HaveKey(workspaceid.WorkspaceID("beta")),
+			HaveKey(newFixtureWorkspaceID("alpha")),
+			HaveKey(newFixtureWorkspaceID("beta")),
 		), fmt.Sprintf("started workspaces = %#v, want alpha and beta", seen))
 
 		close(releaseStart)
@@ -174,7 +174,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 		}
 
 		status, err := manager.Ensure(context.Background(), wikid.WorkspaceRecord{
-			ID:      "alpha",
+			ID:      newFixtureWorkspaceID("alpha"),
 			DataDir: leafwikiTempDir(),
 			RootDir: leafwikiTempDir(),
 		})
@@ -220,7 +220,7 @@ var _ = ginkgo.Describe("federated workspace manager", func() {
 			}, nil
 		}
 
-		workspace := wikid.WorkspaceRecord{ID: "alpha", DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
+		workspace := wikid.WorkspaceRecord{ID: newFixtureWorkspaceID("alpha"), DataDir: leafwikiTempDir(), RootDir: leafwikiTempDir()}
 		processDone := make(chan error, 1)
 		process := testRuntimeRoleProcess(projectdaemon.RoleWorkspaced, 101, processDone)
 		manager.mu.Lock()

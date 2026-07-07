@@ -13,7 +13,7 @@ import (
 )
 
 type seededUser struct {
-	ID       string            `json:"id"`
+	ID       coreauth.UserID   `json:"id"`
 	Username string            `json:"username"`
 	Email    string            `json:"email"`
 	Role     string            `json:"role"`
@@ -214,7 +214,7 @@ func createKey(apiKeys seedAPIKeyService, user *coreauth.User, name string) (see
 		return seededUser{}, fmt.Errorf("create key for %s: %w", user.Username, err)
 	}
 	return seededUser{
-		ID:       user.ID,
+		ID:       userID,
 		Username: user.Username,
 		Email:    user.Email,
 		Role:     user.Role,

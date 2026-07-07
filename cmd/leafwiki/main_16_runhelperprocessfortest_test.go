@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/onsi/gomega/types"
+	"github.com/perber/wiki/internal/agenthooks"
 	"github.com/perber/wiki/internal/projectdaemon"
 )
 
@@ -313,9 +314,9 @@ type leafwikiNativeStdioResponse struct {
 	Error  json.RawMessage `json:"error"`
 }
 
-func haveNativeStdioToolListResponse(id int, toolName string) types.GomegaMatcher {
+func haveNativeStdioToolListResponse(id int, toolName agenthooks.AgentToolName) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return WithTransform(func(stdout string) []string {
+	return WithTransform(func(stdout string) []agenthooks.AgentToolName {
 		return nativeStdioToolNames(stdout, id)
 	}, ContainElement(toolName))
 }
@@ -331,7 +332,7 @@ func haveNativeStdioJSONTextResponse(id int, matcher types.GomegaMatcher) types.
 	}, matcher)
 }
 
-func nativeStdioToolNames(stdout string, id int) []string {
+func nativeStdioToolNames(stdout string, id int) []agenthooks.AgentToolName {
 	response := nativeStdioResponseByID(stdout, id)
 	if response == nil {
 		return nil
@@ -344,9 +345,9 @@ func nativeStdioToolNames(stdout string, id int) []string {
 	if err := json.Unmarshal(response.Result, &result); err != nil {
 		return nil
 	}
-	names := make([]string, 0, len(result.Tools))
+	names := make([]agenthooks.AgentToolName, 0, len(result.Tools))
 	for _, tool := range result.Tools {
-		names = append(names, tool.Name)
+		names = append(names, agenthooks.AgentToolNameFromString(tool.Name))
 	}
 	return names
 }

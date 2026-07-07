@@ -69,7 +69,7 @@ var _ = ginkgo.Describe("visible legacy subcases", func() {
 		ginkgo.Entry("viewer grant remains viewer", wikid.GrantRoleEditor, wikid.GrantRoleViewer, wikid.GrantRoleViewer),
 		ginkgo.Entry("editor grant capped by downgraded viewer", wikid.GrantRoleViewer, wikid.GrantRoleEditor, wikid.GrantRoleViewer),
 		ginkgo.Entry("admin user keeps editor grant", wikid.GrantRoleAdmin, wikid.GrantRoleEditor, wikid.GrantRoleEditor),
-		ginkgo.Entry("unknown user role denies effective grant", wikid.GrantRole(""), wikid.GrantRoleEditor, wikid.GrantRole("")),
+		ginkgo.Entry("unknown user role denies effective grant", newFixtureGrantRole(""), wikid.GrantRoleEditor, newFixtureGrantRole("")),
 	)
 
 	type configFileErrorCase struct {

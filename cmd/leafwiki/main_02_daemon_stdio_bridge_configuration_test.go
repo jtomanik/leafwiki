@@ -24,7 +24,6 @@ import (
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/wiki"
 	"github.com/perber/wiki/internal/wikid"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("daemon STDIO bridge configuration", func() {
@@ -52,7 +51,7 @@ var _ = ginkgo.Describe("control-plane router", func() {
 		dataDir := leafwikiTempDir()
 		rootDir := leafwikiTempDir()
 		cfg := leafwikiRuntimeConfig{
-			Workspace:           wiki.Workspace{ID: "current", DataDir: dataDir, RootDir: rootDir},
+			Workspace:           wiki.Workspace{ID: newFixtureWorkspaceID("current"), DataDir: dataDir, RootDir: rootDir},
 			Host:                "127.0.0.1",
 			Port:                "8085",
 			AdminPassword:       "admin",
@@ -107,12 +106,12 @@ var _ = ginkgo.Describe("frontd actor resolution", func() {
 
 		user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
 			PublicAccess: true,
-			Workspace:    wiki.Workspace{ID: "current"},
+			Workspace:    wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 		})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("frontdActorUser public read failed: %v", err))
-		Expect(method).To(Equal("public_access"), fmt.Sprintf("auth method = %q, want public_access", method))
+		Expect(method).To(Equal(string(leafwikiActorAuthMethodPublicAccess)), fmt.Sprintf("auth method = %q, want public_access", method))
 		Expect(user).To(SatisfyAll(
-			HaveField("ID", Equal("public-viewer")),
+			HaveCoreAuthUserID(newFixtureUserID("public-viewer")),
 			HaveField("Role", Equal(coreauth.RoleViewer)),
 		), fmt.Sprintf("public actor = %#v, want public viewer", user))
 
@@ -134,12 +133,12 @@ var _ = ginkgo.Describe("frontd actor resolution", func() {
 			EnableHTTPRemoteUser: true,
 			HTTPRemoteUserHeader: "Remote-User",
 			TrustedProxyIPsRaw:   "127.0.0.1",
-			Workspace:            wiki.Workspace{ID: "current"},
+			Workspace:            wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 		})
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("frontdActorUser remote user failed: %v", err))
-		Expect(method).To(Equal("remote_user"), fmt.Sprintf("auth method = %q, want remote_user", method))
+		Expect(method).To(Equal(string(leafwikiActorAuthMethodRemoteUser)), fmt.Sprintf("auth method = %q, want remote_user", method))
 		Expect(user).To(SatisfyAll(
-			HaveField("ID", Equal(created.ID)),
+			HaveCoreAuthUserID(coreauth.UserIDFromString(created.ID)),
 			HaveField("Username", Equal("editor")),
 			HaveField("Role", Equal(coreauth.RoleEditor)),
 		), fmt.Sprintf("remote actor = %#v, want created editor %#v", user, created))
@@ -162,7 +161,7 @@ var _ = ginkgo.Describe("frontd actor resolution", func() {
 		req.Header.Set("Authorization", "Bearer "+created.Secret)
 
 		user, method, err := frontdActorUser(req, w, leafwikiRuntimeConfig{
-			Workspace: wiki.Workspace{ID: "current"},
+			Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 		})
 		Expect(err).To(MatchError(errFrontdWorkspaceCredentialsMissing), fmt.Sprintf("frontdActorUser allowed MCP API key as workspace user %#v with method %q, want workspace credentials error", user, method))
 
@@ -226,7 +225,7 @@ var _ = ginkgo.Describe("frontd public MCP proxy", func() {
 
 		handler, err := frontdPublicMCPHandler(leafwikiRuntimeConfig{
 			BasePath:  "",
-			Workspace: wiki.Workspace{ID: "current"},
+			Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 		}, upstream.URL, "private-token", "http://127.0.0.1:1")
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("frontdPublicMCPHandler failed: %v", err))
 
@@ -245,7 +244,7 @@ var _ = ginkgo.Describe("frontd workspace MCP proxy", func() {
 		handler := frontdMCPBearerAuthHandler(
 			leafwikiRuntimeConfig{
 				BasePath:  "",
-				Workspace: wiki.Workspace{ID: "current"},
+				Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 			},
 			"http://127.0.0.1:1",
 			"private-token",
@@ -335,13 +334,13 @@ var _ = ginkgo.Describe("wikid control MCP actor resolver", func() {
 		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 		req.Header.Set("Authorization", "Bearer "+created.Secret)
 		actor, err := wikidControlMCPActorResolver(authDir, leafwikiRuntimeConfig{
-			Workspace: wiki.Workspace{ID: "current"},
+			Workspace: wiki.Workspace{ID: newFixtureWorkspaceID("current")},
 		})(req)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("wikidControlMCPActorResolver failed: %v", err))
 		Expect(actor).To(SatisfyAll(
-			HaveField("Subject", Equal("user:"+editor.ID)),
+			HaveActorSubjectForUser(coreauth.UserIDFromString(editor.ID)),
 			HaveField("Username", Equal("editor")),
-			HaveField("AuthMethod", Equal("api_key")),
+			HaveActorAuthMethod(leafwikiActorAuthMethodAPIKey),
 		), fmt.Sprintf("actor = %#v, want API-key editor actor", actor))
 
 	})
@@ -372,11 +371,7 @@ var _ = ginkgo.Describe("federated first-contact registration", func() {
 		doc, err := wikid.NewGrantStore(layout.DBPath).Load()
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("load grants failed: %v", err))
 
-		Expect(doc.Grants).To(ContainElement(SatisfyAll(
-			HaveField("Subject", HavePrefix("user:")),
-			HaveField("WorkspaceID", Equal(workspace.ID)),
-			HaveField("Role", Equal(wikid.GrantRoleEditor)),
-		)), fmt.Sprintf("grants = %#v, want editor grant for first-contact workspace %q", doc.Grants, workspace.ID))
+		Expect(doc.Grants).To(ContainElement(HaveWikidGrantForWorkspace(workspace.ID, wikid.GrantRoleEditor)), fmt.Sprintf("grants = %#v, want editor grant for first-contact workspace %q", doc.Grants, workspace.ID))
 
 	})
 })
@@ -433,7 +428,7 @@ var _ = ginkgo.Describe("federated workspace ensure", func() {
 			ControlURL:    control.URL,
 			ControlToken:  "control-token",
 			SchemaVersion: projectdaemon.DescriptorSchemaVersion,
-		}, workspaceid.WorkspaceID("workspace-b"), leafwikiRuntimeConfig{
+		}, newFixtureWorkspaceID("workspace-b"), leafwikiRuntimeConfig{
 			APIKey: "valid-but-ungranted-key",
 		})
 		Expect(err).To(MatchWikidPrivateEndpoint(http.StatusForbidden, runtimeErrorCodeWorkspaceGrantDenied))
@@ -490,7 +485,7 @@ var _ = ginkgo.Describe("federated workspace runtime configuration", func() {
 		}
 
 		cfg := manager.workspaceRuntimeConfig(wikid.WorkspaceRecord{
-			ID:                     "docs",
+			ID:                     newFixtureWorkspaceID("docs"),
 			DataDir:                dataDir,
 			RootDir:                rootDir,
 			MarkdownLinkRootPrefix: "/docs",

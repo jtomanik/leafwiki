@@ -346,7 +346,7 @@ var _ = ginkgo.Describe("leafwiki main process", func() {
 			"--log-target", "stderr",
 		}, nil, nativeStdioListToolsInput(), 8*time.Second)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("repeated combined STDIO+HTTP startup should attach, got %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr))
-		Expect(stdout).To(haveNativeStdioToolListResponse(2, "wiki_create_page"), fmt.Sprintf("stdout = %q, want tools/list response from repeated STDIO attach", stdout))
+		Expect(stdout).To(haveNativeStdioToolListResponse(2, newFixtureAgentToolName("wiki_create_page")), fmt.Sprintf("stdout = %q, want tools/list response from repeated STDIO attach", stdout))
 		Expect(stderr).To(BeEmpty(), fmt.Sprintf("stderr = %q, want quiet combined transport reattach", stderr))
 
 	})

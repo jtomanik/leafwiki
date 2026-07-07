@@ -129,7 +129,7 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			Expect(classifyStartupPositionalCommand([]string{"help"}, false, "")).To(Equal(startupPositionalCommandHandledUsage))
 		})
 
-		Expect(output).To(ContainSubstring("Usage: leafwiki [command]"))
+		Expect(output).To(ContainRenderedLeafwikiUsageMessage(leafwikiUsageMessageCLIHelpUsage))
 	})
 
 	ginkgo.It("resolves daemon service defaults from the current user home", ginkgo.Label("unit"), func() {
@@ -163,15 +163,9 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		Expect(resolveInt("workers", 7, map[string]bool{}, "LEAFWIKI_TEST_WORKERS", 3)).To(Equal(3))
 
 		Expect(parseByteSize("1MiB", "upload")).To(Equal(int64(1024 * 1024)))
-		parsed, err := parseBoolResult(" ON ")
-		Expect(err).To(Succeed())
-		Expect(parsed).To(BeTrue())
-		parsed, err = parseBoolResult(" off ")
-		Expect(err).To(Succeed())
-		Expect(parsed).To(BeFalse())
-		parsed, err = parseBoolResult("maybe")
-		Expect(err).To(MatchError(errBoolValueRejected))
-		Expect(parsed).To(BeFalse())
+		Expect(observeParsedBool(" ON ")).To(Equal(leafwikiParsedBoolEnabled))
+		Expect(observeParsedBool(" off ")).To(Equal(leafwikiParsedBoolDisabled))
+		Expect(observeParsedBool("maybe")).To(Equal(leafwikiParsedBoolRejected))
 
 		duration, err := parseDurationResult("1500ms")
 		Expect(err).To(Succeed())
@@ -248,13 +242,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 			}),
 		))
 
-		roles := []projectdaemon.RoleHealth{{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateCrashed, Error: "boom"}}
+		roles := []projectdaemon.RoleHealth{{Name: projectdaemon.RoleWorkspaced, State: projectdaemon.RoleStateCrashed, Error: string(leafwikiRuntimeFailureBoom)}}
 		copied := projectDaemonDescriptorRoles(projectdaemon.RuntimeStackWikidFrontd, 123, "127.0.0.1:8080", &wikidFrontdRuntime{roles: roles})
 		Expect(copied).To(Equal(roles))
 		copied[0].Error = "mutated"
-		Expect(roles).To(HaveExactElements(MatchProjectDaemonRoleHealth(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateCrashed, gstruct.Fields{
-			"Error": Equal("boom"),
-		})))
+		Expect(roles).To(HaveExactElements(MatchProjectDaemonRoleFailure(projectdaemon.RoleWorkspaced, projectdaemon.RoleStateCrashed, leafwikiRuntimeFailureBoom)))
 	})
 
 	ginkgo.It("derives workspace display names and original request paths", ginkgo.Label("unit"), func() {
@@ -463,11 +455,11 @@ var _ = ginkgo.Describe("leafwiki command helper edges", func() {
 		desc = &projectdaemon.Descriptor{
 			Role:          projectdaemon.RoleWorkspaced,
 			PrivateMCPURL: "http://127.0.0.1/private",
-			WorkspaceID:   "owner-workspace",
+			WorkspaceID:   newFixtureWorkspaceID("owner-workspace"),
 			Config:        owner,
 		}
 		requested = owner
-		requested.WorkspaceID = "requested-workspace"
+		requested.WorkspaceID = newFixtureWorkspaceID("requested-workspace")
 		desc.Config.WorkspaceID = requested.WorkspaceID
 		mismatches := compareProjectDaemonDescriptorForRequest(desc, requested, mcpTransports{Stdio: true})
 		Expect(mismatches).To(ContainElement(Satisfy(func(mismatch projectdaemon.Mismatch) bool {
