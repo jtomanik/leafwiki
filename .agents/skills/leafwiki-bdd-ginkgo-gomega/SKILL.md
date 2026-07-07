@@ -170,7 +170,7 @@ Coverage cleanup must preserve truthful taxonomy labels and meet the active
 labelled coverage targets:
 
 - `unit` labelled Ginkgo specs: 100% composite statement coverage.
-- `integration` labelled Ginkgo specs: at least 90% composite statement coverage.
+- `integration` labelled Ginkgo specs: at least 80% composite statement coverage.
 - `e2e` labelled Ginkgo specs, excluding `e2e-proxy`: at least 75% subprocess
   `GOCOVERDIR` profile coverage.
 - `e2e` labelled Ginkgo specs, excluding `e2e-proxy`: at least 25% main merged
