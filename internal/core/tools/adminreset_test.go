@@ -211,6 +211,14 @@ var _ = ginkgo.Describe("admin password reset", func() {
 
 		Expect(*records).To(ConsistOf(matchAuthStoreCloseErrorLog(errResetAdminCloseStore)))
 	})
+
+	ginkgo.It("suppresses log records when the auth store closes cleanly", ginkgo.Label("unit"), func() {
+		logger, records := newRecordingLogger()
+
+		logUserStoreClose(logger, closeErrorStore{})
+
+		Expect(*records).To(BeEmpty())
+	})
 })
 
 func tempAdminResetStorageDir() string {
