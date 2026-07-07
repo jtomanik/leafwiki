@@ -43,6 +43,8 @@ var _ = ginkgo.Describe("OAuth helper contracts", func() {
 		Expect(redirects).To(Equal([]string{"http://127.0.0.1:49152/callback"}))
 		_, err = normalizeRedirectURIs(nil)
 		Expect(err).To(matchOAuthErrorIs(ErrOAuthRedirectURIsRequired))
+		_, err = normalizeRedirectURIs([]string{" "})
+		Expect(err).To(matchOAuthErrorIs(ErrOAuthRedirectURIEmpty))
 
 		grants, err := normalizeRegistrationGrantTypes(nil)
 		Expect(err).To(Succeed())
@@ -55,6 +57,8 @@ var _ = ginkgo.Describe("OAuth helper contracts", func() {
 		grants, err = normalizeRegistrationGrantTypes([]string{string(fosite.GrantTypeAuthorizationCode)})
 		Expect(err).To(Succeed())
 		Expect(grants).To(Equal([]string{"authorization_code"}))
+		_, err = normalizeRegistrationGrantTypes([]string{string(fosite.GrantTypeRefreshToken)})
+		Expect(err).To(matchOAuthErrorIs(ErrOAuthAuthorizationCodeGrantRequired))
 
 		responses, err := normalizeRegistrationResponseTypes(nil)
 		Expect(err).To(Succeed())

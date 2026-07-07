@@ -132,7 +132,7 @@ func normalizeRedirectURIs(values []string) ([]string, error) {
 	for _, value := range values {
 		redirectURI := strings.TrimSpace(value)
 		if redirectURI == "" {
-			return nil, fmt.Errorf("redirect_uris must not contain empty values")
+			return nil, ErrOAuthRedirectURIEmpty
 		}
 		if err := validateLoopbackRedirectURI(redirectURI); err != nil {
 			return nil, err
@@ -160,7 +160,7 @@ func normalizeRegistrationGrantTypes(values []string) ([]string, error) {
 		}
 	}
 	if !hasAuthorizationCode {
-		return nil, fmt.Errorf("authorization_code grant_type is required")
+		return nil, ErrOAuthAuthorizationCodeGrantRequired
 	}
 	out := []string{string(fosite.GrantTypeAuthorizationCode)}
 	if hasRefreshToken {
