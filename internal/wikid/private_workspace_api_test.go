@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -187,6 +188,60 @@ var _ = ginkgo.Describe("private workspace API", ginkgo.Label("integration"), fu
 				"URL":         Equal("http://127.0.0.1:41001"),
 			}),
 		}))
+	})
+
+	ginkgo.It("reports supervisor lifecycle state in workspace listings and snapshots", func() {
+		fixture := newPrivateWorkspaceAPIFixture()
+		now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+		fixture.supervisor = NewWorkspaceSupervisor(WorkspaceSupervisorOptions{
+			MaxRestarts: 1,
+			Backoff:     time.Minute,
+			Now:         func() time.Time { return now },
+		})
+		alpha := fixture.registerWorkspace("Alpha", "")
+		bravo := fixture.registerWorkspace("Bravo", "")
+		fixture.grantWorkspace("user:1", alpha.ID, GrantRoleEditor)
+		fixture.grantWorkspace("user:1", bravo.ID, GrantRoleViewer)
+		fixture.supervisor.MarkStatus(WorkspaceStatus{
+			WorkspaceID: alpha.ID,
+			State:       WorkspaceStateStarting,
+		})
+		Expect(recordWorkspaceCrash(fixture.supervisor, bravo.ID, workspaceCrashProcessExit.String())).To(SatisfyAll(
+			HaveField("Decision", Equal(workspaceRestartScheduled)),
+			HaveField("RestartAt", BeTemporally("==", now.Add(time.Minute))),
+		))
+		api := fixture.privateWorkspaceAPI(WorkspaceSubject{Subject: "user:1"}, nil)
+
+		rec := recordPrivateWorkspaceAPIResponse(api, http.MethodGet, PrivateWorkspacesPrefix)
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		out := decodePrivateWorkspaceAPIResponse[WorkspaceListResponse](rec)
+		Expect(out.Workspaces).To(ConsistOf(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ID":   Equal(alpha.ID),
+				"Role": Equal(GrantRoleEditor),
+				"Status": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"WorkspaceID": Equal(alpha.ID),
+					"State":       Equal(WorkspaceStateStarting),
+					"UpdatedAt":   BeTemporally("==", now),
+				}),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"ID":     Equal(bravo.ID),
+				"Role":   Equal(GrantRoleViewer),
+				"Status": matchWorkspaceFailureState(WorkspaceStateRestarting, workspaceCrashProcessExit),
+			}),
+		))
+		Expect(fixture.supervisor.Statuses()).To(HaveExactElements(
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"WorkspaceID": Equal(alpha.ID),
+				"State":       Equal(WorkspaceStateStarting),
+			}),
+			gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"WorkspaceID": Equal(bravo.ID),
+				"State":       Equal(WorkspaceStateRestarting),
+			}),
+		))
 	})
 
 	ginkgo.It("returns a localized denial for workspaces not granted to the subject", func() {

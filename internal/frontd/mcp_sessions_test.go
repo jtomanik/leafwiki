@@ -96,6 +96,32 @@ var _ = Describe("workspace MCP session routing", func() {
 		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session-1"), mustDecodeWorkspaceID("alpha")))
 	})
 
+	It("binds server sessions after streaming MCP response bodies", Label("integration"), func() {
+		bindings := NewMCPSessionBindings()
+		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
+			Sessions: bindings,
+			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
+				return WorkspaceRoute{WorkspaceID: mustDecodeWorkspaceID("alpha"), Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
+			},
+			Proxy: func(route WorkspaceRoute) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					Expect(http.NewResponseController(w).Flush()).To(Succeed())
+					w.Header().Set("Mcp-Session-Id", "server-session-stream")
+					_, err := w.Write([]byte(`{"jsonrpc":"2.0","result":{}}`))
+					Expect(err).To(Succeed())
+				})
+			},
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/mcp/workspaces/alpha", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+		Expect(rec.Body.String()).To(MatchJSON(`{"jsonrpc":"2.0","result":{}}`))
+		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session-stream"), mustDecodeWorkspaceID("alpha")))
+	})
+
 	It("routes root MCP through an existing session binding", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("alpha"))).To(Succeed())

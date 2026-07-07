@@ -91,6 +91,27 @@ func matchTaggedPage(fields gstruct.Fields) types.GomegaMatcher {
 }
 
 var _ = Describe("page DTO mapping", func() {
+	It("maps a full page without author lookup into initialized HTTP collections", Label("unit"), func() {
+		_, child, _ := dtoTestTree()
+
+		page := ToAPIPage(&tree.Page{PageNode: child, Content: "# Intro"}, nil)
+
+		Expect(page).To(matchAPIPage(gstruct.Fields{
+			"Content":    Equal("# Intro"),
+			"Path":       Equal("docs/intro"),
+			"Tags":       SatisfyAll(BeEmpty(), Not(BeNil())),
+			"Properties": SatisfyAll(BeEmpty(), Not(BeNil())),
+			"Node": matchAPINode(gstruct.Fields{
+				"ID":   matchAPINodeID(child.ID),
+				"Path": Equal("docs/intro"),
+				"Metadata": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"Creator":    BeNil(),
+					"LastAuthor": BeNil(),
+				}),
+			}),
+		}))
+	})
+
 	It("maps a full page with metadata, content, path, and initialized collections", Label("integration"), func() {
 		root, child, _ := dtoTestTree()
 		resolver := newDTOUserResolver(root, child)
@@ -111,6 +132,63 @@ var _ = Describe("page DTO mapping", func() {
 				}),
 			}),
 		}))
+	})
+
+	It("maps resolver-backed node depth and content-path variants", Label("integration"), func() {
+		root, child, _ := dtoTestTree()
+		resolver := newDTOUserResolver(root, child)
+		contentPath := func(node *tree.PageNode) (string, error) {
+			return node.CalculateRoutePath().FilesystemPath() + ".md", nil
+		}
+
+		pageDepthZero := ToAPIPageWithDepth(&tree.Page{PageNode: root, Content: "# Docs"}, resolver, 0)
+		pageUnlimited := ToAPIPageWithDepth(&tree.Page{PageNode: root, Content: "# Docs"}, resolver, -1)
+		nodeWithContentPath := ToAPINodeWithContentPaths(root, "", resolver, contentPath)
+		nodeWithoutContentPath := ToAPINodeWithContentPaths(root, "", resolver, func(*tree.PageNode) (string, error) {
+			return "", errors.New("content path unavailable")
+		})
+		nodeDepthOne := ToAPINodeWithDepth(root, "", resolver, 1)
+		contentPathDepthZero := ToAPINodeWithContentPathsAndDepth(root, "", resolver, contentPath, 0)
+		contentPathUnlimited := ToAPINodeWithContentPathsAndDepth(root, "", resolver, nil, -1)
+
+		Expect(pageDepthZero).To(matchAPIPage(gstruct.Fields{
+			"Content": Equal("# Docs"),
+			"Node": matchAPINode(gstruct.Fields{
+				"Children": BeEmpty(),
+				"Metadata": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"Creator":    Equal(&coreauth.UserLabel{ID: root.Metadata.CreatorID, Username: "creator"}),
+					"LastAuthor": Equal(&coreauth.UserLabel{ID: root.Metadata.LastAuthorID, Username: "last-author"}),
+				}),
+			}),
+		}))
+		Expect(nodeWithContentPath).To(matchAPINode(gstruct.Fields{
+			"ContentPath": Equal("docs.md"),
+			"Children": ConsistOf(matchAPINode(gstruct.Fields{
+				"ID":          matchAPINodeID(child.ID),
+				"ContentPath": Equal("docs/intro.md"),
+			})),
+		}))
+		Expect(pageUnlimited.Children).To(ConsistOf(matchAPINode(gstruct.Fields{
+			"ID": matchAPINodeID(child.ID),
+			"Children": ConsistOf(matchAPINode(gstruct.Fields{
+				"Path": Equal("docs/intro/deep"),
+			})),
+		})))
+		Expect(nodeWithoutContentPath.ContentPath).To(BeEmpty())
+		Expect(nodeDepthOne).To(matchAPINode(gstruct.Fields{
+			"Children": ConsistOf(matchAPINode(gstruct.Fields{
+				"ID":       matchAPINodeID(child.ID),
+				"Children": BeEmpty(),
+			})),
+		}))
+		Expect(contentPathDepthZero).To(matchAPINode(gstruct.Fields{
+			"ID":          matchAPINodeID(root.ID),
+			"ContentPath": Equal("docs.md"),
+			"Children":    BeEmpty(),
+		}))
+		Expect(contentPathUnlimited.Children).To(ConsistOf(matchAPINode(gstruct.Fields{
+			"ID": matchAPINodeID(child.ID),
+		})))
 	})
 
 	It("prunes page children when converting a page with depth zero", Label("unit"), func() {
@@ -208,6 +286,26 @@ var _ = Describe("page DTO mapping", func() {
 })
 
 var _ = Describe("property and tag DTO mapping", func() {
+	It("maps property pages with copied properties and timestamps without author lookup", Label("unit"), func() {
+		_, child, _ := dtoTestTree()
+
+		page := ToPropertyPage(child, map[string]coreprop.PropertyEntry{
+			"status": {Value: "draft", Type: "text"},
+		}, nil)
+
+		Expect(page).To(matchPropertyPage(gstruct.Fields{
+			"ID":    matchAPINodeID(child.ID),
+			"Title": Equal("Intro"),
+			"Path":  Equal("docs/intro"),
+			"Properties": Equal(map[string]PropertyEntry{
+				"status": {Value: "draft", Type: "text"},
+			}),
+			"CreatedAt":  Equal("2026-06-26T10:00:00Z"),
+			"UpdatedAt":  Equal("2026-06-26T11:00:00Z"),
+			"LastAuthor": BeNil(),
+		}))
+	})
+
 	It("maps property pages with copied properties and author labels", Label("integration"), func() {
 		root, child, _ := dtoTestTree()
 		resolver := newDTOUserResolver(root, child)
@@ -238,6 +336,27 @@ var _ = Describe("property and tag DTO mapping", func() {
 			"CreatedAt":  BeEmpty(),
 			"UpdatedAt":  BeEmpty(),
 			"Properties": BeEmpty(),
+		}))
+	})
+
+	It("maps tagged pages and normalizes nil tags without author lookup", Label("unit"), func() {
+		root, child, _ := dtoTestTree()
+
+		tagged := ToTaggedPage(child, []string{"go", "wiki"}, "Intro excerpt", nil)
+		emptyTags := ToTaggedPage(root, nil, "", nil)
+
+		Expect(tagged).To(matchTaggedPage(gstruct.Fields{
+			"ID":         matchAPINodeID(child.ID),
+			"Kind":       Equal(tree.NodeKindPage),
+			"Path":       Equal("docs/intro"),
+			"Excerpt":    Equal("Intro excerpt"),
+			"Tags":       Equal([]string{"go", "wiki"}),
+			"CreatedAt":  Equal("2026-06-26T10:00:00Z"),
+			"UpdatedAt":  Equal("2026-06-26T11:00:00Z"),
+			"LastAuthor": BeNil(),
+		}))
+		Expect(emptyTags).To(matchTaggedPage(gstruct.Fields{
+			"Tags": SatisfyAll(BeEmpty(), Not(BeNil())),
 		}))
 	})
 

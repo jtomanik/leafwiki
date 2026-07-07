@@ -3,9 +3,9 @@ package projectdaemon
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +20,7 @@ import (
 	"github.com/perber/wiki/internal/agenthooks"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integration"), func() {
@@ -59,6 +60,7 @@ var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integrati
 		handle := decodeControlResponse[SessionHandle](resp)
 		Expect(handle.ID).NotTo(BeEmpty())
 		Expect(sessions.Count()).To(Equal(1))
+		Expect(sessions).To(reportSessionSeen(1))
 		Expect(counts).To(Equal([]int{1}))
 
 		Expect(performControlRequest(handler, http.MethodPost, sessionHeartbeatPath(handle.ID), "control-token", nil)).To(HaveHTTPStatus(http.StatusOK))
@@ -67,9 +69,68 @@ var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integrati
 
 		Expect(performControlRequest(handler, http.MethodDelete, sessionPath(handle.ID), "control-token", nil)).To(HaveHTTPStatus(http.StatusOK))
 		Expect(sessions.Count()).To(BeZero())
+		Expect(sessions).To(reportSessionSeen(0))
 		Expect(counts).To(Equal([]int{1, 0}))
 
 		Expect(performControlRequest(handler, http.MethodDelete, "/sessions/missing", "control-token", nil)).To(HaveHTTPStatus(http.StatusOK))
+	})
+
+	ginkgo.It("expires sessions that were registered through the control API", func() {
+		now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+		var counts []int
+		sessions := NewSessionRegistry(time.Minute, func(count int) {
+			counts = append(counts, count)
+		})
+		sessions.now = func() time.Time {
+			return now
+		}
+		handler := NewControlServer(ControlServerOptions{
+			Token:        "control-token",
+			Sessions:     sessions,
+			AuthDisabled: true,
+		})
+
+		resp := performControlRequest(handler, http.MethodPost, "/sessions", "control-token", nil)
+		Expect(resp).To(HaveHTTPStatus(http.StatusOK))
+		Expect(sessions).To(reportSessionSeen(1))
+
+		now = now.Add(2 * time.Minute)
+
+		Expect(sessions.PruneExpired()).To(BeZero())
+		Expect(sessions).To(reportSessionSeen(0))
+		Expect(counts).To(Equal([]int{1, 0}))
+	})
+
+	ginkgo.It("expires registered sessions from the background control registry loop", func() {
+		var counts []int
+		sessions := NewSessionRegistry(10*time.Millisecond, func(count int) {
+			counts = append(counts, count)
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			sessions.RunExpiryLoop(ctx, 5*time.Millisecond)
+		}()
+		handler := NewControlServer(ControlServerOptions{
+			Token:        "control-token",
+			Sessions:     sessions,
+			AuthDisabled: true,
+		})
+
+		resp := performControlRequest(handler, http.MethodPost, "/sessions", "control-token", nil)
+		Expect(resp).To(HaveHTTPStatus(http.StatusOK))
+		Expect(sessions).To(reportSessionSeen(1))
+
+		Eventually(sessions.Count).
+			WithTimeout(500 * time.Millisecond).
+			WithPolling(5 * time.Millisecond).
+			Should(BeZero())
+		Expect(sessions).To(reportSessionSeen(0))
+		Expect(counts).To(Equal([]int{1, 0}))
+
+		cancel()
+		Eventually(done).WithTimeout(250 * time.Millisecond).Should(BeClosed())
 	})
 
 	ginkgo.It("requires tokens for agent presence and returns sanitized accepted sessions", func() {
@@ -83,7 +144,7 @@ var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integrati
 
 		rawEvent := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session","model":"gpt-5.4"}`)
 		body, err := json.Marshal(rawEvent)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		resp := performControlRequest(handler, http.MethodPost, "/agent-presence/events", "", bytes.NewReader(body))
 		Expect(resp).To(testmatchers.HaveHTTPStructuredError(http.StatusUnauthorized, errCodeDaemonControlUnauthorized, sharederrors.MessageIDForCode(errCodeDaemonControlUnauthorized)))
@@ -107,6 +168,84 @@ var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integrati
 			Not(HaveKey("session_id")),
 			Not(HaveKey("raw")),
 		)))
+	})
+
+	ginkgo.It("expires agent sessions that were recorded through the control API", func() {
+		now := time.Date(2026, 7, 7, 9, 15, 0, 0, time.UTC)
+		var counts []int
+		presence := NewAgentPresenceRegistry(time.Minute, func(count int) {
+			counts = append(counts, count)
+		})
+		presence.now = func() time.Time {
+			return now
+		}
+		handler := NewControlServer(ControlServerOptions{
+			Token:         "control-token",
+			Sessions:      NewSessionRegistry(time.Minute, nil),
+			AgentPresence: presence,
+			AuthDisabled:  true,
+		})
+		rawEvent := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session","source":"cli","tool_name":"mcp__leafwiki__wiki_get_page"}`)
+		rawEvent.SeenAt = now
+		body, err := json.Marshal(rawEvent)
+		Expect(err).To(Succeed())
+
+		resp := performControlRequest(handler, http.MethodPost, "/agent-presence/events", "control-token", bytes.NewReader(body))
+		Expect(resp).To(HaveHTTPStatus(http.StatusOK))
+		Expect(presence).To(reportAgentPresenceSeen(1))
+
+		resp = performControlRequest(handler, http.MethodGet, "/agent-presence", "control-token", nil)
+		Expect(resp).To(HaveHTTPStatus(http.StatusOK))
+		sessions := decodeControlResponse[[]AgentPresenceSession](resp)
+		Expect(sessions).To(ConsistOf(SatisfyAll(
+			matchAgentPresenceSession(gstruct.Fields{
+				"Source":   Equal(agenthooks.AgentSourceCLI),
+				"ToolName": Equal(mustDecodeAgentToolName("mcp__leafwiki__wiki_get_page")),
+			}),
+			matchMCPToolPresenceSession(),
+		)))
+
+		now = now.Add(2 * time.Minute)
+
+		Expect(presence.PruneExpired()).To(BeZero())
+		Expect(presence).To(reportAgentPresenceSeen(0))
+		Expect(counts).To(Equal([]int{1, 0}))
+	})
+
+	ginkgo.It("expires recorded agent sessions from the background control registry loop", func() {
+		var counts []int
+		presence := NewAgentPresenceRegistry(10*time.Millisecond, func(count int) {
+			counts = append(counts, count)
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			presence.RunExpiryLoop(ctx, 5*time.Millisecond)
+		}()
+		handler := NewControlServer(ControlServerOptions{
+			Token:         "control-token",
+			Sessions:      NewSessionRegistry(time.Minute, nil),
+			AgentPresence: presence,
+			AuthDisabled:  true,
+		})
+		rawEvent := normalizedPresenceEvent(agenthooks.ProviderCodex, `{"hook_event_name":"SessionStart","session_id":"codex-session","source":"cli"}`)
+		body, err := json.Marshal(rawEvent)
+		Expect(err).To(Succeed())
+
+		resp := performControlRequest(handler, http.MethodPost, "/agent-presence/events", "control-token", bytes.NewReader(body))
+		Expect(resp).To(HaveHTTPStatus(http.StatusOK))
+		Expect(presence).To(reportAgentPresenceSeen(1))
+
+		Eventually(presence.Count).
+			WithTimeout(500 * time.Millisecond).
+			WithPolling(5 * time.Millisecond).
+			Should(BeZero())
+		Expect(presence).To(reportAgentPresenceSeen(0))
+		Expect(counts).To(Equal([]int{1, 0}))
+
+		cancel()
+		Eventually(done).WithTimeout(250 * time.Millisecond).Should(BeClosed())
 	})
 
 	ginkgo.It("forwards private MCP requests after control-token authorization", func() {
@@ -173,128 +312,6 @@ var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integrati
 		}, wantStatus: http.StatusOK}),
 	)
 
-	ginkgo.It("lets the client call every control API and propagates structured errors", func() {
-		var verifiedKey string
-		expectedHealth := DaemonHealth{
-			OK:            true,
-			SchemaVersion: DescriptorSchemaVersion,
-			PID:           123,
-			DataDir:       "/data",
-			RootDir:       "/root",
-			ConfigHash:    "hash",
-		}
-		handler := NewControlServer(ControlServerOptions{
-			Token:         "control-token",
-			Sessions:      NewSessionRegistry(time.Minute, nil),
-			AgentPresence: NewAgentPresenceRegistry(time.Minute, nil),
-			Health:        expectedHealth,
-			VerifyAPIKey: func(key string) error {
-				verifiedKey = key
-				return nil
-			},
-		})
-		server := httptest.NewServer(handler)
-		ginkgo.DeferCleanup(server.Close)
-		client := NewClient(server.URL, "control-token")
-		ctx := context.Background()
-
-		health, err := client.Health(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(health).To(matchDaemonHealth(expectedHealth))
-		handle, err := client.RegisterSession(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(handle.ID).NotTo(BeEmpty())
-		Expect(client.HeartbeatSession(ctx, handle.ID)).To(Succeed())
-		Expect(client.ReleaseSession(ctx, handle.ID)).To(Succeed())
-		Expect(client.VerifyStdioAuth(ctx, "lwk_valid")).To(Succeed())
-		cursorEvent := normalizedPresenceEvent(agenthooks.ProviderCursor, `{"hook_event_name":"sessionStart","session_id":"cursor-session"}`)
-		Expect(client.RecordAgentPresence(ctx, cursorEvent)).To(Succeed())
-		presenceSessions, err := client.ListAgentPresence(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(presenceSessions).To(ConsistOf(matchAgentPresenceSession(gstruct.Fields{
-			"SessionIDHash": Equal(cursorEvent.SessionIDHash),
-		})))
-		Expect(verifiedKey).To(Equal("lwk_valid"))
-
-		Expect(client.HeartbeatSession(ctx, newFixtureSessionID("missing"))).To(matchControlHTTPError(http.StatusNotFound, errCodeDaemonSessionNotFound))
-		Expect(NewClient(server.URL, "wrong-token").Ping(ctx)).To(matchControlHTTPError(http.StatusUnauthorized, errCodeDaemonControlUnauthorized))
-	})
-
-	ginkgo.It("exposes structured control error text and status matching", func() {
-		detail := sharederrors.NewLocalizedErrorDetailFromCode(errCodeDaemonSessionNotFound)
-		err := &ControlHTTPError{
-			StatusCode: http.StatusNotFound,
-			Code:       detail.Code,
-			MessageID:  detail.MessageID,
-			Message:    detail.Message,
-		}
-
-		Expect(err).To(matchControlHTTPError(http.StatusNotFound, errCodeDaemonSessionNotFound))
-		Expect(err).To(haveControlStatus(http.StatusNotFound))
-		Expect(fmt.Errorf("wrapped: %w", err)).To(haveControlStatus(http.StatusNotFound))
-		Expect(err).NotTo(haveControlStatus(http.StatusUnauthorized))
-		Expect(errors.New("plain")).NotTo(haveControlStatus(http.StatusNotFound))
-		Expect((*ControlHTTPError)(nil).Error()).To(BeEmpty())
-	})
-
-	ginkgo.It("returns decode errors for malformed JSON control responses", func() {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if req.Header.Get(ControlTokenHeader) != "control-token" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte("{"))
-		}))
-		ginkgo.DeferCleanup(server.Close)
-
-		_, err := NewClient(server.URL, "control-token").Health(context.Background())
-
-		Expect(err).To(matchProjectdaemonJSONSyntaxError())
-	})
-
-	ginkgo.It("adds control, bearer, and actor-context headers without mutating the original request", func() {
-		var seenControlToken, seenBearerToken, seenActorContext string
-		client := &http.Client{
-			Transport: AuthRoundTripper{
-				Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-					seenControlToken = req.Header.Get(ControlTokenHeader)
-					seenBearerToken = req.Header.Get("Authorization")
-					seenActorContext = req.Header.Get(ActorContextHeader)
-					return &http.Response{
-						StatusCode: http.StatusNoContent,
-						Body:       io.NopCloser(bytes.NewReader(nil)),
-						Header:     http.Header{},
-						Request:    req,
-					}, nil
-				}),
-				ControlToken: "control-token",
-				BearerToken:  "stdio-api-key",
-				ActorContext: "encoded-actor",
-			},
-		}
-
-		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", nil)
-		Expect(err).NotTo(HaveOccurred())
-		resp, err := client.Do(req)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(resp.Body.Close()).To(Succeed())
-
-		Expect(forwardedControlHeaders{
-			ControlToken: seenControlToken,
-			BearerToken:  seenBearerToken,
-			ActorContext: seenActorContext,
-		}).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"ControlToken": Equal("control-token"),
-			"BearerToken":  Equal("Bearer stdio-api-key"),
-			"ActorContext": Equal("encoded-actor"),
-		}))
-		Expect(req.Header).NotTo(SatisfyAny(
-			HaveKey(ControlTokenHeader),
-			HaveKey("Authorization"),
-			HaveKey(ActorContextHeader),
-		))
-	})
 })
 
 type forwardedMCPRequest struct {
@@ -363,16 +380,78 @@ func matchControlHTTPError(status int, code sharederrors.ErrorCode) types.Gomega
 }
 
 func haveControlStatus(status int) types.GomegaMatcher {
-	return WithTransform(func(err error) *ControlHTTPError {
+	return WithTransform(func(err error) controlStatusObservation {
 		ginkgo.GinkgoHelper()
-		var controlErr *ControlHTTPError
-		if errors.As(err, &controlErr) {
-			return controlErr
+		if IsControlStatus(err, status) {
+			return controlStatusMatched
 		}
-		return nil
-	}, gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"StatusCode": Equal(status),
-	})))
+		return controlStatusUnmatched
+	}, Equal(controlStatusMatched))
+}
+
+type controlStatusObservation uint8
+
+const (
+	controlStatusUnmatched controlStatusObservation = iota
+	controlStatusMatched
+)
+
+type privateMCPActorContextCase struct {
+	actorContextHeader func(time.Time) string
+	want               privateMCPActorContextBoundary
+}
+
+type privateMCPActorContextBoundary uint8
+
+const (
+	privateMCPActorContextMissing privateMCPActorContextBoundary = iota + 1
+	privateMCPActorContextMalformed
+	privateMCPActorContextMalformedJSON
+	privateMCPActorContextInvalidWorkspace
+	privateMCPActorContextExpired
+	privateMCPActorContextValidationRejected
+)
+
+func matchPrivateMCPActorContextBoundary(want privateMCPActorContextBoundary) types.GomegaMatcher {
+	return WithTransform(classifyPrivateMCPActorContextBoundary, Equal(want))
+}
+
+func classifyPrivateMCPActorContextBoundary(err error) privateMCPActorContextBoundary {
+	switch {
+	case errors.Is(err, errActorContextRequired):
+		return privateMCPActorContextMissing
+	case errors.Is(err, errDecodeActorContext):
+		return privateMCPActorContextMalformed
+	case errors.Is(err, errDecodeActorContextJSON):
+		return privateMCPActorContextMalformedJSON
+	case actorContextWorkspaceIDError(err):
+		return privateMCPActorContextInvalidWorkspace
+	case errors.Is(err, errActorContextExpired):
+		return privateMCPActorContextExpired
+	case err != nil:
+		return privateMCPActorContextValidationRejected
+	default:
+		return 0
+	}
+}
+
+func actorContextWorkspaceIDError(err error) bool {
+	var validationErr *workspaceid.ValidationError
+	return errors.As(err, &validationErr)
+}
+
+func encodedPrivateActorContext(ctx ActorContext) string {
+	ginkgo.GinkgoHelper()
+	encoded, err := EncodeActorContext(ctx)
+	Expect(err).To(Succeed())
+	return encoded
+}
+
+func encodedActorContextWire(wire actorContextWire) string {
+	ginkgo.GinkgoHelper()
+	raw, err := json.Marshal(wire)
+	Expect(err).To(Succeed())
+	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

@@ -234,6 +234,22 @@ func matchAgentPresenceSession(fields gstruct.Fields) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, fields)
 }
 
+func matchMCPToolPresenceSession() types.GomegaMatcher {
+	return WithTransform(func(session AgentPresenceSession) agentPresenceToolKind {
+		if session.IsMCPTool {
+			return agentPresenceMCPTool
+		}
+		return agentPresencePlainTool
+	}, Equal(agentPresenceMCPTool))
+}
+
+type agentPresenceToolKind uint8
+
+const (
+	agentPresencePlainTool agentPresenceToolKind = iota
+	agentPresenceMCPTool
+)
+
 func reportAgentPresenceSeen(count int) types.GomegaMatcher {
 	return reportAgentPresenceObservation(agentPresenceObserved, count)
 }

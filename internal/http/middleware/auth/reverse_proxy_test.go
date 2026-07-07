@@ -17,6 +17,13 @@ type proxyFixture struct {
 	close       func() error
 }
 
+type remoteUserSourceObservation uint8
+
+const (
+	remoteUserSourceAbsent remoteUserSourceObservation = iota
+	remoteUserSourcePresent
+)
+
 func cleanupWithErrorCheck(name string, closeFn func() error) {
 	GinkgoHelper()
 
@@ -149,11 +156,27 @@ var _ = Describe("reverse proxy user injection", Label("integration"), func() {
 		req.RemoteAddr = "127.0.0.1:1234"
 		req.Header.Set("Remote-User", "admin")
 		w := httptest.NewRecorder()
+		remoteSource := remoteUserSourceAbsent
+		router := gin.New()
+		router.Use(authmw.InjectRemoteUser(cfg))
+		router.GET("/test", func(c *gin.Context) {
+			if authmw.IsRemoteUser(c) {
+				remoteSource = remoteUserSourcePresent
+			}
+			userVal, exists := c.Get("user")
+			if !exists {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "no user"})
+				return
+			}
+			u := userVal.(*coreauth.User)
+			c.JSON(http.StatusOK, gin.H{"username": u.Username})
+		})
 
-		proxyRouter(cfg).ServeHTTP(w, req)
+		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusOK))
 		Expect(w.Body.String()).To(MatchJSON(`{"username":"admin"}`))
+		Expect(remoteSource).To(Equal(remoteUserSourcePresent))
 	})
 
 	It("returns a structured not-found error for unknown remote users", func() {

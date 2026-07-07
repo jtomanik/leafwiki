@@ -5,7 +5,10 @@ import "io/fs"
 // Re-export unexported helpers for use in external test package (package http_test).
 
 var BuildCustomStylesheetTag = buildCustomStylesheetTag
+var FrontendIndexHTML = frontendIndexHTML
+var FrontendRequestPath = frontendRequestPath
 var InjectIntoHead = injectIntoHead
+var IsFrontendSPARoute = isFrontendSPARoute
 
 func SetFrontendSubFSForTest(fn func(fs.FS, string) (fs.FS, error)) func() {
 	previous := frontendSubFS

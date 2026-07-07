@@ -13,7 +13,7 @@ import (
 )
 
 var _ = ginkgo.Describe("project daemon descriptors", func() {
-	ginkgo.It("writes private descriptors atomically with 0600 permissions and no session secret material", ginkgo.Label("integration"), func() {
+	ginkgo.It("writes private descriptors atomically with 0600 permissions and no session secret material", ginkgo.Label("unit"), func() {
 		dataDir := tempProjectdaemonDir()
 		rootDir := filepath.Join(tempProjectdaemonDir(), "root")
 		desc := &Descriptor{
@@ -59,7 +59,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		})))
 	})
 
-	ginkgo.It("round-trips runtime stack and role health metadata", ginkgo.Label("integration"), func() {
+	ginkgo.It("round-trips runtime stack and role health metadata", ginkgo.Label("unit"), func() {
 		dataDir := tempProjectdaemonDir()
 		rootDir := filepath.Join(tempProjectdaemonDir(), "root")
 		now := time.Now().UTC().Truncate(time.Second)
@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		})))
 	})
 
-	ginkgo.It("round-trips workspace identity and private MCP attach metadata without leaking tokens in mismatch messages", ginkgo.Label("integration"), func() {
+	ginkgo.It("round-trips workspace identity and private MCP attach metadata without leaking tokens in mismatch messages", ginkgo.Label("unit"), func() {
 		dataDir := tempProjectdaemonDir()
 		rootDir := filepath.Join(tempProjectdaemonDir(), "root")
 		desc := &Descriptor{
@@ -171,13 +171,66 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		})))
 	})
 
+	ginkgo.It("persists hashed config identity in role-scoped descriptors", ginkgo.Label("unit"), func() {
+		runtimeDir := filepath.Join(tempProjectdaemonDir(), ".leafwiki", "runtime")
+		dataDir := tempProjectdaemonDir()
+		rootDir := filepath.Join(tempProjectdaemonDir(), "root")
+		cfg := Config{
+			RuntimeStack:    RuntimeStackWikidFrontd,
+			DataDir:         dataDir,
+			RootDir:         rootDir,
+			PrivateMCPToken: "owner-secret",
+			Port:            "8080",
+		}
+		configHash, err := ConfigHash(cfg)
+		Expect(err).To(Succeed())
+		desc := &Descriptor{
+			SchemaVersion: DescriptorSchemaVersion,
+			RuntimeStack:  RuntimeStackWikidFrontd,
+			Role:          RoleFrontd,
+			PID:           2345,
+			StartedAt:     time.Now().UTC().Truncate(time.Second),
+			DataDir:       dataDir,
+			RootDir:       rootDir,
+			ControlURL:    "http://127.0.0.1:12345",
+			ConfigHash:    configHash,
+			ControlToken:  "control-token",
+			Config:        cfg,
+		}
+		path := GlobalDescriptorPath(runtimeDir, RoleFrontd)
+
+		Expect(WriteDescriptorAtomic(path, desc)).To(Succeed())
+
+		loaded, err := ReadTrustedDescriptor(path)
+		Expect(err).To(Succeed())
+		Expect(loaded).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Role":       Equal(RoleFrontd),
+			"ConfigHash": SatisfyAll(HaveLen(64), Equal(configHash)),
+			"Config": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"RuntimeStack":    Equal(RuntimeStackWikidFrontd),
+				"PrivateMCPToken": Equal("owner-secret"),
+			}),
+		})))
+
+		requested := loaded.Config
+		requested.Port = "8081"
+		mismatch := NewConfigMismatchError(CompareConfig(loaded.Config, requested))
+		Expect(mismatch).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Mismatches": ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Field": Equal("port"),
+				"Want":  Equal("8080"),
+				"Got":   Equal("8081"),
+			})),
+		})))
+	})
+
 	ginkgo.It("builds global descriptor paths for daemon roles", ginkgo.Label("unit"), func() {
 		runtimeDir := filepath.Join(tempProjectdaemonDir(), ".leafwiki", "runtime")
 
 		Expect(GlobalDescriptorPath(runtimeDir, RoleWikid)).To(Equal(filepath.Join(runtimeDir, "wikid.json")))
 	})
 
-	ginkgo.It("removes missing and existing descriptors idempotently", ginkgo.Label("integration"), func() {
+	ginkgo.It("removes missing and existing descriptors idempotently", ginkgo.Label("unit"), func() {
 		path := DescriptorPath(tempProjectdaemonDir())
 
 		Expect(RemoveDescriptor(path)).To(Succeed())
@@ -202,7 +255,7 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		Expect(changed).NotTo(Equal(first))
 	})
 
-	ginkgo.It("rejects trusted descriptors that are readable outside the owner", ginkgo.Label("integration"), func() {
+	ginkgo.It("rejects trusted descriptors that are readable outside the owner", ginkgo.Label("unit"), func() {
 		dataDir := tempProjectdaemonDir()
 		path := DescriptorPath(dataDir)
 		Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())

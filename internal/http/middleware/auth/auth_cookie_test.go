@@ -210,6 +210,55 @@ var _ = Describe("auth cookie lifecycle", Label("unit"), func() {
 	})
 })
 
+var _ = Describe("auth cookie route lifecycle", Label("integration"), func() {
+	It("sets refresh cookies that routed handlers can read and expire", func() {
+		gin.SetMode(gin.TestMode)
+		authCookies := NewAuthCookies(true, time.Hour, 24*time.Hour)
+		router := gin.New()
+		var seenRefreshToken string
+		router.POST("/login", func(c *gin.Context) {
+			Expect(authCookies.Set(c, "access-token", "refresh-token")).To(Succeed())
+			c.Status(http.StatusCreated)
+		})
+		router.GET("/refresh", func(c *gin.Context) {
+			refreshToken, err := authCookies.ReadRefresh(c)
+			Expect(err).To(Succeed())
+			seenRefreshToken = refreshToken
+			c.Status(http.StatusNoContent)
+		})
+		router.DELETE("/logout", func(c *gin.Context) {
+			Expect(authCookies.Clear(c)).To(Succeed())
+			c.Status(http.StatusNoContent)
+		})
+
+		loginReq := httptest.NewRequest(http.MethodPost, "/login", nil)
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+
+		Expect(loginRec).To(HaveHTTPStatus(http.StatusCreated))
+		loginCookies := loginRec.Result().Cookies()
+		Expect(loginCookies).To(ContainElement(matchAuthCookie("leafwiki_rt", "refresh-token", false, int((24 * time.Hour).Seconds()))))
+
+		refreshReq := httptest.NewRequest(http.MethodGet, "/refresh", nil)
+		refreshReq.AddCookie(authCookieNamed(loginCookies, "leafwiki_rt"))
+		refreshRec := httptest.NewRecorder()
+		router.ServeHTTP(refreshRec, refreshReq)
+
+		Expect(refreshRec).To(HaveHTTPStatus(http.StatusNoContent))
+		Expect(seenRefreshToken).To(Equal("refresh-token"))
+
+		logoutReq := httptest.NewRequest(http.MethodDelete, "/logout", nil)
+		logoutRec := httptest.NewRecorder()
+		router.ServeHTTP(logoutRec, logoutReq)
+
+		Expect(logoutRec).To(HaveHTTPStatus(http.StatusNoContent))
+		Expect(logoutRec.Result().Cookies()).To(HaveExactElements(
+			matchExpiredAuthCookie("leafwiki_at"),
+			matchExpiredAuthCookie("leafwiki_rt"),
+		))
+	})
+})
+
 func performSecureDetectionRequest(allowInsecure bool, configure func(*http.Request)) *httptest.ResponseRecorder {
 	GinkgoHelper()
 	gin.SetMode(gin.TestMode)
@@ -341,4 +390,14 @@ func matchExpiredAuthCookie(name string) OmegaMatcher {
 		HaveField("Value", BeEmpty()),
 		HaveField("MaxAge", Equal(-1)),
 	)
+}
+
+func authCookieNamed(cookies []*http.Cookie, name string) *http.Cookie {
+	GinkgoHelper()
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
 }
