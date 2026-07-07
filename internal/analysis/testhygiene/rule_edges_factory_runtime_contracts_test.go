@@ -207,12 +207,14 @@ type toolResult struct {
 	IsError   bool
 	LastError string
 	Ready     bool
+	Available bool
 }
 
 var predicateValue any
 
 func MakeMatcher(predicate ...any) GomegaMatcher { return nil }
 func Match(pattern string, text string) bool { return false }
+func computeAvailable(result toolResult) bool { return result.Available }
 
 func matchUnaryProtocol() GomegaMatcher {
 	return MakeMatcher(func(result *toolResult) bool { return !result.IsError })
@@ -251,6 +253,22 @@ func matchNoParams() GomegaMatcher {
 func matchUnnamedErrorParam() GomegaMatcher {
 	return MakeMatcher(func(error) bool { return true })
 }
+
+func matchSelectorPredicate() GomegaMatcher {
+	return MakeMatcher(func(result toolResult) bool { return result.Available })
+}
+
+func matchCallPredicate() GomegaMatcher {
+	return MakeMatcher(func(result toolResult) bool { return computeAvailable(result) })
+}
+
+func matchUnaryCallPredicate() GomegaMatcher {
+	return MakeMatcher(func(result toolResult) bool { return !computeAvailable(result) })
+}
+
+func matchBooleanChainPredicate() GomegaMatcher {
+	return MakeMatcher(func(result toolResult) bool { return result.Available || computeAvailable(result) })
+}
 `)
 		calls := callExpressionsByFunction(h.file, "MakeMatcher")
 
@@ -264,6 +282,10 @@ func matchUnnamedErrorParam() GomegaMatcher {
 			gomegaPredicateOnlyBooleanMatcher(h.ctx, calls["matchNonFuncArg"]) != nil,
 			gomegaGenericErrorPredicateMatcher(h.ctx, calls["matchNoParams"]) != nil,
 			gomegaGenericErrorPredicateMatcher(h.ctx, calls["matchUnnamedErrorParam"]) != nil,
+			gomegaPredicateOnlyBooleanMatcher(h.ctx, calls["matchSelectorPredicate"]) != nil,
+			gomegaPredicateOnlyBooleanMatcher(h.ctx, calls["matchCallPredicate"]) != nil,
+			gomegaPredicateOnlyBooleanMatcher(h.ctx, calls["matchUnaryCallPredicate"]) != nil,
+			gomegaPredicateOnlyBooleanMatcher(h.ctx, calls["matchBooleanChainPredicate"]) != nil,
 		)).To(Equal([]helperDecision{
 			helperAccepted,
 			helperAccepted,
@@ -274,6 +296,10 @@ func matchUnnamedErrorParam() GomegaMatcher {
 			helperRejected,
 			helperRejected,
 			helperRejected,
+			helperAccepted,
+			helperAccepted,
+			helperAccepted,
+			helperAccepted,
 		}))
 	})
 
