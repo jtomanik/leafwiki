@@ -157,6 +157,34 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(rec).To(matchStructuredPrivateAuthError(errCodePrivateActorContextInvalid))
 	})
 
+	ginkgo.It("serves workspace routes for current private actors with the default clock", ginkgo.Label("integration"), func() {
+		now := time.Now().UTC()
+		w := newTestWiki()
+		ginkgo.DeferCleanup(func() {
+			Expect(w.Close()).To(Succeed())
+		})
+		actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
+			Version:     1,
+			Issuer:      projectdaemon.ActorContextIssuerWikid,
+			Subject:     "user:admin",
+			Username:    "admin",
+			Role:        "admin",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
+			AuthMethod:  "disabled",
+			IssuedAt:    now.Add(-time.Hour),
+			ExpiresAt:   now.Add(time.Hour),
+		})
+		Expect(err).To(Succeed())
+		router := NewAuthenticatedRouter(w, workspacedRouterOptions(), PrivateAuthOptions{
+			DaemonToken: "private-token",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
+		})
+
+		rec := requestWithRequest(router, newPrivateRequest(http.MethodGet, "/api/tree", "private-token", actor))
+
+		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
+	})
+
 	ginkgo.It("carries workspace IDs as the semantic workspace type", ginkgo.Label("unit"), func() {
 		auth := PrivateAuthOptions{WorkspaceID: mustDecodeWorkspaceID("current")}
 
