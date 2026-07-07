@@ -85,6 +85,58 @@ var _ = Describe("git revision store", func() {
 		Expect(files).To(HaveKeyWithValue("docs/page.md", "# Previous\n"))
 	})
 
+	It("restores historical source content to a different managed target path", Label("integration"), func() {
+		dataDir := gitRevisionTempDir()
+		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
+		writeFile(filepath.Join(rootDir, "docs", "source.md"), "# Historical\n")
+		store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
+		Expect(err).To(Succeed())
+		previous, err := store.Capture(context.Background(), CommitRequest{
+			Reason: ReasonStartup,
+			Source: SourceFilesystem,
+			Actor:  PublicEditorActor(),
+		})
+		Expect(err).To(Succeed())
+		writeFile(filepath.Join(rootDir, "docs", "source.md"), "# Current\n")
+
+		restore, err := store.RestoreDocumentToPath(context.Background(), "archive/restored.md", "docs/source.md", previous.Hash, CommitRequest{
+			Actor: PublicEditorActor(),
+		})
+
+		Expect(err).To(Succeed())
+		Expect(os.ReadFile(filepath.Join(rootDir, "archive", "restored.md"))).To(Equal([]byte("# Historical\n")))
+		Expect(os.ReadFile(filepath.Join(rootDir, "docs", "source.md"))).To(Equal([]byte("# Current\n")))
+		Expect(restore).To(matchCreatedRevisionCommitWithMarkdownPaths("archive/restored.md", "docs/source.md"))
+		files, err := store.FilesAt(context.Background(), restore.Hash)
+		Expect(err).To(Succeed())
+		Expect(files).To(HaveKeyWithValue("archive/restored.md", "# Historical\n"))
+		Expect(files).To(HaveKeyWithValue("docs/source.md", "# Current\n"))
+	})
+
+	It("restores supplied document content to a target path", Label("integration"), func() {
+		dataDir := gitRevisionTempDir()
+		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
+		store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
+		Expect(err).To(Succeed())
+
+		restore, err := store.RestoreDocumentContentToPath(context.Background(), " docs/restored.md ", "# Restored\n", CommitRequest{
+			Actor: PublicEditorActor(),
+		})
+
+		Expect(err).To(Succeed())
+		Expect(os.ReadFile(filepath.Join(rootDir, "docs", "restored.md"))).To(Equal([]byte("# Restored\n")))
+		Expect(restore).To(matchCreatedRevisionCommitWithMarkdownPaths("docs/restored.md"))
+		files, err := store.FilesAt(context.Background(), restore.Hash)
+		Expect(err).To(Succeed())
+		Expect(files).To(HaveKeyWithValue("docs/restored.md", "# Restored\n"))
+		commit, err := store.GetCommit(context.Background(), restore.Hash)
+		Expect(err).To(Succeed())
+		Expect(commit).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Reason": Equal(ReasonRestore),
+			"Source": Equal(SourceSystem),
+		}))
+	})
+
 	It("classifies managed markdown paths by extension and hidden-name rules", Label("unit"), func() {
 		Expect("docs/page.md").To(matchManagedMarkdownPathClass(managedMarkdownRevisionPath))
 		Expect("docs/Page.MD").To(matchManagedMarkdownPathClass(managedMarkdownRevisionPath))
@@ -92,6 +144,20 @@ var _ = Describe("git revision store", func() {
 		Expect("docs/.draft.md").To(matchManagedMarkdownPathClass(ignoredHiddenFilenameMarkdownPath))
 		Expect("docs/page.md.swp").To(matchManagedMarkdownPathClass(ignoredSwapMarkdownPath))
 		Expect("docs/image.png").To(matchManagedMarkdownPathClass(ignoredNonMarkdownRevisionPath))
+	})
+
+	It("collects visible markdown files for snapshot staging", Label("unit"), func() {
+		rootDir := gitRevisionTempDir()
+		writeFile(filepath.Join(rootDir, "docs", "page.md"), "# Page\n")
+		writeFile(filepath.Join(rootDir, "docs", ".draft.md"), "# Draft\n")
+		writeFile(filepath.Join(rootDir, "docs", "page.md.swp"), "# Swap\n")
+		writeFile(filepath.Join(rootDir, ".obsidian", "local.md"), "# Local\n")
+		writeFile(filepath.Join(rootDir, "docs", "image.png"), "png")
+
+		paths, err := collectMarkdownPaths(rootDir)
+
+		Expect(err).To(Succeed())
+		Expect(paths).To(Equal([]string{"docs/page.md"}))
 	})
 
 	It("returns captured commit metadata and reports missing commits", Label("integration"), func() {

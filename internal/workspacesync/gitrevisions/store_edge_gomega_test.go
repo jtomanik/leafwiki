@@ -58,6 +58,25 @@ var _ = Describe("git revision edge behavior", func() {
 		Expect(actors).To(Equal([]ActorID{newFixtureActorID("alice")}))
 	})
 
+	It("deduplicates commit actors while preserving primary attribution", Label("unit"), func() {
+		actors := commitActorIDs(CommitRequest{
+			Actor: Actor{ID: newFixtureActorID("editor-1")},
+			AdditionalActors: []Actor{
+				{ID: newFixtureActorID("reviewer-1")},
+				{ID: newFixtureActorID("editor-1")},
+				{ID: newFixtureActorID("reviewer-1")},
+				{},
+				{ID: newFixtureActorID("reviewer-2")},
+			},
+		})
+
+		Expect(actors).To(Equal([]ActorID{
+			newFixtureActorID("editor-1"),
+			newFixtureActorID("reviewer-1"),
+			newFixtureActorID("reviewer-2"),
+		}))
+	})
+
 	It("reports Open validation and dependency failures", Label("unit"), func() {
 		_, err := Open(StoreOptions{})
 		Expect(err).To(MatchError(ErrDataDirRequired))
