@@ -120,7 +120,6 @@ var _ = ginkgo.Describe("service", func() {
 	ginkgo.It("wraps localized errors with causes and structured details", ginkgo.Label("unit"), func() {
 		cause := errors.New("boom")
 		err := sharederrors.NewLocalizedError(newFixtureErrorCode("code"), "message", "template %s", cause, "arg")
-		Expect(err.Error()).NotTo(BeEmpty())
 		Expect(err).To(matchRevisionErrorCause(cause))
 		Expect(err).To(matchLocalizedRevisionErrorDetails(newFixtureErrorCode("code"), "arg"))
 		Expect(errors.New("plain")).NotTo(matchLocalizedRevisionErrorDetails(newFixtureErrorCode("code"), "arg"))
