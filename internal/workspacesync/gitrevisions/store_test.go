@@ -205,6 +205,32 @@ var _ = Describe("git revision store", func() {
 		})))
 	})
 
+	It("derives git author identity from the semantic actor ID when display metadata is absent", Label("integration"), func() {
+		dataDir := gitRevisionTempDir()
+		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")
+		writeFile(filepath.Join(rootDir, "a.md"), "# A\n")
+		store, err := Open(StoreOptions{DataDir: dataDir, RootDir: rootDir})
+		Expect(err).To(Succeed())
+		actorID := newFixtureActorID("carol")
+
+		_, err = store.Capture(context.Background(), CommitRequest{
+			Reason: ReasonExplicit,
+			Source: SourceFilesystem,
+			Actor:  Actor{ID: actorID},
+		})
+		Expect(err).To(Succeed())
+
+		head, err := store.repo.Head()
+		Expect(err).To(Succeed())
+		headCommit, err := store.repo.CommitObject(head.Hash())
+		Expect(err).To(Succeed())
+		Expect(headCommit.Author).To(matchActorIDDerivedGitSignature(actorID))
+
+		commits, err := store.ListCommits(context.Background(), ListRequest{Limit: 1})
+		Expect(err).To(Succeed())
+		Expect(commits).To(ConsistOf(matchListedCommitAuthorDerivedFromActorID(actorID)))
+	})
+
 	It("records additional actors once while preserving the primary author", Label("integration"), func() {
 		dataDir := gitRevisionTempDir()
 		rootDir := filepath.Join(gitRevisionTempDir(), "workspace")

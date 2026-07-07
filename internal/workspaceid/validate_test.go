@@ -33,11 +33,14 @@ var _ = Describe("workspace ID parsing", Label("unit"), func() {
 
 var _ = Describe("workspace ID boundary helpers", Label("unit"), func() {
 	It("returns stable string forms for transport, URL, and storage boundaries", func() {
-		id := newFixtureWorkspaceID("docs-home")
+		fixture := workspaceIDBoundaryFixtureFor("docs-home")
 
-		Expect(id.HTTPHeaderValue()).To(Equal("docs-home"))
-		Expect(id.URLPathSegment()).To(Equal("docs-home"))
-		Expect(id.StorageKey()).To(Equal("docs-home"))
+		Expect(workspaceIDBoundaryObservationFor(fixture)).To(Equal(workspaceIDBoundaryObservation{
+			ID:         fixture.ID,
+			HTTPHeader: workspaceIDBoundaryMatchesCanonicalID,
+			URLPath:    workspaceIDBoundaryMatchesCanonicalID,
+			StorageKey: workspaceIDBoundaryMatchesCanonicalID,
+		}))
 	})
 
 	It("path-escapes URL path segments at the boundary", func() {
@@ -65,6 +68,11 @@ var _ = Describe("workspace ID validation errors", Label("unit"), func() {
 		_, err := ParseWorkspaceID("Docs")
 
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDInvalid, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid)))
+		Expect(workspaceValidationCodeObservationFor(err)).To(Equal(workspaceValidationCodeObservation{
+			State:     workspaceValidationCodePresent,
+			Code:      ErrCodeWorkspaceIDInvalid,
+			MessageID: sharederrors.MessageIDForCode(ErrCodeWorkspaceIDInvalid),
+		}))
 	})
 
 	It("returns empty error text for a nil validation error", func() {
@@ -135,9 +143,80 @@ const (
 	workspaceValidationMessagePresent
 )
 
+type workspaceIDBoundaryState uint8
+
+const (
+	workspaceIDBoundaryUnexpected workspaceIDBoundaryState = iota
+	workspaceIDBoundaryMatchesCanonicalID
+)
+
+type workspaceIDBoundaryObservation struct {
+	ID         WorkspaceID
+	HTTPHeader workspaceIDBoundaryState
+	URLPath    workspaceIDBoundaryState
+	StorageKey workspaceIDBoundaryState
+}
+
+type workspaceIDBoundaryFixture struct {
+	ID  WorkspaceID
+	Raw string
+}
+
+type workspaceValidationCodeState uint8
+
+const (
+	workspaceValidationCodeAbsent workspaceValidationCodeState = iota
+	workspaceValidationCodePresent
+)
+
+type workspaceValidationCodeObservation struct {
+	State     workspaceValidationCodeState
+	Code      sharederrors.ErrorCode
+	MessageID sharederrors.MessageID
+}
+
 func workspaceValidationErrorMessageObservation(err *ValidationError) workspaceValidationErrorMessageState {
 	if err.Error() != "" {
 		return workspaceValidationMessagePresent
 	}
 	return workspaceValidationMessageAbsent
+}
+
+func workspaceIDBoundaryFixtureFor(raw string) workspaceIDBoundaryFixture {
+	GinkgoHelper()
+
+	id, err := ParseWorkspaceID(raw)
+	Expect(err).To(Succeed())
+	return workspaceIDBoundaryFixture{
+		ID:  id,
+		Raw: raw,
+	}
+}
+
+func workspaceIDBoundaryObservationFor(fixture workspaceIDBoundaryFixture) workspaceIDBoundaryObservation {
+	return workspaceIDBoundaryObservation{
+		ID:         fixture.ID,
+		HTTPHeader: workspaceIDBoundaryStateFor(fixture.ID.HTTPHeaderValue(), fixture.Raw),
+		URLPath:    workspaceIDBoundaryStateFor(fixture.ID.URLPathSegment(), fixture.Raw),
+		StorageKey: workspaceIDBoundaryStateFor(fixture.ID.StorageKey(), fixture.Raw),
+	}
+}
+
+func workspaceIDBoundaryStateFor(value string, raw string) workspaceIDBoundaryState {
+	if value == raw {
+		return workspaceIDBoundaryMatchesCanonicalID
+	}
+	return workspaceIDBoundaryUnexpected
+}
+
+func workspaceValidationCodeObservationFor(err error) workspaceValidationCodeObservation {
+	code := WorkspaceIDErrorCode(err)
+	if code == "" {
+		return workspaceValidationCodeObservation{State: workspaceValidationCodeAbsent}
+	}
+	return workspaceValidationCodeObservation{
+		State:     workspaceValidationCodePresent,
+		Code:      code,
+		MessageID: sharederrors.MessageIDForCode(code),
+	}
 }
