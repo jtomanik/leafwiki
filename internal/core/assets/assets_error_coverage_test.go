@@ -68,18 +68,18 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 
 		Expect(service.DeleteAllAssetsForPage(&tree.PageNode{ID: newFixturePageID("never-uploaded")})).To(Succeed())
 		loopPage := &tree.PageNode{ID: newFixturePageID("loop-page")}
-		loopPath := filepath.Join(service.GetAssetsDir(), loopPage.ID.String())
+		loopPath := assetPageDiskPath(service.GetAssetsDir(), loopPage.ID)
 		Expect(os.Symlink(loopPath, loopPath)).To(Succeed())
 		Expect(service.DeleteAllAssetsForPage(loopPage)).To(Succeed())
 
 		listPage := &tree.PageNode{ID: newFixturePageID("list-page")}
-		Expect(os.WriteFile(filepath.Join(service.GetAssetsDir(), listPage.ID.String()), []byte("not a directory"), 0o600)).To(Succeed())
+		Expect(os.WriteFile(assetPageDiskPath(service.GetAssetsDir(), listPage.ID), []byte("not a directory"), 0o600)).To(Succeed())
 		files, err := service.ListAssetsForPage(listPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(files).To(BeEmpty())
 
 		readPage := &tree.PageNode{ID: newFixturePageID("read-page")}
-		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), readPage.ID.String(), "note.txt"), 0o755)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(assetPageDiskPath(service.GetAssetsDir(), readPage.ID), "note.txt"), 0o755)).To(Succeed())
 		_, err = service.ReadAssetForPage(readPage, assetName("note.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetReadFailed))
 
@@ -87,7 +87,7 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetNotFound))
 
 		deletePage := &tree.PageNode{ID: newFixturePageID("delete-page")}
-		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), deletePage.ID.String(), "blocked.txt", "child"), 0o755)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(assetPageDiskPath(service.GetAssetsDir(), deletePage.ID), "blocked.txt", "child"), 0o755)).To(Succeed())
 		err = service.DeleteAsset(deletePage, assetName("blocked.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetDeleteFailed))
 	})
@@ -100,13 +100,13 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 
 		statErrorPage := &tree.PageNode{ID: newFixturePageID("stat-error-page")}
 		writeAssetFile(service, statErrorPage, assetName("old.txt"), []byte("old"))
-		statErrorDir := filepath.Join(service.GetAssetsDir(), statErrorPage.ID.String())
+		statErrorDir := assetPageDiskPath(service.GetAssetsDir(), statErrorPage.ID)
 		Expect(os.Symlink("new.txt", filepath.Join(statErrorDir, "new.txt"))).To(Succeed())
 		_, err = service.RenameAsset(statErrorPage, assetName("old.txt"), assetName("new.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetRenameFailed))
 
 		renameErrorPage := &tree.PageNode{ID: newFixturePageID("rename-error-page")}
-		Expect(os.MkdirAll(filepath.Join(service.GetAssetsDir(), renameErrorPage.ID.String()), 0o755)).To(Succeed())
+		Expect(os.MkdirAll(assetPageDiskPath(service.GetAssetsDir(), renameErrorPage.ID), 0o755)).To(Succeed())
 		tooLongName := strings.Repeat("a", 4096) + ".txt"
 		_, err = service.RenameAsset(renameErrorPage, assetName(tooLongName), assetName("renamed.txt"))
 		Expect(err).To(matchLocalizedAssetCode(ErrCodeAssetRenameFailed))
@@ -127,12 +127,12 @@ var _ = Describe("asset service failure behavior", Label("unit"), func() {
 		Expect(os.Chmod(assetsDir, 0o755)).To(Succeed())
 
 		sourceFilePage := &tree.PageNode{ID: newFixturePageID("source-file")}
-		Expect(os.WriteFile(filepath.Join(service.GetAssetsDir(), sourceFilePage.ID.String()), []byte("not a directory"), 0o600)).To(Succeed())
+		Expect(os.WriteFile(assetPageDiskPath(service.GetAssetsDir(), sourceFilePage.ID), []byte("not a directory"), 0o600)).To(Succeed())
 		err = service.CopyAllAssets(sourceFilePage, &tree.PageNode{ID: newFixturePageID("target")})
 		Expect(err).To(Satisfy(wrapsAssetPathError))
 
 		danglingSource := &tree.PageNode{ID: newFixturePageID("dangling-source")}
-		danglingDir := filepath.Join(service.GetAssetsDir(), danglingSource.ID.String())
+		danglingDir := assetPageDiskPath(service.GetAssetsDir(), danglingSource.ID)
 		Expect(os.MkdirAll(danglingDir, 0o755)).To(Succeed())
 		Expect(os.Symlink("missing.txt", filepath.Join(danglingDir, "broken.txt"))).To(Succeed())
 		err = service.CopyAllAssets(danglingSource, &tree.PageNode{ID: newFixturePageID("dangling-target")})
