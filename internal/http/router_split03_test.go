@@ -13,6 +13,9 @@ import (
 
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/shared"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	wikiauth "github.com/perber/wiki/internal/wiki/auth"
 )
 
 var _ = Describe("HTTP router", Label("integration"), func() {
@@ -200,8 +203,11 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
-		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "expected status 400, got %d", rec.Code)
-		Expect(rec).To(HaveHTTPBody(ContainSubstring("--allow-insecure")), "expected response to explain allow-insecure requirement, got %s", rec.Body.String())
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(
+			http.StatusBadRequest,
+			wikiauth.ErrCodeAuthCookieFailed,
+			sharederrors.MessageIDForCode(wikiauth.ErrCodeAuthCookieFailed),
+		), "expected structured HTTPS-required config error, got status %d", rec.Code)
 
 	})
 })
@@ -218,8 +224,11 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
-		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), "expected status 400, got %d with body %s", rec.Code, rec.Body.String())
-		Expect(rec).To(HaveHTTPBody(ContainSubstring("--allow-insecure")), "expected response to explain allow-insecure requirement, got %s", rec.Body.String())
+		Expect(rec).To(testmatchers.HaveHTTPStructuredError(
+			http.StatusBadRequest,
+			wikiauth.ErrCodeAuthCookieFailed,
+			sharederrors.MessageIDForCode(wikiauth.ErrCodeAuthCookieFailed),
+		), "expected structured HTTPS-required login error, got status %d", rec.Code)
 
 	})
 })
