@@ -349,6 +349,7 @@ var _ = ginkgo.Describe("revision service unit seams", ginkgo.Label("unit"), fun
 		})
 		Expect(service.RestoreRevision(pageID, rev.ID, authorID)).
 			To(matchLocalizedRevisionErrorDetails(errCodeRevisionRestoreFailed, pageID.MetadataValue()))
+		Expect(page.Content).To(Equal("Before body"))
 		restoreAssets()
 
 		recordErr := errors.New("restore revision record failed")
@@ -357,6 +358,7 @@ var _ = ginkgo.Describe("revision service unit seams", ginkgo.Label("unit"), fun
 		})
 		Expect(service.RestoreRevision(pageID, rev.ID, authorID)).
 			To(matchLocalizedRevisionErrorDetails(errCodeRevisionRestoreFailed, pageID.MetadataValue()))
+		Expect(page.Content).To(Equal("Before body"))
 		restoreRecord()
 	})
 
