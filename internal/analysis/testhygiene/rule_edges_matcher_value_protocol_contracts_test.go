@@ -30,7 +30,9 @@ type validationIssue struct {
 }
 
 func Expect(actual any) assertion { return assertion{} }
+func Eventually(actual any) assertion { return assertion{} }
 func (assertion) To(matcher any, extra ...any) {}
+func (assertion) Should(matcher any, extra ...any) {}
 func Equal(expected any) GomegaMatcher { return nil }
 func BeEquivalentTo(expected any) GomegaMatcher { return nil }
 func BeTrue() GomegaMatcher { return nil }
@@ -57,6 +59,8 @@ func TestProtocolMatchers(err error, result validationResult, issue validationIs
 	Expect(err).To(MatchError(And(HavePrefix("missing"))))
 	Expect(err).To(MatchError(errors.New("missing")))
 	Expect(err).To(MatchError(fmt.Errorf("missing: %w", err)))
+	Eventually(err).Should(MatchError(expectedMatcher))
+	_ = MatchError(expectedMatcher)
 	Expect("Docs").To(Equal(expectedMatcher))
 	localMatcher := Equal("Docs")
 	Expect("Docs").To(Equal(localMatcher))
@@ -99,6 +103,9 @@ func TestProtocolMatchers(err error, result validationResult, issue validationIs
 			matcherCallUsesMatcherValueAsExpected(h.ctx, assertions[10].matcher),
 			matcherCallUsesMatcherValueAsExpected(h.ctx, assertions[11].matcher),
 			assertionUsesStructuredProtocolKeyMatcherSucceeded(h.ctx, assertions[12]),
+			callIsInsideGomegaAssertion(h.ctx, h.findCalls("MatchError")[0]),
+			callIsInsideGomegaAssertion(h.ctx, h.findCalls("MatchError")[3]),
+			callIsInsideGomegaAssertion(h.ctx, h.findCalls("MatchError")[4]),
 			rawSemanticContractMatcherCall(h.ctx, h.findCall("BeEquivalentTo")),
 			rawSemanticContractMatcherCall(h.ctx, h.findCall("HavePrefix")),
 			rawSemanticContractMatcherCall(h.ctx, h.findCall("Or")),
@@ -107,6 +114,7 @@ func TestProtocolMatchers(err error, result validationResult, issue validationIs
 			helperAccepted, helperAccepted, helperAccepted, helperAccepted,
 			helperAccepted, helperAccepted, helperAccepted, helperAccepted,
 			helperAccepted, helperAccepted, helperAccepted, helperAccepted, helperRejected,
+			helperAccepted, helperAccepted, helperRejected,
 			helperAccepted, helperAccepted, helperAccepted, helperRejected,
 		}))
 	})
