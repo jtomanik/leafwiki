@@ -205,10 +205,12 @@ var _ = Describe("opening loggers", Label("unit"), func() {
 
 		raw, err := os.ReadFile(logPath)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(raw)).To(SatisfyAll(
-			ContainSubstring(testLogPreviousLine),
-			ContainSubstring(testLogStartupMessage),
-		))
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		Expect(lines).To(HaveLen(2))
+		Expect(lines[0]).To(Equal(testLogPreviousLine))
+		var appendedRecord map[string]any
+		Expect(json.Unmarshal([]byte(lines[1]), &appendedRecord)).To(Succeed())
+		Expect(appendedRecord).To(HaveKeyWithValue("msg", testLogStartupMessage))
 	})
 
 	It("returns visible errors when file log parent creation cannot proceed", func() {
