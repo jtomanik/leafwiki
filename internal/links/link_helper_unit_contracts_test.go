@@ -1,6 +1,9 @@
 package links
 
 import (
+	"path"
+	"strings"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -60,6 +63,28 @@ var _ = ginkgo.Describe("link helper semantic contracts", ginkgo.Label("unit"), 
 		Expect(markdownRouteObservationFor(newFixtureRoutePath("/docs"), tree.NodeKindSection)).To(Equal(markdownRouteObservation{
 			SourceFile:  newFixtureMarkdownPath("docs/index.md"),
 			ContentFile: newFixtureMarkdownPath("docs/index.md"),
+		}))
+	})
+
+	ginkgo.It("keeps internal markdown destinations while ignoring non-wiki destinations", func() {
+		content := strings.Join([]string{
+			"[Guide](docs/guide.md#intro)",
+			"[Nested](nested/page.md?download=1)",
+			"[Section](notes/guide)",
+			"[External](https://example.test/docs)",
+			"[Email](mailto:editor@example.test)",
+			"[Anchor](#local)",
+			"![Asset](/assets/logo.png)",
+		}, "\n")
+
+		Expect(markdownDestinationObservationFor(content)).To(Equal(markdownDestinationObservation{
+			MarkdownPaths: []tree.MarkdownPath{
+				newFixtureMarkdownPath("docs/guide.md"),
+				newFixtureMarkdownPath("nested/page.md"),
+			},
+			RoutePaths: []tree.RoutePath{
+				newFixtureRoutePath("notes/guide"),
+			},
 		}))
 	})
 
@@ -185,6 +210,23 @@ func markdownRouteObservationFor(routePath tree.RoutePath, kind tree.NodeKind) m
 		SourceFile:  markdownSourceFileForRoute(routePath, kind),
 		ContentFile: markdownContentPathForRoute(routePath, kind),
 	}
+}
+
+type markdownDestinationObservation struct {
+	MarkdownPaths []tree.MarkdownPath
+	RoutePaths    []tree.RoutePath
+}
+
+func markdownDestinationObservationFor(content string) markdownDestinationObservation {
+	observation := markdownDestinationObservation{}
+	for _, destination := range extractLinksFromMarkdown(content) {
+		if strings.EqualFold(path.Ext(destination), ".md") {
+			observation.MarkdownPaths = append(observation.MarkdownPaths, tree.MarkdownPathFromString(destination))
+			continue
+		}
+		observation.RoutePaths = append(observation.RoutePaths, tree.RoutePathFromString(destination))
+	}
+	return observation
 }
 
 type unresolvedDestinationState uint8

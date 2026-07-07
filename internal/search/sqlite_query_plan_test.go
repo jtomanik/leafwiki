@@ -10,6 +10,16 @@ import (
 )
 
 var _ = ginkgo.Describe("SQLite search query planning", ginkgo.Label("unit"), func() {
+	ginkgo.It("maps stored node kinds into route node kinds", func() {
+		Expect(searchNodeKindObservationFor(string(searchSQLiteNodeKindFromNodeKind(tree.NodeKindPage)))).To(Equal(searchNodeKindObservation{
+			State: searchNodeKindRecognized,
+			Kind:  tree.NodeKindPage,
+		}))
+		Expect(searchNodeKindObservationFor("unsupported")).To(Equal(searchNodeKindObservation{
+			State: searchNodeKindRejected,
+		}))
+	})
+
 	ginkgo.It("preserves text-search and page-filter plan semantics", func() {
 		Expect(searchQueryPlanFor("docs", []tree.PageID{newFixturePageID("page-a"), newFixturePageID("page-b")})).To(Equal(searchQueryPlanObservation{
 			NodeKind:      tree.NodeKindSection,
@@ -35,6 +45,30 @@ var _ = ginkgo.Describe("SQLite search query planning", ginkgo.Label("unit"), fu
 		}))
 	})
 })
+
+type searchNodeKindState uint8
+
+const (
+	searchNodeKindUnknown searchNodeKindState = iota
+	searchNodeKindRecognized
+	searchNodeKindRejected
+)
+
+type searchNodeKindObservation struct {
+	State searchNodeKindState
+	Kind  tree.NodeKind
+}
+
+func searchNodeKindObservationFor(raw string) searchNodeKindObservation {
+	kind, err := parseSearchSQLiteNodeKind(raw)
+	if err != nil {
+		return searchNodeKindObservation{State: searchNodeKindRejected}
+	}
+	return searchNodeKindObservation{
+		State: searchNodeKindRecognized,
+		Kind:  kind,
+	}
+}
 
 type searchTextQueryPlan uint8
 
