@@ -52,7 +52,7 @@ var _ = ginkgo.Describe("link errors", func() {
 	ginkgo.It("assigns HTTP status classes to missing unavailable and unknown link failures", ginkgo.Label("unit"), func() {
 		Expect(linkErrorStatus(ErrCodeLinkPageNotFound)).To(Equal(http.StatusNotFound))
 		Expect(linkErrorStatus(ErrCodeLinkUnavailable)).To(Equal(http.StatusServiceUnavailable))
-		Expect(linkErrorStatus("unknown")).To(Equal(http.StatusInternalServerError))
+		Expect(linkErrorStatus(newFixtureErrorCode("unknown"))).To(Equal(http.StatusInternalServerError))
 	})
 
 	ginkgo.It("returns structured localized detail for explicit link status failures", ginkgo.Label("integration"), func() {

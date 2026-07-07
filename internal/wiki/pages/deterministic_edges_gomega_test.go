@@ -13,7 +13,6 @@ import (
 
 	"github.com/perber/wiki/internal/core/assets"
 	"github.com/perber/wiki/internal/core/markdown"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/http/dto"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
@@ -22,7 +21,7 @@ import (
 
 const pageMetadataWhitespacePropertyKeyFixture = " key "
 
-var _ = ginkgo.Describe("deterministic page helper edges", func() {
+var _ = ginkgo.Describe("page metadata and route helper contracts", func() {
 	ginkgo.It("rejects invalid markdown section targets and metadata patch fields", ginkgo.Label("unit"), func() {
 		_, err := ReplaceMarkdownSection("# Page\n", []string{" "}, 0, "")
 		Expect(err).To(MatchError(ErrSectionHeadingPathRequired))
@@ -75,7 +74,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			"Properties": BeEmpty(),
 		})))
 
-		_, err := BuildMarkdownWithPublicMetadataPatch("<!-- leafwiki malformed\n-->\nbody", tree.PageIDFromString("page-1"), "Page", PublicMetadataPatch{}, "body")
+		_, err := BuildMarkdownWithPublicMetadataPatch("<!-- leafwiki malformed\n-->\nbody", newFixturePageID("page-1"), "Page", PublicMetadataPatch{}, "body")
 		Expect(err).To(MatchError(markdown.ErrMetadataParse))
 
 		Expect(normalizeMetadataTags([]string{" Alpha ", "alpha", "Beta"})).To(Equal([]string{"alpha", "beta"}))
@@ -91,7 +90,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		rootDir := pagesTempDir()
 		Expect(os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("# Root"), 0o644)).To(Succeed())
-		rootPage := &tree.Page{PageNode: &tree.PageNode{ID: tree.RootPageID, Title: "Root", Slug: tree.SlugFromString("root"), Kind: tree.NodeKindSection}}
+		rootPage := &tree.Page{PageNode: &tree.PageNode{ID: tree.RootPageID, Title: "Root", Slug: newFixtureSlug("root"), Kind: tree.NodeKindSection}}
 		out, err := requireReadmeMarkdownPathFallback("README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: rootDir,
 			RootPage: func() (*tree.Page, error) {
@@ -103,12 +102,12 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "README.md"), []byte("# Docs"), 0o644)).To(Succeed())
-		sectionPage := &tree.Page{PageNode: &tree.PageNode{ID: tree.PageIDFromString("docs"), Title: "Docs", Slug: tree.SlugFromString("docs"), Kind: tree.NodeKindSection}}
+		sectionPage := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("docs"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: tree.NodeKindSection}}
 		out, err = requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
 			RootDir: rootDir,
 			FindByPath: func(in FindByPathInput) (*FindByPathOutput, error) {
 				Expect(in).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-					"RoutePath": Equal(tree.RoutePath("docs")),
+					"RoutePath": Equal(newFixtureRoutePath("docs")),
 					"Kind":      Equal(tree.NodeKindSection),
 				}))
 				return &FindByPathOutput{Page: sectionPage}, nil
@@ -120,25 +119,25 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 	ginkgo.It("validates page lookup permalink slug and error contracts", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
-		docs := deps.createPage("Docs", "docs", tree.NodeKindSection, nil)
-		guide := deps.createPage("Guide", "guide", tree.NodeKindPage, &docs.ID)
+		docs := deps.createPage("Docs", newFixtureSlug("docs"), tree.NodeKindSection, nil)
+		guide := deps.createPage("Guide", newFixtureSlug("guide"), tree.NodeKindPage, &docs.ID)
 		Expect(guide).NotTo(BeNil())
 
 		findByPath := NewFindByPathUseCase(deps.tree)
 		_, err := findByPath.Execute(context.Background(), FindByPathInput{})
 		Expect(err).To(HavePageValidationField("path"))
 
-		lookup, err := NewLookupPagePathUseCase(deps.tree).Execute(context.Background(), LookupPagePathInput{Path: "docs/guide"})
+		lookup, err := NewLookupPagePathUseCase(deps.tree).Execute(context.Background(), LookupPagePathInput{Path: newFixtureRoutePath("docs/guide")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(lookup.Lookup).To(gstruct.PointTo(HaveExistingRoutePathLookup(tree.RoutePath("docs/guide"))))
+		Expect(lookup.Lookup).To(gstruct.PointTo(HaveExistingRoutePathLookup(newFixtureRoutePath("docs/guide"))))
 
 		_, err = NewLookupPagePathUseCase(deps.tree).Execute(context.Background(), LookupPagePathInput{})
 		Expect(err).To(HavePageValidationField("path"))
 
-		_, err = NewResolvePermalinkUseCase(deps.tree).Execute(context.Background(), ResolvePermalinkInput{ID: tree.PageIDFromString("missing")})
+		_, err = NewResolvePermalinkUseCase(deps.tree).Execute(context.Background(), ResolvePermalinkInput{ID: newFixturePageID("missing")})
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
-		_, err = NewSuggestSlugUseCase(deps.tree, tree.NewSlugService()).Execute(context.Background(), SuggestSlugInput{ParentID: tree.PageIDFromString("missing"), Title: "Child"})
+		_, err = NewSuggestSlugUseCase(deps.tree, tree.NewSlugService()).Execute(context.Background(), SuggestSlugInput{ParentID: newFixturePageID("missing"), Title: "Child"})
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 		validated, err := ValidateRefactorKind(RefactorKindRename)
@@ -150,7 +149,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		parent, err := ValidateSemanticMoveParentID(tree.RootPageID)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(parent).To(Equal(tree.RootPageID))
-		_, err = ValidateSemanticMoveParentID(tree.PageID(" parent "))
+		_, err = ValidateSemanticMoveParentID(newFixturePageID(" parent "))
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
 
 		optionalParent, err := ValidateOptionalParentID(nil)
@@ -164,7 +163,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		_, err = ValidateSemanticRoutePath("../escape")
 		Expect(err).To(HavePageValidationField("path"))
 
-		Expect(pageErrorStatus(sharederrors.ErrorCode("unknown"))).To(Equal(http.StatusInternalServerError))
+		Expect(pageErrorStatus(newFixtureErrorCode("unknown"))).To(Equal(http.StatusInternalServerError))
 	})
 
 	ginkgo.It("normalizes route input for root README metadata and versions", ginkgo.Label("integration"), func() {
@@ -202,8 +201,8 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(os.WriteFile(filepath.Join(rootDir, "index.md"), []byte("# Index"), 0o644)).To(Succeed())
 		Expect(ReadmeFallbackSectionIsActive(rootDir, "")).To(BeFalse())
 
-		Expect(sanitizeSemanticClientVersion(tree.PageVersion("\x00"))).To(BeEmpty())
-		Expect(sanitizeSemanticClientVersion(tree.PageVersionFromString("v1"))).To(Equal(tree.PageVersion("v1")))
+		Expect(sanitizeSemanticClientVersion(newFixtureRawPageVersion("\x00"))).To(BeEmpty())
+		Expect(sanitizeSemanticClientVersion(tree.PageVersionFromString("v1"))).To(Equal(newFixturePageVersion("v1")))
 
 		err = ValidatePageMetadataInput(
 			[]string{"alpha", "Alpha", " spaced "},
@@ -228,9 +227,9 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 	})
 
 	ginkgo.It("deduplicates and sorts refactor warnings deterministically", ginkgo.Label("unit"), func() {
-		first := RefactorWarning{MessageID: sharederrors.MessageID("warnings.refactor.a"), Message: "beta"}
-		second := RefactorWarning{MessageID: sharederrors.MessageID("warnings.refactor.a"), Message: "alpha"}
-		third := RefactorWarning{MessageID: sharederrors.MessageID("warnings.refactor.b"), Message: "alpha"}
+		first := RefactorWarning{MessageID: newFixtureMessageID("warnings.refactor.a"), Message: "beta"}
+		second := RefactorWarning{MessageID: newFixtureMessageID("warnings.refactor.a"), Message: "alpha"}
+		third := RefactorWarning{MessageID: newFixtureMessageID("warnings.refactor.b"), Message: "alpha"}
 
 		warnings := collectPreviewWarnings([]RefactorAffectedPage{
 			{WarningDetails: []RefactorWarning{third, first}},
@@ -250,36 +249,36 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 	ginkgo.It("rejects invalid direct page use-case requests", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
-		userID := tree.UserIDFromString("pages-direct-user")
+		userID := newFixtureUserID("pages-direct-user")
 
 		_, err := deps.routes.copyPage.Execute(context.Background(), CopyPageInput{
 			UserID:       userID,
-			SourcePageID: tree.PageIDFromString("missing"),
+			SourcePageID: newFixturePageID("missing"),
 			Title:        "",
-			Slug:         tree.SlugFromString("bad slug"),
+			Slug:         newFixtureSlug("bad slug"),
 		})
 		Expect(err).To(HavePageValidationFields("title", "slug"))
 
-		badParent := tree.PageID(" parent ")
+		badParent := newFixturePageID(" parent ")
 		_, err = deps.routes.copyPage.Execute(context.Background(), CopyPageInput{
 			UserID:         userID,
-			SourcePageID:   tree.PageIDFromString("missing"),
+			SourcePageID:   newFixturePageID("missing"),
 			TargetParentID: &badParent,
 			Title:          "Copy",
-			Slug:           tree.SlugFromString("copy"),
+			Slug:           newFixtureSlug("copy"),
 		})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
 
 		err = deps.routes.deletePage.Execute(context.Background(), DeletePageInput{UserID: userID, ID: tree.RootPageID})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageRootOperation))
 
-		err = deps.routes.convertPage.Execute(context.Background(), ConvertPageInput{UserID: userID, ID: ""})
+		err = deps.routes.convertPage.Execute(context.Background(), ConvertPageInput{UserID: userID, ID: newFixturePageID("")})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageRootOperation))
 
 		err = deps.routes.movePage.Execute(context.Background(), MovePageInput{UserID: userID, ID: tree.RootPageID})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageRootOperation))
 
-		_, err = deps.routes.ensurePath.Execute(context.Background(), EnsurePathInput{UserID: userID, TargetPath: "", TargetTitle: " "})
+		_, err = deps.routes.ensurePath.Execute(context.Background(), EnsurePathInput{UserID: userID, TargetPath: newFixtureRoutePath(""), TargetTitle: " "})
 		Expect(err).To(HavePageValidationFields("path", "title"))
 	})
 
@@ -289,7 +288,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		orchestrator := pagesave.NewPageSaveOrchestrator(recorder)
 		slugger := tree.NewSlugService()
 		log := slog.Default()
-		userID := tree.UserIDFromString("pages-event-user")
+		userID := newFixtureUserID("pages-event-user")
 		kind := tree.NodeKindPage
 
 		createUC := NewCreatePageUseCase(deps.tree, slugger, orchestrator, log)
@@ -297,7 +296,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			UserID: userID,
 			Source: pagesave.PageMutationSourceMCP,
 			Title:  "Original",
-			Slug:   tree.SlugFromString("original"),
+			Slug:   newFixtureSlug("original"),
 			Kind:   &kind,
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -316,7 +315,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			ID:      created.Page.ID,
 			Version: created.Page.Version(),
 			Title:   "Renamed",
-			Slug:    tree.SlugFromString("renamed"),
+			Slug:    newFixtureSlug("renamed"),
 			Content: &content,
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -324,7 +323,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		updatedEvent := SatisfyAll(
 			matchPageSaveEvent(gstruct.Fields{
 				"Operation":     Equal(pagesave.PageOperationUpdate),
-				"OldPath":       Equal(tree.RoutePath("original")),
+				"OldPath":       Equal(newFixtureRoutePath("original")),
 				"AffectedPages": HaveLen(1),
 			}),
 			HavePageSaveContentChange(),
@@ -345,7 +344,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		deletedEvent := matchPageSaveEvent(gstruct.Fields{
 			"Operation":     Equal(pagesave.PageOperationDelete),
 			"Before":        HaveField("ID", Equal(updated.Page.ID)),
-			"OldPath":       Equal(tree.RoutePath("renamed")),
+			"OldPath":       Equal(newFixtureRoutePath("renamed")),
 			"AffectedPages": HaveLen(1),
 		})
 		Expect(recorder.events).To(HaveExactElements(createdEvent, updatedEvent, deletedEvent))
@@ -377,11 +376,11 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		recorder := &recordingPageSaveEffect{}
 		applyUC.orchestrator = pagesave.NewPageSaveOrchestrator(recorder)
-		Expect(applyUC.runBulkContentUpdateSideEffects("editor", "test", nil)).To(Succeed())
+		Expect(applyUC.runBulkContentUpdateSideEffects(newFixtureUserID("editor"), "test", nil)).To(Succeed())
 		Expect(recorder.events).To(BeEmpty())
 
-		page := deps.createPage("Helper", "helper", tree.NodeKindPage, nil)
-		Expect(applyUC.runBulkContentUpdateSideEffects("editor", "test", []*tree.Page{page})).To(Succeed())
+		page := deps.createPage("Helper", newFixtureSlug("helper"), tree.NodeKindPage, nil)
+		Expect(applyUC.runBulkContentUpdateSideEffects(newFixtureUserID("editor"), "test", []*tree.Page{page})).To(Succeed())
 		Expect(recorder.events).To(HaveExactElements(SatisfyAll(
 			matchPageSaveEvent(gstruct.Fields{
 				"Operation":     Equal(pagesave.PageOperationUpdate),
@@ -391,11 +390,11 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		)))
 
 		Expect(applyUC.loadPagesByID(nil, "unused")).To(BeEmpty())
-		loaded := applyUC.loadPagesByID([]tree.PageID{page.ID, tree.PageIDFromString("missing")}, "missing")
+		loaded := applyUC.loadPagesByID([]tree.PageID{page.ID, newFixturePageID("missing")}, "missing")
 		Expect(loaded).To(HaveKey(page.ID))
-		Expect(loaded).NotTo(HaveKey(tree.PageIDFromString("missing")))
+		Expect(loaded).NotTo(HaveKey(newFixturePageID("missing")))
 
-		ordered := applyUC.loadPagesInOrder([]tree.PageID{tree.PageIDFromString("missing"), page.ID}, "missing")
+		ordered := applyUC.loadPagesInOrder([]tree.PageID{newFixturePageID("missing"), page.ID}, "missing")
 		Expect(ordered).To(Equal([]*tree.Page{page}))
 
 		Expect(planNodeKind(nil)).To(Equal(tree.NodeKindPage))
@@ -407,7 +406,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 	ginkgo.It("returns structured route errors for malformed payloads", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
-		page := deps.createPage("Payload", "payload", tree.NodeKindPage, nil)
+		page := deps.createPage("Payload", newFixtureSlug("payload"), tree.NodeKindPage, nil)
 
 		rec := performRoutesRequest(
 			http.MethodPut,
@@ -481,8 +480,8 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		Expect(semanticPageIDPtr(nil)).To(BeNil())
 		rawParent := " parent "
-		Expect(*semanticPageIDPtr(&rawParent)).To(Equal(tree.PageIDFromString(" parent ")))
-		Expect(semanticPageIDs([]string{"one", "two"})).To(Equal([]tree.PageID{tree.PageIDFromString("one"), tree.PageIDFromString("two")}))
+		Expect(*semanticPageIDPtr(&rawParent)).To(Equal(newFixturePageID(" parent ")))
+		Expect(semanticPageIDs([]string{"one", "two"})).To(Equal([]tree.PageID{newFixturePageID("one"), newFixturePageID("two")}))
 
 		_, err := ValidateSuggestSlugTitle("!!!")
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidTitle))

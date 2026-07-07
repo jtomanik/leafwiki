@@ -5,15 +5,21 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/localization"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 type catalogRenderState string
+type messageTextState string
 
 const (
 	catalogRenderBacked  catalogRenderState = "catalog-backed"
 	catalogRenderMissing catalogRenderState = "missing"
 	catalogRenderErrored catalogRenderState = "errored"
+
+	messageTextPresent messageTextState = "present"
+	messageTextMissing messageTextState = "missing"
 )
 
 func matchCatalogMessageRender() types.GomegaMatcher {
@@ -29,6 +35,30 @@ func catalogRenderStateFor(result localization.Result) catalogRenderState {
 		return catalogRenderMissing
 	}
 	return catalogRenderBacked
+}
+
+type messageOutputProjection struct {
+	MessageID ToolMessageID
+	Message   messageTextState
+}
+
+func matchMessageOutput(messageID ToolMessageID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(messageOutputProjectionFor, Equal(messageOutputProjection{
+		MessageID: messageID,
+		Message:   messageTextPresent,
+	}))
+}
+
+func messageOutputProjectionFor(output messageOutput) messageOutputProjection {
+	messageState := messageTextMissing
+	if output.Message != "" {
+		messageState = messageTextPresent
+	}
+	return messageOutputProjection{
+		MessageID: output.MessageID,
+		Message:   messageState,
+	}
 }
 
 type markdownValidationState string
@@ -157,6 +187,121 @@ func validationOutputProjectionFor(output validationOutput) validationOutputProj
 		Errors:   output.Summary.Errors,
 		Warnings: output.Summary.WarningCount,
 	}
+}
+
+func matchMCPSyncLastErrorDetail(code sharederrors.ErrorCode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(syncStatus map[string]any) any {
+		return syncStatus["lastErrorDetail"]
+	}, testmatchers.HaveStructuredError(code, sharederrors.MessageIDForCode(code)))
+}
+
+func matchMCPSyncLastErrorAbsent() types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(syncStatus map[string]any) any {
+		return syncStatus["lastErrorDetail"]
+	}, BeNil())
+}
+
+func matchRedactedMCPSyncLastErrorDetail(code sharederrors.ErrorCode, forbidden ...string) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(syncStatus map[string]any) any {
+		return syncStatus["lastErrorDetail"]
+	}, SatisfyAll(
+		testmatchers.HaveStructuredError(code, sharederrors.MessageIDForCode(code)),
+		HaveField("Message", rejectSubstrings(forbidden...)),
+		HaveField("Template", rejectSubstrings(forbidden...)),
+	))
+}
+
+func matchMCPToolErrorMeta(code sharederrors.ErrorCode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(meta map[string]any) any {
+		return meta["error"]
+	}, SatisfyAll(
+		testmatchers.HaveMCPStructuredError(code, sharederrors.MessageIDForCode(code)),
+		HaveKeyWithValue("args", HaveLen(1)),
+	))
+}
+
+type validationIssueOutputProjection struct {
+	Code      wikivalidation.IssueCode
+	Path      string
+	MessageID sharederrors.MessageID
+	Severity  wikivalidation.IssueSeverity
+}
+
+func matchValidationIssueOutput(code wikivalidation.IssueCode, path string, messageID sharederrors.MessageID, severity wikivalidation.IssueSeverity) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(validationIssueOutputProjectionFor, Equal(validationIssueOutputProjection{
+		Code:      code,
+		Path:      path,
+		MessageID: messageID,
+		Severity:  severity,
+	}))
+}
+
+func validationIssueOutputProjectionFor(issue any) validationIssueOutputProjection {
+	switch issue := issue.(type) {
+	case validationIssueOutput:
+		return validationIssueOutputProjection{
+			Code:      issue.Code,
+			Path:      issue.Path,
+			MessageID: issue.MessageID,
+			Severity:  issue.Severity,
+		}
+	case wikivalidation.WorkspaceStatusIssue:
+		return validationIssueOutputProjection{
+			Code:      issue.Code,
+			Path:      issue.Path,
+			MessageID: issue.MessageID,
+			Severity:  issue.Severity,
+		}
+	default:
+		return validationIssueOutputProjection{}
+	}
+}
+
+func matchRedactedValidationIssueOutput(path string, requiredMessage string, forbidden ...string) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return SatisfyAll(
+		HaveField("Path", Equal(path)),
+		HaveField("Message", SatisfyAll(ContainSubstring(requiredMessage), rejectSubstrings(forbidden...))),
+	)
+}
+
+func matchWorkspaceValidationError(path string, requiredMessage string, forbidden ...string) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return SatisfyAll(
+		HaveField("Path", Equal(path)),
+		HaveField("Message", SatisfyAll(ContainSubstring(requiredMessage), rejectSubstrings(forbidden...))),
+	)
+}
+
+func matchMCPRefreshValidation(errorCount int, issueMatcher types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return SatisfyAll(
+		HaveField("Summary.Errors", Equal(errorCount)),
+		HaveField("Issues", HaveExactElements(issueMatcher)),
+	)
+}
+
+func rejectSubstrings(values ...string) types.GomegaMatcher {
+	if len(values) == 0 {
+		return BeAssignableToTypeOf("")
+	}
+	matchers := make([]types.GomegaMatcher, 0, len(values))
+	for _, value := range values {
+		matchers = append(matchers, Not(ContainSubstring(value)))
+	}
+	return SatisfyAll(matchers...)
+}
+
+func matchWorkspaceValidationErrorDetails(issueMatcher types.GomegaMatcher) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(syncStatus map[string]any) any {
+		return syncStatus["validationErrorDetails"]
+	}, HaveExactElements(issueMatcher))
 }
 
 type searchPaginationState string

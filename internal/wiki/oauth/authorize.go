@@ -69,7 +69,7 @@ func (r *Routes) handleAuthorize(ctx httpinternal.RouterContext) gin.HandlerFunc
 			return
 		}
 
-		session := newFositeSession(user.ID, user.Username)
+		session := newFositeSession(user.ID.MetadataValue(), user.Username)
 		req.SetSession(session)
 		req.GrantScope(ScopeMCP)
 		info, err := oauthNewAuthorizeResponse(r.service.fositeProvider, c.Request.Context(), req, session)

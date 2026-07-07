@@ -106,9 +106,9 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		out, err := uc.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1",
+			UserID: newFixtureUserID("user1"),
 			Title:  "Home",
-			Slug:   "home",
+			Slug:   newFixtureSlug("home"),
 			Kind:   pageKind(),
 		})
 		Expect(err).To(Succeed())
@@ -123,18 +123,18 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		parent, err := uc.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1",
+			UserID: newFixtureUserID("user1"),
 			Title:  "Docs",
-			Slug:   "docs",
+			Slug:   newFixtureSlug("docs"),
 			Kind:   pageKind(),
 		})
 		Expect(err).To(Succeed())
 
 		child, err := uc.Execute(context.Background(), pages.CreatePageInput{
-			UserID:   "user1",
+			UserID:   newFixtureUserID("user1"),
 			ParentID: pageIDPtr(parent.Page.ID),
 			Title:    "Reference",
-			Slug:     "reference",
+			Slug:     newFixtureSlug("reference"),
 			Kind:     pageKind(),
 		})
 		Expect(err).To(Succeed())
@@ -146,9 +146,9 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1",
+			UserID: newFixtureUserID("user1"),
 			Title:  "",
-			Slug:   "home",
+			Slug:   newFixtureSlug("home"),
 			Kind:   pageKind(),
 		})
 		Expect(err).To(HavePageValidationFieldError("title", pages.FieldCodePageTitleRequired, pages.MessageIDPageTitleRequired))
@@ -159,9 +159,9 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1",
+			UserID: newFixtureUserID("user1"),
 			Title:  "Reserved",
-			Slug:   "e", // too short / reserved
+			Slug:   newFixtureSlug("e"), // too short / reserved
 			Kind:   pageKind(),
 		})
 		Expect(err).To(HavePageValidationFieldError("slug", pages.FieldCodePageSlugInvalid, pages.MessageIDPageSlugInvalid))
@@ -172,7 +172,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		parentID := newFixturePageID("parent-1")
 		version := newFixturePageVersion("version-1")
 		slug := newFixtureSlug("page-slug")
-		routePath := tree.RoutePath("docs/page")
+		routePath := newFixtureRoutePath("docs/page")
 
 		_ = pages.GetPageInput{ID: pageID}
 		_ = pages.ResolvePermalinkInput{ID: pageID}
@@ -219,9 +219,9 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1",
+			UserID: newFixtureUserID("user1"),
 			Title:  "Test",
-			Slug:   "test",
+			Slug:   newFixtureSlug("test"),
 			Kind:   nil,
 		})
 		Expect(err).To(HavePageValidationFieldError("kind", pages.FieldCodePageKindRequired, pages.MessageIDPageKindRequired))
@@ -232,9 +232,9 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		out, err := uc.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1",
+			UserID: newFixtureUserID("user1"),
 			Title:  "Section",
-			Slug:   "section",
+			Slug:   newFixtureSlug("section"),
 			Kind:   sectionKind(),
 		})
 		Expect(err).To(Succeed())
@@ -251,17 +251,17 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Old Title", Slug: "old-title", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Old Title", Slug: newFixtureSlug("old-title"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 
 		content := "updated content"
 		out, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID:  "user1",
+			UserID:  newFixtureUserID("user1"),
 			ID:      pageID(created.Page.ID),
 			Version: pageVersion(created.Page.Version()),
 			Title:   "New Title",
-			Slug:    "new-title",
+			Slug:    newFixtureSlug("new-title"),
 			Content: &content,
 			Kind:    pageKind(),
 		})
@@ -278,18 +278,18 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Old Title", Slug: "old-title", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Old Title", Slug: newFixtureSlug("old-title"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 		staleVersion := created.Page.Version()
 
 		firstContent := "first update"
 		updated, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID:  "user1",
+			UserID:  newFixtureUserID("user1"),
 			ID:      pageID(created.Page.ID),
 			Version: pageVersion(staleVersion),
 			Title:   "New Title",
-			Slug:    "new-title",
+			Slug:    newFixtureSlug("new-title"),
 			Content: &firstContent,
 			Kind:    pageKind(),
 		})
@@ -297,7 +297,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 
 		secondContent := "second update"
 		_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID:  "user2",
+			UserID:  newFixtureUserID("user2"),
 			ID:      pageID(created.Page.ID),
 			Version: pageVersion(staleVersion),
 			Title:   updated.Page.Title,
@@ -314,17 +314,17 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		created, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Page", Slug: "page", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Page", Slug: newFixtureSlug("page"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 
 		content := "new content"
 		_, err = updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID:  "user1",
+			UserID:  newFixtureUserID("user1"),
 			ID:      pageID(created.Page.ID),
-			Version: newFixturePageVersion("\x00"),
+			Version: newFixtureRawPageVersion("\x00"),
 			Title:   "Page",
-			Slug:    "page",
+			Slug:    newFixtureSlug("page"),
 			Content: &content,
 			Kind:    pageKind(),
 		})
@@ -337,11 +337,11 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Page", Slug: "page", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Page", Slug: newFixtureSlug("page"), Kind: pageKind(),
 		})
 
 		_, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "user1", ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "", Slug: "page", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), ID: pageID(created.Page.ID), Version: pageVersion(created.Page.Version()), Title: "", Slug: newFixtureSlug("page"), Kind: pageKind(),
 		})
 		Expect(err).To(HavePageValidationFieldError("title", pages.FieldCodePageTitleRequired, pages.MessageIDPageTitleRequired))
 	})
@@ -356,11 +356,11 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 		created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "To Delete", Slug: "to-delete", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "To Delete", Slug: newFixtureSlug("to-delete"), Kind: pageKind(),
 		})
 
 		if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-			UserID:    "user1",
+			UserID:    newFixtureUserID("user1"),
 			ID:        pageID(created.Page.ID),
 			Version:   pageVersion(created.Page.Version()),
 			Recursive: false,
@@ -379,7 +379,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 		err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-			UserID: "user1", ID: "root", Recursive: false,
+			UserID: newFixtureUserID("user1"), ID: newFixturePageID("root"), Recursive: false,
 		})
 		Expect(err).To(MatchPageLocalizedCode(pages.ErrCodePageRootOperation))
 	})
@@ -390,14 +390,14 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 		parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Parent", Slug: newFixtureSlug("parent"), Kind: pageKind(),
 		})
 		createUC.Execute(context.Background(), pages.CreatePageInput{ //nolint:errcheck
-			UserID: "user1", ParentID: pageIDPtr(parent.Page.ID), Title: "Child", Slug: "child", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), ParentID: pageIDPtr(parent.Page.ID), Title: "Child", Slug: newFixtureSlug("child"), Kind: pageKind(),
 		})
 
 		err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-			UserID: "user1", ID: pageID(parent.Page.ID), Version: pageVersion(parent.Page.Version()), Recursive: true,
+			UserID: newFixtureUserID("user1"), ID: pageID(parent.Page.ID), Version: pageVersion(parent.Page.Version()), Recursive: true,
 		})
 		Expect(err).To(Succeed())
 	})
@@ -412,14 +412,14 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
 
 		parent, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Parent", Slug: "parent", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Parent", Slug: newFixtureSlug("parent"), Kind: pageKind(),
 		})
 		child, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Child", Slug: "child", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Child", Slug: newFixtureSlug("child"), Kind: pageKind(),
 		})
 
 		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-			UserID:   "user1",
+			UserID:   newFixtureUserID("user1"),
 			ID:       pageID(child.Page.ID),
 			Version:  pageVersion(child.Page.Version()),
 			ParentID: pageID(parent.Page.ID),
@@ -438,29 +438,29 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
 
 		parentA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Parent A", Slug: "parent-a", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Parent A", Slug: newFixtureSlug("parent-a"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 		parentB, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Parent B", Slug: "parent-b", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Parent B", Slug: newFixtureSlug("parent-b"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 		parentC, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "user1", Title: "Parent C", Slug: "parent-c", Kind: pageKind(),
+			UserID: newFixtureUserID("user1"), Title: "Parent C", Slug: newFixtureSlug("parent-c"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 		child, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID:   "user1",
+			UserID:   newFixtureUserID("user1"),
 			ParentID: pageIDPtr(parentA.Page.ID),
 			Title:    "Child",
-			Slug:     "child",
+			Slug:     newFixtureSlug("child"),
 			Kind:     pageKind(),
 		})
 		Expect(err).To(Succeed())
 		staleVersion := child.Page.Version()
 
 		if err := moveUC.Execute(context.Background(), pages.MovePageInput{
-			UserID:   "user1",
+			UserID:   newFixtureUserID("user1"),
 			ID:       pageID(child.Page.ID),
 			Version:  pageVersion(staleVersion),
 			ParentID: pageID(parentB.Page.ID),
@@ -469,7 +469,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		}
 
 		err = moveUC.Execute(context.Background(), pages.MovePageInput{
-			UserID:   "user2",
+			UserID:   newFixtureUserID("user2"),
 			ID:       pageID(child.Page.ID),
 			Version:  pageVersion(staleVersion),
 			ParentID: pageID(parentC.Page.ID),
@@ -482,7 +482,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		moveUC := pages.NewMovePageUseCase(deps.tree, deps.orchestrator(), slog.Default())
 
 		err := moveUC.Execute(context.Background(), pages.MovePageInput{
-			UserID: "user1", ID: "root", Version: "root-version", ParentID: "root",
+			UserID: newFixtureUserID("user1"), ID: newFixturePageID("root"), Version: newFixturePageVersion("root-version"), ParentID: newFixturePageID("root"),
 		})
 		Expect(err).To(MatchPageLocalizedCode(pages.ErrCodePageRootOperation))
 	})

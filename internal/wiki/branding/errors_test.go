@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 	corebranding "github.com/perber/wiki/internal/branding"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
@@ -58,11 +57,10 @@ var _ = ginkgo.Describe("branding error responses", func() {
 		Expect(rec).To(testmatchers.HaveHTTPStructuredError(http.StatusInternalServerError, ErrCodeBrandingInternalError, sharederrors.MessageIDForCode(ErrCodeBrandingInternalError)))
 		var body BrandingErrorResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-		Expect(body.Error).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Code":      Equal(ErrCodeBrandingInternalError),
-			"MessageID": Equal(sharederrors.MessageIDForCode(ErrCodeBrandingInternalError)),
-			"Args":      BeEmpty(),
-		}))
+		Expect(body.Error).To(SatisfyAll(
+			testmatchers.HaveStructuredError(ErrCodeBrandingInternalError, sharederrors.MessageIDForCode(ErrCodeBrandingInternalError)),
+			HaveField("Args", BeEmpty()),
+		))
 	})
 
 	ginkgo.It("maps branding error codes to HTTP statuses", ginkgo.Label("unit"), func() {

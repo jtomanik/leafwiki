@@ -33,7 +33,7 @@ func newRevisionRouteFixture() revisionRouteFixture {
 	})
 	Expect(treeService.LoadTree()).To(Succeed())
 	kind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode("alice", nil, "Page A", "page-a", &kind)
+	pageID, err := treeService.CreateNode(newFixtureUserID("alice"), nil, "Page A", newFixtureSlug("page-a"), &kind)
 	Expect(err).NotTo(HaveOccurred())
 
 	return revisionRouteFixture{
@@ -111,6 +111,20 @@ func matchContentChangedRevisionComparison(baseContent string, targetContent str
 	return WithTransform(observeRevisionComparison, gstruct.MatchFields(gstruct.IgnoreExtras, fields))
 }
 
+func matchRevisionWireID(want revision.RevisionID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(got string) revision.RevisionID {
+		return revision.RevisionIDFromString(got)
+	}, Equal(want))
+}
+
+func matchRevisionPageWireID(want tree.PageID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(got string) tree.PageID {
+		return tree.PageIDFromString(got)
+	}, Equal(want))
+}
+
 func MatchRevisionErrorCode(code sharederrors.ErrorCode) types.GomegaMatcher {
 	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
 }
@@ -125,7 +139,7 @@ func revisionFor(pageID tree.PageID, revisionID revision.RevisionID) *revision.R
 		AuthorID:  "alice",
 		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 		Title:     "Page A",
-		Slug:      "page-a",
+		Slug:      newFixtureSlug("page-a"),
 		Kind:      tree.NodeKindPage,
 		Path:      "page-a",
 	}

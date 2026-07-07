@@ -231,7 +231,7 @@ var _ = ginkgo.Describe("wiki startup initialization behavior", ginkgo.Label("in
 				return &wikipages.CreatePageOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("welcome")}}}, nil
 			}
 			wikiGetWelcomePage = func(*tree.TreeService, tree.PageID) (*tree.Page, error) {
-				return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("welcome"), Title: "Welcome", Slug: "welcome"}}, nil
+				return &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("welcome"), Title: "Welcome", Slug: newFixtureSlug("welcome")}}, nil
 			}
 			wikiUpdateWelcomePage = func(*Wiki, tree.UserID, *tree.Page, *string, *tree.NodeKind) (*wikipages.UpdatePageOutput, error) {
 				return nil, expected
@@ -252,7 +252,7 @@ var _ = ginkgo.Describe("wiki startup initialization behavior", ginkgo.Label("in
 		wikiTreeGetPages = func(*tree.TreeService, []tree.PageID) ([]*tree.Page, []error) {
 			return []*tree.Page{
 				nil,
-				{PageNode: &tree.PageNode{ID: newFixturePageID("indexed"), Title: "Indexed", Slug: "indexed"}, RawContent: "body"},
+				{PageNode: &tree.PageNode{ID: newFixturePageID("indexed"), Title: "Indexed", Slug: newFixtureSlug("indexed")}, RawContent: "body"},
 			}, []error{expected, nil}
 		}
 		wikiTagsIndexPageContent = func(*tags.TagsService, tree.PageID, string) error { return expected }

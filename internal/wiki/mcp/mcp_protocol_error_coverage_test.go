@@ -101,7 +101,7 @@ func newProtocolErrorWikiWithStorage() (*wiki.Wiki, string) {
 	rootDir := filepath.Join(protocolErrorTempDir(), "content")
 	w, err := wiki.NewWiki(&wiki.WikiOptions{
 		Workspace: wiki.Workspace{
-			ID:      "default",
+			ID:      newFixtureWorkspaceID("default"),
 			DataDir: storageDir,
 			RootDir: rootDir,
 		},

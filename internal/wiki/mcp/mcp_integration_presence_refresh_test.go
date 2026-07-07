@@ -77,15 +77,15 @@ var _ = Describe("local MCP presence", Label("integration"), func() {
 		agentPresence.Record(agenthooks.Event{
 			Provider:      agenthooks.ProviderCodex,
 			SessionIDHash: sessionHash,
-			EventName:     "SessionStart",
+			EventName:     agenthooks.AgentEventSessionStart,
 			Model:         "gpt-5",
-			Source:        "hook",
+			Source:        agenthooks.AgentSourceHook,
 			SeenAt:        time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC),
 		})
 		agentPresence.Record(agenthooks.Event{
 			Provider:      agenthooks.ProviderCodex,
 			SessionIDHash: sessionHash,
-			EventName:     "SubagentStart",
+			EventName:     agenthooks.AgentEventSubagentStart,
 			SubagentDelta: 1,
 			SeenAt:        time.Date(2026, 6, 8, 12, 0, 1, 0, time.UTC),
 		})

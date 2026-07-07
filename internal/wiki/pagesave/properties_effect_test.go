@@ -30,7 +30,7 @@ var _ = ginkgo.Describe("property indexing side effect", ginkgo.Label("integrati
 		ginkgo.It("indexes the page under each declared property", func() {
 			treeSvc, propsSvc, effect := setupPropertiesEffectTest()
 			raw := "---\nstatus: draft\nauthor: alice\n---\n\nPage body."
-			page := createPageWithFrontmatter(treeSvc, "Props Page", "props-page", raw)
+			page := createPageWithFrontmatter(treeSvc, "Props Page", newFixtureSlug("props-page"), raw)
 
 			effect.Apply(PageSaveEvent{
 				Operation: PageOperationCreate,
@@ -51,7 +51,7 @@ var _ = ginkgo.Describe("property indexing side effect", ginkgo.Label("integrati
 		ginkgo.It("removes stale property mappings and indexes the new value", func() {
 			treeSvc, propsSvc, effect := setupPropertiesEffectTest()
 			raw := "---\nstatus: draft\n---\n\nOriginal."
-			page := createPageWithFrontmatter(treeSvc, "Update Props", "update-props", raw)
+			page := createPageWithFrontmatter(treeSvc, "Update Props", newFixtureSlug("update-props"), raw)
 			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
 			newRaw := "---\nstatus: published\n---\n\nUpdated."
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("property indexing side effect", ginkgo.Label("integrati
 		ginkgo.It("removes the page from property lookups", func() {
 			treeSvc, propsSvc, effect := setupPropertiesEffectTest()
 			raw := "---\nstatus: draft\n---\n\nBody."
-			page := createPageWithFrontmatter(treeSvc, "Delete Props", "delete-props", raw)
+			page := createPageWithFrontmatter(treeSvc, "Delete Props", newFixtureSlug("delete-props"), raw)
 			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
 			effect.Apply(PageSaveEvent{

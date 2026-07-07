@@ -27,8 +27,8 @@ var _ = ginkgo.Describe("workspace validation edges", ginkgo.Label("unit"), func
 	ginkgo.It("rejects missing data and equal root/data directories", func() {
 		sameDir := filepath.Join(wikiTestTempDir(), "same")
 
-		Expect(ValidateWorkspace(Workspace{ID: "default"})).To(MatchError(ErrWorkspaceDataDirRequired))
-		Expect(ValidateWorkspace(Workspace{ID: "default", DataDir: sameDir, RootDir: sameDir})).To(MatchError(ErrWorkspaceRootDirEqualsDataDir))
+		Expect(ValidateWorkspace(Workspace{ID: newFixtureWorkspaceID("default")})).To(MatchError(ErrWorkspaceDataDirRequired))
+		Expect(ValidateWorkspace(Workspace{ID: newFixtureWorkspaceID("default"), DataDir: sameDir, RootDir: sameDir})).To(MatchError(ErrWorkspaceRootDirEqualsDataDir))
 	})
 
 	ginkgo.It("surfaces absolute path failures from the resolver", func() {
@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("workspace validation edges", ginkgo.Label("unit"), func
 		}
 
 		err := ValidateWorkspace(Workspace{
-			ID:      "default",
+			ID:      newFixtureWorkspaceID("default"),
 			DataDir: dataDir,
 			RootDir: rootDir,
 		})
@@ -71,7 +71,7 @@ var _ = ginkgo.Describe("workspace validation edges", ginkgo.Label("unit"), func
 		}
 
 		err = ValidateWorkspace(Workspace{
-			ID:      "default",
+			ID:      newFixtureWorkspaceID("default"),
 			DataDir: dataDir,
 			RootDir: rootDir,
 		})

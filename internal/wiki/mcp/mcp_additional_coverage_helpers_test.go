@@ -293,7 +293,7 @@ func matchValidationPageID(state validationResolutionState, pageIDMatcher types.
 	})
 }
 
-func mcpTokenInfoRequest(userID string) *sdkmcp.CallToolRequest {
+func mcpTokenInfoRequest(userID tree.UserID) *sdkmcp.CallToolRequest {
 	GinkgoHelper()
-	return &sdkmcp.CallToolRequest{Extra: &sdkmcp.RequestExtra{TokenInfo: &sdkauth.TokenInfo{UserID: userID}}}
+	return &sdkmcp.CallToolRequest{Extra: &sdkmcp.RequestExtra{TokenInfo: &sdkauth.TokenInfo{UserID: userID.MetadataValue()}}}
 }

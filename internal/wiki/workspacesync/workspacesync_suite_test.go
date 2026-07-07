@@ -3,8 +3,8 @@ package workspacesyncapi
 import (
 	"testing"
 
-	. "github.com/onsi/gomega"
 	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 func TestWorkspacesyncSuite(t *testing.T) {

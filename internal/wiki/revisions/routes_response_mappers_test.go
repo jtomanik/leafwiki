@@ -30,7 +30,7 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		rev := revisionFor(newFixturePageID("page-1"), newFixtureRevisionID("rev-1"))
-		rev.AuthorID = user.ID
+		rev.AuthorID = user.ID.MetadataValue()
 
 		out := ToRevisionResponse(rev, resolver)
 		Expect(out.Author).To(Equal(&coreauth.UserLabel{ID: user.ID, Username: "alice"}))
@@ -49,7 +49,7 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 				AuthorID:             "alice",
 				CreatedAt:            createdAt,
 				Title:                "Title",
-				Slug:                 "title",
+				Slug:                 newFixtureSlug("title"),
 				Kind:                 tree.NodeKindPage,
 				Path:                 "title",
 				ContentHash:          "content-hash",
@@ -73,9 +73,9 @@ var _ = ginkgo.Describe("revision response mappers", func() {
 		Expect(ToSnapshotResponse(snapshot, nil)).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Content": Equal("body"),
 			"Revision": gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"ID":            Equal("rev-1"),
-				"PageID":        Equal("page-1"),
-				"ParentID":      Equal("parent-1"),
+				"ID":            matchRevisionWireID(newFixtureRevisionID("rev-1")),
+				"PageID":        matchRevisionPageWireID(newFixturePageID("page-1")),
+				"ParentID":      matchRevisionPageWireID(newFixturePageID("parent-1")),
 				"CreatedAt":     Equal(createdAt.Format(time.RFC3339)),
 				"PageCreatedAt": Equal(createdAt.Format(time.RFC3339)),
 				"PageUpdatedAt": Equal(createdAt.Add(time.Hour).Format(time.RFC3339)),

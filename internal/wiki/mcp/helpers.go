@@ -119,7 +119,7 @@ func (r *Routes) actorFromPrivateContextHeader(header http.Header) (*coreauth.Us
 		return nil, true, newMCPHelperError(errCodeMCPActorContextInvalid, "private MCP actor context invalid", err)
 	}
 	return &coreauth.User{
-		ID:       actor.SubjectID(),
+		ID:       coreauth.UserIDFromString(actor.SubjectID()),
 		Username: actor.Username,
 		Email:    actor.Email,
 		Role:     actor.Role,

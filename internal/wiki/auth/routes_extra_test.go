@@ -118,7 +118,7 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 		Expect(rec).To(HaveHTTPHeaderWithValue("X-CSRF-Token", Not(BeEmpty())))
-		Expect(rec).To(matchAuthJSONBodyField("authDisabled", false))
+		Expect(rec).To(matchAuthJSONBodyField(authJSONFieldAuthDisabled, false))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleConfig(fixture.routerContext(false)),
@@ -138,7 +138,7 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 
 		rec = performAuthHandlerRequest(fixture.routes.handleMe, http.MethodGet, "/api/auth/me", nil, nil, fixture.admin, false)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		Expect(rec).To(matchAuthJSONBodyField("username", "admin"))
+		Expect(rec).To(matchAuthJSONBodyField(authJSONFieldUsername, "admin"))
 	})
 
 	ginkgo.It("handles login, logout, and refresh-token requests", func() {

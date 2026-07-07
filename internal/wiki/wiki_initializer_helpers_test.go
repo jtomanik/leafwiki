@@ -264,7 +264,7 @@ func newInitializerWiki() *Wiki {
 		props:       properties.NewPropertiesService(propsStore),
 		searchIndex: searchIndex,
 		storageDir:  storageDir,
-		workspace:   Workspace{ID: "default", DataDir: storageDir, RootDir: rootDir},
+		workspace:   Workspace{ID: newFixtureWorkspaceID("default"), DataDir: storageDir, RootDir: rootDir},
 		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }

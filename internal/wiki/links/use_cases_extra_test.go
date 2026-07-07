@@ -184,9 +184,9 @@ func newWikiLinksFixture() wikiLinksFixture {
 	treeService := tree.NewTreeService(dataDir)
 	Expect(treeService.LoadTree()).To(Succeed())
 	pageKind := tree.NodeKindPage
-	sourceID, err := treeService.CreateNode("user-1", nil, "Source", "source", &pageKind)
+	sourceID, err := treeService.CreateNode(newFixtureUserID("user-1"), nil, "Source", newFixtureSlug("source"), &pageKind)
 	Expect(err).NotTo(HaveOccurred())
-	targetID, err := treeService.CreateNode("user-1", nil, "Target", "target", &pageKind)
+	targetID, err := treeService.CreateNode(newFixtureUserID("user-1"), nil, "Target", newFixtureSlug("target"), &pageKind)
 	Expect(err).NotTo(HaveOccurred())
 
 	store, err := corelinks.NewLinksStore(dataDir)

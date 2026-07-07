@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/assets"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	wikiassets "github.com/perber/wiki/internal/wiki/assets"
@@ -137,25 +138,26 @@ func runLocalMCPProtocolIndexAndAssetParity() {
 		"contentBase64": base64.StdEncoding.EncodeToString(assetContent),
 	})
 	Expect(uploaded).To(HaveKeyWithValue("file", "/assets/"+sourceID+"/note.txt"))
-	httpUploaded := uploadHTTPAsset(router, sourceID, "http-note.txt", httpAssetContent, http.StatusCreated)
-	Expect(uploaded).To(matchAssetURLResult("file", sourceID), "wiki_upload_asset")
-	Expect(httpUploaded).To(matchAssetURLResult("file", sourceID), "HTTP upload asset")
+	sourcePageID := tree.PageIDFromString(sourceID)
+	httpUploaded := uploadHTTPAsset(router, sourcePageID, newFixtureAssetName("http-note.txt"), httpAssetContent, http.StatusCreated)
+	Expect(uploaded).To(matchAssetURLResult("file", sourcePageID), "wiki_upload_asset")
+	Expect(httpUploaded).To(matchAssetURLResult("file", sourcePageID), "HTTP upload asset")
 	asset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "note.txt"})
 	Expect(asset).To(SatisfyAll(
 		HaveKeyWithValue("filename", "note.txt"),
 		HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(assetContent)),
 	))
-	httpNoteBody, httpNoteContentType := getHTTPAssetWithContentType(router, sourceID, "note.txt")
+	httpNoteBody, httpNoteContentType := getHTTPAssetWithContentType(router, sourcePageID, newFixtureAssetName("note.txt"))
 	Expect(httpNoteBody).To(Equal(string(assetContent)))
 	Expect(httpNoteContentType).To(HavePrefix(asset["mimeType"].(string)))
 	httpAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-note.txt"})
 	Expect(httpAsset).To(HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(httpAssetContent)))
-	httpAssetBody, httpAssetContentType := getHTTPAssetWithContentType(router, sourceID, "http-note.txt")
+	httpAssetBody, httpAssetContentType := getHTTPAssetWithContentType(router, sourcePageID, newFixtureAssetName("http-note.txt"))
 	Expect(httpAssetBody).To(Equal(string(httpAssetContent)))
 	Expect(httpAssetContentType).To(HavePrefix(httpAsset["mimeType"].(string)))
 	listed := callToolStructured(session, "wiki_list_assets", map[string]any{"pageId": sourceID})
 	Expect(stringSliceField(listed, "files")).To(ContainElement("/assets/" + sourceID + "/note.txt"))
-	httpListed := getHTTPAssets(router, sourceID)
+	httpListed := getHTTPAssets(router, sourcePageID)
 	Expect(stringSliceField(httpListed, "files")).To(ContainElement("/assets/" + sourceID + "/note.txt"))
 	Expect(listed).To(matchJSONEqual(httpListed), "wiki_list_assets")
 	recordHTTPMCPParity("wiki_upload_asset", "POST /api/pages/:id/assets")
@@ -167,7 +169,7 @@ func runLocalMCPProtocolIndexAndAssetParity() {
 		"contentBase64": base64.StdEncoding.EncodeToString(cssContent),
 	})
 	cssAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "style.css"})
-	httpCSSBody, httpCSSContentType := getHTTPAssetWithContentType(router, sourceID, "style.css")
+	httpCSSBody, httpCSSContentType := getHTTPAssetWithContentType(router, sourcePageID, newFixtureAssetName("style.css"))
 	Expect(httpCSSBody).To(Equal(string(cssContent)))
 	Expect(httpCSSContentType).To(HavePrefix(cssAsset["mimeType"].(string)))
 
@@ -181,21 +183,21 @@ func runLocalMCPProtocolIndexAndAssetParity() {
 		"old_filename": "http-note.txt",
 		"new_filename": "http-renamed.txt",
 	}, http.StatusOK)
-	Expect(renamed).To(matchAssetURLResult("url", sourceID), "wiki_rename_asset")
-	Expect(httpRenamed).To(matchAssetURLResult("url", sourceID), "HTTP rename_asset")
+	Expect(renamed).To(matchAssetURLResult("url", sourcePageID), "wiki_rename_asset")
+	Expect(httpRenamed).To(matchAssetURLResult("url", sourcePageID), "HTTP rename_asset")
 	renamedAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
 	Expect(renamedAsset).To(HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(assetContent)))
-	httpRenamedBody, httpRenamedContentType := getHTTPAssetWithContentType(router, sourceID, "renamed.txt")
+	httpRenamedBody, httpRenamedContentType := getHTTPAssetWithContentType(router, sourcePageID, newFixtureAssetName("renamed.txt"))
 	Expect(httpRenamedBody).To(Equal(string(assetContent)))
 	Expect(httpRenamedContentType).To(HavePrefix(renamedAsset["mimeType"].(string)))
 	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "note.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
 	getHTTPStatus(router, "/assets/"+sourceID+"/note.txt", http.StatusNotFound)
 	httpRenamedAsset := callToolStructured(session, "wiki_get_asset", map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})
 	Expect(httpRenamedAsset).To(HaveKeyWithValue("contentBase64", base64.StdEncoding.EncodeToString(httpAssetContent)))
-	Expect(getHTTPAsset(router, sourceID, "http-renamed.txt")).To(Equal(string(httpAssetContent)))
+	Expect(getHTTPAsset(router, sourcePageID, newFixtureAssetName("http-renamed.txt"))).To(Equal(string(httpAssetContent)))
 	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-note.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
 	getHTTPStatus(router, "/assets/"+sourceID+"/http-note.txt", http.StatusNotFound)
-	httpListed = getHTTPAssets(router, sourceID)
+	httpListed = getHTTPAssets(router, sourcePageID)
 	listed = callToolStructured(session, "wiki_list_assets", map[string]any{"pageId": sourceID})
 	Expect(listed).To(matchJSONEqual(httpListed), "list_assets after rename")
 	Expect(stringSliceField(httpListed, "files")).To(ContainElements("/assets/"+sourceID+"/renamed.txt", "/assets/"+sourceID+"/http-renamed.txt"))
@@ -203,14 +205,14 @@ func runLocalMCPProtocolIndexAndAssetParity() {
 	mcpDeleted := callToolStructured(session, "wiki_delete_asset", map[string]any{"pageId": sourceID, "filename": "renamed.txt"})
 	httpDeletedBody := deleteHTTPStatus(router, "/api/pages/"+sourceID+"/assets/http-renamed.txt", http.StatusOK)
 	httpDeleted := decodeJSONMap("HTTP delete_asset", []byte(httpDeletedBody))
-	Expect(mcpDeleted).To(matchScopedSuccessPayload(httpDeleted, "mcp.tools.wiki_delete_asset.success", "api.assets.delete.success"), "wiki_delete_asset")
+	Expect(mcpDeleted).To(matchScopedSuccessPayload(httpDeleted, newFixtureToolMessageID("mcp.tools.wiki_delete_asset.success"), newFixtureMessageID("api.assets.delete.success")), "wiki_delete_asset")
 	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "renamed.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
 	getHTTPStatus(router, "/assets/"+sourceID+"/renamed.txt", http.StatusNotFound)
 	Expect(callToolStructuredError(session, wikimcp.ToolGetAsset, map[string]any{"pageId": sourceID, "filename": "http-renamed.txt"})).To(matchMCPStructuredError(wikiassets.ErrCodeAssetNotFound, sharederrors.MessageIDForCode(wikiassets.ErrCodeAssetNotFound)))
 	getHTTPStatus(router, "/assets/"+sourceID+"/http-renamed.txt", http.StatusNotFound)
 	listed = callToolStructured(session, "wiki_list_assets", map[string]any{"pageId": sourceID})
 	Expect(stringSliceField(listed, "files")).NotTo(ContainElement("/assets/" + sourceID + "/renamed.txt"))
-	httpListed = getHTTPAssets(router, sourceID)
+	httpListed = getHTTPAssets(router, sourcePageID)
 	Expect(listed).To(matchJSONEqual(httpListed), "list_assets after delete")
 	Expect(stringSliceField(httpListed, "files")).NotTo(ContainElements("/assets/"+sourceID+"/renamed.txt", "/assets/"+sourceID+"/http-renamed.txt"))
 	recordHTTPMCPParity("wiki_delete_asset", "DELETE /api/pages/:id/assets/:name")

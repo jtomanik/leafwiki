@@ -14,18 +14,18 @@ import (
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
-var _ = ginkgo.Describe("deterministic page helper edges", func() {
+var _ = ginkgo.Describe("page mutation use case failure mapping", func() {
 	ginkgo.It("returns post-mutation failures from page use cases", ginkgo.Label("unit"), func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
-		userID := tree.UserIDFromString("fake-user")
+		userID := newFixtureUserID("fake-user")
 		kindPage := tree.NodeKindPage
 		kindSection := tree.NodeKindSection
 		noEffects := pagesave.NewPageSaveOrchestrator()
 
 		ginkgo.By("create returning an error after the node has been inserted")
-		createdID := tree.PageIDFromString("created")
+		createdID := newFixturePageID("created")
 		createReadErr := errors.New("created page read failed")
 		createTree := &pageUseCaseFakeTree{
 			createNodeFunc: func(tree.UserID, *tree.PageID, string, tree.Slug, *tree.NodeKind) (*tree.PageID, error) {
@@ -38,7 +38,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		_, err := (&CreatePageUseCase{tree: createTree, slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, CreatePageInput{
 			UserID: userID,
 			Title:  "Created",
-			Slug:   tree.SlugFromString("created"),
+			Slug:   newFixtureSlug("created"),
 			Kind:   &kindPage,
 		})
 		Expect(err).To(MatchError(createReadErr))
@@ -46,7 +46,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		ginkgo.By("convert returning an error after the conversion succeeds")
 		convertReadErr := errors.New("converted page read failed")
 		convertCalls := 0
-		convertPage := testFixturePage("convert", "Convert", "convert", tree.NodeKindPage)
+		convertPage := testFixturePage(newFixturePageID("convert"), "Convert", newFixtureSlug("convert"), tree.NodeKindPage)
 		convertTree := &pageUseCaseFakeTree{
 			getPageFunc: func(tree.PageID) (*tree.Page, error) {
 				convertCalls++
@@ -66,8 +66,8 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		})).To(MatchError(convertReadErr))
 
 		ginkgo.By("copy cleanup when the copied page cannot be fetched")
-		sourcePage := testFixturePage("copy-source", "Copy Source", "copy-source", tree.NodeKindPage)
-		copyID := tree.PageIDFromString("copy-created")
+		sourcePage := testFixturePage(newFixturePageID("copy-source"), "Copy Source", newFixtureSlug("copy-source"), tree.NodeKindPage)
+		copyID := newFixturePageID("copy-created")
 		copyFetchErr := errors.New("copied page read failed")
 		cleanupDeletes := 0
 		copyFetchCalls := 0
@@ -93,13 +93,13 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			UserID:       userID,
 			SourcePageID: sourcePage.ID,
 			Title:        "Copy",
-			Slug:         tree.SlugFromString("copy"),
+			Slug:         newFixtureSlug("copy"),
 		})
 		Expect(err).To(MatchError(copyFetchErr))
 		Expect(cleanupDeletes).To(Equal(1))
 
 		ginkgo.By("copy asset cleanup when the copied content update fails")
-		copyPage := testPage(copyID, "Copy", tree.SlugFromString("copy"), tree.NodeKindPage)
+		copyPage := testPage(copyID, "Copy", newFixtureSlug("copy"), tree.NodeKindPage)
 		updateErr := errors.New("copy content update failed")
 		assetsAfterUpdateErr := &fakePageAssets{}
 		copyUpdateCalls := 0
@@ -125,7 +125,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			UserID:       userID,
 			SourcePageID: sourcePage.ID,
 			Title:        "Copy",
-			Slug:         tree.SlugFromString("copy"),
+			Slug:         newFixtureSlug("copy"),
 		})
 		Expect(err).To(MatchError(updateErr))
 		Expect(pageAssetCallCounts(assetsAfterUpdateErr)).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
@@ -162,12 +162,12 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			UserID:       userID,
 			SourcePageID: sourcePage.ID,
 			Title:        "Copy",
-			Slug:         tree.SlugFromString("copy"),
+			Slug:         newFixtureSlug("copy"),
 		})
 		Expect(err).To(MatchError(finalReadErr))
 
 		ginkgo.By("update returning an error after the update succeeds")
-		updateBefore := testFixturePage("update", "Update", "update", tree.NodeKindPage)
+		updateBefore := testFixturePage(newFixturePageID("update"), "Update", newFixtureSlug("update"), tree.NodeKindPage)
 		updateReadErr := errors.New("updated page read failed")
 		updateCalls := 0
 		updateTree := &pageUseCaseFakeTree{
@@ -186,14 +186,14 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			UserID: userID,
 			ID:     updateBefore.ID,
 			Title:  "Update",
-			Slug:   tree.SlugFromString("update"),
+			Slug:   newFixtureSlug("update"),
 		})
 		Expect(err).To(MatchError(updateReadErr))
 
 		ginkgo.By("update warning and continuing when a slug-change affected page fails to load")
-		updateChild := testFixtureChildPage(updateBefore, "update-child", "Update Child", "child", tree.NodeKindPage)
+		updateChild := testFixtureChildPage(updateBefore, newFixturePageID("update-child"), "Update Child", newFixtureSlug("child"), tree.NodeKindPage)
 		updateBefore.Children = []*tree.PageNode{updateChild.PageNode}
-		updateAfter := testFixturePage("update", "Renamed", "renamed", tree.NodeKindPage)
+		updateAfter := testFixturePage(newFixturePageID("update"), "Renamed", newFixtureSlug("renamed"), tree.NodeKindPage)
 		affectedErr := errors.New("affected update page failed")
 		updateAffectedCalls := 0
 		updateAffectedTree := &pageUseCaseFakeTree{
@@ -216,14 +216,14 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			UserID: userID,
 			ID:     updateBefore.ID,
 			Title:  "Renamed",
-			Slug:   tree.SlugFromString("renamed"),
+			Slug:   newFixtureSlug("renamed"),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out.Page).To(BeIdenticalTo(updateAfter))
 
 		ginkgo.By("delete warning and continuing when recursive affected pages or assets fail")
-		deleteParent := testFixturePage("delete-parent", "Delete Parent", "delete-parent", tree.NodeKindSection)
-		deleteChild := testFixtureChildPage(deleteParent, "delete-child", "Delete Child", "child", tree.NodeKindPage)
+		deleteParent := testFixturePage(newFixturePageID("delete-parent"), "Delete Parent", newFixtureSlug("delete-parent"), tree.NodeKindSection)
+		deleteChild := testFixtureChildPage(deleteParent, newFixturePageID("delete-child"), "Delete Child", newFixtureSlug("child"), tree.NodeKindPage)
 		deleteParent.Children = []*tree.PageNode{deleteChild.PageNode}
 		deleteAssets := &fakePageAssets{deleteErr: errors.New("asset delete failed")}
 		deleteGetPagesErr := errors.New("recursive child read failed")
@@ -283,8 +283,8 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(nonRecursiveAssets.deleteCalls).To(Equal(1))
 
 		ginkgo.By("move warning and continuing when affected pages fail to load")
-		moveParent := testFixturePage("move", "Move", "move", tree.NodeKindSection)
-		moveChild := testFixtureChildPage(moveParent, "move-child", "Move Child", "child", tree.NodeKindPage)
+		moveParent := testFixturePage(newFixturePageID("move"), "Move", newFixtureSlug("move"), tree.NodeKindSection)
+		moveChild := testFixtureChildPage(moveParent, newFixturePageID("move-child"), "Move Child", newFixtureSlug("child"), tree.NodeKindPage)
 		moveParent.Children = []*tree.PageNode{moveChild.PageNode}
 		moveAffectedErr := errors.New("moved child read failed")
 		moveTree := &pageUseCaseFakeTree{
@@ -313,13 +313,13 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			},
 		}, slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "lookup",
+			TargetPath:  newFixtureRoutePath("lookup"),
 			TargetTitle: "Lookup",
 			Kind:        &kindPage,
 		})
 		Expect(err).To(MatchError(lookupErr))
 
-		finalID := tree.PageIDFromString("existing-final")
+		finalID := newFixturePageID("existing-final")
 		finalKind := tree.NodeKindPage
 		existingFinalReadErr := errors.New("existing final read failed")
 		_, err = (&EnsurePathUseCase{tree: &pageUseCaseFakeTree{
@@ -328,7 +328,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 					Path:   routePath,
 					Exists: true,
 					Segments: []tree.PathSegment{{
-						Slug:   tree.SlugFromString("existing-final"),
+						Slug:   newFixtureSlug("existing-final"),
 						Exists: true,
 						Kind:   &finalKind,
 						ID:     &finalID,
@@ -340,7 +340,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			},
 		}, slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "existing-final",
+			TargetPath:  newFixtureRoutePath("existing-final"),
 			TargetTitle: "Existing",
 			Kind:        &kindPage,
 		})
@@ -351,14 +351,14 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 				return &tree.PathLookup{
 					Path: routePath,
 					Segments: []tree.PathSegment{{
-						Slug:   tree.SlugFromString("bad slug"),
+						Slug:   newFixtureSlug("bad slug"),
 						Exists: false,
 					}},
 				}, nil
 			},
 		}, slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "invalid-segment",
+			TargetPath:  newFixtureRoutePath("invalid-segment"),
 			TargetTitle: "Invalid Segment",
 			Kind:        &kindPage,
 		})
@@ -374,21 +374,21 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			},
 		}, slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "ensure-fails",
+			TargetPath:  newFixtureRoutePath("ensure-fails"),
 			TargetTitle: "Ensure Fails",
 			Kind:        &kindPage,
 		})
 		Expect(err).To(MatchError(ensureErr))
 
-		resultNode := testFixturePage("ensure-result", "Ensure Result", "ensure-result", tree.NodeKindPage).PageNode
-		createdNode := testFixturePage("ensure-created", "Ensure Created", "created", tree.NodeKindPage).PageNode
+		resultNode := testFixturePage(newFixturePageID("ensure-result"), "Ensure Result", newFixtureSlug("ensure-result"), tree.NodeKindPage).PageNode
+		createdNode := testFixturePage(newFixturePageID("ensure-created"), "Ensure Created", newFixtureSlug("created"), tree.NodeKindPage).PageNode
 		resultReadErr := errors.New("result page read failed")
 		_, err = (&EnsurePathUseCase{tree: fakeEnsureTree(resultNode, []*tree.PageNode{createdNode}, func(ids []tree.PageID) ([]*tree.Page, []error) {
 			Expect(ids).To(Equal([]tree.PageID{resultNode.ID, createdNode.ID}))
 			return []*tree.Page{nil, nil}, []error{resultReadErr, nil}
 		}), slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "ensure-result",
+			TargetPath:  newFixtureRoutePath("ensure-result"),
 			TargetTitle: "Ensure Result",
 			Kind:        &kindPage,
 		})
@@ -396,10 +396,10 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		_, err = (&EnsurePathUseCase{tree: fakeEnsureTree(resultNode, []*tree.PageNode{createdNode}, func(ids []tree.PageID) ([]*tree.Page, []error) {
 			Expect(ids).To(Equal([]tree.PageID{resultNode.ID, createdNode.ID}))
-			return []*tree.Page{testPage(resultNode.ID, "Ensure Result", tree.SlugFromString("ensure-result"), tree.NodeKindPage), nil}, []error{nil, errors.New("created page read failed")}
+			return []*tree.Page{testPage(resultNode.ID, "Ensure Result", newFixtureSlug("ensure-result"), tree.NodeKindPage), nil}, []error{nil, errors.New("created page read failed")}
 		}), slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "ensure-created-error",
+			TargetPath:  newFixtureRoutePath("ensure-created-error"),
 			TargetTitle: "Ensure Created Error",
 			Kind:        &kindPage,
 		})
@@ -410,7 +410,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			return []*tree.Page{nil}, []error{nil}
 		}), slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "ensure-missing-result",
+			TargetPath:  newFixtureRoutePath("ensure-missing-result"),
 			TargetTitle: "Ensure Missing Result",
 			Kind:        &kindPage,
 		})
@@ -418,10 +418,10 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 
 		_, err = (&EnsurePathUseCase{tree: fakeEnsureTree(resultNode, []*tree.PageNode{createdNode}, func(ids []tree.PageID) ([]*tree.Page, []error) {
 			Expect(ids).To(Equal([]tree.PageID{resultNode.ID, createdNode.ID}))
-			return []*tree.Page{testPage(resultNode.ID, "Ensure Result", tree.SlugFromString("ensure-result"), tree.NodeKindPage), nil}, []error{nil, nil}
+			return []*tree.Page{testPage(resultNode.ID, "Ensure Result", newFixtureSlug("ensure-result"), tree.NodeKindPage), nil}, []error{nil, nil}
 		}), slug: slug, orchestrator: noEffects, log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "ensure-created-missing",
+			TargetPath:  newFixtureRoutePath("ensure-created-missing"),
 			TargetTitle: "Ensure Created Missing",
 			Kind:        &kindPage,
 		})
@@ -431,12 +431,12 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		_, err = (&EnsurePathUseCase{tree: fakeEnsureTree(resultNode, []*tree.PageNode{createdNode}, func(ids []tree.PageID) ([]*tree.Page, []error) {
 			Expect(ids).To(Equal([]tree.PageID{resultNode.ID, createdNode.ID}))
 			return []*tree.Page{
-				testPage(resultNode.ID, "Ensure Result", tree.SlugFromString("ensure-result"), tree.NodeKindPage),
-				testPage(createdNode.ID, "Ensure Created", tree.SlugFromString("created"), tree.NodeKindPage),
+				testPage(resultNode.ID, "Ensure Result", newFixtureSlug("ensure-result"), tree.NodeKindPage),
+				testPage(createdNode.ID, "Ensure Created", newFixtureSlug("created"), tree.NodeKindPage),
 			}, []error{nil, nil}
 		}), slug: slug, orchestrator: pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: ensureSideEffectErr}), log: log}).Execute(ctx, EnsurePathInput{
 			UserID:      userID,
-			TargetPath:  "ensure-effect-error",
+			TargetPath:  newFixtureRoutePath("ensure-effect-error"),
 			TargetTitle: "Ensure Effect Error",
 			Kind:        &kindSection,
 		})

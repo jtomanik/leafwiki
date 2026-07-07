@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/assets"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -102,7 +103,8 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 		"slug":    "target",
 		"content": "Second content",
 	}), "page")
-	httpUpdated := updateHTTPPage(router, targetID, map[string]any{
+	targetPageID := tree.PageIDFromString(targetID)
+	httpUpdated := updateHTTPPage(router, targetPageID, map[string]any{
 		"version": stringField(second, "version"),
 		"title":   "Target",
 		"slug":    "target",
@@ -129,14 +131,14 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 	Expect(firstRevision).To(HaveKeyWithValue("pageId", targetID))
 	latest := callToolStructured(session, "wiki_get_latest_revision", map[string]any{"pageId": targetID})
 	latestRevision := nestedMap(latest, "revision")
-	httpLatestRevision := getHTTPLatestRevision(router, targetID)
+	httpLatestRevision := getHTTPLatestRevision(router, targetPageID)
 	Expect(latestRevision).To(matchJSONEqual(httpLatestRevision), "wiki_get_latest_revision")
 	recordHTTPMCPParity("wiki_get_latest_revision", "GET /api/pages/:id/revisions/latest")
 	latestRevisionID := stringField(latestRevision, "id")
 	Expect(latestRevision).NotTo(HaveKey("page_id"))
 	Expect(latestRevision).To(HaveKeyWithValue("pageId", targetID))
 	snapshot := callToolStructured(session, "wiki_get_revision", map[string]any{"pageId": targetID, "revisionId": latestRevisionID})
-	httpSnapshotAtLatest := getHTTPRevision(router, targetID, latestRevisionID)
+	httpSnapshotAtLatest := getHTTPRevision(router, targetPageID, tree.RevisionIDFromString(latestRevisionID))
 	Expect(snapshot).To(matchJSONEqual(httpSnapshotAtLatest), "wiki_get_revision")
 	recordHTTPMCPParity("wiki_get_revision", "GET /api/pages/:id/revisions/:revisionId")
 	Expect(stringField(snapshot, "content")).To(ContainSubstring("Third content from HTTP"))
@@ -150,9 +152,9 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 		"content": "Fourth content from MCP",
 	}), "page")
 	Expect(mcpAfterHTTP).To(HaveKeyWithValue("content", "Fourth content from MCP"))
-	httpLatest := getHTTPLatestRevision(router, targetID)
+	httpLatest := getHTTPLatestRevision(router, targetPageID)
 	httpLatestRevisionID := stringField(httpLatest, "id")
-	httpSnapshot := getHTTPRevision(router, targetID, httpLatestRevisionID)
+	httpSnapshot := getHTTPRevision(router, targetPageID, tree.RevisionIDFromString(httpLatestRevisionID))
 	Expect(stringField(httpSnapshot, "content")).To(ContainSubstring("Fourth content from MCP"))
 
 	olderRevision := revisionItems[1].(map[string]any)
@@ -285,7 +287,7 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 		"kind":  "page",
 	}), "page")
 	staleRefactorID := stringField(staleRefactor, "id")
-	updateHTTPPage(router, staleRefactorID, map[string]any{
+	updateHTTPPage(router, tree.PageIDFromString(staleRefactorID), map[string]any{
 		"version": stringField(staleRefactor, "version"),
 		"title":   "Stale Refactor",
 		"slug":    "stale-refactor",
@@ -333,7 +335,7 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 		"slug":         "http-apply-target-renamed",
 		"rewriteLinks": true,
 	}, http.StatusOK)
-	Expect(httpAppliedViaRoute).To(matchPageState(stringField(httpApplyTarget, "id"), "HTTP Apply Target", "http-apply-target-renamed", "http-apply-target-renamed", "page", ""), "HTTP wiki_apply_page_refactor success")
+	Expect(httpAppliedViaRoute).To(matchPageState(tree.PageIDFromString(stringField(httpApplyTarget, "id")), "HTTP Apply Target", newFixtureSlug("http-apply-target-renamed"), "http-apply-target-renamed", "page", newFixturePageID("")), "HTTP wiki_apply_page_refactor success")
 	httpApplyRefAfter := getHTTPPageByPath(router, "http-apply-ref")
 	Expect(httpApplyRefAfter).To(HaveKeyWithValue("content", "[HTTP Apply Target](/http-apply-target-renamed.md)"))
 
@@ -347,9 +349,9 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 		"rewriteLinks": true,
 	}), "page")
 	Expect(applied).To(HaveKeyWithValue("slug", "target-renamed"))
-	httpApplied := getHTTPPageByID(router, targetID)
+	httpApplied := getHTTPPageByID(router, targetPageID)
 	Expect(applied).To(matchJSONEqual(httpApplied), "wiki_apply_page_refactor")
-	Expect(applied).To(matchPageState(targetID, "Target", "target-renamed", "target-renamed", "page", ""), "MCP wiki_apply_page_refactor success")
+	Expect(applied).To(matchPageState(targetPageID, "Target", newFixtureSlug("target-renamed"), "target-renamed", "page", newFixturePageID("")), "MCP wiki_apply_page_refactor success")
 	refHTTP := getHTTPPageByPath(router, "ref")
 	Expect(refHTTP).To(HaveKeyWithValue("content", "[Target](/target-renamed.md)"))
 	recordHTTPMCPParity("wiki_apply_page_refactor", "POST /api/pages/:id/refactor/apply")
@@ -359,7 +361,7 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 		"revisionId": latestRevisionID,
 	}), "page")
 	Expect(restored).To(HaveKeyWithValue("content", "Third content from HTTP"))
-	httpRestored := getHTTPPageByID(router, targetID)
+	httpRestored := getHTTPPageByID(router, targetPageID)
 	Expect(restored).To(matchJSONEqual(httpRestored), "wiki_restore_revision")
 
 	mcpRestoreMeta := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
@@ -411,7 +413,8 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 		"kind":  "page",
 	}, http.StatusCreated)
 	httpRestoreMetaID := stringField(httpRestoreMeta, "id")
-	httpRestoreMetaRevision := updateHTTPPage(router, httpRestoreMetaID, map[string]any{
+	httpRestoreMetaPageID := tree.PageIDFromString(httpRestoreMetaID)
+	httpRestoreMetaRevision := updateHTTPPage(router, httpRestoreMetaPageID, map[string]any{
 		"version": stringField(httpRestoreMeta, "version"),
 		"title":   "HTTP Restore Metadata",
 		"slug":    "http-restore-metadata",
@@ -421,8 +424,8 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 			"status": "archived",
 		},
 	})
-	httpRestoreMetaLatest := getHTTPLatestRevision(router, httpRestoreMetaID)
-	updateHTTPPage(router, httpRestoreMetaID, map[string]any{
+	httpRestoreMetaLatest := getHTTPLatestRevision(router, httpRestoreMetaPageID)
+	updateHTTPPage(router, httpRestoreMetaPageID, map[string]any{
 		"version": stringField(httpRestoreMetaRevision, "version"),
 		"title":   "HTTP Restore Metadata",
 		"slug":    "http-restore-metadata",
@@ -430,6 +433,6 @@ func runLocalMCPProtocolFeatureGatedToolParity() {
 	})
 	httpRestoredMeta := postHTTPJSON(router, "/api/pages/"+httpRestoreMetaID+"/revisions/"+stringField(httpRestoreMetaLatest, "id")+"/restore", nil, http.StatusOK)
 	Expect(httpRestoredMeta).To(matchRestoredMetadata(), "HTTP restore metadata")
-	Expect(getHTTPPageByID(router, httpRestoreMetaID)).To(matchRestoredMetadata(), "HTTP restore metadata persisted")
+	Expect(getHTTPPageByID(router, httpRestoreMetaPageID)).To(matchRestoredMetadata(), "HTTP restore metadata persisted")
 	recordHTTPMCPParity("wiki_restore_revision", "POST /api/pages/:id/revisions/:revisionId/restore")
 }

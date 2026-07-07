@@ -31,7 +31,7 @@ var _ = Describe("OAuth token exchange", Label("integration"), func() {
 			"grant_type":    {"authorization_code"},
 			"client_id":     {oauthClientID},
 			"redirect_uri":  {redirectURI},
-			"code":          {badCode},
+			"code":          {string(badCode)},
 			"code_verifier": {"wrong-verifier"},
 		}
 		badRec := performForm(router, "http://leafwiki.local/oauth/token", badForm)
@@ -41,7 +41,7 @@ var _ = Describe("OAuth token exchange", Label("integration"), func() {
 		Expect(badTokenError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
 
 		code := authorizeCode(router, cookies, redirectURI, "token-state", verifier, resource)
-		token := exchangeCode(router, code, redirectURI, verifier)
+		token := exchangeCode(router, oauthAuthorizationCode(code), redirectURI, verifier)
 		accessToken := stringFromMap(token, "access_token")
 		refreshToken := stringFromMap(token, "refresh_token")
 		Expect(token).To(HaveKeyWithValue("token_type", "Bearer"))
@@ -90,7 +90,7 @@ var _ = Describe("OAuth token exchange", Label("integration"), func() {
 			"grant_type":    {"authorization_code"},
 			"client_id":     {oauthClientID},
 			"redirect_uri":  {redirectURI},
-			"code":          {reuseCode},
+			"code":          {string(reuseCode)},
 			"code_verifier": {reuseVerifier},
 		}), http.StatusUnauthorized)
 		Expect(reuseCodeError).To(matchOAuthErrorField(oauthErrorField(fosite.ErrInvalidGrant.ErrorField)))
@@ -138,7 +138,7 @@ var _ = Describe("OAuth token lifetimes", Label("integration"), func() {
 		cookies := loginCookies(router, "admin", "admin")
 		verifier := "oauth-lifetime-verifier-abcdefghijklmnopqrstuvwxyz0123456789"
 		code := authorizeCode(router, cookies, "http://localhost:49152/callback", "lifetime-state", verifier, "http://leafwiki.local/mcp")
-		token := exchangeCode(router, code, "http://localhost:49152/callback", verifier)
+		token := exchangeCode(router, oauthAuthorizationCode(code), "http://localhost:49152/callback", verifier)
 
 		Expect(token).To(HaveKeyWithValue("expires_in", BeNumerically(">=", (14*time.Minute).Seconds())))
 	})
@@ -166,7 +166,7 @@ var _ = Describe("OAuth token lifetimes", Label("integration"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		code := redirected.Query().Get("code")
 		Expect(code).NotTo(BeEmpty(), "expired-token authorize redirect should include code: %s", redirected.String())
-		token := stringFromMap(exchangeCode(router, code, "http://localhost:49152/callback", verifier), "access_token")
+		token := stringFromMap(exchangeCode(router, oauthAuthorizationCode(code), "http://localhost:49152/callback", verifier), "access_token")
 
 		req := httptest.NewRequest(http.MethodPost, "http://leafwiki.local/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
 		req.RemoteAddr = "127.0.0.1:12345"
@@ -197,8 +197,8 @@ var _ = Describe("OAuth-authenticated writes", Label("integration"), func() {
 		metadata := nestedMap(page, "metadata")
 		creator := nestedMap(metadata, "creator")
 		lastAuthor := nestedMap(metadata, "lastAuthor")
-		Expect(metadata).To(HaveKeyWithValue("creatorId", admin.ID))
-		Expect(metadata).To(HaveKeyWithValue("lastAuthorId", admin.ID))
+		Expect(metadata).To(HaveKeyWithValue("creatorId", admin.ID.MetadataValue()))
+		Expect(metadata).To(HaveKeyWithValue("lastAuthorId", admin.ID.MetadataValue()))
 		Expect(creator).To(HaveKeyWithValue("username", "admin"))
 		Expect(lastAuthor).To(HaveKeyWithValue("username", "admin"))
 
@@ -211,7 +211,7 @@ var _ = Describe("OAuth-authenticated writes", Label("integration"), func() {
 	})
 })
 
-func exerciseOAuthWriterCRUD(router http.Handler, session *sdkmcp.ClientSession, cookies []*http.Cookie, label, userID string) map[string]any {
+func exerciseOAuthWriterCRUD(router http.Handler, session *sdkmcp.ClientSession, cookies []*http.Cookie, label string, userID coreauth.UserID) map[string]any {
 	GinkgoHelper()
 
 	titlePrefix := strings.ToUpper(label[:1]) + label[1:]
@@ -224,13 +224,13 @@ func exerciseOAuthWriterCRUD(router http.Handler, session *sdkmcp.ClientSession,
 	pageID := stringField(createdPage, "id")
 	createdVersion := stringField(createdPage, "version")
 	createdMetadata := nestedMap(createdPage, "metadata")
-	Expect(createdMetadata).To(HaveKeyWithValue("creatorId", userID))
-	Expect(createdMetadata).To(HaveKeyWithValue("lastAuthorId", userID))
+	Expect(createdMetadata).To(HaveKeyWithValue("creatorId", userID.MetadataValue()))
+	Expect(createdMetadata).To(HaveKeyWithValue("lastAuthorId", userID.MetadataValue()))
 
 	httpPage := decodeJSONResponse(performRequest(router, http.MethodGet, "http://leafwiki.local/api/pages/"+pageID, cookies, nil), http.StatusOK)
 	httpMetadata := nestedMap(httpPage, "metadata")
-	Expect(httpMetadata).To(HaveKeyWithValue("creatorId", userID))
-	Expect(httpMetadata).To(HaveKeyWithValue("lastAuthorId", userID))
+	Expect(httpMetadata).To(HaveKeyWithValue("creatorId", userID.MetadataValue()))
+	Expect(httpMetadata).To(HaveKeyWithValue("lastAuthorId", userID.MetadataValue()))
 	Expect(httpPage).To(HaveKeyWithValue("id", pageID))
 
 	updated := callToolStructured(session, "wiki_update_page", map[string]any{
@@ -242,7 +242,7 @@ func exerciseOAuthWriterCRUD(router http.Handler, session *sdkmcp.ClientSession,
 	})
 	updatedPage := nestedMap(updated, "page")
 	updatedMetadata := nestedMap(updatedPage, "metadata")
-	Expect(updatedMetadata).To(HaveKeyWithValue("lastAuthorId", userID))
+	Expect(updatedMetadata).To(HaveKeyWithValue("lastAuthorId", userID.MetadataValue()))
 	updatedVersion := stringField(updatedPage, "version")
 
 	deleted := callToolStructured(session, "wiki_delete_page", map[string]any{

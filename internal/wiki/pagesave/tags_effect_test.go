@@ -27,13 +27,13 @@ func setupTagsEffectTest() (*tree.TreeService, *tags.TagsService, *TagsSideEffec
 
 // createPageWithFrontmatter creates a page whose frontmatter is set via the import path,
 // so custom keys (tags, properties) survive the write.
-func createPageWithFrontmatter(treeSvc *tree.TreeService, title, slug, raw string) *tree.Page {
+func createPageWithFrontmatter(treeSvc *tree.TreeService, title string, slug tree.Slug, raw string) *tree.Page {
 	ginkgo.GinkgoHelper()
 
 	kind := tree.NodeKindPage
-	id, err := treeSvc.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), &kind)
+	id, err := treeSvc.CreateNode(newFixtureUserID("system"), nil, title, slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &raw, true)).To(Succeed())
+	Expect(treeSvc.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, slug, &raw, true)).To(Succeed())
 	page, err := treeSvc.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
 	return page
@@ -44,7 +44,7 @@ var _ = ginkgo.Describe("tag indexing side effect", ginkgo.Label("integration"),
 		ginkgo.It("indexes the page under each declared tag", func() {
 			treeSvc, tagsSvc, effect := setupTagsEffectTest()
 			raw := "---\ntags:\n  - golang\n  - testing\n---\n\nPage body."
-			page := createPageWithFrontmatter(treeSvc, "Tagged Page", "tagged", raw)
+			page := createPageWithFrontmatter(treeSvc, "Tagged Page", newFixtureSlug("tagged"), raw)
 
 			effect.Apply(PageSaveEvent{
 				Operation: PageOperationCreate,
@@ -65,7 +65,7 @@ var _ = ginkgo.Describe("tag indexing side effect", ginkgo.Label("integration"),
 		ginkgo.It("removes stale tag mappings and indexes the new tags", func() {
 			treeSvc, tagsSvc, effect := setupTagsEffectTest()
 			raw := "---\ntags:\n  - oldtag\n---\n\nOriginal."
-			page := createPageWithFrontmatter(treeSvc, "Update Tags", "update-tags", raw)
+			page := createPageWithFrontmatter(treeSvc, "Update Tags", newFixtureSlug("update-tags"), raw)
 			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
 			newRaw := "---\ntags:\n  - newtag\n---\n\nUpdated."
@@ -89,7 +89,7 @@ var _ = ginkgo.Describe("tag indexing side effect", ginkgo.Label("integration"),
 		ginkgo.It("removes the page from tag lookups", func() {
 			treeSvc, tagsSvc, effect := setupTagsEffectTest()
 			raw := "---\ntags:\n  - removeme\n---\n\nBody."
-			page := createPageWithFrontmatter(treeSvc, "Delete Tags", "delete-tags", raw)
+			page := createPageWithFrontmatter(treeSvc, "Delete Tags", newFixtureSlug("delete-tags"), raw)
 			effect.Apply(PageSaveEvent{Operation: PageOperationCreate, After: page})
 
 			effect.Apply(PageSaveEvent{

@@ -68,8 +68,16 @@ func matchAuthValidationResponse() types.GomegaMatcher {
 	}))
 }
 
-func matchAuthJSONBodyField(field string, value any) types.GomegaMatcher {
-	return WithTransform(authJSONBodyFields, HaveKeyWithValue(field, value))
+type authJSONField string
+
+const (
+	authJSONFieldAuthDisabled authJSONField = "authDisabled"
+	authJSONFieldRole         authJSONField = "role"
+	authJSONFieldUsername     authJSONField = "username"
+)
+
+func matchAuthJSONBodyField(field authJSONField, value any) types.GomegaMatcher {
+	return WithTransform(authJSONBodyFields, HaveKeyWithValue(string(field), value))
 }
 
 func matchAuthJSONArrayElement(elementMatcher types.GomegaMatcher) types.GomegaMatcher {
@@ -232,16 +240,16 @@ func jsonBody(v interface{}) []byte {
 	return body
 }
 
-func authUserAPIKeyPath(userID string, keyID coreauth.APIKeyID) string {
-	return "/api/users/" + userID + "/mcp-api-keys/" + url.PathEscape(keyID.String())
+func authUserAPIKeyPath(userID coreauth.UserID, keyID coreauth.APIKeyID) string {
+	return "/api/users/" + userID.MetadataValue() + "/mcp-api-keys/" + url.PathEscape(keyID.String())
 }
 
 func authOwnAPIKeyPath(keyID coreauth.APIKeyID) string {
 	return "/api/users/me/mcp-api-keys/" + url.PathEscape(keyID.String())
 }
 
-func authUserAPIKeyParams(userID string, keyID coreauth.APIKeyID) gin.Params {
-	return gin.Params{{Key: "id", Value: userID}, authAPIKeyParam(keyID)}
+func authUserAPIKeyParams(userID coreauth.UserID, keyID coreauth.APIKeyID) gin.Params {
+	return gin.Params{{Key: "id", Value: userID.MetadataValue()}, authAPIKeyParam(keyID)}
 }
 
 func authOwnAPIKeyParams(keyID coreauth.APIKeyID) gin.Params {

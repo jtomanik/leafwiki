@@ -63,7 +63,7 @@ func (r *Routes) getContextTool(ctx context.Context, req *sdkmcp.CallToolRequest
 	if err != nil {
 		return contextOutput{}, err
 	}
-	return r.getContext(ctx, req, toolActor{ID: actor.ID, User: actor}, opts, in)
+	return r.getContext(ctx, req, toolActor{ID: auth.UserIDFromString(actor.ID), User: actor}, opts, in)
 }
 
 func (r *Routes) getContext(ctx context.Context, req *sdkmcp.CallToolRequest, actor toolActor, opts httpinternal.RouterOptions, in getContextInput) (contextOutput, error) {

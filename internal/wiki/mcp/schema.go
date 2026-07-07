@@ -10,7 +10,7 @@ import (
 )
 
 type toolActor struct {
-	ID   string
+	ID   coreauth.UserID
 	User *coreauth.User
 }
 
@@ -51,7 +51,7 @@ func callActorTool[In, Out any](routes *Routes, ctx context.Context, req *sdkmcp
 	if err != nil {
 		return zero, err
 	}
-	return handler(ctx, toolActor{ID: user.ID, User: user}, in)
+	return handler(ctx, toolActor{ID: coreauth.UserIDFromString(user.ID), User: user}, in)
 }
 
 func addEditorTool[In, Out any](routes *Routes, server *sdkmcp.Server, descriptor ToolDescriptor, handler func(context.Context, toolActor, In) (Out, error)) {
@@ -61,7 +61,7 @@ func addEditorTool[In, Out any](routes *Routes, server *sdkmcp.Server, descripto
 		if err != nil {
 			return zero, err
 		}
-		return handler(ctx, toolActor{ID: user.ID, User: user}, in)
+		return handler(ctx, toolActor{ID: coreauth.UserIDFromString(user.ID), User: user}, in)
 	})
 }
 
@@ -224,6 +224,25 @@ func pagePathSchemaWith(extra map[string]*jsonschema.Schema, required []string) 
 }
 
 func toolOutputSchema(name ToolID) *jsonschema.Schema {
+	if schema := contextToolOutputSchema(name); schema != nil {
+		return schema
+	}
+	if schema := pageToolOutputSchema(name); schema != nil {
+		return schema
+	}
+	if schema := searchTagToolOutputSchema(name); schema != nil {
+		return schema
+	}
+	if schema := assetRevisionToolOutputSchema(name); schema != nil {
+		return schema
+	}
+	if schema := refactorToolOutputSchema(name); schema != nil {
+		return schema
+	}
+	return &jsonschema.Schema{Type: "object"}
+}
+
+func contextToolOutputSchema(name ToolID) *jsonschema.Schema {
 	switch name {
 	case ToolGetContext:
 		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
@@ -264,16 +283,6 @@ func toolOutputSchema(name ToolID) *jsonschema.Schema {
 			"summary": objectValueSchema(),
 			"issues":  arrayValueSchema(),
 		})
-	case ToolUpdatePageMetadata, ToolReplacePageSection:
-		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
-			"pageId":     stringSchema(),
-			"path":       stringSchema(),
-			"title":      stringSchema(),
-			"version":    stringSchema(),
-			"validation": objectValueSchema(),
-			"page":       objectValueSchema(),
-			"linkStatus": objectValueSchema(),
-		}, []string{"pageId", "path", "title", "version"})
 	case ToolGetCurrentUser:
 		return outputSchema(map[string]*jsonschema.Schema{"user": objectValueSchema()})
 	case ToolGetConfig:
@@ -289,6 +298,23 @@ func toolOutputSchema(name ToolID) *jsonschema.Schema {
 			"httpRemoteUserEnabled":   booleanSchema(),
 			"httpRemoteUserLogoutUrl": stringSchema(),
 		})
+	default:
+		return nil
+	}
+}
+
+func pageToolOutputSchema(name ToolID) *jsonschema.Schema {
+	switch name {
+	case ToolUpdatePageMetadata, ToolReplacePageSection:
+		return outputSchemaWithRequired(map[string]*jsonschema.Schema{
+			"pageId":     stringSchema(),
+			"path":       stringSchema(),
+			"title":      stringSchema(),
+			"version":    stringSchema(),
+			"validation": objectValueSchema(),
+			"page":       objectValueSchema(),
+			"linkStatus": objectValueSchema(),
+		}, []string{"pageId", "path", "title", "version"})
 	case ToolGetTree:
 		return outputSchema(map[string]*jsonschema.Schema{"tree": objectValueSchema()})
 	case ToolGetPage, ToolGetPageByPath:
@@ -309,6 +335,13 @@ func toolOutputSchema(name ToolID) *jsonschema.Schema {
 			"messageId": stringSchema(),
 			"message":   stringSchema(),
 		})
+	default:
+		return nil
+	}
+}
+
+func searchTagToolOutputSchema(name ToolID) *jsonschema.Schema {
+	switch name {
 	case ToolSearchPages:
 		return outputSchema(map[string]*jsonschema.Schema{
 			"count":     integerSchema(),
@@ -328,6 +361,13 @@ func toolOutputSchema(name ToolID) *jsonschema.Schema {
 		return outputSchema(map[string]*jsonschema.Schema{"keys": arrayValueSchema()})
 	case ToolGetLinkStatus:
 		return outputSchema(map[string]*jsonschema.Schema{"status": objectValueSchema()})
+	default:
+		return nil
+	}
+}
+
+func assetRevisionToolOutputSchema(name ToolID) *jsonschema.Schema {
+	switch name {
 	case ToolUploadAsset:
 		return outputSchema(map[string]*jsonschema.Schema{"file": stringSchema()})
 	case ToolGetAsset, ToolGetRevisionAsset:
@@ -360,6 +400,13 @@ func toolOutputSchema(name ToolID) *jsonschema.Schema {
 			"contentChanged": booleanSchema(),
 			"assetChanges":   arrayValueSchema(),
 		})
+	default:
+		return nil
+	}
+}
+
+func refactorToolOutputSchema(name ToolID) *jsonschema.Schema {
+	switch name {
 	case ToolPreviewRefactor:
 		return outputSchema(map[string]*jsonschema.Schema{
 			"kind":          stringSchema(),
@@ -371,7 +418,7 @@ func toolOutputSchema(name ToolID) *jsonschema.Schema {
 			"warnings":      arrayValueSchema(),
 		})
 	default:
-		return &jsonschema.Schema{Type: "object"}
+		return nil
 	}
 }
 

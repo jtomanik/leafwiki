@@ -177,7 +177,7 @@ var _ = ginkgo.Describe("required role checks", ginkgo.Label("unit"), func() {
 				projectdaemon.RoleWikid,
 				projectdaemon.RoleFrontd,
 				projectdaemon.RoleWorkspaced,
-				projectdaemon.RoleName("custom"),
+				newFixtureRoleName("custom"),
 			},
 			[]projectdaemon.RoleHealth{
 				{Name: projectdaemon.RoleWikid, State: projectdaemon.RoleStateReady},
@@ -210,6 +210,10 @@ func evaluateRequiredRoles(required []projectdaemon.RoleName, roles []projectdae
 	ginkgo.GinkgoHelper()
 	checks, healthy := requiredRoleChecks(required, roles)
 	return healthEvaluation{Healthy: healthy, Checks: checks}
+}
+
+func newFixtureRoleName[T ~string](raw T) projectdaemon.RoleName {
+	return projectdaemon.RoleName(raw)
 }
 
 func reportHealthyHealthChecks(checks types.GomegaMatcher) types.GomegaMatcher {

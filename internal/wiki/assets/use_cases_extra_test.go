@@ -104,7 +104,7 @@ var _ = ginkgo.Describe("asset helpers", func() {
 		Expect(assetErrorStatus(ErrCodeAssetInvalidName)).To(Equal(http.StatusBadRequest))
 		Expect(assetErrorStatus(ErrCodeAssetPageNotFound)).To(Equal(http.StatusNotFound))
 		Expect(assetErrorStatus(ErrCodeAssetAlreadyExists)).To(Equal(http.StatusConflict))
-		Expect(assetErrorStatus("unknown")).To(Equal(http.StatusInternalServerError))
+		Expect(assetErrorStatus(newFixtureAssetErrorCode("unknown"))).To(Equal(http.StatusInternalServerError))
 	})
 
 	ginkgo.It("asset localized error constructors preserve code and cause", ginkgo.Label("unit"), func() {
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   *pageID,
 			File:     inMemoryMultipartFile{Reader: bytes.NewReader([]byte("hello image"))},
-			Filename: tree.AssetName("my-image.png"),
+			Filename: newFixtureAssetName("my-image.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -168,16 +168,16 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 
 		getOut, err := NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{
 			PageID:   *pageID,
-			Filename: tree.AssetName("my-image.png"),
+			Filename: newFixtureAssetName("my-image.png"),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(getOut).To(matchAssetDownload(tree.AssetName("my-image.png"), "image/png", []byte("hello image")))
+		Expect(getOut).To(matchAssetDownload(newFixtureAssetName("my-image.png"), "image/png", []byte("hello image")))
 
 		renameOut, err := NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
 			PageID:      *pageID,
-			OldFilename: tree.AssetName("my-image.png"),
-			NewFilename: tree.AssetName("renamed.png"),
+			OldFilename: newFixtureAssetName("my-image.png"),
+			NewFilename: newFixtureAssetName("renamed.png"),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(renameOut.URL).To(Equal(pageAssetURL(*pageID, tree.AssetNameFromString("renamed.png"))))
@@ -185,7 +185,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 		Expect(NewDeleteAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), DeleteAssetInput{
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   *pageID,
-			Filename: tree.AssetName("renamed.png"),
+			Filename: newFixtureAssetName("renamed.png"),
 		})).To(Succeed())
 
 		listOut, err = NewListAssetsUseCase(treeService, assetService).Execute(context.Background(), ListAssetsInput{PageID: *pageID})
@@ -201,7 +201,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   newFixturePageID("missing"),
 			File:     inMemoryMultipartFile{Reader: bytes.NewReader([]byte("content"))},
-			Filename: tree.AssetName("asset.png"),
+			Filename: newFixtureAssetName("asset.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetPageNotFound))
@@ -209,21 +209,21 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 		_, err = NewListAssetsUseCase(treeService, assetService).Execute(context.Background(), ListAssetsInput{PageID: newFixturePageID("missing")})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetPageNotFound))
 
-		_, err = NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{PageID: newFixturePageID("missing"), Filename: tree.AssetName("asset.png")})
+		_, err = NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{PageID: newFixturePageID("missing"), Filename: newFixtureAssetName("asset.png")})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetPageNotFound))
 
 		_, err = NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
 			PageID:      newFixturePageID("missing"),
-			OldFilename: tree.AssetName("asset.png"),
-			NewFilename: tree.AssetName("renamed.png"),
+			OldFilename: newFixtureAssetName("asset.png"),
+			NewFilename: newFixtureAssetName("renamed.png"),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetPageNotFound))
 
 		err = NewDeleteAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), DeleteAssetInput{
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   newFixturePageID("missing"),
-			Filename: tree.AssetName("asset.png"),
+			Filename: newFixtureAssetName("asset.png"),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetPageNotFound))
 	})
@@ -245,14 +245,14 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 		treeService, pageID := setupAssetUseCaseTree()
 		assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
 
-		_, err := NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{PageID: *pageID, Filename: tree.AssetName("missing.png")})
+		_, err := NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{PageID: *pageID, Filename: newFixtureAssetName("missing.png")})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetNotFound))
 
 		_, err = NewUploadAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), UploadAssetInput{
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   *pageID,
 			File:     inMemoryMultipartFile{Reader: bytes.NewReader([]byte("content larger than cap"))},
-			Filename: tree.AssetName("asset.png"),
+			Filename: newFixtureAssetName("asset.png"),
 			ByteCap:  shared.MaxBytes(1),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetFileTooLarge))
@@ -261,7 +261,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   *pageID,
 			File:     inMemoryMultipartFile{Reader: bytes.NewReader([]byte("content"))},
-			Filename: tree.AssetName("asset.png"),
+			Filename: newFixtureAssetName("asset.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -269,16 +269,16 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 		_, err = NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
 			PageID:      *pageID,
-			OldFilename: tree.AssetName("asset.png"),
-			NewFilename: tree.AssetName("asset.jpg"),
+			OldFilename: newFixtureAssetName("asset.png"),
+			NewFilename: newFixtureAssetName("asset.jpg"),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetInvalidExtension))
 
 		_, err = NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
 			PageID:      *pageID,
-			OldFilename: tree.AssetName("asset.png"),
-			NewFilename: tree.AssetName("../escape.png"),
+			OldFilename: newFixtureAssetName("asset.png"),
+			NewFilename: newFixtureAssetName("../escape.png"),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetInvalidName))
 
@@ -286,7 +286,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   *pageID,
 			File:     inMemoryMultipartFile{Reader: bytes.NewReader([]byte("other"))},
-			Filename: tree.AssetName("other.png"),
+			Filename: newFixtureAssetName("other.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -294,15 +294,15 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 		_, err = NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
 			PageID:      *pageID,
-			OldFilename: tree.AssetName("asset.png"),
-			NewFilename: tree.AssetName("other.png"),
+			OldFilename: newFixtureAssetName("asset.png"),
+			NewFilename: newFixtureAssetName("other.png"),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetAlreadyExists))
 
 		err = NewDeleteAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), DeleteAssetInput{
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   *pageID,
-			Filename: tree.AssetName("missing.png"),
+			Filename: newFixtureAssetName("missing.png"),
 		})
 		Expect(err).To(matchAssetLocalizedError(ErrCodeAssetNotFound))
 	})
@@ -319,7 +319,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   pageID,
 			File:     inMemoryMultipartFile{Reader: bytes.NewReader([]byte("content"))},
-			Filename: tree.AssetName("asset.png"),
+			Filename: newFixtureAssetName("asset.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
@@ -327,21 +327,21 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 		_, err = NewListAssetsUseCase(treeService, assetService).Execute(context.Background(), ListAssetsInput{PageID: pageID})
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 
-		_, err = NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{PageID: pageID, Filename: tree.AssetName("asset.png")})
+		_, err = NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{PageID: pageID, Filename: newFixtureAssetName("asset.png")})
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 
 		_, err = NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
 			PageID:      pageID,
-			OldFilename: tree.AssetName("asset.png"),
-			NewFilename: tree.AssetName("renamed.png"),
+			OldFilename: newFixtureAssetName("asset.png"),
+			NewFilename: newFixtureAssetName("renamed.png"),
 		})
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 
 		err = NewDeleteAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), DeleteAssetInput{
 			UserID:   newFixtureUserID("user-1"),
 			PageID:   pageID,
-			Filename: tree.AssetName("asset.png"),
+			Filename: newFixtureAssetName("asset.png"),
 		})
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 	})
@@ -350,7 +350,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 var _ = ginkgo.Describe("asset route handlers", ginkgo.Label("integration"), func() {
 	ginkgo.It("lists, renames, and deletes assets through handlers", func() {
 		fixture := newAssetRouteFixture()
-		fixture.uploadAsset("asset.png", []byte("content"))
+		fixture.uploadAsset(newFixtureAssetName("asset.png"), []byte("content"))
 
 		list := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodGet, assetsPagePath(fixture.pageID), nil, "")
 		Expect(list).To(HaveHTTPStatus(http.StatusOK), list.Body.String())
@@ -385,7 +385,7 @@ var _ = ginkgo.Describe("asset route handlers", ginkgo.Label("integration"), fun
 
 	ginkgo.It("uploads assets and maps upload request errors through the handler", func() {
 		fixture := newAssetRouteFixture()
-		uploadBody, uploadContentType := assetMultipartBody("asset.png", []byte("content"))
+		uploadBody, uploadContentType := assetMultipartBody(newFixtureAssetName("asset.png"), []byte("content"))
 
 		uploaded := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodPost, assetsPagePath(fixture.pageID), uploadBody, uploadContentType)
 
@@ -396,14 +396,14 @@ var _ = ginkgo.Describe("asset route handlers", ginkgo.Label("integration"), fun
 		Expect(json.Unmarshal(uploaded.Body.Bytes(), &uploadedBody)).To(Succeed())
 		Expect(uploadedBody.File).To(Equal(pageAssetURL(fixture.pageID, tree.AssetNameFromString("asset.png"))))
 
-		invalidNameBody, invalidNameContentType := assetMultipartBody(".", []byte("content"))
+		invalidNameBody, invalidNameContentType := assetMultipartBody(newFixtureAssetName("."), []byte("content"))
 		invalidName := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodPost, assetsPagePath(fixture.pageID), invalidNameBody, invalidNameContentType)
 		Expect(invalidName).To(matchAssetStructuredError(http.StatusBadRequest, ErrCodeAssetInvalidName), invalidName.Body.String())
 
 		tooLarge := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodPost, assetsPagePath(fixture.pageID), strings.NewReader("bad multipart"), "multipart/form-data; boundary=missing")
 		Expect(tooLarge).To(matchAssetStructuredError(http.StatusRequestEntityTooLarge, ErrCodeAssetFileTooLarge), tooLarge.Body.String())
 
-		emptyBody, emptyContentType := assetMultipartBody("", nil)
+		emptyBody, emptyContentType := assetMultipartBody(newFixtureAssetName(""), nil)
 		missingFile := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodPost, assetsPagePath(fixture.pageID), emptyBody, emptyContentType)
 		Expect(missingFile).To(matchAssetStructuredError(http.StatusBadRequest, ErrCodeAssetMissingFile), missingFile.Body.String())
 	})
@@ -423,7 +423,7 @@ var _ = ginkgo.Describe("asset route handlers", ginkgo.Label("integration"), fun
 		missingDeleteFile := performAssetHandlerRequest(fixture.routerWithUser(), http.MethodDelete, assetFilePath(fixture.pageID, tree.AssetNameFromString("missing.png")), nil, "")
 		Expect(missingDeleteFile).To(matchAssetStructuredError(http.StatusNotFound, ErrCodeAssetNotFound), missingDeleteFile.Body.String())
 
-		fixture.uploadAsset("asset.png", []byte("content"))
+		fixture.uploadAsset(newFixtureAssetName("asset.png"), []byte("content"))
 		invalidExtension := performAssetHandlerRequest(
 			fixture.routerWithUser(),
 			http.MethodPut,
@@ -436,7 +436,7 @@ var _ = ginkgo.Describe("asset route handlers", ginkgo.Label("integration"), fun
 
 	ginkgo.It("forbids mutating handlers when user context is missing", func() {
 		fixture := newAssetRouteFixture()
-		uploadBody, uploadContentType := assetMultipartBody("asset.png", []byte("content"))
+		uploadBody, uploadContentType := assetMultipartBody(newFixtureAssetName("asset.png"), []byte("content"))
 
 		upload := performAssetHandlerRequest(fixture.routerWithoutUser(), http.MethodPost, assetsPagePath(fixture.pageID), uploadBody, uploadContentType)
 		Expect(upload).To(HaveHTTPStatus(http.StatusForbidden), upload.Body.String())
@@ -457,7 +457,7 @@ func setupAssetUseCaseTree() (*tree.TreeService, *tree.PageID) {
 	})
 	Expect(treeService.LoadTree()).To(Succeed())
 	kind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode("user-1", nil, "Asset Page", "asset-page", &kind)
+	pageID, err := treeService.CreateNode(newFixtureUserID("user-1"), nil, "Asset Page", newFixtureSlug("asset-page"), &kind)
 	Expect(err).NotTo(HaveOccurred())
 	return treeService, pageID
 }
@@ -488,13 +488,13 @@ func newAssetRouteFixture() assetRouteFixture {
 	}
 }
 
-func (fixture assetRouteFixture) uploadAsset(filename string, content []byte) {
+func (fixture assetRouteFixture) uploadAsset(filename tree.AssetName, content []byte) {
 	ginkgo.GinkgoHelper()
 	_, err := NewUploadAssetUseCase(fixture.treeService, fixture.assetService, slog.Default()).Execute(context.Background(), UploadAssetInput{
 		UserID:   newFixtureUserID("user-1"),
 		PageID:   fixture.pageID,
 		File:     inMemoryMultipartFile{Reader: bytes.NewReader(content)},
-		Filename: tree.AssetNameFromString(filename),
+		Filename: filename,
 		ByteCap:  shared.MaxBytes(1024),
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -503,7 +503,7 @@ func (fixture assetRouteFixture) uploadAsset(filename string, content []byte) {
 func (fixture assetRouteFixture) routerWithUser() http.Handler {
 	ginkgo.GinkgoHelper()
 	return fixture.router(func(c *gin.Context) {
-		c.Set("user", &coreauth.User{ID: "user-1"})
+		c.Set("user", &coreauth.User{ID: newFixtureUserID("user-1")})
 	})
 }
 
@@ -527,12 +527,12 @@ func (fixture assetRouteFixture) router(setup gin.HandlerFunc) http.Handler {
 	return router
 }
 
-func assetMultipartBody(filename string, fileContent []byte) (*bytes.Buffer, string) {
+func assetMultipartBody(filename tree.AssetName, fileContent []byte) (*bytes.Buffer, string) {
 	ginkgo.GinkgoHelper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if filename != "" {
-		part, err := writer.CreateFormFile("file", filename)
+		part, err := writer.CreateFormFile("file", filename.Filename())
 		Expect(err).NotTo(HaveOccurred())
 		_, err = part.Write(fileContent)
 		Expect(err).NotTo(HaveOccurred())

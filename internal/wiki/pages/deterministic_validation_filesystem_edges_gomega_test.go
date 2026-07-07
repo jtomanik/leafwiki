@@ -21,7 +21,7 @@ import (
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
-var _ = ginkgo.Describe("deterministic page helper edges", func() {
+var _ = ginkgo.Describe("page validation and filesystem route behavior", func() {
 	ginkgo.It("returns validation README fallback and route error outcomes", ginkgo.Label("integration"), func() {
 		deps := newRoutesSpecDeps()
 
@@ -56,7 +56,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(rec).To(HavePageErrorResponse(http.StatusNotFound, ErrCodePageNotFound), rec.Body.String())
 		unloadedTree := tree.NewTreeService(pagesTempDir())
 		lookupUC := NewLookupPagePathUseCase(unloadedTree)
-		_, err = lookupUC.Execute(context.Background(), LookupPagePathInput{Path: "missing"})
+		_, err = lookupUC.Execute(context.Background(), LookupPagePathInput{Path: newFixtureRoutePath("missing")})
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 		rec = performRoutesRequest(http.MethodGet, "/api/pages/lookup?path=missing", "", nil, nil, (&Routes{lookupPath: lookupUC}).handleLookupPath)
 		Expect(rec).To(HavePageErrorResponse(http.StatusInternalServerError, ErrCodePageInternalError), rec.Body.String())
@@ -67,7 +67,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), rec.Body.String())
 		Expect(rec).To(HaveHTTPBody(ContainSubstring(pageValidationErrorCode)))
 
-		page := deps.createPage("Route Error", "route-error", tree.NodeKindPage, nil)
+		page := deps.createPage("Route Error", newFixtureSlug("route-error"), tree.NodeKindPage, nil)
 		rec = performRoutesRequest(
 			http.MethodPut,
 			pageRouteTarget(page.ID),
@@ -122,14 +122,14 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
 
-		section := deps.createPage("Route Section", "route-section", tree.NodeKindSection, nil)
+		section := deps.createPage("Route Section", newFixtureSlug("route-section"), tree.NodeKindSection, nil)
 		rec := performRoutesRequest(http.MethodGet, "/api/pages/by-path?path=route-section&kind=section", "", nil, nil, deps.routes.handleGetByPath)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 		sectionJSON := decodeRoutesJSON[routePageJSON](rec)
 		Expect(sectionJSON.ID).To(Equal(section.ID))
 
-		docs := deps.createPage("Route Docs", "route-docs", tree.NodeKindSection, nil)
-		readme := deps.createPage("README", "readme", tree.NodeKindPage, &docs.ID)
+		docs := deps.createPage("Route Docs", newFixtureSlug("route-docs"), tree.NodeKindSection, nil)
+		readme := deps.createPage("README", newFixtureSlug("readme"), tree.NodeKindPage, &docs.ID)
 		readmeOut, err := deps.routes.findByPathInput(ctx, "route-docs/readme.md", tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(readmeOut.Page.ID).To(Equal(readme.ID))
@@ -138,7 +138,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rootOut.Page.ID).To(Equal(tree.RootPageID))
 
-		tagsOnly := deps.createPage("Tags Only", "tags-only", tree.NodeKindPage, nil)
+		tagsOnly := deps.createPage("Tags Only", newFixtureSlug("tags-only"), tree.NodeKindPage, nil)
 		rec = performRoutesRequest(
 			http.MethodPut,
 			pageRouteTarget(tagsOnly.ID),
@@ -154,7 +154,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		rec = performRoutesRequest(http.MethodPut, pageRouteTarget(section.ID), `{`, ginPageIDParams(section.ID), routesSpecUser(), deps.routes.handleUpdate)
 		Expect(rec).To(HavePageErrorResponse(http.StatusBadRequest, ErrCodePageInvalidRequest), rec.Body.String())
 
-		missingRaw := deps.createPage("Missing Raw", "missing-raw", tree.NodeKindPage, nil)
+		missingRaw := deps.createPage("Missing Raw", newFixtureSlug("missing-raw"), tree.NodeKindPage, nil)
 		removePageMarkdown(deps, missingRaw)
 		rec = performRoutesRequest(
 			http.MethodPut,
@@ -166,7 +166,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		)
 		Expect(rec).To(HavePageErrorResponse(http.StatusInternalServerError, ErrCodePageInternalError), rec.Body.String())
 
-		malformedForParse := deps.createPage("Malformed Parse", "malformed-parse", tree.NodeKindPage, nil)
+		malformedForParse := deps.createPage("Malformed Parse", newFixtureSlug("malformed-parse"), tree.NodeKindPage, nil)
 		writePageMarkdown(deps, malformedForParse, "<!-- leafwiki malformed\n-->\nbody")
 		rec = performRoutesRequest(
 			http.MethodPut,
@@ -178,7 +178,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		)
 		Expect(rec).To(HavePageErrorResponse(http.StatusInternalServerError, ErrCodePageInternalError), rec.Body.String())
 
-		malformedForBuild := deps.createPage("Malformed Build", "malformed-build", tree.NodeKindPage, nil)
+		malformedForBuild := deps.createPage("Malformed Build", newFixtureSlug("malformed-build"), tree.NodeKindPage, nil)
 		writePageMarkdown(deps, malformedForBuild, "<!-- leafwiki malformed\n-->\nbody")
 		rec = performRoutesRequest(
 			http.MethodPut,
@@ -212,19 +212,19 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), rec.Body.String())
 		Expect(rec).To(HaveHTTPBody(ContainSubstring(pageValidationErrorCode)))
 
-		source := deps.createPage("Asset Source", "asset-source", tree.NodeKindPage, nil)
+		source := deps.createPage("Asset Source", newFixtureSlug("asset-source"), tree.NodeKindPage, nil)
 		assetService := assets.NewAssetService(deps.tree.RootDir(), slug)
 		Expect(os.WriteFile(filepath.Join(assetService.GetAssetsDir(), source.ID.MetadataValue()), []byte("not a directory"), 0o644)).To(Succeed())
 		_, err = NewCopyPageUseCase(deps.tree, slug, pagesave.NewPageSaveOrchestrator(), assetService, log).Execute(ctx, CopyPageInput{
-			UserID:       tree.UserIDFromString("routes-test-user"),
+			UserID:       newFixtureUserID("routes-test-user"),
 			SourcePageID: source.ID,
 			Title:        "Asset Copy",
-			Slug:         tree.SlugFromString("asset-copy"),
+			Slug:         newFixtureSlug("asset-copy"),
 		})
 		Expect(err).To(MatchError(syscall.ENOTDIR))
 
-		recursiveStale := deps.createPage("Recursive Stale", "recursive-stale", tree.NodeKindSection, nil)
-		_ = deps.createPage("Recursive Stale Child", "recursive-stale-child", tree.NodeKindPage, &recursiveStale.ID)
+		recursiveStale := deps.createPage("Recursive Stale", newFixtureSlug("recursive-stale"), tree.NodeKindSection, nil)
+		_ = deps.createPage("Recursive Stale Child", newFixtureSlug("recursive-stale-child"), tree.NodeKindPage, &recursiveStale.ID)
 		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: recursiveStale.ID, Version: tree.PageVersionFromString("stale"), Recursive: true})).To(MatchError(tree.ErrVersionConflict))
 	})
 })

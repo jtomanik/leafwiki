@@ -75,7 +75,7 @@ var _ = Describe("local MCP page section replacement", Label("integration"), fun
 		Expect(stringSliceField(page, "tags")).To(matchStringSet([]string{"draft"}))
 		Expect(nestedMap(page, "properties")).To(HaveKeyWithValue("status", "draft"))
 
-		raw := readPageMarkdownByRoutePath(w.GetRootDir(), "section-preserve")
+		raw := readPageMarkdownByRoutePath(w.GetRootDir(), newFixtureRoutePath("section-preserve"))
 		for _, want := range []string{
 			"pinned: true",
 			"audiences:",

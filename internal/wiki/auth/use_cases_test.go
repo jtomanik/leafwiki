@@ -243,7 +243,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			CreatedByUserID: newFixtureUserID("admin-1"),
 		}
 		_ = ListAPIKeysInput{UserID: newFixtureUserID("user-1")}
-		_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: coreauth.APIKeyID("key-1")}
+		_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: newFixtureAPIKeyID("key-1")}
 	})
 
 	ginkgo.It("returns auth-disabled errors for login, logout, and refresh when no auth service is configured", ginkgo.Label("unit"), func() {
@@ -407,7 +407,7 @@ var _ = ginkgo.Describe("auth use cases", func() {
 	ginkgo.It("auth error helpers map localized codes and success messages", ginkgo.Label("unit"), func() {
 		Expect(authErrorStatus(ErrCodeAuthUserNotFound)).To(Equal(404))
 		Expect(authErrorStatus(ErrCodeAuthForbidden)).To(Equal(403))
-		Expect(authErrorStatus("unknown")).To(Equal(500))
+		Expect(authErrorStatus(newFixtureErrorCode("unknown"))).To(Equal(500))
 		Expect(apiSuccessMessage(MessageIDAuthLoginSuccess)).NotTo(BeEmpty())
 	})
 

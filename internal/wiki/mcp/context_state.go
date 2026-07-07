@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -19,13 +20,28 @@ type contextCheckpoint struct {
 	CommitHash workspacesync.CommitHash
 }
 
+type contextSessionID string
+
+func contextSessionIDFromString[T ~string](raw T) contextSessionID {
+	return contextSessionID(raw)
+}
+
+func (id contextSessionID) IsEmpty() bool {
+	return id == ""
+}
+
+type contextSessionScope struct {
+	ActorID   auth.UserID
+	SessionID contextSessionID
+}
+
 type contextCheckpointStore struct {
 	mu          sync.Mutex
 	limit       int
 	maxSessions int
 	ttl         time.Duration
 	next        uint64
-	sessions    map[string][]contextCheckpoint
+	sessions    map[contextSessionScope][]contextCheckpoint
 }
 
 func newContextCheckpointStore(limit int) *contextCheckpointStore {
@@ -36,11 +52,11 @@ func newContextCheckpointStore(limit int) *contextCheckpointStore {
 		limit:       limit,
 		maxSessions: defaultContextCheckpointSessions,
 		ttl:         defaultContextCheckpointTTL,
-		sessions:    map[string][]contextCheckpoint{},
+		sessions:    map[contextSessionScope][]contextCheckpoint{},
 	}
 }
 
-func (s *contextCheckpointStore) record(sessionKey string, checkpoint contextCheckpoint) (previous *contextCheckpoint, history []contextCheckpoint) {
+func (s *contextCheckpointStore) record(sessionKey contextSessionScope, checkpoint contextCheckpoint) (previous *contextCheckpoint, history []contextCheckpoint) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -70,7 +86,7 @@ func (s *contextCheckpointStore) record(sessionKey string, checkpoint contextChe
 	return previous, append([]contextCheckpoint{}, existing...)
 }
 
-func (s *contextCheckpointStore) find(sessionKey, token string) (contextCheckpoint, bool) {
+func (s *contextCheckpointStore) find(sessionKey contextSessionScope, token string) (contextCheckpoint, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -106,7 +122,7 @@ func (s *contextCheckpointStore) pruneExpiredLocked(now time.Time) {
 	}
 }
 
-func (s *contextCheckpointStore) evictOverflowLocked(keepSession string) {
+func (s *contextCheckpointStore) evictOverflowLocked(keepSession contextSessionScope) {
 	if s.maxSessions <= 0 {
 		return
 	}
@@ -115,7 +131,7 @@ func (s *contextCheckpointStore) evictOverflowLocked(keepSession string) {
 	}
 }
 
-func (s *contextCheckpointStore) evictForNewSessionLocked(keepSession string) {
+func (s *contextCheckpointStore) evictForNewSessionLocked(keepSession contextSessionScope) {
 	if s.maxSessions <= 0 {
 		return
 	}
@@ -126,9 +142,10 @@ func (s *contextCheckpointStore) evictForNewSessionLocked(keepSession string) {
 	}
 }
 
-func (s *contextCheckpointStore) evictOldestSessionLocked(keepSession string) bool {
-	oldestSession := ""
+func (s *contextCheckpointStore) evictOldestSessionLocked(keepSession contextSessionScope) bool {
+	var oldestSession contextSessionScope
 	var oldest time.Time
+	found := false
 	for sessionKey, checkpoints := range s.sessions {
 		if sessionKey == keepSession {
 			continue
@@ -137,12 +154,13 @@ func (s *contextCheckpointStore) evictOldestSessionLocked(keepSession string) bo
 		if len(checkpoints) > 0 {
 			lastSeen = checkpoints[len(checkpoints)-1].CreatedAt
 		}
-		if oldestSession == "" || lastSeen.Before(oldest) {
+		if !found || lastSeen.Before(oldest) {
 			oldestSession = sessionKey
 			oldest = lastSeen
+			found = true
 		}
 	}
-	if oldestSession == "" {
+	if !found {
 		return false
 	}
 	delete(s.sessions, oldestSession)

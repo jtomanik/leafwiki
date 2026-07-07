@@ -49,27 +49,25 @@ var validModes = map[SessionMode]struct{}{
 	SessionModeUnknown:  {},
 }
 
+var sessionModesByRaw = map[string]SessionMode{
+	sessionModeViewRaw:     SessionModeView,
+	sessionModeEditRaw:     SessionModeEdit,
+	sessionModeHistoryRaw:  SessionModeHistory,
+	sessionModeAssetsRaw:   SessionModeAssets,
+	sessionModeSettingsRaw: SessionModeSettings,
+	sessionModeImportRaw:   SessionModeImport,
+	sessionModeUnknownRaw:  SessionModeUnknown,
+}
+
 func SessionModeFromString(raw string) SessionMode {
-	switch strings.TrimSpace(raw) {
-	case "":
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
 		return ""
-	case sessionModeViewRaw:
-		return SessionModeView
-	case sessionModeEditRaw:
-		return SessionModeEdit
-	case sessionModeHistoryRaw:
-		return SessionModeHistory
-	case sessionModeAssetsRaw:
-		return SessionModeAssets
-	case sessionModeSettingsRaw:
-		return SessionModeSettings
-	case sessionModeImportRaw:
-		return SessionModeImport
-	case sessionModeUnknownRaw:
-		return SessionModeUnknown
-	default:
-		return sessionModeInvalid
 	}
+	if mode, ok := sessionModesByRaw[trimmed]; ok {
+		return mode
+	}
+	return sessionModeInvalid
 }
 
 func (mode SessionMode) Normalize() SessionMode {

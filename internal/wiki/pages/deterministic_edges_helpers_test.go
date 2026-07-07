@@ -85,8 +85,8 @@ func pageMarkdownPath(deps *routesSpecDeps, page *tree.Page) string {
 	return filepath.Join(deps.tree.RootDir(), filepath.FromSlash(rel))
 }
 
-func testFixturePage(id, title, slug string, kind tree.NodeKind) *tree.Page {
-	return testPage(tree.PageIDFromString(id), title, tree.SlugFromString(slug), kind)
+func testFixturePage(id tree.PageID, title string, slug tree.Slug, kind tree.NodeKind) *tree.Page {
+	return testPage(id, title, slug, kind)
 }
 
 func testPage(id tree.PageID, title string, slug tree.Slug, kind tree.NodeKind) *tree.Page {
@@ -99,7 +99,7 @@ func testPage(id tree.PageID, title string, slug tree.Slug, kind tree.NodeKind) 
 	return &tree.Page{PageNode: node, Content: title + " body"}
 }
 
-func testFixtureChildPage(parent *tree.Page, id, title, slug string, kind tree.NodeKind) *tree.Page {
+func testFixtureChildPage(parent *tree.Page, id tree.PageID, title string, slug tree.Slug, kind tree.NodeKind) *tree.Page {
 	page := testFixturePage(id, title, slug, kind)
 	page.Parent = parent.PageNode
 	return page
@@ -195,7 +195,7 @@ func (f *pageUseCaseFakeTree) GetPages(ids []tree.PageID) ([]*tree.Page, []error
 	pages := make([]*tree.Page, len(ids))
 	errs := make([]error, len(ids))
 	for i, id := range ids {
-		pages[i] = testPage(id, "Generated Page", tree.SlugFromString("generated-page"), tree.NodeKindPage)
+		pages[i] = testPage(id, "Generated Page", newFixtureSlug("generated-page"), tree.NodeKindPage)
 	}
 	return pages, errs
 }

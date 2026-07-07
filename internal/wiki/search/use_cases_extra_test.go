@@ -24,8 +24,8 @@ import (
 var _ = ginkgo.Describe("search execution", func() {
 	ginkgo.It("searches indexed pages and attaches tags and facets", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		goID := fixture.createIndexedPage("Go Guide", "go-guide", []string{"go", "docs"}, "A guide about Go testing.")
-		fixture.createIndexedPage("React Notes", "react-notes", []string{"react", "docs"}, "Frontend notes.")
+		goID := fixture.createIndexedPage("Go Guide", newFixtureIndexedPageSlug("go-guide"), []string{"go", "docs"}, "A guide about Go testing.")
+		fixture.createIndexedPage("React Notes", newFixtureIndexedPageSlug("react-notes"), []string{"react", "docs"}, "Frontend notes.")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
 			Query:    "guide",
@@ -49,8 +49,8 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("intersects query results with normalized tag filters", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		goID := fixture.createIndexedPage("Go Guide", "go-guide", []string{"go", "docs"}, "A guide about Go testing.")
-		fixture.createIndexedPage("React Guide", "react-guide", []string{"react", "docs"}, "A guide about React testing.")
+		goID := fixture.createIndexedPage("Go Guide", newFixtureIndexedPageSlug("go-guide"), []string{"go", "docs"}, "A guide about Go testing.")
+		fixture.createIndexedPage("React Guide", newFixtureIndexedPageSlug("react-guide"), []string{"react", "docs"}, "A guide about React testing.")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
 			Query:    "guide",
@@ -70,10 +70,10 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("returns sorted and paged tag-only results from the tree", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		fixture.createIndexedPage("Beta Page", "beta", []string{"go"}, "Beta body.")
-		alphaID := fixture.createIndexedPage("Alpha Page", "alpha", []string{"go", "docs"}, "Alpha body.")
-		missingID := fixture.createIndexedPage("Missing Tree Page", "missing-tree", []string{"go"}, "Missing body.")
-		Expect(fixture.tree.DeleteNodeUncheckedVersion(tree.UserIDFromString("system"), missingID, false)).To(Succeed())
+		fixture.createIndexedPage("Beta Page", newFixtureIndexedPageSlug("beta"), []string{"go"}, "Beta body.")
+		alphaID := fixture.createIndexedPage("Alpha Page", newFixtureIndexedPageSlug("alpha"), []string{"go", "docs"}, "Alpha body.")
+		missingID := fixture.createIndexedPage("Missing Tree Page", newFixtureIndexedPageSlug("missing-tree"), []string{"go"}, "Missing body.")
+		Expect(fixture.tree.DeleteNodeUncheckedVersion(newFixtureUserID("system"), missingID, false)).To(Succeed())
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
 			Tags:     []string{"go"},
@@ -100,8 +100,8 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("sorts equal tag-only titles by path and applies the default page size", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		firstID := fixture.createIndexedPage("Same Title", "a-page", []string{"go"}, "First body.")
-		fixture.createIndexedPage("Same Title", "b-page", []string{"go"}, "Second body.")
+		firstID := fixture.createIndexedPage("Same Title", newFixtureIndexedPageSlug("a-page"), []string{"go"}, "First body.")
+		fixture.createIndexedPage("Same Title", newFixtureIndexedPageSlug("b-page"), []string{"go"}, "Second body.")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
 			Tags:     []string{"go"},
@@ -122,7 +122,7 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("bounds tag-only result offsets past the end", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		fixture.createIndexedPage("Only Page", "only", []string{"go"}, "body")
+		fixture.createIndexedPage("Only Page", newFixtureIndexedPageSlug("only"), []string{"go"}, "body")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
 			Tags:     []string{"go"},
@@ -139,7 +139,7 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("returns tag lookup errors before searching", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
+		fixture.createIndexedPage("Go Guide", newFixtureIndexedPageSlug("go-guide"), []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "tags.db", "DROP TABLE page_tags")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
@@ -154,7 +154,7 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("returns tag-only excerpt lookup errors", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
+		fixture.createIndexedPage("Go Guide", newFixtureIndexedPageSlug("go-guide"), []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "tags.db", "DROP TABLE page_meta")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("returns index search errors", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
+		fixture.createIndexedPage("Go Guide", newFixtureIndexedPageSlug("go-guide"), []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "search.db", "DROP TABLE pages")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
@@ -202,7 +202,7 @@ var _ = ginkgo.Describe("search execution", func() {
 
 	ginkgo.It("omits tags and facets when tag attachment lookups fail", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "body")
+		fixture.createIndexedPage("Go Guide", newFixtureIndexedPageSlug("go-guide"), []string{"go"}, "body")
 		dropSearchFixtureTable(fixture.dataDir, "tags.db", "DROP TABLE page_tags")
 
 		out, err := fixture.useCase.Execute(context.Background(), SearchInput{
@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("search execution", func() {
 var _ = ginkgo.Describe("search routes", func() {
 	ginkgo.It("serves public search results and indexing status", ginkgo.Label("integration"), func() {
 		fixture := newSearchFixture()
-		fixture.createIndexedPage("Go Guide", "go-guide", []string{"go"}, "A guide about Go.")
+		fixture.createIndexedPage("Go Guide", newFixtureIndexedPageSlug("go-guide"), []string{"go"}, "A guide about Go.")
 		status := coresearch.NewIndexingStatus()
 		status.Start()
 		status.Success()
@@ -333,6 +333,21 @@ type searchFixture struct {
 	useCase *SearchUseCase
 }
 
+type indexedPageSlugFixture struct {
+	slug         tree.Slug
+	indexPath    string
+	markdownPath string
+}
+
+func newFixtureIndexedPageSlug[T ~string](raw T) indexedPageSlugFixture {
+	rawSlug := string(raw)
+	return indexedPageSlugFixture{
+		slug:         newFixtureSlug(raw),
+		indexPath:    "/" + rawSlug,
+		markdownPath: rawSlug + ".md",
+	}
+}
+
 func newSearchFixture() *searchFixture {
 	ginkgo.GinkgoHelper()
 	dataDir := tempSearchDataDir()
@@ -361,10 +376,10 @@ func newSearchFixture() *searchFixture {
 	}
 }
 
-func (fixture *searchFixture) createIndexedPage(title string, slug string, tags []string, body string) tree.PageID {
+func (fixture *searchFixture) createIndexedPage(title string, pageSlug indexedPageSlugFixture, tags []string, body string) tree.PageID {
 	ginkgo.GinkgoHelper()
 	kind := tree.NodeKindPage
-	id, err := fixture.tree.CreateNode(tree.UserIDFromString("system"), nil, title, tree.SlugFromString(slug), &kind)
+	id, err := fixture.tree.CreateNode(newFixtureUserID("system"), nil, title, pageSlug.slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
 
 	raw := "---\ntags:\n"
@@ -373,8 +388,8 @@ func (fixture *searchFixture) createIndexedPage(title string, slug string, tags 
 	}
 	raw += "---\n\n# " + title + "\n\n" + body
 
-	Expect(fixture.tree.UpdateNodeUncheckedVersion(tree.UserIDFromString("system"), *id, title, tree.SlugFromString(slug), &raw, true)).To(Succeed())
-	Expect(fixture.index.IndexPage("/"+slug, slug+".md", *id, title, kind, raw)).To(Succeed())
+	Expect(fixture.tree.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, pageSlug.slug, &raw, true)).To(Succeed())
+	Expect(fixture.index.IndexPage(pageSlug.indexPath, pageSlug.markdownPath, *id, title, kind, raw)).To(Succeed())
 	Expect(fixture.tags.IndexPageContent(*id, raw)).To(Succeed())
 	return *id
 }
@@ -398,6 +413,14 @@ func newSearchTestRouter(cfg RoutesConfig, opts httpinternal.RouterOptions) http
 		httpinternal.FrontendConfig{},
 		opts,
 	)
+}
+
+func newFixtureUserID[T ~string](raw T) tree.UserID {
+	return tree.NewUserIDUnchecked(string(raw))
+}
+
+func newFixtureSlug[T ~string](raw T) tree.Slug {
+	return tree.NewSlugUnchecked(raw)
 }
 
 type fakeSearchIndex struct {

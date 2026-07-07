@@ -76,7 +76,7 @@ func tempPropertiesDataDir() string {
 var _ = ginkgo.Describe("properties routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("exposes property keys without authentication when public access is enabled", func() {
 		svc := newPropertiesTestService()
-		Expect(svc.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
+		Expect(svc.SetPropertiesForPage(newFixturePageID("page-1"), map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
 		})).To(Succeed())
 
@@ -173,11 +173,11 @@ var _ = ginkgo.Describe("properties routes", ginkgo.Label("integration"), func()
 var _ = ginkgo.Describe("properties use cases", func() {
 	ginkgo.It("normalizes key filter and page size before listing property keys", ginkgo.Label("unit"), func() {
 		svc := newPropertiesTestService()
-		Expect(svc.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
+		Expect(svc.SetPropertiesForPage(newFixturePageID("page-1"), map[string]coreprop.PropertyEntry{
 			"Status": {Value: "draft", Type: "text"},
 			"stage":  {Value: "alpha", Type: "text"},
 		})).To(Succeed())
-		Expect(svc.SetPropertiesForPage("page-2", map[string]coreprop.PropertyEntry{
+		Expect(svc.SetPropertiesForPage(newFixturePageID("page-2"), map[string]coreprop.PropertyEntry{
 			"Status": {Value: "published", Type: "text"},
 		})).To(Succeed())
 		uc := NewGetPropertyKeysUseCase(svc)
@@ -226,7 +226,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 
 	ginkgo.It("returns backing store errors from property key and page lookup use cases", ginkgo.Label("unit"), func() {
 		propertiesService, dataDir := newPropertiesTestServiceWithDataDir()
-		Expect(propertiesService.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
+		Expect(propertiesService.SetPropertiesForPage(newFixturePageID("page-1"), map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
 		})).To(Succeed())
 		dropPropertiesTable(dataDir)
@@ -252,7 +252,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 
 	ginkgo.It("returns structured route errors when property key listing fails", ginkgo.Label("integration"), func() {
 		propertiesService, dataDir := newPropertiesTestServiceWithDataDir()
-		Expect(propertiesService.SetPropertiesForPage("page-1", map[string]coreprop.PropertyEntry{
+		Expect(propertiesService.SetPropertiesForPage(newFixturePageID("page-1"), map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
 		})).To(Succeed())
 		dropPropertiesTable(dataDir)
@@ -272,7 +272,7 @@ var _ = ginkgo.Describe("properties use cases", func() {
 
 	ginkgo.It("maps matching page IDs to property page DTOs and skips missing tree nodes", ginkgo.Label("unit"), func() {
 		fixture := newPropertiesPageFixture()
-		Expect(fixture.properties.SetPropertiesForPage("missing-page", map[string]coreprop.PropertyEntry{
+		Expect(fixture.properties.SetPropertiesForPage(newFixturePageID("missing-page"), map[string]coreprop.PropertyEntry{
 			"status": {Value: "draft", Type: "text"},
 		})).To(Succeed())
 		uc := NewGetPagesByPropertyUseCase(fixture.properties, fixture.tree, nil)
@@ -356,7 +356,7 @@ func newPropertiesPageFixture() propertiesPageFixture {
 	treeService := tree.NewTreeService(dataDir)
 	Expect(treeService.LoadTree()).To(Succeed())
 	pageKind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode("user-1", nil, "Draft Page", "draft", &pageKind)
+	pageID, err := treeService.CreateNode(newFixtureUserID("user-1"), nil, "Draft Page", newFixtureSlug("draft"), &pageKind)
 	Expect(err).NotTo(HaveOccurred())
 	propertiesService := newPropertiesTestService()
 	Expect(propertiesService.SetPropertiesForPage(*pageID, map[string]coreprop.PropertyEntry{
@@ -395,6 +395,18 @@ func replacePropertiesTableWithoutType(dataDir string) {
 		INSERT INTO page_properties (page_id, key, value) VALUES ('page-1', 'status', 'draft');
 	`)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func newFixturePageID[T ~string](raw T) tree.PageID {
+	return tree.NewPageIDUnchecked(raw)
+}
+
+func newFixtureUserID[T ~string](raw T) tree.UserID {
+	return tree.NewUserIDUnchecked(string(raw))
+}
+
+func newFixtureSlug[T ~string](raw T) tree.Slug {
+	return tree.NewSlugUnchecked(raw)
 }
 
 func ginTestContext() (*gin.Context, *httptest.ResponseRecorder) {

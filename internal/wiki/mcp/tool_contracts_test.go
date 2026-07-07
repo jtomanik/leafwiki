@@ -7,9 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/localization"
-	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
 
 var _ = Describe("Tool descriptor contracts", Label("unit"), func() {
@@ -42,10 +40,7 @@ var _ = Describe("Tool descriptor contracts", Label("unit"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		var decoded messageOutput
 		Expect(json.Unmarshal(encoded, &decoded)).To(Succeed())
-		Expect(decoded).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"MessageID": Equal(ToolMessageMovePageSuccess),
-			"Message":   Not(BeEmpty()),
-		}))
+		Expect(decoded).To(matchMessageOutput(ToolMessageMovePageSuccess))
 	})
 
 	It("exposes message IDs in message-only output schemas", func() {
@@ -59,9 +54,6 @@ var _ = Describe("Tool descriptor contracts", Label("unit"), func() {
 		rawErr := errors.New("sqlite raw private failure")
 
 		result := mcpToolErrorResult(rawErr)
-		Expect(result.Meta).To(HaveKeyWithValue("error", SatisfyAll(
-			testmatchers.HaveMCPStructuredError(errCodeMCPToolError, sharederrors.MessageIDForCode(errCodeMCPToolError)),
-			HaveKeyWithValue("args", HaveLen(1)),
-		)))
+		Expect(result.Meta).To(matchMCPToolErrorMeta(errCodeMCPToolError))
 	})
 })

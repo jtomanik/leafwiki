@@ -11,6 +11,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -27,10 +28,10 @@ func getHTTPPageByPath(router http.Handler, path string) map[string]any {
 	return out
 }
 
-func getHTTPPageByID(router http.Handler, pageID string) map[string]any {
+func getHTTPPageByID(router http.Handler, pageID tree.PageID) map[string]any {
 	GinkgoHelper()
 
-	return getHTTPMap(router, "/api/pages/"+pageID)
+	return getHTTPMap(router, "/api/pages/"+pageID.MetadataValue())
 }
 
 func getHTTPValue(router http.Handler, path string) any {
@@ -59,13 +60,13 @@ func getHTTPMap(router http.Handler, path string) map[string]any {
 	return value.(map[string]any)
 }
 
-func updateHTTPPage(router http.Handler, pageID string, payload map[string]any) map[string]any {
+func updateHTTPPage(router http.Handler, pageID tree.PageID, payload map[string]any) map[string]any {
 	GinkgoHelper()
 
 	body, err := json.Marshal(payload)
 	Expect(err).NotTo(HaveOccurred())
 	csrfToken, csrfCookies := issueHTTPCSRF(router)
-	req := httptest.NewRequest(http.MethodPut, "/api/pages/"+pageID, strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPut, "/api/pages/"+pageID.MetadataValue(), strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-CSRF-Token", csrfToken)
 	for _, cookie := range csrfCookies {
@@ -75,7 +76,7 @@ func updateHTTPPage(router http.Handler, pageID string, payload map[string]any) 
 	router.ServeHTTP(rec, req)
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	var out map[string]any
-	Expect(json.Unmarshal(rec.Body.Bytes(), &out)).To(Succeed(), "decode HTTP page update %q", pageID)
+	Expect(json.Unmarshal(rec.Body.Bytes(), &out)).To(Succeed(), "decode HTTP page update %q", pageID.MetadataValue())
 	return out
 }
 
@@ -167,19 +168,19 @@ func getHTTPSearch(router http.Handler, values url.Values) map[string]any {
 	return decodeJSONMap("GET /api/search", rec.Body.Bytes())
 }
 
-func uploadHTTPAsset(router http.Handler, pageID, filename string, content []byte, wantStatus int) map[string]any {
+func uploadHTTPAsset(router http.Handler, pageID tree.PageID, filename tree.AssetName, content []byte, wantStatus int) map[string]any {
 	GinkgoHelper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", filename)
+	part, err := writer.CreateFormFile("file", filename.Filename())
 	Expect(err).NotTo(HaveOccurred())
 	_, err = part.Write(content)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(writer.Close()).To(Succeed())
 
 	csrfToken, csrfCookies := issueHTTPCSRF(router)
-	req := httptest.NewRequest(http.MethodPost, "/api/pages/"+pageID+"/assets", &body)
+	req := httptest.NewRequest(http.MethodPost, "/api/pages/"+pageID.MetadataValue()+"/assets", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-CSRF-Token", csrfToken)
 	for _, cookie := range csrfCookies {
@@ -188,48 +189,56 @@ func uploadHTTPAsset(router http.Handler, pageID, filename string, content []byt
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	Expect(rec).To(HaveHTTPStatus(wantStatus), rec.Body.String())
-	return decodeJSONMap("POST asset "+pageID+"/"+filename, rec.Body.Bytes())
+	return decodeJSONMap(httpAssetUploadLabel(pageID), rec.Body.Bytes())
 }
 
-func getHTTPAssets(router http.Handler, pageID string) map[string]any {
+func httpAssetUploadLabel(pageID tree.PageID) string {
+	return "POST asset for page " + pageID.MetadataValue()
+}
+
+func getHTTPAssets(router http.Handler, pageID tree.PageID) map[string]any {
 	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID+"/assets", nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID.MetadataValue()+"/assets", nil))
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
-	return decodeJSONMap("GET asset list for page "+pageID, rec.Body.Bytes())
+	return decodeJSONMap("GET asset list for page "+pageID.MetadataValue(), rec.Body.Bytes())
 }
 
-func getHTTPAsset(router http.Handler, pageID, filename string) string {
+func getHTTPAsset(router http.Handler, pageID tree.PageID, filename tree.AssetName) string {
 	GinkgoHelper()
 
 	body, _ := getHTTPAssetWithContentType(router, pageID, filename)
 	return body
 }
 
-func getHTTPAssetWithContentType(router http.Handler, pageID, filename string) (string, string) {
+func getHTTPAssetWithContentType(router http.Handler, pageID tree.PageID, filename tree.AssetName) (string, string) {
 	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/"+pageID+"/"+url.PathEscape(filename), nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/"+pageID.MetadataValue()+"/"+url.PathEscape(filename.String()), nil))
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
 	return rec.Body.String(), rec.Header().Get("Content-Type")
 }
 
-func getHTTPLatestRevision(router http.Handler, pageID string) map[string]any {
+func getHTTPLatestRevision(router http.Handler, pageID tree.PageID) map[string]any {
 	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID+"/revisions/latest", nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID.MetadataValue()+"/revisions/latest", nil))
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
-	return decodeJSONMap("GET latest revision for page "+pageID, rec.Body.Bytes())
+	return decodeJSONMap("GET latest revision for page "+pageID.MetadataValue(), rec.Body.Bytes())
 }
 
-func getHTTPRevision(router http.Handler, pageID, revisionID string) map[string]any {
+func getHTTPRevision(router http.Handler, pageID tree.PageID, revisionID tree.RevisionID) map[string]any {
 	GinkgoHelper()
 
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID+"/revisions/"+revisionID, nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/"+pageID.MetadataValue()+"/revisions/"+revisionID.String(), nil))
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), rec.Body.String())
-	return decodeJSONMap("GET revision "+pageID+"/"+revisionID, rec.Body.Bytes())
+	return decodeJSONMap(httpRevisionLabel(pageID), rec.Body.Bytes())
+}
+
+func httpRevisionLabel(pageID tree.PageID) string {
+	return "GET revision for page " + pageID.MetadataValue()
 }

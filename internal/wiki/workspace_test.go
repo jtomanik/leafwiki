@@ -19,7 +19,7 @@ var _ = ginkgo.Describe("workspace directory validation", ginkgo.Label("unit"), 
 		rootDir := filepath.Join(wikiTestTempDir(), "wiki")
 		dataDir := filepath.Join(rootDir, "data")
 
-		err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		err := ValidateWorkspace(Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 		Expect(err).To(MatchError(ErrWorkspaceRootDirContainsDataDir))
 	})
 
@@ -27,7 +27,7 @@ var _ = ginkgo.Describe("workspace directory validation", ginkgo.Label("unit"), 
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(dataDir, "assets", "pages")
 
-		err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		err := ValidateWorkspace(Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 		Expect(err).To(MatchError(ErrWorkspaceRootDirInsideDataDirAppState))
 	})
 
@@ -36,7 +36,7 @@ var _ = ginkgo.Describe("workspace directory validation", ginkgo.Label("unit"), 
 			dataDir := filepath.Join(wikiTestTempDir(), ".leafwiki")
 			rootDir := filepath.Join(dataDir, reserved, "workspace")
 
-			err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+			err := ValidateWorkspace(Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 			Expect(err).To(MatchError(ErrWorkspaceRootDirInsideDataDirAppState))
 		},
 		ginkgo.Entry("rejects roots inside wikid control state", "wikid"),
@@ -51,7 +51,7 @@ var _ = ginkgo.Describe("workspace directory validation", ginkgo.Label("unit"), 
 		rootLink := filepath.Join(baseDir, "root-link")
 		Expect(os.Symlink(rootTarget, rootLink)).To(Succeed())
 
-		err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootLink})
+		err := ValidateWorkspace(Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootLink})
 		Expect(err).To(MatchError(ErrWorkspaceRootDirContainsDataDir))
 	})
 
@@ -63,7 +63,7 @@ var _ = ginkgo.Describe("workspace directory validation", ginkgo.Label("unit"), 
 		rootLink := filepath.Join(baseDir, "root-link")
 		Expect(os.Symlink(rootTarget, rootLink)).To(Succeed())
 
-		err := ValidateWorkspace(Workspace{ID: "default", DataDir: dataDir, RootDir: rootLink})
+		err := ValidateWorkspace(Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootLink})
 		Expect(err).To(MatchError(ErrWorkspaceRootDirInsideDataDirAppState))
 	})
 })

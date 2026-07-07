@@ -29,7 +29,7 @@ var _ = Describe("Revision tools", Label("integration"), func() {
 		})
 		Expect(treeService.LoadTree()).To(Succeed())
 		kind := tree.NodeKindPage
-		pageID, err := treeService.CreateNode("alice", nil, "Page A", "page-a", &kind)
+		pageID, err := treeService.CreateNode(newFixtureUserID("alice"), nil, "Page A", newFixtureSlug("page-a"), &kind)
 		Expect(err).NotTo(HaveOccurred())
 
 		var seenCursor string
@@ -42,12 +42,12 @@ var _ = Describe("Revision tools", Label("integration"), func() {
 				seenCursor = cursor
 				return workspacesync.PageRevisionList{
 					Revisions: []*corerevision.Revision{{
-						ID:       corerevision.RevisionIDFromString(revisionCursorFixture),
+						ID:       newFixtureRevisionID(revisionCursorFixture),
 						PageID:   *pageID,
 						Type:     corerevision.RevisionTypeContentUpdate,
-						AuthorID: "alice",
+						AuthorID: newFixtureUserID("alice").MetadataValue(),
 						Title:    "Page A",
-						Slug:     "page-a",
+						Slug:     newFixtureSlug("page-a"),
 						Kind:     tree.NodeKindPage,
 						Path:     "page-a",
 					}},

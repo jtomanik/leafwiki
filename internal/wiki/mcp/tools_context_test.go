@@ -10,12 +10,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 	"github.com/perber/wiki/internal/core/auth"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
-	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -48,9 +45,9 @@ var _ = Describe("context tool helpers", func() {
 	It("uses markdown file kind for same-basename twins", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 
-		sectionID, err := routes.treeService.CreateNode("system", nil, "Sync Section", "sync", testNodeKindPtr(tree.NodeKindSection))
+		sectionID, err := routes.treeService.CreateNode(newFixtureUserID("system"), nil, "Sync Section", newFixtureSlug("sync"), testNodeKindPtr(tree.NodeKindSection))
 		Expect(err).To(Succeed())
-		pageID, err := routes.treeService.CreateNode("system", nil, "Sync Page", "sync", testNodeKindPtr(tree.NodeKindPage))
+		pageID, err := routes.treeService.CreateNode(newFixtureUserID("system"), nil, "Sync Page", newFixtureSlug("sync"), testNodeKindPtr(tree.NodeKindPage))
 		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"sync.md"})
@@ -63,7 +60,7 @@ var _ = Describe("context tool helpers", func() {
 	It("resolves README fallback markdown paths to sections", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 
-		sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
+		sectionID, err := routes.treeService.CreateNode(newFixtureUserID("system"), nil, "Guide", newFixtureSlug("guide"), testNodeKindPtr(tree.NodeKindSection))
 		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/README.md"})
@@ -76,7 +73,7 @@ var _ = Describe("context tool helpers", func() {
 		routes.workspaceRootDir = workspaceRoot
 		Expect(os.MkdirAll(filepath.Join(workspaceRoot, "User Guides"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(workspaceRoot, "User Guides", "README.md"), []byte("# User Guides\n"), 0o644)).To(Succeed())
-		sectionID, err := routes.treeService.CreateNode("system", nil, "User Guides", "user-guides", testNodeKindPtr(tree.NodeKindSection))
+		sectionID, err := routes.treeService.CreateNode(newFixtureUserID("system"), nil, "User Guides", newFixtureSlug("user-guides"), testNodeKindPtr(tree.NodeKindSection))
 		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"User Guides/README.md"})
@@ -86,7 +83,7 @@ var _ = Describe("context tool helpers", func() {
 	It("does not fallback lowercase readme markdown paths", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
 
-		_, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
+		_, err := routes.treeService.CreateNode(newFixtureUserID("system"), nil, "Guide", newFixtureSlug("guide"), testNodeKindPtr(tree.NodeKindSection))
 		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"guide/readme.md"})
@@ -95,9 +92,9 @@ var _ = Describe("context tool helpers", func() {
 
 	It("uses workspace route normalization for plan paths", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
-		plansID, err := routes.treeService.CreateNode("system", nil, "Plans", "plans", testNodeKindPtr(tree.NodeKindSection))
+		plansID, err := routes.treeService.CreateNode(newFixtureUserID("system"), nil, "Plans", newFixtureSlug("plans"), testNodeKindPtr(tree.NodeKindSection))
 		Expect(err).To(Succeed())
-		pageID, err := routes.treeService.CreateNode("system", plansID, "Agent Hooks Plan", "agent-hooks-plan", testNodeKindPtr(tree.NodeKindPage))
+		pageID, err := routes.treeService.CreateNode(newFixtureUserID("system"), plansID, "Agent Hooks Plan", newFixtureSlug("agent-hooks-plan"), testNodeKindPtr(tree.NodeKindPage))
 		Expect(err).To(Succeed())
 
 		pageIDs := routes.pageIDsForMarkdownPaths([]string{"plans/agent_hooks.PLAN.md"})
@@ -111,7 +108,7 @@ var _ = Describe("context tool helpers", func() {
 		routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 			return workspacesync.SnapshotList{
 				Snapshots: []workspacesync.Snapshot{{
-					ID:                   "root-index-commit",
+					ID:                   newFixtureCommitHash("root-index-commit"),
 					CreatedAt:            createdAt,
 					ChangedMarkdownCount: 1,
 					ChangedMarkdownPaths: []string{"index.md"},
@@ -126,12 +123,12 @@ var _ = Describe("context tool helpers", func() {
 
 	It("handles context sync modes and session history", Label("integration"), func() {
 		routes := newContextToolTestRoutes()
-		actor := toolActor{ID: "editor-1", User: &auth.User{ID: "editor-1", Username: "editor", Role: auth.RoleEditor}}
+		actor := toolActor{ID: newFixtureUserID("editor-1"), User: &auth.User{ID: newFixtureUserID("editor-1"), Username: "editor", Role: auth.RoleEditor}}
 		opts := httpinternal.RouterOptions{AuthDisabled: true, EnableWorkspaceSync: true}
 		ctx := context.Background()
 
 		refreshCalls := 0
-		status := workspacesync.SyncStatus{Enabled: true, WatcherRunning: true, LastCommitHash: "healthy"}
+		status := workspacesync.SyncStatus{Enabled: true, WatcherRunning: true, LastCommitHash: newFixtureCommitHash("healthy")}
 		routes.workspaceSyncStatus = func() workspacesync.SyncStatus { return status }
 		routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
 			refreshCalls++
@@ -157,14 +154,14 @@ var _ = Describe("context tool helpers", func() {
 		status.WatcherRunning = true
 
 		status.PendingEventCount = 2
-		status.LastCommitHash = "pending"
+		status.LastCommitHash = newFixtureCommitHash("pending")
 		_, err = routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto})
 		Expect(err).To(Succeed())
 		Expect(refreshCalls).To(Equal(2))
 
 		status.PendingEventCount = 0
 		status.LastError = "previous sync failed"
-		status.LastCommitHash = "errored"
+		status.LastCommitHash = newFixtureCommitHash("errored")
 		routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
 			refreshCalls++
 			return status, errors.New("sync still failed")
@@ -172,26 +169,24 @@ var _ = Describe("context tool helpers", func() {
 		errored, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeAuto})
 		Expect(err).To(Succeed())
 		Expect(refreshCalls).To(Equal(3))
-		Expect(errored.SyncStatus).To(HaveKeyWithValue("lastErrorDetail",
-			testmatchers.HaveStructuredError(errCodeMCPWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeMCPWorkspaceSyncFailed))))
+		Expect(errored.SyncStatus).To(matchMCPSyncLastErrorDetail(errCodeMCPWorkspaceSyncFailed))
 
 		routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
 			refreshCalls++
 			return status, nil
 		}
 		status.LastError = ""
-		status.LastCommitHash = "force"
+		status.LastCommitHash = newFixtureCommitHash("force")
 		_, err = routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeForce})
 		Expect(err).To(Succeed())
 		Expect(refreshCalls).To(Equal(4))
 
 		status.LastError = "reported without refresh"
-		status.LastCommitHash = "none"
+		status.LastCommitHash = newFixtureCommitHash("none")
 		none, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SyncMode: contextSyncModeNone})
 		Expect(err).To(Succeed())
 		Expect(refreshCalls).To(Equal(4))
-		Expect(none.SyncStatus).To(HaveKeyWithValue("lastErrorDetail",
-			testmatchers.HaveStructuredError(errCodeMCPWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeMCPWorkspaceSyncFailed))))
+		Expect(none.SyncStatus).To(matchMCPSyncLastErrorDetail(errCodeMCPWorkspaceSyncFailed))
 
 		missing, err := routes.getContext(ctx, nil, actor, opts, getContextInput{SinceToken: "missing", SyncMode: contextSyncModeNone})
 		Expect(err).To(Succeed())
@@ -208,7 +203,7 @@ var _ = Describe("context tool helpers", func() {
 		}
 		Expect(latest.ContextHistory).To(HaveLen(10))
 
-		otherActor := toolActor{ID: "editor-2", User: &auth.User{ID: "editor-2", Username: "other", Role: auth.RoleEditor}}
+		otherActor := toolActor{ID: newFixtureUserID("editor-2"), User: &auth.User{ID: newFixtureUserID("editor-2"), Username: "other", Role: auth.RoleEditor}}
 		other, err := routes.getContext(ctx, nil, otherActor, opts, getContextInput{SyncMode: contextSyncModeNone})
 		Expect(err).To(Succeed())
 		Expect(other.ContextHistory).To(HaveLen(1))
@@ -236,7 +231,7 @@ var _ = Describe("context tool helpers", func() {
 			return workspacesync.SyncStatus{
 				Enabled:        true,
 				WatcherRunning: true,
-				LastCommitHash: "redact",
+				LastCommitHash: newFixtureCommitHash("redact"),
 				LastError: fmt.Sprintf(
 					"open %s: permission denied; stat %s: no such file",
 					filepath.Join(rootDir, "docs", "api.md"),
@@ -246,30 +241,22 @@ var _ = Describe("context tool helpers", func() {
 					{
 						Path:     filepath.Join(rootDir, "docs", "bad.md"),
 						Message:  "validate " + filepath.Join(dataDir, ".leafwiki", "work", "bad.md") + ": failed",
-						Severity: "error",
+						Severity: newFixtureIssueSeverity("error"),
 					},
 				},
 			}
 		}
-		actor := toolActor{ID: "editor-1", User: &auth.User{ID: "editor-1", Username: "editor", Role: auth.RoleEditor}}
+		actor := toolActor{ID: newFixtureUserID("editor-1"), User: &auth.User{ID: newFixtureUserID("editor-1"), Username: "editor", Role: auth.RoleEditor}}
 
 		out, err := routes.getContext(context.Background(), nil, actor, httpinternal.RouterOptions{EnableWorkspaceSync: true}, getContextInput{SyncMode: contextSyncModeNone})
 		Expect(err).To(Succeed())
 		Expect(out.SyncStatus).To(SatisfyAll(
-			HaveKeyWithValue("lastErrorDetail", SatisfyAll(
-				testmatchers.HaveStructuredError(errCodeMCPWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeMCPWorkspaceSyncFailed)),
-				HaveField("Message", SatisfyAll(Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir)))),
-				HaveField("Template", SatisfyAll(Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir)))),
-			)),
-			HaveKeyWithValue("validationErrorDetails", HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Path":    Equal("<root-dir>/docs/bad.md"),
-				"Message": SatisfyAll(ContainSubstring("<data-dir>/.leafwiki/work/bad.md"), Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir))),
-			}))),
+			matchRedactedMCPSyncLastErrorDetail(errCodeMCPWorkspaceSyncFailed, rootDir, dataDir),
+			matchWorkspaceValidationErrorDetails(matchWorkspaceValidationError("<root-dir>/docs/bad.md", "<data-dir>/.leafwiki/work/bad.md", rootDir, dataDir)),
 		))
-		Expect(out.Validation.Issues).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Path":    Equal("<root-dir>/docs/bad.md"),
-			"Message": SatisfyAll(ContainSubstring("<data-dir>/.leafwiki/work/bad.md"), Not(ContainSubstring(rootDir)), Not(ContainSubstring(dataDir))),
-		})))
+		Expect(out.Validation.Issues).To(HaveExactElements(
+			matchRedactedValidationIssueOutput("<root-dir>/docs/bad.md", "<data-dir>/.leafwiki/work/bad.md", rootDir, dataDir),
+		))
 	})
 
 	It("evicts old checkpoint sessions", Label("unit"), func() {
@@ -277,11 +264,11 @@ var _ = Describe("context tool helpers", func() {
 		base := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 
 		for i := 0; i < defaultContextCheckpointSessions+4; i++ {
-			store.record(fmt.Sprintf("session-%03d", i), contextCheckpoint{CreatedAt: base.Add(time.Duration(i) * time.Second)})
+			store.record(contextSessionScopeForTest(newFixtureContextSessionID(fmt.Sprintf("session-%03d", i))), contextCheckpoint{CreatedAt: base.Add(time.Duration(i) * time.Second)})
 		}
 
 		store.mu.Lock()
-		sessions := map[string][]contextCheckpoint{}
+		sessions := map[contextSessionScope][]contextCheckpoint{}
 		for id, history := range store.sessions {
 			sessions[id] = history
 		}
@@ -289,8 +276,8 @@ var _ = Describe("context tool helpers", func() {
 
 		Expect(sessions).To(SatisfyAll(
 			HaveLen(defaultContextCheckpointSessions),
-			Not(HaveKey("session-000")),
-			HaveKey(fmt.Sprintf("session-%03d", defaultContextCheckpointSessions+3)),
+			Not(HaveKey(contextSessionScopeForTest(newFixtureContextSessionID("session-000")))),
+			HaveKey(contextSessionScopeForTest(newFixtureContextSessionID(fmt.Sprintf("session-%03d", defaultContextCheckpointSessions+3)))),
 		))
 	})
 
@@ -299,27 +286,27 @@ var _ = Describe("context tool helpers", func() {
 		store.maxSessions = 2
 		store.ttl = time.Hour
 		base := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
-		store.sessions["current"] = []contextCheckpoint{{Token: "current-old", CreatedAt: base.Add(2 * time.Minute)}}
-		store.sessions["oldest"] = []contextCheckpoint{{Token: "oldest", CreatedAt: base}}
-		store.sessions["middle"] = []contextCheckpoint{{Token: "middle", CreatedAt: base.Add(time.Minute)}}
+		store.sessions[contextSessionScopeForTest(newFixtureContextSessionID("current"))] = []contextCheckpoint{{Token: "current-old", CreatedAt: base.Add(2 * time.Minute)}}
+		store.sessions[contextSessionScopeForTest(newFixtureContextSessionID("oldest"))] = []contextCheckpoint{{Token: "oldest", CreatedAt: base}}
+		store.sessions[contextSessionScopeForTest(newFixtureContextSessionID("middle"))] = []contextCheckpoint{{Token: "middle", CreatedAt: base.Add(time.Minute)}}
 
-		_, history := store.record("current", contextCheckpoint{CreatedAt: base.Add(3 * time.Minute)})
+		_, history := store.record(contextSessionScopeForTest(newFixtureContextSessionID("current")), contextCheckpoint{CreatedAt: base.Add(3 * time.Minute)})
 
 		Expect(history).To(HaveExactElements(
 			HaveField("Token", Equal("current-old")),
 			HaveField("CreatedAt", Equal(base.Add(3*time.Minute))),
 		))
 		store.mu.Lock()
-		sessions := map[string][]contextCheckpoint{}
+		sessions := map[contextSessionScope][]contextCheckpoint{}
 		for id, history := range store.sessions {
 			sessions[id] = history
 		}
 		store.mu.Unlock()
 		Expect(sessions).To(SatisfyAll(
 			HaveLen(2),
-			HaveKey("current"),
-			HaveKey("middle"),
-			Not(HaveKey("oldest")),
+			HaveKey(contextSessionScopeForTest(newFixtureContextSessionID("current"))),
+			HaveKey(contextSessionScopeForTest(newFixtureContextSessionID("middle"))),
+			Not(HaveKey(contextSessionScopeForTest(newFixtureContextSessionID("oldest")))),
 		))
 	})
 
@@ -328,21 +315,21 @@ var _ = Describe("context tool helpers", func() {
 		store.ttl = time.Minute
 		base := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 
-		store.record("expired", contextCheckpoint{CreatedAt: base})
-		store.record("fresh", contextCheckpoint{CreatedAt: base.Add(30 * time.Second)})
-		store.record("current", contextCheckpoint{CreatedAt: base.Add(2 * time.Minute)})
+		store.record(contextSessionScopeForTest(newFixtureContextSessionID("expired")), contextCheckpoint{CreatedAt: base})
+		store.record(contextSessionScopeForTest(newFixtureContextSessionID("fresh")), contextCheckpoint{CreatedAt: base.Add(30 * time.Second)})
+		store.record(contextSessionScopeForTest(newFixtureContextSessionID("current")), contextCheckpoint{CreatedAt: base.Add(2 * time.Minute)})
 
 		store.mu.Lock()
-		sessions := map[string][]contextCheckpoint{}
+		sessions := map[contextSessionScope][]contextCheckpoint{}
 		for id, history := range store.sessions {
 			sessions[id] = history
 		}
 		store.mu.Unlock()
 
 		Expect(sessions).To(SatisfyAll(
-			HaveKey("current"),
-			Not(HaveKey("expired")),
-			Not(HaveKey("fresh")),
+			HaveKey(contextSessionScopeForTest(newFixtureContextSessionID("current"))),
+			Not(HaveKey(contextSessionScopeForTest(newFixtureContextSessionID("expired")))),
+			Not(HaveKey(contextSessionScopeForTest(newFixtureContextSessionID("fresh")))),
 		))
 	})
 
@@ -352,9 +339,9 @@ var _ = Describe("context tool helpers", func() {
 		expiredTime := freshTime.Add(-2 * time.Minute)
 
 		store.ttl = 0
-		_, history := store.record("current", contextCheckpoint{CreatedAt: expiredTime})
+		_, history := store.record(contextSessionScopeForTest(newFixtureContextSessionID("current")), contextCheckpoint{CreatedAt: expiredTime})
 		expiredToken := history[0].Token
-		_, history = store.record("current", contextCheckpoint{CreatedAt: freshTime})
+		_, history = store.record(contextSessionScopeForTest(newFixtureContextSessionID("current")), contextCheckpoint{CreatedAt: freshTime})
 		freshToken := history[len(history)-1].Token
 		store.ttl = time.Minute
 
@@ -368,7 +355,7 @@ var _ = Describe("context tool helpers", func() {
 	It("separates sync-status validation warnings from errors", Label("unit"), func() {
 		validation := validationFromSyncStatus(workspacesync.SyncStatus{
 			ValidationErrors: []workspacesync.ValidationError{
-				{Path: "hidden.md", Message: "hidden markdown file", Severity: "warning"},
+				{Path: "hidden.md", Message: "hidden markdown file", Severity: newFixtureIssueSeverity("warning")},
 			},
 		})
 
@@ -382,13 +369,17 @@ func testNodeKindPtr(kind tree.NodeKind) *tree.NodeKind {
 
 func currentSessionHistoryAfterCheckpointLookup(store *contextCheckpointStore, token string) []contextCheckpoint {
 	GinkgoHelper()
-	_, found := store.find("current", token)
+	_, found := store.find(contextSessionScopeForTest(newFixtureContextSessionID("current")), token)
 	if found {
 		return nil
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	return append([]contextCheckpoint(nil), store.sessions["current"]...)
+	return append([]contextCheckpoint(nil), store.sessions[contextSessionScopeForTest(newFixtureContextSessionID("current"))]...)
+}
+
+func contextSessionScopeForTest(sessionID contextSessionID) contextSessionScope {
+	return contextSessionScope{ActorID: newFixtureUserID("context-store-user"), SessionID: sessionID}
 }
 
 func newContextToolTestRoutes() *Routes {
@@ -399,7 +390,7 @@ func newContextToolTestRoutes() *Routes {
 		RootDir: mcpTestTempDir(),
 	})
 	Expect(treeService.LoadTree()).To(Succeed())
-	id, err := treeService.CreateNode("system", nil, "Home", "home", nil)
+	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, "Home", newFixtureSlug("home"), nil)
 	Expect(err).To(Succeed())
 	Expect(id).NotTo(BeNil())
 	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)

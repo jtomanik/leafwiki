@@ -47,7 +47,7 @@ func newLocalMCPTestWikiWithOptionsAndStorage(opts wiki.WikiOptions) (*wiki.Wiki
 	storageDir := filepath.Join(mcpIntegrationTempDir(), "data")
 	rootDir := filepath.Join(mcpIntegrationTempDir(), "content")
 	if opts.Workspace.ID == "" {
-		opts.Workspace.ID = "default"
+		opts.Workspace.ID = newFixtureWorkspaceID("default")
 	}
 	if opts.Workspace.DataDir == "" {
 		opts.Workspace.DataDir = storageDir

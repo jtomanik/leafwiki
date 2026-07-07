@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
+	"github.com/perber/wiki/internal/agenthooks"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -83,11 +84,11 @@ func inputSchemasMatch(tools []*sdkmcp.Tool, expected, expectedRequired map[stri
 		gotProps := make([]string, 0, len(properties))
 		for prop, property := range properties {
 			gotProps = append(gotProps, prop)
-			if err := schemaPropertyHasType("input", name, prop, property); err != nil {
+			if err := schemaPropertyHasType("input", agenthooks.AgentToolNameFromString(name), prop, property); err != nil {
 				return err
 			}
 		}
-		if err := preciseInputPropertySchemas(name, properties); err != nil {
+		if err := preciseInputPropertySchemas(agenthooks.AgentToolNameFromString(name), properties); err != nil {
 			return err
 		}
 		if err := schemaPropertyOrderSorted("input", name, schema); err != nil {
@@ -129,7 +130,7 @@ func outputSchemasMatch(tools []*sdkmcp.Tool, expected map[string][]string) erro
 		gotProps := make([]string, 0, len(properties))
 		for prop, property := range properties {
 			gotProps = append(gotProps, prop)
-			if err := schemaPropertyHasType("output", name, prop, property); err != nil {
+			if err := schemaPropertyHasType("output", agenthooks.AgentToolNameFromString(name), prop, property); err != nil {
 				return err
 			}
 		}
@@ -203,10 +204,10 @@ func schemaPropertyOrderSorted(kind, name string, schema map[string]any) error {
 	return nil
 }
 
-func schemaPropertyHasType(kind, toolName, prop string, property any) error {
+func schemaPropertyHasType(kind string, toolName agenthooks.AgentToolName, prop string, property any) error {
 	schema, ok := property.(map[string]any)
 	if !ok {
-		return fmt.Errorf("%s schema for %s.%s should be an object", kind, toolName, prop)
+		return fmt.Errorf("%s schema for %s.%s should be an object", kind, string(toolName), prop)
 	}
 	if _, ok := schema["type"]; ok {
 		return nil
@@ -216,7 +217,7 @@ func schemaPropertyHasType(kind, toolName, prop string, property any) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("%s schema for %s.%s should declare a type or combinator", kind, toolName, prop)
+	return fmt.Errorf("%s schema for %s.%s should declare a type or combinator", kind, string(toolName), prop)
 }
 
 func rootSchemaHasNoCombinators(kind, name string, schema map[string]any) error {
@@ -228,9 +229,9 @@ func rootSchemaHasNoCombinators(kind, name string, schema map[string]any) error 
 	return nil
 }
 
-func preciseInputPropertySchemas(toolName string, properties map[string]any) error {
+func preciseInputPropertySchemas(toolName agenthooks.AgentToolName, properties map[string]any) error {
 	switch toolName {
-	case "wiki_update_page_metadata":
+	case newFixtureAgentToolName("wiki_update_page_metadata"):
 		for _, prop := range []string{"setTags", "addTags", "removeTags", "removeProperties"} {
 			if err := stringArrayPropertySchema(toolName, prop, properties[prop]); err != nil {
 				return err
@@ -239,7 +240,7 @@ func preciseInputPropertySchemas(toolName string, properties map[string]any) err
 		if err := stringMapPropertySchema(toolName, "setProperties", properties["setProperties"]); err != nil {
 			return err
 		}
-	case "wiki_replace_page_section":
+	case newFixtureAgentToolName("wiki_replace_page_section"):
 		if err := stringArrayPropertySchema(toolName, "headingPath", properties["headingPath"]); err != nil {
 			return err
 		}
@@ -247,38 +248,38 @@ func preciseInputPropertySchemas(toolName string, properties map[string]any) err
 	return nil
 }
 
-func stringArrayPropertySchema(toolName, prop string, raw any) error {
+func stringArrayPropertySchema(toolName agenthooks.AgentToolName, prop string, raw any) error {
 	schema, ok := raw.(map[string]any)
 	if !ok {
-		return fmt.Errorf("input schema for %s.%s should be an object", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should be an object", string(toolName), prop)
 	}
 	if schema["type"] != "array" {
-		return fmt.Errorf("input schema for %s.%s should be an array", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should be an array", string(toolName), prop)
 	}
 	items, ok := schema["items"].(map[string]any)
 	if !ok {
-		return fmt.Errorf("input schema for %s.%s should declare item schema", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should declare item schema", string(toolName), prop)
 	}
 	if items["type"] != "string" {
-		return fmt.Errorf("input schema for %s.%s should contain string items", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should contain string items", string(toolName), prop)
 	}
 	return nil
 }
 
-func stringMapPropertySchema(toolName, prop string, raw any) error {
+func stringMapPropertySchema(toolName agenthooks.AgentToolName, prop string, raw any) error {
 	schema, ok := raw.(map[string]any)
 	if !ok {
-		return fmt.Errorf("input schema for %s.%s should be an object", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should be an object", string(toolName), prop)
 	}
 	if schema["type"] != "object" {
-		return fmt.Errorf("input schema for %s.%s should be an object map", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should be an object map", string(toolName), prop)
 	}
 	additional, ok := schema["additionalProperties"].(map[string]any)
 	if !ok {
-		return fmt.Errorf("input schema for %s.%s should declare additional properties", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should declare additional properties", string(toolName), prop)
 	}
 	if additional["type"] != "string" {
-		return fmt.Errorf("input schema for %s.%s should contain string values", toolName, prop)
+		return fmt.Errorf("input schema for %s.%s should contain string values", string(toolName), prop)
 	}
 	return nil
 }

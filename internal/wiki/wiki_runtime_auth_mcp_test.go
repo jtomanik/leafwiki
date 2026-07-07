@@ -21,7 +21,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
-			Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+			Workspace:           Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir},
 			AdminPassword:       "admin",
 			JWTSecret:           "secretkey",
 			AccessTokenTimeout:  15 * time.Minute,
@@ -72,7 +72,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
-			Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+			Workspace:           Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir},
 			AdminPassword:       "admin",
 			JWTSecret:           "secretkey",
 			AccessTokenTimeout:  15 * time.Minute,
@@ -141,7 +141,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		dir := wikiTestTempDir()
 
 		_, err := NewWiki(&WikiOptions{
-			Workspace:           Workspace{ID: "default", DataDir: dir, RootDir: filepath.Clean(filepath.Join(dir, "."))},
+			Workspace:           Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dir, RootDir: filepath.Clean(filepath.Join(dir, "."))},
 			AdminPassword:       "admin",
 			JWTSecret:           "secretkey",
 			AccessTokenTimeout:  15 * time.Minute,
@@ -155,7 +155,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		dataDir := filepath.Join(rootDir, "data")
 
 		_, err := NewWiki(&WikiOptions{
-			Workspace:           Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir},
+			Workspace:           Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir},
 			AdminPassword:       "admin",
 			JWTSecret:           "secretkey",
 			AccessTokenTimeout:  15 * time.Minute,
@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		rootDir := filepath.Join(baseDir, "content")
 
 		w, err := NewWiki(&WikiOptions{
-			Workspace:           Workspace{ID: "default", DataDir: " " + dataDir + string(os.PathSeparator) + "." + " ", RootDir: " " + rootDir + string(os.PathSeparator) + "." + " "},
+			Workspace:           Workspace{ID: newFixtureWorkspaceID("default"), DataDir: " " + dataDir + string(os.PathSeparator) + "." + " ", RootDir: " " + rootDir + string(os.PathSeparator) + "." + " "},
 			AdminPassword:       "admin",
 			JWTSecret:           "secretkey",
 			AccessTokenTimeout:  15 * time.Minute,
@@ -189,12 +189,12 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 	ginkgo.It("refuses non-recursive deletion of a page with children", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
-		parent := createPageForTest(w, "system", nil, "Parent", "parent", pageNodeKind())
-		createPageForTest(w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
+		parent := createPageForTest(w, newFixtureUserID("system"), nil, "Parent", newFixtureSlug("parent"), pageNodeKind())
+		createPageForTest(w, newFixtureUserID("system"), pageIDPtr(parent.ID), "Child", newFixtureSlug("child"), pageNodeKind())
 
 		err := wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 			context.Background(),
-			wikipages.DeletePageInput{UserID: "system", ID: parent.ID, Version: tree.PageVersionFromString(parent.Version()), Recursive: false},
+			wikipages.DeletePageInput{UserID: newFixtureUserID("system"), ID: parent.ID, Version: tree.PageVersionFromString(parent.Version()), Recursive: false},
 		)
 		Expect(err).To(MatchError(tree.ErrPageHasChildren))
 	})
@@ -202,10 +202,10 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 	ginkgo.It("removes a page subtree recursively", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
-		parent := createPageForTest(w, "system", nil, "Parent", "parent", pageNodeKind())
-		child := createPageForTest(w, "system", pageIDPtr(parent.ID), "Child", "child", pageNodeKind())
+		parent := createPageForTest(w, newFixtureUserID("system"), nil, "Parent", newFixtureSlug("parent"), pageNodeKind())
+		child := createPageForTest(w, newFixtureUserID("system"), pageIDPtr(parent.ID), "Child", newFixtureSlug("child"), pageNodeKind())
 
-		deletePageForTest(w, "system", parent.ID, true)
+		deletePageForTest(w, newFixtureUserID("system"), parent.ID, true)
 		_, err := w.tree.GetPage(parent.ID)
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 		_, err = w.tree.GetPage(child.ID)
@@ -301,13 +301,13 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, wikiInstance.Close)
 
 		// Test creating a page
-		page := createPageForTest(wikiInstance, "system", nil, "Test Page", "test-page", pageNodeKind())
+		page := createPageForTest(wikiInstance, newFixtureUserID("system"), nil, "Test Page", newFixtureSlug("test-page"), pageNodeKind())
 
 		Expect(page.Title).To(Equal("Test Page"))
 
 		// Test updating a page
 		var updatedContent = "# Content"
-		updatedPage := updatePageForTest(wikiInstance, "system", page.ID, "Updated Title", "updated-slug", &updatedContent, pageNodeKind())
+		updatedPage := updatePageForTest(wikiInstance, newFixtureUserID("system"), page.ID, "Updated Title", newFixtureSlug("updated-slug"), &updatedContent, pageNodeKind())
 
 		Expect(updatedPage.Title).To(Equal("Updated Title"))
 
@@ -318,6 +318,6 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(retrievedPage.ID).To(Equal(page.ID))
 
 		// Test deleting a page
-		deletePageForTest(wikiInstance, "system", page.ID, false)
+		deletePageForTest(wikiInstance, newFixtureUserID("system"), page.ID, false)
 	})
 })

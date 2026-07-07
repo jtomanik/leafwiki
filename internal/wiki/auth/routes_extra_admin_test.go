@@ -15,6 +15,8 @@ import (
 var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("handles admin user CRUD and own password changes", func() {
 		fixture := newAuthRouteFixture()
+		editorWireID := fixture.editor.ID.MetadataValue()
+		adminWireID := fixture.admin.ID.MetadataValue()
 
 		rec := performAuthHandlerRequest(fixture.routes.handleCreateUser, http.MethodPost, "/api/users", []byte(`{`), nil, fixture.admin, false)
 		Expect(rec).To(matchAuthRouteError(http.StatusBadRequest, ErrCodeAuthInvalidRequest), rec.Body.String())
@@ -40,7 +42,7 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 			false,
 		)
 		Expect(rec).To(HaveHTTPStatus(http.StatusCreated))
-		Expect(rec).To(matchAuthJSONBodyField("username", "new-user"))
+		Expect(rec).To(matchAuthJSONBodyField(authJSONFieldUsername, "new-user"))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUser,
@@ -65,9 +67,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
 			http.MethodPut,
-			"/api/users/"+fixture.editor.ID,
+			"/api/users/"+editorWireID,
 			jsonBody(gin.H{"username": "editor-updated", "email": "editor-updated@example.test", "role": coreauth.RoleAdmin}),
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			nil,
 			false,
 		)
@@ -76,9 +78,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
 			http.MethodPut,
-			"/api/users/"+fixture.editor.ID,
+			"/api/users/"+editorWireID,
 			[]byte(`{`),
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			fixture.admin,
 			false,
 		)
@@ -87,14 +89,14 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
 			http.MethodPut,
-			"/api/users/"+fixture.editor.ID,
+			"/api/users/"+editorWireID,
 			jsonBody(gin.H{"username": "editor-updated", "email": "editor-updated@example.test", "role": coreauth.RoleAdmin}),
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			fixture.admin,
 			false,
 		)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		Expect(rec).To(matchAuthJSONBodyField("role", string(coreauth.RoleAdmin)))
+		Expect(rec).To(matchAuthJSONBodyField(authJSONFieldRole, string(coreauth.RoleAdmin)))
 
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleUpdateUser,
@@ -109,12 +111,13 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 
 		deleteTarget, err := fixture.userService.CreateUser("delete-me", "delete@example.test", "password123", coreauth.RoleViewer)
 		Expect(err).NotTo(HaveOccurred())
+		deleteTargetWireID := deleteTarget.ID.MetadataValue()
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleDeleteUser,
 			http.MethodDelete,
-			"/api/users/"+deleteTarget.ID,
+			"/api/users/"+deleteTargetWireID,
 			nil,
-			gin.Params{{Key: "id", Value: deleteTarget.ID}},
+			gin.Params{{Key: "id", Value: deleteTargetWireID}},
 			fixture.admin,
 			false,
 		)
@@ -123,9 +126,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleDeleteUser,
 			http.MethodDelete,
-			"/api/users/"+fixture.admin.ID,
+			"/api/users/"+adminWireID,
 			nil,
-			gin.Params{{Key: "id", Value: fixture.admin.ID}},
+			gin.Params{{Key: "id", Value: adminWireID}},
 			fixture.admin,
 			false,
 		)
@@ -162,13 +165,14 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 
 	ginkgo.It("handles admin and self API key flows", func() {
 		fixture := newAuthRouteFixture()
+		editorWireID := fixture.editor.ID.MetadataValue()
 
 		rec := performAuthHandlerRequest(
 			fixture.routes.handleListUserAPIKeys,
 			http.MethodGet,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys",
+			"/api/users/"+editorWireID+"/mcp-api-keys",
 			nil,
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			fixture.admin,
 			false,
 		)
@@ -178,9 +182,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUserAPIKey,
 			http.MethodPost,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys",
+			"/api/users/"+editorWireID+"/mcp-api-keys",
 			jsonBody(gin.H{"name": "admin-created"}),
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			nil,
 			false,
 		)
@@ -189,9 +193,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUserAPIKey,
 			http.MethodPost,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys",
+			"/api/users/"+editorWireID+"/mcp-api-keys",
 			jsonBody(gin.H{"name": "admin-created"}),
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			fixture.admin,
 			false,
 		)
@@ -200,9 +204,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			fixture.routes.handleCreateUserAPIKey,
 			http.MethodPost,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys",
+			"/api/users/"+editorWireID+"/mcp-api-keys",
 			[]byte(`{`),
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			fixture.admin,
 			false,
 		)
@@ -232,9 +236,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			errorRoutes.handleListUserAPIKeys,
 			http.MethodGet,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys",
+			"/api/users/"+editorWireID+"/mcp-api-keys",
 			nil,
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			fixture.admin,
 			false,
 		)
@@ -280,9 +284,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			errorRoutes.handleCreateUserAPIKey,
 			http.MethodPost,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys",
+			"/api/users/"+editorWireID+"/mcp-api-keys",
 			jsonBody(gin.H{"name": "fails"}),
-			gin.Params{{Key: "id", Value: fixture.editor.ID}},
+			gin.Params{{Key: "id", Value: editorWireID}},
 			fixture.admin,
 			false,
 		)
@@ -293,9 +297,9 @@ var _ = ginkgo.Describe("auth routes", ginkgo.Label("integration"), func() {
 		rec = performAuthHandlerRequest(
 			errorRoutes.handleRevokeUserAPIKey,
 			http.MethodDelete,
-			"/api/users/"+fixture.editor.ID+"/mcp-api-keys/missing-key",
+			"/api/users/"+editorWireID+"/mcp-api-keys/missing-key",
 			nil,
-			gin.Params{{Key: "id", Value: fixture.editor.ID}, {Key: "keyId", Value: "missing-key"}},
+			gin.Params{{Key: "id", Value: editorWireID}, {Key: "keyId", Value: "missing-key"}},
 			fixture.admin,
 			false,
 		)

@@ -98,7 +98,7 @@ func (s *Service) VerifyBearerToken(ctx context.Context, token string, req *http
 	}
 
 	return &sdkauth.TokenInfo{
-		UserID:     user.ID,
+		UserID:     user.ID.MetadataValue(),
 		Scopes:     []string(requester.GetGrantedScopes()),
 		Expiration: requester.GetSession().GetExpiresAt(fosite.AccessToken),
 	}, nil

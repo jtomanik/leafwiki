@@ -14,7 +14,6 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
-	"github.com/perber/wiki/internal/workspaceid"
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
@@ -22,8 +21,8 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 	ginkgo.It("removes a leaf page from the tree", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
-		page := createPageForTest(w, "system", nil, "Trash", "trash", pageNodeKind())
-		deletePageForTest(w, "system", page.ID, false)
+		page := createPageForTest(w, newFixtureUserID("system"), nil, "Trash", newFixtureSlug("trash"), pageNodeKind())
+		deletePageForTest(w, newFixtureUserID("system"), page.ID, false)
 		_, err := w.tree.GetPage(page.ID)
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
@@ -43,7 +42,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		Expect(wikiInstance.GetStorageDir()).To(Equal(dataDir))
 		Expect(wikiInstance.GetRootDir()).To(Equal(filepath.Join(dataDir, "root")))
 		Expect(wikiInstance.Workspace()).To(SatisfyAll(
-			HaveField("ID", Equal(workspaceid.WorkspaceID("default"))),
+			HaveField("ID", Equal(newFixtureWorkspaceID("default"))),
 			HaveField("DataDir", Equal(dataDir)),
 			HaveField("RootDir", Equal(filepath.Join(dataDir, "root"))),
 		))
@@ -54,7 +53,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		dataDir := filepath.Join(wikiTestTempDir(), "data")
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w := createWikiTestInstanceWithWorkspace(Workspace{
-			ID:      "default",
+			ID:      newFixtureWorkspaceID("default"),
 			DataDir: dataDir,
 			RootDir: rootDir,
 		})
@@ -104,7 +103,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
 			Workspace: Workspace{
-				ID:      "current",
+				ID:      newFixtureWorkspaceID("current"),
 				DataDir: dataDir,
 				RootDir: rootDir,
 			},
@@ -148,7 +147,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 		rootDir := filepath.Join(wikiTestTempDir(), "content")
 		w, err := NewWiki(&WikiOptions{
 			Workspace: Workspace{
-				ID:      "current",
+				ID:      newFixtureWorkspaceID("current"),
 				DataDir: dataDir,
 				RootDir: rootDir,
 			},
@@ -178,7 +177,7 @@ var _ = ginkgo.Describe("wiki runtime behavior", func() {
 	ginkgo.It("reports crashed runtime roles through control-plane health", ginkgo.Label("integration"), func() {
 		w, err := NewWiki(&WikiOptions{
 			Workspace: Workspace{
-				ID:      "current",
+				ID:      newFixtureWorkspaceID("current"),
 				DataDir: filepath.Join(wikiTestTempDir(), "data"),
 				RootDir: filepath.Join(wikiTestTempDir(), "content"),
 			},
@@ -272,13 +271,13 @@ leafwiki_title: Glossary
 		})
 		Expect(err).To(Succeed())
 		Expect(w.WorkspaceSyncStatus().ValidationErrors).To(BeEmpty())
-		source, err := w.tree.GetPage("source")
+		source, err := w.tree.GetPage(newFixturePageID("source"))
 		Expect(err).To(Succeed())
 		outgoing, err := w.links.GetOutgoingLinksForPage(source.ID)
 		Expect(err).To(Succeed())
 		Expect(outgoing).To(SatisfyAll(
 			HaveField("Count", Equal(1)),
-			HaveField("Outgoings", ContainElement(matchResolvedOutgoingLinkToPath(tree.RoutePath("/sync/glossary")))),
+			HaveField("Outgoings", ContainElement(matchResolvedOutgoingLinkToPath(newFixtureRoutePath("/sync/glossary")))),
 		))
 		closeWithErrorCheckForTest(w.Close)
 	})
@@ -298,7 +297,7 @@ leafwiki_title: Glossary
 		before := w.WorkspaceSyncStatus().LastCommitHash
 		Expect(before).NotTo(BeEmpty())
 
-		page := createPageForTest(w, "alice", nil, "Synced Web Page", "synced-web-page", pageNodeKind())
+		page := createPageForTest(w, newFixtureUserID("alice"), nil, "Synced Web Page", newFixtureSlug("synced-web-page"), pageNodeKind())
 
 		after := w.WorkspaceSyncStatus().LastCommitHash
 		Expect(after).NotTo(BeEmpty())
@@ -325,10 +324,10 @@ leafwiki_title: Glossary
 		Expect(before).NotTo(BeEmpty())
 
 		adapter := NewWikiImportAdapter(w)
-		page, err := adapter.EnsurePath("importer-user", "imported-page", "Imported Page", pageNodeKind())
+		page, err := adapter.EnsurePath(newFixtureUserID("importer-user"), newFixtureRoutePath("imported-page"), "Imported Page", pageNodeKind())
 		Expect(err).To(Succeed())
 		content := "Imported body\n"
-		page, err = adapter.UpdatePage("importer-user", page.ID, page.Title, page.Slug, &content, &page.Kind)
+		page, err = adapter.UpdatePage(newFixtureUserID("importer-user"), page.ID, page.Title, page.Slug, &content, &page.Kind)
 		Expect(err).To(Succeed())
 
 		after := w.WorkspaceSyncStatus().LastCommitHash
@@ -342,7 +341,7 @@ leafwiki_title: Glossary
 		Expect(err).To(Succeed())
 		Expect(snapshots).To(ContainElement(SatisfyAll(
 			HaveField("ID", Equal(after)),
-			HaveField("AuthorID", Equal(workspacesync.ActorID("importer-user"))),
+			HaveField("AuthorID", Equal(workspacesync.ActorIDFromUserID(newFixtureUserID("importer-user")))),
 			HaveField("Source", Equal(string(workspacesync.SourceWeb))),
 		)))
 	})
@@ -381,12 +380,12 @@ workspace-sync-search-token`
 		Expect(err).To(Succeed())
 		Expect(status.LastCommitHash).NotTo(BeEmpty())
 
-		_, err = w.tree.GetPage("indexed-page")
+		_, err = w.tree.GetPage(newFixturePageID("indexed-page"))
 		Expect(err).To(Succeed())
 		tagged, err := w.tags.GetPageIDsByTags([]string{"synced"})
 		Expect(err).To(Succeed())
-		Expect(tagged).To(ConsistOf(tree.PageID("indexed-page")))
-		props, err := w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
+		Expect(tagged).To(ConsistOf(newFixturePageID("indexed-page")))
+		props, err := w.props.GetPropertiesForPages([]tree.PageID{newFixturePageID("indexed-page")})
 		Expect(err).To(Succeed())
 		Expect(props[newFixturePageID("indexed-page")]["status"].Value).To(Equal("draft"))
 		result, err := w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
@@ -416,8 +415,8 @@ workspace-sync-updated-token`
 		Expect(tagged).To(BeEmpty())
 		tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
 		Expect(err).To(Succeed())
-		Expect(tagged).To(ConsistOf(tree.PageID("indexed-page")))
-		props, err = w.props.GetPropertiesForPages([]tree.PageID{"indexed-page"})
+		Expect(tagged).To(ConsistOf(newFixturePageID("indexed-page")))
+		props, err = w.props.GetPropertiesForPages([]tree.PageID{newFixturePageID("indexed-page")})
 		Expect(err).To(Succeed())
 		Expect(props[newFixturePageID("indexed-page")]["status"].Value).To(Equal("published"))
 		result, err = w.searchIndex.Search("workspace-sync-search-token", nil, 0, 10)
@@ -434,7 +433,7 @@ workspace-sync-updated-token`
 			Actor:  workspacesync.PublicEditorActor(),
 		})
 		Expect(err).To(Succeed())
-		_, err = w.tree.GetPage("indexed-page")
+		_, err = w.tree.GetPage(newFixturePageID("indexed-page"))
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 		tagged, err = w.tags.GetPageIDsByTags([]string{"resynced"})
 		Expect(err).To(Succeed())

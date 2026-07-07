@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/assets"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -94,7 +95,8 @@ func runLocalMCPProtocolPageOperationParity() {
 	}), "page")
 	parentID := stringField(parent, "id")
 	parentViaGet := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"id": parentID}), "page")
-	Expect(parentViaGet).To(matchJSONEqual(getHTTPPageByID(router, parentID)), "wiki_get_page")
+	parentPageID := tree.PageIDFromString(parentID)
+	Expect(parentViaGet).To(matchJSONEqual(getHTTPPageByID(router, parentPageID)), "wiki_get_page")
 	recordHTTPMCPParity("wiki_get_page", "GET /api/pages/:id")
 	treeResult := callToolStructured(session, "wiki_get_tree", map[string]any{"depth": float64(1)})
 	Expect(treeResult).To(HaveKey("tree"))
@@ -143,9 +145,9 @@ func runLocalMCPProtocolPageOperationParity() {
 		"parentId":   parentID,
 		"orderedIds": []any{stringField(childB, "id"), stringField(childA, "id")},
 	})
-	Expect(mcpSort).To(matchScopedSuccessPayload(httpSort, "mcp.tools.wiki_sort_pages.success", "api.pages.sort.success"), "wiki_sort_pages")
+	Expect(mcpSort).To(matchScopedSuccessPayload(httpSort, newFixtureToolMessageID("mcp.tools.wiki_sort_pages.success"), newFixtureMessageID("api.pages.sort.success")), "wiki_sort_pages")
 	parentAfterSort := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"id": parentID}), "page")
-	Expect(parentAfterSort).To(matchChildOrder(stringField(childB, "id"), stringField(childA, "id")), "sort_pages shared parent")
+	Expect(parentAfterSort).To(matchChildOrder(tree.PageIDFromString(stringField(childB, "id")), tree.PageIDFromString(stringField(childA, "id"))), "sort_pages shared parent")
 	mcpSortParent := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "MCP Sort Parent",
 		"slug":  "mcp-sort-parent",
@@ -187,8 +189,8 @@ func runLocalMCPProtocolPageOperationParity() {
 	putHTTPJSON(router, "/api/pages/"+stringField(httpSortParent, "id")+"/sort", map[string]any{
 		"orderedIds": []string{stringField(httpSortB, "id"), stringField(httpSortA, "id")},
 	}, http.StatusOK)
-	Expect(getHTTPPageByPath(router, "mcp-sort-parent")).To(matchChildOrder(stringField(mcpSortB, "id"), stringField(mcpSortA, "id")), "MCP sort_pages parent")
-	Expect(getHTTPPageByPath(router, "http-sort-parent")).To(matchChildOrder(stringField(httpSortB, "id"), stringField(httpSortA, "id")), "HTTP sort_pages parent")
+	Expect(getHTTPPageByPath(router, "mcp-sort-parent")).To(matchChildOrder(tree.PageIDFromString(stringField(mcpSortB, "id")), tree.PageIDFromString(stringField(mcpSortA, "id"))), "MCP sort_pages parent")
+	Expect(getHTTPPageByPath(router, "http-sort-parent")).To(matchChildOrder(tree.PageIDFromString(stringField(httpSortB, "id")), tree.PageIDFromString(stringField(httpSortA, "id"))), "HTTP sort_pages parent")
 	recordHTTPMCPParity("wiki_sort_pages", "PUT /api/pages/:id/sort")
 	parentByAlias := nestedMap(callToolStructured(session, "wiki_get_page", map[string]any{"pageId": parentID}), "page")
 	Expect(parentByAlias).To(HaveKeyWithValue("id", parentID))
@@ -215,8 +217,8 @@ func runLocalMCPProtocolPageOperationParity() {
 		"title": "Ensured Independent",
 		"kind":  "section",
 	}, http.StatusOK)
-	Expect(getHTTPPageByPath(router, "parent-section/ensured-mcp")).To(matchPageState(stringField(mcpEnsuredIndependent, "id"), "Ensured Independent", "ensured-mcp", "parent-section/ensured-mcp", "section", ""), "MCP ensure_page independent")
-	Expect(getHTTPPageByPath(router, "parent-section/ensured-http")).To(matchPageState(stringField(httpEnsuredIndependent, "id"), "Ensured Independent", "ensured-http", "parent-section/ensured-http", "section", ""), "HTTP ensure_page independent")
+	Expect(getHTTPPageByPath(router, "parent-section/ensured-mcp")).To(matchPageState(tree.PageIDFromString(stringField(mcpEnsuredIndependent, "id")), "Ensured Independent", newFixtureSlug("ensured-mcp"), "parent-section/ensured-mcp", "section", newFixturePageID("")), "MCP ensure_page independent")
+	Expect(getHTTPPageByPath(router, "parent-section/ensured-http")).To(matchPageState(tree.PageIDFromString(stringField(httpEnsuredIndependent, "id")), "Ensured Independent", newFixtureSlug("ensured-http"), "parent-section/ensured-http", "section", newFixturePageID("")), "HTTP ensure_page independent")
 	nullKindEnsured := nestedMap(callToolStructured(session, "wiki_ensure_page", map[string]any{
 		"path":  "parent-section/ensured-null-kind",
 		"title": "Ensured Null Kind",
@@ -327,13 +329,13 @@ func runLocalMCPProtocolPageOperationParity() {
 		"version":  stringField(childB, "version"),
 		"parentId": "",
 	}, http.StatusOK)
-	Expect(mcpMove).To(matchScopedSuccessPayload(httpMove, "mcp.tools.wiki_move_page.success", "api.pages.move.success"), "wiki_move_page")
+	Expect(mcpMove).To(matchScopedSuccessPayload(httpMove, newFixtureToolMessageID("mcp.tools.wiki_move_page.success"), newFixtureMessageID("api.pages.move.success")), "wiki_move_page")
 	httpMoved := getHTTPPageByPath(router, "child-a")
-	Expect(httpMoved).To(matchPageState(stringField(childA, "id"), "Child A", "child-a", "child-a", "page", ""), "MCP moved child A")
+	Expect(httpMoved).To(matchPageState(tree.PageIDFromString(stringField(childA, "id")), "Child A", newFixtureSlug("child-a"), "child-a", "page", newFixturePageID("")), "MCP moved child A")
 	httpMovedB := getHTTPPageByPath(router, "child-b")
-	Expect(httpMovedB).To(matchPageState(stringField(childB, "id"), "Child B", "child-b", "child-b", "page", ""), "HTTP moved child B")
+	Expect(httpMovedB).To(matchPageState(tree.PageIDFromString(stringField(childB, "id")), "Child B", newFixtureSlug("child-b"), "child-b", "page", newFixturePageID("")), "HTTP moved child B")
 	parentAfterMove := getHTTPPageByPath(router, "parent-section")
-	Expect(parentAfterMove).To(matchChildrenExcludingIDs(stringField(childA, "id"), stringField(childB, "id")), "parent after move")
+	Expect(parentAfterMove).To(matchChildrenExcludingIDs(tree.PageIDFromString(stringField(childA, "id")), tree.PageIDFromString(stringField(childB, "id"))), "parent after move")
 	staleMoveErr := callToolStructuredError(session, "wiki_move_page", map[string]any{
 		"id":       stringField(childA, "id"),
 		"version":  stringField(childA, "version"),
@@ -377,7 +379,7 @@ func runLocalMCPProtocolPageOperationParity() {
 		"version": stringField(mcpMissingParentMove, "version"),
 	})
 	Expect(messageOutputFromStructuredContent(missingParentMove)).To(HaveField("MessageID", Equal(wikimcp.ToolMessageMovePageSuccess)))
-	Expect(getHTTPPageByPath(router, "mcp-missing-parent-move")).To(matchPageState(stringField(mcpMissingParentMove, "id"), "MCP Missing Parent Move", "mcp-missing-parent-move", "mcp-missing-parent-move", "page", ""), "MCP move_page missing parentId")
+	Expect(getHTTPPageByPath(router, "mcp-missing-parent-move")).To(matchPageState(tree.PageIDFromString(stringField(mcpMissingParentMove, "id")), "MCP Missing Parent Move", newFixtureSlug("mcp-missing-parent-move"), "mcp-missing-parent-move", "page", newFixturePageID("")), "MCP move_page missing parentId")
 	recordHTTPMCPParity("wiki_move_page", "PUT /api/pages/:id/move")
 
 	convertMe := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
@@ -393,7 +395,7 @@ func runLocalMCPProtocolPageOperationParity() {
 	Expect(messageOutputFromStructuredContent(mcpConvert)).To(HaveField("MessageID", Equal(wikimcp.ToolMessageConvertPageSuccess)))
 	httpConverted := getHTTPPageByPath(router, "convert-me")
 	Expect(httpConverted).To(HaveKeyWithValue("kind", "page"))
-	Expect(httpConverted).To(matchPageState(stringField(convertMe, "id"), "Convert Me", "convert-me", "convert-me", "page", ""), "MCP converted page")
+	Expect(httpConverted).To(matchPageState(tree.PageIDFromString(stringField(convertMe, "id")), "Convert Me", newFixtureSlug("convert-me"), "convert-me", "page", newFixturePageID("")), "MCP converted page")
 	convertHTTP := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "Convert HTTP",
 		"slug":  "convert-http",
@@ -404,7 +406,7 @@ func runLocalMCPProtocolPageOperationParity() {
 		"targetKind": "page",
 	}, http.StatusNoContent)
 	httpConvertedPeer := getHTTPPageByPath(router, "convert-http")
-	Expect(httpConvertedPeer).To(matchPageState(stringField(convertHTTP, "id"), "Convert HTTP", "convert-http", "convert-http", "page", ""), "HTTP converted page")
+	Expect(httpConvertedPeer).To(matchPageState(tree.PageIDFromString(stringField(convertHTTP, "id")), "Convert HTTP", newFixtureSlug("convert-http"), "convert-http", "page", newFixturePageID("")), "HTTP converted page")
 	staleConvertErr := callToolStructuredError(session, "wiki_convert_page", map[string]any{
 		"id":         stringField(convertMe, "id"),
 		"version":    stringField(convertMe, "version"),
@@ -476,9 +478,9 @@ func runLocalMCPProtocolPageOperationParity() {
 	}, http.StatusBadRequest)
 	Expect(paddedCopyHTTP).To(matchHTTPPageError(wikipages.ErrCodePageInvalidParentID, sharederrors.MessageIDForCode(wikipages.ErrCodePageInvalidParentID)))
 	Expect(copied).To(matchMapFields(httpCopied, []string{"title", "kind", "content"}), "wiki_copy_page")
-	Expect(getHTTPPageByPath(router, "child-a-copy")).To(matchPageState(stringField(copied, "id"), "Child A Copy", "child-a-copy", "child-a-copy", "page", ""), "MCP copied page")
-	Expect(getHTTPPageByPath(router, "child-a-http-copy")).To(matchPageState(stringField(httpCopied, "id"), "Child A Copy", "child-a-http-copy", "child-a-http-copy", "page", ""), "HTTP copied page")
-	Expect(getHTTPPageByPath(router, "child-a")).To(matchPageState(stringField(childA, "id"), "Child A", "child-a", "child-a", "page", ""), "copy_page source preserved")
+	Expect(getHTTPPageByPath(router, "child-a-copy")).To(matchPageState(tree.PageIDFromString(stringField(copied, "id")), "Child A Copy", newFixtureSlug("child-a-copy"), "child-a-copy", "page", newFixturePageID("")), "MCP copied page")
+	Expect(getHTTPPageByPath(router, "child-a-http-copy")).To(matchPageState(tree.PageIDFromString(stringField(httpCopied, "id")), "Child A Copy", newFixtureSlug("child-a-http-copy"), "child-a-http-copy", "page", newFixturePageID("")), "HTTP copied page")
+	Expect(getHTTPPageByPath(router, "child-a")).To(matchPageState(tree.PageIDFromString(stringField(childA, "id")), "Child A", newFixtureSlug("child-a"), "child-a", "page", newFixturePageID("")), "copy_page source preserved")
 	recordHTTPMCPParity("wiki_copy_page", "POST /api/pages/copy/:id")
 
 	missingDeleteHTTP := deleteHTTPStatus(router, "/api/pages/"+stringField(copied, "id"), http.StatusBadRequest)
@@ -504,7 +506,7 @@ func runLocalMCPProtocolPageOperationParity() {
 		"version": stringField(staleDelete, "version"),
 	})
 	httpDeletedPageBody := deleteHTTPStatus(router, "/api/pages/"+stringField(httpCopied, "id")+"?version="+url.QueryEscape(stringField(httpCopied, "version")), http.StatusOK)
-	Expect(mcpDeletedPage).To(matchScopedSuccessPayload(decodeJSONMap("HTTP delete_page", []byte(httpDeletedPageBody)), "mcp.tools.wiki_delete_page.success", "api.pages.delete.success"), "wiki_delete_page")
+	Expect(mcpDeletedPage).To(matchScopedSuccessPayload(decodeJSONMap("HTTP delete_page", []byte(httpDeletedPageBody)), newFixtureToolMessageID("mcp.tools.wiki_delete_page.success"), newFixtureMessageID("api.pages.delete.success")), "wiki_delete_page")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pages/by-path?path=child-a-copy", nil))
 	Expect(rec).To(HaveHTTPStatus(http.StatusNotFound))

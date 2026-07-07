@@ -239,13 +239,13 @@ func loginCookiesAt(router http.Handler, basePath, identifier, password string) 
 	return rec.Result().Cookies()
 }
 
-func authorizeCode(router http.Handler, cookies []*http.Cookie, redirectURI, state, verifier, resource string) string {
+func authorizeCode(router http.Handler, cookies []*http.Cookie, redirectURI, state, verifier, resource string) oauthAuthorizationCode {
 	GinkgoHelper()
 
 	return authorizeCodeAt(router, cookies, "", redirectURI, state, verifier, resource)
 }
 
-func authorizeCodeAt(router http.Handler, cookies []*http.Cookie, basePath, redirectURI, state, verifier, resource string) string {
+func authorizeCodeAt(router http.Handler, cookies []*http.Cookie, basePath, redirectURI, state, verifier, resource string) oauthAuthorizationCode {
 	GinkgoHelper()
 
 	q := validAuthorizeQuery(redirectURI, state, pkceS256(verifier), resource)
@@ -259,29 +259,29 @@ func authorizeCodeAt(router http.Handler, cookies []*http.Cookie, basePath, redi
 	code := redirected.Query().Get("code")
 	Expect(code).NotTo(BeEmpty(), "authorize redirect should include a code: %s", redirected.String())
 	Expect(redirected.Query().Get("state")).To(Equal(state))
-	return code
+	return oauthAuthorizationCode(code)
 }
 
-func exchangeCode(router http.Handler, code, redirectURI, verifier string) map[string]any {
+func exchangeCode(router http.Handler, code oauthAuthorizationCode, redirectURI, verifier string) map[string]any {
 	GinkgoHelper()
 
 	return exchangeCodeAt(router, "", code, redirectURI, verifier)
 }
 
-func exchangeCodeAt(router http.Handler, basePath, code, redirectURI, verifier string) map[string]any {
+func exchangeCodeAt(router http.Handler, basePath string, code oauthAuthorizationCode, redirectURI, verifier string) map[string]any {
 	GinkgoHelper()
 
 	return exchangeCodeForClient(router, basePath, oauthClientID, code, redirectURI, verifier)
 }
 
-func exchangeCodeForClient(router http.Handler, basePath, clientID, code, redirectURI, verifier string) map[string]any {
+func exchangeCodeForClient(router http.Handler, basePath, clientID string, code oauthAuthorizationCode, redirectURI, verifier string) map[string]any {
 	GinkgoHelper()
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {clientID},
 		"redirect_uri":  {redirectURI},
-		"code":          {code},
+		"code":          {string(code)},
 		"code_verifier": {verifier},
 	}
 	return decodeJSONResponse(performForm(router, "http://leafwiki.local"+basePath+"/oauth/token", form), http.StatusOK)

@@ -7,7 +7,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 	"github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/workspacesync"
 )
@@ -20,7 +19,7 @@ var _ = Describe("Workspace sync tool helpers", Label("integration"), func() {
 				return workspacesync.SyncStatus{Enabled: true}, expected
 			},
 		}
-		actor := toolActor{ID: "editor", User: &auth.User{ID: "editor", Username: "editor", Role: auth.RoleEditor}}
+		actor := toolActor{ID: newFixtureUserID("editor"), User: &auth.User{ID: newFixtureUserID("editor"), Username: "editor", Role: auth.RoleEditor}}
 
 		_, err := routes.refreshWorkspaceSync(context.Background(), actor, refreshInput{})
 		Expect(err).To(MatchError(expected))
@@ -44,28 +43,19 @@ var _ = Describe("Workspace sync tool helpers", Label("integration"), func() {
 				}, nil
 			},
 		}
-		actor := toolActor{ID: "editor", User: &auth.User{ID: "editor", Username: "editor", Role: auth.RoleEditor}}
+		actor := toolActor{ID: newFixtureUserID("editor"), User: &auth.User{ID: newFixtureUserID("editor"), Username: "editor", Role: auth.RoleEditor}}
 
 		out, err := routes.refreshWorkspaceSync(context.Background(), actor, refreshInput{})
 		Expect(err).To(Succeed())
 		validation := out.Validation
 		Expect(validation).NotTo(BeNil())
-		Expect(*validation).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Summary": gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Errors": Equal(1),
-			}),
-			"Issues": HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Path":    Equal("<root-dir>/a.md"),
-				"Message": ContainSubstring("<data-dir>/.leafwiki/scan"),
-			})),
-		}))
+		Expect(*validation).To(matchMCPRefreshValidation(1,
+			matchRedactedValidationIssueOutput("<root-dir>/a.md", "<data-dir>/.leafwiki/scan"),
+		))
 
 		Expect(out.SyncStatus).To(SatisfyAll(
-			HaveKeyWithValue("lastErrorDetail", BeNil()),
-			HaveKeyWithValue("validationErrorDetails", HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-				"Path":    Equal("<root-dir>/a.md"),
-				"Message": ContainSubstring("<data-dir>/.leafwiki/scan"),
-			}))),
+			matchMCPSyncLastErrorAbsent(),
+			matchWorkspaceValidationErrorDetails(matchWorkspaceValidationError("<root-dir>/a.md", "<data-dir>/.leafwiki/scan")),
 		))
 	})
 
@@ -81,7 +71,7 @@ var _ = Describe("Workspace sync tool helpers", Label("integration"), func() {
 				}, expected
 			},
 		}
-		actor := toolActor{ID: "editor", User: &auth.User{ID: "editor", Username: "editor", Role: auth.RoleEditor}}
+		actor := toolActor{ID: newFixtureUserID("editor"), User: &auth.User{ID: newFixtureUserID("editor"), Username: "editor", Role: auth.RoleEditor}}
 
 		_, err := routes.refreshWorkspaceSync(context.Background(), actor, refreshInput{})
 		Expect(err).To(MatchError(expected))

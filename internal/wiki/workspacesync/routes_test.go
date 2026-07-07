@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
+	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
@@ -69,7 +70,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 			ValidationErrors: []workspacesync.ValidationError{{
 				Path:     "docs/page.md",
 				Message:  "broken link",
-				Severity: "error",
+				Severity: newFixtureIssueSeverity("error"),
 			}},
 		}
 
@@ -81,9 +82,7 @@ var _ = ginkgo.Describe("workspace sync routes", func() {
 		Expect(response).To(HaveKeyWithValue("lastCommitHash", workspacesync.CommitHashFromString("abc123")))
 		Expect(response).To(HaveKeyWithValue("recentChangedMarkdownPaths", []string{"docs/page.md"}))
 		Expect(response).To(HaveKeyWithValue("validationErrorDetails", status.ValidationErrors))
-		Expect(response).To(HaveKeyWithValue("lastErrorDetail",
-			testmatchers.HaveStructuredError(errCodeWorkspaceSyncFailed, sharederrors.MessageIDForCode(errCodeWorkspaceSyncFailed)),
-		))
+		Expect(response).To(haveWorkspaceSyncLastErrorDetail(errCodeWorkspaceSyncFailed))
 	})
 
 	ginkgo.It("omits last-error detail for blank status errors", ginkgo.Label("unit"), func() {
@@ -414,6 +413,13 @@ func haveWorkspaceSyncPublishedStatus(status workspacesync.SyncStatus) types.Gom
 	}))
 }
 
+func haveWorkspaceSyncLastErrorDetail(code sharederrors.ErrorCode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(response gin.H) any {
+		return response["lastErrorDetail"]
+	}, testmatchers.HaveStructuredError(code, sharederrors.MessageIDForCode(code)))
+}
+
 func workspaceSyncPublishedStatusStateFor(value any) workspaceSyncPublishedStatusState {
 	enabled, ok := value.(bool)
 	if !ok {
@@ -466,6 +472,10 @@ func performWorkspaceSyncCSRFRequest(router http.Handler, method string, path st
 func matchWorkspaceSyncStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+func newFixtureIssueSeverity[T ~string](raw T) wikivalidation.IssueSeverity {
+	return wikivalidation.IssueSeverity(raw)
 }
 
 func haveWorkspaceSyncSnapshotPageResponse(snapshot workspacesync.Snapshot, nextCursor workspacesync.CommitHash) types.GomegaMatcher {

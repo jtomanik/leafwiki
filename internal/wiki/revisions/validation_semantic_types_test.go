@@ -25,7 +25,7 @@ var _ = ginkgo.Describe("revision validation", ginkgo.Label("unit"), func() {
 		var semanticAssetName tree.AssetName = assetName
 		Expect(semanticAssetPageID).To(Equal(newFixturePageID("page-1")))
 		Expect(semanticAssetRevisionID).To(Equal(newFixtureRevisionID("rev-1")))
-		Expect(semanticAssetName).To(Equal(tree.AssetName("asset.png")))
+		Expect(semanticAssetName).To(Equal(newFixtureAssetName("asset.png")))
 	})
 
 	ginkgo.It("ValidateRevisionCompareInput returns semantic values and trims IDs", func() {
@@ -37,7 +37,7 @@ var _ = ginkgo.Describe("revision validation", ginkgo.Label("unit"), func() {
 	})
 
 	ginkgo.It("ValidateRevisionCompare reports invalid page and compare request errors", func() {
-		_, _, _, err := ValidateRevisionCompare("", "base", "target")
+		_, _, _, err := ValidateRevisionCompare(newFixturePageID(""), "base", "target")
 		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidPageID))
 
 		_, _, _, err = ValidateRevisionCompare(newFixturePageID("page-1"), "", "target")
@@ -48,10 +48,10 @@ var _ = ginkgo.Describe("revision validation", ginkgo.Label("unit"), func() {
 	})
 
 	ginkgo.It("ValidateRevisionLookup and ValidateRevisionAsset propagate invalid lookup errors", func() {
-		_, _, err := ValidateRevisionLookup("", "rev-1")
+		_, _, err := ValidateRevisionLookup(newFixturePageID(""), "rev-1")
 		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidPageID))
 
-		_, _, _, err = ValidateRevisionAsset("", "rev-1", "asset.png")
+		_, _, _, err = ValidateRevisionAsset(newFixturePageID(""), "rev-1", "asset.png")
 		Expect(err).To(MatchRevisionErrorCode(ErrCodeRevisionInvalidPageID))
 	})
 })

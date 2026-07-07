@@ -204,7 +204,7 @@ var _ = Describe("local MCP page frontmatter preservation", Label("integration")
 		})
 		Expect(nestedMap(result, "page")).To(HaveKeyWithValue("content", "# Metadata Preserve\n\nBody"))
 
-		raw := readPageMarkdownByRoutePath(w.GetRootDir(), "metadata-preserve")
+		raw := readPageMarkdownByRoutePath(w.GetRootDir(), newFixtureRoutePath("metadata-preserve"))
 		doc := canonicalPageMarkdown("wiki_update_page_metadata raw markdown", raw)
 		Expect(raw).NotTo(ContainSubstring("leafwiki_id:"))
 		Expect(doc.Metadata.Fields).To(HaveKeyWithValue("status", "published"))
@@ -255,7 +255,7 @@ var _ = Describe("local MCP page frontmatter preservation", Label("integration")
 				"status": "draft",
 			},
 		}), "page")
-		rawAfterFirst := readPageMarkdownByRoutePath(w.GetRootDir(), "mcp-metadata-preserve")
+		rawAfterFirst := readPageMarkdownByRoutePath(w.GetRootDir(), newFixtureRoutePath("mcp-metadata-preserve"))
 		firstDoc := canonicalPageMarkdown("wiki_update_page metadata preserve first update", rawAfterFirst)
 		Expect(firstDoc.Metadata).To(SatisfyAll(
 			HaveField("Tags", Equal([]string{"draft"})),
@@ -297,7 +297,7 @@ var _ = Describe("local MCP page frontmatter preservation", Label("integration")
 		}), "page")
 		Expect(stringSliceField(cleared, "tags")).To(matchStringSet(nil))
 		Expect(nestedMap(cleared, "properties")).To(BeEmpty())
-		rawAfterClear := readPageMarkdownByRoutePath(w.GetRootDir(), "mcp-metadata-preserve")
+		rawAfterClear := readPageMarkdownByRoutePath(w.GetRootDir(), newFixtureRoutePath("mcp-metadata-preserve"))
 		clearDoc := canonicalPageMarkdown("wiki_update_page metadata preserve clear update", rawAfterClear)
 		Expect(clearDoc.Metadata).To(SatisfyAll(
 			HaveField("Tags", BeEmpty()),

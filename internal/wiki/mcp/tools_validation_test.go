@@ -8,7 +8,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -61,13 +60,13 @@ leafwiki_title: Sync Child
 
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: dataDir, RootDir: rootDir})
 		Expect(treeService.LoadTree()).To(Succeed())
-		Expect(moveChildKindFirst(treeService.GetTree(), "docs", tree.NodeKindPage)).To(Equal(validationChildKindMoved))
-		section, err := treeService.GetPage("sync-section")
+		Expect(moveChildKindFirst(treeService.GetTree(), newFixtureRoutePath("docs"), tree.NodeKindPage)).To(Equal(validationChildKindMoved))
+		section, err := treeService.GetPage(newFixturePageID("sync-section"))
 		Expect(err).NotTo(HaveOccurred())
 		routes := &Routes{treeService: treeService}
 
 		routePath := tree.RoutePathFromString(section.CalculatePath())
-		result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, tree.PageIDFromString(section.ID), section.Kind)
+		result := routes.validateMarkdownContent(context.Background(), routePath, section.RawContent, section.ID, section.Kind)
 
 		Expect(result).To(matchMarkdownValidationWithoutIssue(wikivalidation.IssueCodeBrokenLink), "validateMarkdownContent = %#v", result)
 	})
@@ -101,10 +100,10 @@ leafwiki_title: Glossary
 	It("validates loaded tree content when no workspace root is available", func() {
 		treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})
 		Expect(treeService.LoadTree()).To(Succeed())
-		pageID, err := treeService.CreateNode("system", nil, "Broken", "broken", nil)
+		pageID, err := treeService.CreateNode(newFixtureUserID("system"), nil, "Broken", newFixtureSlug("broken"), nil)
 		Expect(err).NotTo(HaveOccurred())
 		content := "# Broken\n\n[Missing](missing.md)\n"
-		Expect(treeService.UpdateNodeUncheckedVersion("system", *pageID, "Broken", "broken", &content, false)).To(Succeed())
+		Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *pageID, "Broken", newFixtureSlug("broken"), &content, false)).To(Succeed())
 
 		result := (&Routes{treeService: treeService}).validateLoadedTree(context.Background())
 
@@ -120,13 +119,12 @@ leafwiki_title: Glossary
 			Severity:  wikivalidation.IssueSeverityError,
 		}})
 
-		Expect(issues).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"Code":      Equal(wikivalidation.IssueCodeDuplicateLeafwikiID),
-			"Path":      Equal("docs/a.md"),
-			"MessageID": Equal(wikivalidation.IssueCodeDuplicateLeafwikiID.MessageID()),
-			"Message":   Equal(validationDuplicateLeafwikiIDMessage),
-			"Severity":  Equal(wikivalidation.IssueSeverityError),
-		})))
+		Expect(issues).To(HaveExactElements(matchValidationIssueOutput(
+			wikivalidation.IssueCodeDuplicateLeafwikiID,
+			"docs/a.md",
+			wikivalidation.IssueCodeDuplicateLeafwikiID.MessageID(),
+			wikivalidation.IssueSeverityError,
+		)))
 	})
 
 	It("resolves validation source markdown files and page IDs for sections", func() {
@@ -141,9 +139,9 @@ leafwiki_title: Docs
 		Expect(treeService.LoadTree()).To(Succeed())
 		routes := &Routes{treeService: treeService}
 
-		source := routes.validationSourceMarkdownFile("docs")
-		Expect(source).To(Equal(tree.MarkdownPathFromString("docs/index.md")))
-		Expect(validationPageIDResolutionFor(routes, "docs")).To(matchValidationPageID(validationResolved, Equal(newFixturePageID("docs-section"))))
+		source := routes.validationSourceMarkdownFile(newFixtureRoutePath("docs"))
+		Expect(source).To(Equal(newFixtureMarkdownPath("docs/index.md")))
+		Expect(validationPageIDResolutionFor(routes, newFixtureRoutePath("docs"))).To(matchValidationPageID(validationResolved, Equal(newFixturePageID("docs-section"))))
 	})
 
 	It("normalizes validation asset destinations before lookup", func() {
@@ -160,10 +158,11 @@ const (
 	validationChildKindNotPresent validationChildKindMoveState = "child kind not present"
 )
 
-func moveChildKindFirst(root *tree.PageNode, routePath string, kind tree.NodeKind) validationChildKindMoveState {
+func moveChildKindFirst(root *tree.PageNode, routePath tree.RoutePath, kind tree.NodeKind) validationChildKindMoveState {
 	GinkgoHelper()
 	parent := root
-	for _, slug := range strings.Split(strings.Trim(routePath, "/"), "/") {
+	for _, rawSlug := range strings.Split(strings.Trim(routePath.String(), "/"), "/") {
+		slug := tree.SlugFromString(rawSlug)
 		if slug == "" {
 			continue
 		}
@@ -182,12 +181,12 @@ func moveChildKindFirst(root *tree.PageNode, routePath string, kind tree.NodeKin
 	return validationChildKindNotPresent
 }
 
-func childBySlug(parent *tree.PageNode, slug string) *tree.PageNode {
+func childBySlug(parent *tree.PageNode, slug tree.Slug) *tree.PageNode {
 	if parent == nil {
 		return nil
 	}
 	for _, child := range parent.Children {
-		if child.Slug == tree.SlugFromString(slug) {
+		if child.Slug == slug {
 			return child
 		}
 	}

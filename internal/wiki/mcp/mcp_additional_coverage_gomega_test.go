@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+	"github.com/onsi/gomega/types"
 	coreassets "github.com/perber/wiki/internal/core/assets"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
@@ -29,43 +31,60 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
+type schemaTypeFixture string
+
+func newFixtureSchemaType[T ~string](raw T) schemaTypeFixture {
+	return schemaTypeFixture(raw)
+}
+
+func haveSchemaType(want schemaTypeFixture) types.GomegaMatcher {
+	GinkgoHelper()
+	return WithTransform(func(schema *jsonschema.Schema) schemaTypeFixture {
+		return schemaTypeFixture(schema.Type)
+	}, Equal(want))
+}
+
 var _ = Describe("MCP context checkpoints and route normalization", func() {
 	Describe("checkpoint eviction", Label("unit"), func() {
 		It("evicts overflow and new sessions while preserving the active session", func() {
 			base := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 			store := newContextCheckpointStore(1)
 			store.maxSessions = 2
-			store.sessions = map[string][]contextCheckpoint{
-				"old":  {{Token: "old", CreatedAt: base}},
-				"new":  {{Token: "new", CreatedAt: base.Add(time.Minute)}},
-				"keep": {{Token: "keep", CreatedAt: base.Add(-time.Hour)}},
+			oldSession := contextSessionScopeForTest(newFixtureContextSessionID("old"))
+			newSession := contextSessionScopeForTest(newFixtureContextSessionID("new"))
+			keepSession := contextSessionScopeForTest(newFixtureContextSessionID("keep"))
+			store.sessions = map[contextSessionScope][]contextCheckpoint{
+				oldSession:  {{Token: "old", CreatedAt: base}},
+				newSession:  {{Token: "new", CreatedAt: base.Add(time.Minute)}},
+				keepSession: {{Token: "keep", CreatedAt: base.Add(-time.Hour)}},
 			}
 
-			store.evictOverflowLocked("keep")
+			store.evictOverflowLocked(keepSession)
 
-			Expect(store.sessions).NotTo(HaveKey("old"))
-			Expect(store.sessions).To(HaveKey("new"))
-			Expect(store.sessions).To(HaveKey("keep"))
+			Expect(store.sessions).NotTo(HaveKey(oldSession))
+			Expect(store.sessions).To(HaveKey(newSession))
+			Expect(store.sessions).To(HaveKey(keepSession))
 
-			store.sessions = map[string][]contextCheckpoint{
-				"old": {{Token: "old", CreatedAt: base}},
-				"new": {{Token: "new", CreatedAt: base.Add(time.Minute)}},
+			store.sessions = map[contextSessionScope][]contextCheckpoint{
+				oldSession: {{Token: "old", CreatedAt: base}},
+				newSession: {{Token: "new", CreatedAt: base.Add(time.Minute)}},
 			}
 
-			store.evictForNewSessionLocked("incoming")
+			store.evictForNewSessionLocked(contextSessionScopeForTest(newFixtureContextSessionID("incoming")))
 
-			Expect(store.sessions).NotTo(HaveKey("old"))
-			Expect(store.sessions).To(HaveKey("new"))
+			Expect(store.sessions).NotTo(HaveKey(oldSession))
+			Expect(store.sessions).To(HaveKey(newSession))
 
 			onlyStore := newContextCheckpointStore(1)
 			onlyStore.maxSessions = 1
-			onlyStore.sessions = map[string][]contextCheckpoint{
-				"only": {{Token: "only", CreatedAt: base}},
+			onlySession := contextSessionScopeForTest(newFixtureContextSessionID("only"))
+			onlyStore.sessions = map[contextSessionScope][]contextCheckpoint{
+				onlySession: {{Token: "only", CreatedAt: base}},
 			}
 
-			onlyStore.evictForNewSessionLocked("only")
+			onlyStore.evictForNewSessionLocked(onlySession)
 
-			Expect(onlyStore.sessions).To(HaveKey("only"))
+			Expect(onlyStore.sessions).To(HaveKey(onlySession))
 		})
 	})
 
@@ -89,7 +108,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 				"Role": Equal(coreauth.RoleEditor),
 			}))
 
-			user, err = routes.actorForRequest(mcpTokenInfoRequest("missing-user"))
+			user, err = routes.actorForRequest(mcpTokenInfoRequest(newFixtureUserID("missing-user")))
 			Expect(user).To(BeNil())
 			Expect(err).To(matchLocalizedErrorCode(errCodeMCPAuthenticatedUserNotFound, sharederrors.MessageIDForCode(errCodeMCPAuthenticatedUserNotFound)))
 
@@ -164,7 +183,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 
 	Describe("schema and context helpers", func() {
 		It("falls back to object schema and no optional tools for unknown gates", Label("unit"), func() {
-			Expect(toolOutputSchema(ToolID("unknown_tool")).Type).To(Equal("object"))
+			Expect(toolOutputSchema(newFixtureToolID("unknown_tool"))).To(haveSchemaType(newFixtureSchemaType("object")))
 			Expect(toolNamesForGate(optionalToolGate("unknown"))).To(BeNil())
 		})
 
@@ -175,10 +194,10 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 				return []wikipresence.Session{{Type: wikipresence.SessionTypeWeb, SessionID: wikipresence.WebSessionIDFromString("web-session")}}, nil
 			}
 			routes.agentPresenceProvider = func() ([]projectdaemon.AgentPresenceSession, error) {
-				return []projectdaemon.AgentPresenceSession{{SessionIDHash: "agent-session", Provider: "codex", FirstSeenAt: now, LastSeenAt: now}}, nil
+				return []projectdaemon.AgentPresenceSession{{SessionIDHash: "agent-session", Provider: newFixtureProviderID("codex"), FirstSeenAt: now, LastSeenAt: now}}, nil
 			}
 
-			sessions, status := routes.activeSessionsForContext(&coreauth.User{ID: "editor", Role: coreauth.RoleEditor})
+			sessions, status := routes.activeSessionsForContext(&coreauth.User{ID: newFixtureUserID("editor"), Role: coreauth.RoleEditor})
 
 			Expect(status).To(matchPresenceStatusOutput(gstruct.Fields{
 				"Web":        Equal("enabled"),
@@ -200,7 +219,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})}).contextTree(1)).To(BeNil())
 			Expect(func() { ensureNodeChildrenArray(nil) }).NotTo(Panic())
 
-			_, err := routes.getContext(context.Background(), nil, toolActor{ID: "viewer", User: &coreauth.User{ID: "viewer", Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{SyncMode: "invalid"})
+			_, err := routes.getContext(context.Background(), nil, toolActor{ID: newFixtureUserID("viewer"), User: &coreauth.User{ID: newFixtureUserID("viewer"), Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{SyncMode: "invalid"})
 			Expect(err).To(MatchError(errContextSyncModeInvalid))
 
 			routes.workspaceSyncRefresh = func(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
@@ -209,37 +228,37 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			routes.workspaceSyncStatus = func() workspacesync.SyncStatus {
 				return workspacesync.SyncStatus{Enabled: true, PendingEventCount: 1}
 			}
-			out, err := routes.getContext(context.Background(), nil, toolActor{ID: "viewer", User: &coreauth.User{ID: "viewer", Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{})
+			out, err := routes.getContext(context.Background(), nil, toolActor{ID: newFixtureUserID("viewer"), User: &coreauth.User{ID: newFixtureUserID("viewer"), Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out.Warnings).To(ContainElement("sync refresh skipped because current MCP user is not an editor or admin"))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 				return workspacesync.SnapshotList{
 					Snapshots: []workspacesync.Snapshot{
-						{ID: "first", ChangedMarkdownPaths: []string{"home.md"}},
-						{ID: "second", ChangedMarkdownPaths: []string{"home.md"}},
+						{ID: newFixtureCommitHash("first"), ChangedMarkdownPaths: []string{"home.md"}},
+						{ID: newFixtureCommitHash("second"), ChangedMarkdownPaths: []string{"home.md"}},
 					},
 				}, nil
 			}
 			Expect(routes.recentChanges(context.Background(), workspacesync.SyncStatus{}, 1)).To(HaveLen(1))
 
-			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "")).To(matchChangesSinceCommit(
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, newFixtureCommitHash(""))).To(matchChangesSinceCommit(
 				changesReachedRequestedCommit,
 				HaveLen(2),
 			))
 
 			routes.listWorkspaceSnapshots = nil
-			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "missing")).To(matchChangesSinceCommit(
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, newFixtureCommitHash("missing"))).To(matchChangesSinceCommit(
 				changesStoppedBeforeRequestedCommit,
 				BeNil(),
 			))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
 				return workspacesync.SnapshotList{
-					Snapshots: []workspacesync.Snapshot{{ID: "newer"}},
+					Snapshots: []workspacesync.Snapshot{{ID: newFixtureCommitHash("newer")}},
 				}, errors.New("snapshot backend failed")
 			}
-			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "target")).To(matchChangesSinceCommit(
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, newFixtureCommitHash("target"))).To(matchChangesSinceCommit(
 				changesStoppedBeforeRequestedCommit,
 				HaveLen(0),
 			))
@@ -249,34 +268,34 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 				for i := range snapshots {
 					snapshots[i] = workspacesync.Snapshot{ID: workspacesync.CommitHashFromString(fmt.Sprintf("snapshot-%d", i))}
 				}
-				return workspacesync.SnapshotList{Snapshots: snapshots, NextCursor: "next"}, nil
+				return workspacesync.SnapshotList{Snapshots: snapshots, NextCursor: newFixtureCommitHash("next")}, nil
 			}
-			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "target")).To(matchChangesSinceCommit(
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, newFixtureCommitHash("target"))).To(matchChangesSinceCommit(
 				changesStoppedBeforeRequestedCommit,
 				HaveLen(maxContextDeltaSnapshots),
 			))
 
 			routes.listWorkspaceSnapshots = func(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
-				return workspacesync.SnapshotList{NextCursor: "next"}, nil
+				return workspacesync.SnapshotList{NextCursor: newFixtureCommitHash("next")}, nil
 			}
-			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, "target")).To(matchChangesSinceCommit(
+			Expect(changesSinceCommitOutcomeFor(routes, workspacesync.SyncStatus{}, newFixtureCommitHash("target"))).To(matchChangesSinceCommit(
 				changesStoppedBeforeRequestedCommit,
 				BeEmpty(),
 			))
 
-			routes.contextStore.record(contextSessionKey(nil, toolActor{ID: "viewer"}), contextCheckpoint{Token: "old-token", CommitHash: "old"})
+			routes.contextStore.record(contextSessionKey(nil, toolActor{ID: newFixtureUserID("viewer")}), contextCheckpoint{Token: "old-token", CommitHash: newFixtureCommitHash("old")})
 			routes.workspaceSyncStatus = func() workspacesync.SyncStatus {
-				return workspacesync.SyncStatus{LastCommitHash: "new"}
+				return workspacesync.SyncStatus{LastCommitHash: newFixtureCommitHash("new")}
 			}
-			out, err = routes.getContext(context.Background(), nil, toolActor{ID: "viewer", User: &coreauth.User{ID: "viewer", Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{SinceToken: "old-token"})
+			out, err = routes.getContext(context.Background(), nil, toolActor{ID: newFixtureUserID("viewer"), User: &coreauth.User{ID: newFixtureUserID("viewer"), Username: "viewer", Role: coreauth.RoleViewer}}, httpinternal.RouterOptions{}, getContextInput{SinceToken: "old-token"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out.Warnings).To(ContainElement("changesSincePreviousContext truncated before sinceToken checkpoint"))
 
 			statusForFallback := workspacesync.SyncStatus{
-				LastCommitHash:             "latest",
+				LastCommitHash:             newFixtureCommitHash("latest"),
 				RecentChangedMarkdownPaths: []string{"home.md"},
 			}
-			change := routes.recentChangeFromSnapshot(statusForFallback, workspacesync.Snapshot{ID: "latest"})
+			change := routes.recentChangeFromSnapshot(statusForFallback, workspacesync.Snapshot{ID: newFixtureCommitHash("latest")})
 			Expect(change.ChangedPaths).To(Equal([]string{"home.md"}))
 		})
 
@@ -291,8 +310,8 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(routes.pageIDForMarkdownPath("bad/ /README.md")).To(BeEmpty())
 			Expect(routes.pageIDForMarkdownPath("../bad.md")).To(BeEmpty())
 			Expect(routes.pageIDsForMarkdownPaths([]string{"home.md", "home.md"})).To(Equal([]tree.PageID{home.ID}))
-			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})}).pageIDForRecentChangeRoute("", tree.NodeKindSection)).To(BeEmpty())
-			Expect(routes.pageIDForRecentChangeRoute(newFixtureRoutePath("missing"), "")).To(BeEmpty())
+			Expect((&Routes{treeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{DataDir: mcpTestTempDir(), RootDir: mcpTestTempDir()})}).pageIDForRecentChangeRoute(newFixtureRoutePath(""), tree.NodeKindSection)).To(BeEmpty())
+			Expect(routes.pageIDForRecentChangeRoute(newFixtureRoutePath("missing"), newFixtureNodeKind(""))).To(BeEmpty())
 
 			readmeRoutes := newContextToolTestRoutes()
 			Expect(readmeRoutes.pageIDForMarkdownPath("README.md")).To(Equal(tree.RootPageID))
@@ -324,19 +343,19 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			parent := &tree.PageNode{Children: []*tree.PageNode{{Children: []*tree.PageNode{{}}}}}
 			Expect(subtreeExtentFor(parent, treeDisplayDepth(1))).To(Equal(subtreeExtentTruncated))
 
-			emptyVersionPage := &tree.Page{PageNode: &tree.PageNode{ID: "empty", Title: "Empty", Slug: "empty", Kind: tree.NodeKindPage}}
-			Expect(partialEditVersionPreflight("", nil)).To(Succeed())
-			Expect(partialEditVersionPreflight("", emptyVersionPage)).To(Succeed())
+			emptyVersionPage := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("empty"), Title: "Empty", Slug: newFixtureSlug("empty"), Kind: tree.NodeKindPage}}
+			Expect(partialEditVersionPreflight(newFixturePageVersion(""), nil)).To(Succeed())
+			Expect(partialEditVersionPreflight(newFixturePageVersion(""), emptyVersionPage)).To(Succeed())
 
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(partialEditVersionPreflight("", home)).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionRequired))
-			Expect(partialEditVersionPreflight(tree.PageVersionFromString("stale"), home)).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionConflict))
+			Expect(partialEditVersionPreflight(newFixturePageVersion(""), home)).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionRequired))
+			Expect(partialEditVersionPreflight(newFixturePageVersion("stale"), home)).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionConflict))
 			otherErr := errors.New("other")
 			Expect(partialEditWriteError(otherErr, nil)).To(MatchError(otherErr))
 			Expect(partialEditWriteError(otherErr, home)).To(MatchError(otherErr))
 
-			missingPage := &tree.Page{PageNode: &tree.PageNode{ID: "missing", Title: "Missing", Slug: "missing", Kind: tree.NodeKindPage}}
+			missingPage := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("missing"), Title: "Missing", Slug: newFixtureSlug("missing"), Kind: tree.NodeKindPage}}
 			_, err = routes.partialEditOutput(context.Background(), missingPage, false, nil, false)
 			Expect(err).To(MatchError(tree.ErrPageNotFound))
 
@@ -351,38 +370,38 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			routes.workspaceRootDir = ""
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
-			sectionID, err := routes.treeService.CreateNode("system", nil, "Guide", "guide", testNodeKindPtr(tree.NodeKindSection))
+			sectionID, err := routes.treeService.CreateNode(newFixtureUserID("system"), nil, "Guide", newFixtureSlug("guide"), testNodeKindPtr(tree.NodeKindSection))
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(validationMarkdownLinkResolutionFor((*Routes)(nil), "", tree.NodeKindPage, "missing.md")).To(matchValidationMarkdownLink(
+			Expect(validationMarkdownLinkResolutionFor((*Routes)(nil), newFixtureRoutePath(""), tree.NodeKindPage, "missing.md")).To(matchValidationMarkdownLink(
 				validationUnresolved,
 				BeEmpty(),
 				BeEmpty(),
 				Equal(wikivalidation.IssueCodeBrokenLink),
 			))
 
-			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "https://example.com")).To(matchValidationMarkdownLink(
+			Expect(validationMarkdownLinkResolutionFor(routes, newFixtureRoutePath(""), tree.NodeKindPage, "https://example.com")).To(matchValidationMarkdownLink(
 				validationResolved,
 				BeEmpty(),
 				BeEmpty(),
 				BeEmpty(),
 			))
 
-			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "%zz")).To(matchValidationMarkdownLink(
+			Expect(validationMarkdownLinkResolutionFor(routes, newFixtureRoutePath(""), tree.NodeKindPage, "%zz")).To(matchValidationMarkdownLink(
 				validationUnresolved,
 				gstruct.Ignore(),
 				gstruct.Ignore(),
 				Equal(wikivalidation.IssueCodeInvalidLink),
 			))
 
-			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "../escape.md")).To(matchValidationMarkdownLink(
+			Expect(validationMarkdownLinkResolutionFor(routes, newFixtureRoutePath(""), tree.NodeKindPage, "../escape.md")).To(matchValidationMarkdownLink(
 				validationUnresolved,
 				gstruct.Ignore(),
 				gstruct.Ignore(),
 				Equal(wikivalidation.IssueCodeInvalidLink),
 			))
 
-			Expect(validationMarkdownLinkResolutionFor(routes, "", tree.NodeKindPage, "/home.md")).To(matchValidationMarkdownLink(
+			Expect(validationMarkdownLinkResolutionFor(routes, newFixtureRoutePath(""), tree.NodeKindPage, "/home.md")).To(matchValidationMarkdownLink(
 				validationResolved,
 				Equal(home.ID),
 				Equal(tree.NodeKindPage),
@@ -397,9 +416,9 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(validationContentLeafWikiID("---\nleafwiki_id: page-1\n---\n# Page\n")).To(Equal("page-1"))
 			Expect((&Routes{}).validateLoadedTree(context.Background())).To(matchSuccessfulMarkdownValidation())
 
-			_, _, err = routes.normalizeValidationContentPathInput("../bad", "")
+			_, _, err = routes.normalizeValidationContentPathInput("../bad", newFixtureNodeKind(""))
 			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
-			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", "")
+			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", newFixtureNodeKind(""))
 			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathInput("bad//page.md", tree.NodeKindPage)
 			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
@@ -409,13 +428,13 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(err).To(matchMCPToolLocalizedError(wikipages.ErrCodePageInvalidKind))
 			_, _, err = routes.normalizeValidationContentPathToolInput("guide/README.md", "invalid-kind")
 			Expect(err).To(matchMCPToolLocalizedError(wikipages.ErrCodePageInvalidKind))
-			_, _, err = routes.normalizeValidationContentPathInput("bad//README.md", "")
+			_, _, err = routes.normalizeValidationContentPathInput("bad//README.md", newFixtureNodeKind(""))
 			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
-			routePath, sourceKind, err := routes.normalizeValidationContentPathInput("README.md", "")
+			routePath, sourceKind, err := routes.normalizeValidationContentPathInput("README.md", newFixtureNodeKind(""))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("README")))
 			Expect(sourceKind).To(Equal(tree.NodeKindPage))
-			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("", "")
+			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("", newFixtureNodeKind(""))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(BeEmpty())
 			Expect(sourceKind).To(BeEmpty())
@@ -426,7 +445,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(os.MkdirAll(guideDir, 0o755)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(guideDir, "README.md"), []byte("# Guide\n"), 0o644)).To(Succeed())
 
-			routePath, sourceKind, err = fallbackRoutes.normalizeValidationContentPathInput("guide/README.md", "")
+			routePath, sourceKind, err = fallbackRoutes.normalizeValidationContentPathInput("guide/README.md", newFixtureNodeKind(""))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide")))
 			Expect(sourceKind).To(Equal(tree.NodeKindSection))
@@ -452,16 +471,16 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
 			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", tree.NodeKindSection)
 			Expect(err).To(MatchError(errValidationContentKindMismatch))
-			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", "")
+			_, _, err = routes.normalizeValidationContentPathInput("bad/../README.md", newFixtureNodeKind(""))
 			Expect(err).To(MatchError(tree.ErrInvalidRoutePath))
-			_, err = routes.treeService.CreateNode("system", sectionID, "Guide Readme", "README", nil)
+			_, err = routes.treeService.CreateNode(newFixtureUserID("system"), sectionID, "Guide Readme", newFixtureSlug("README"), nil)
 			Expect(err).NotTo(HaveOccurred())
-			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("guide/README.md", "")
+			routePath, sourceKind, err = routes.normalizeValidationContentPathInput("guide/README.md", newFixtureNodeKind(""))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(routePath).To(Equal(newFixtureRoutePath("guide/README")))
 			Expect(sourceKind).To(Equal(tree.NodeKindPage))
 
-			Expect(validationPageIDKindResolutionFor(routes, "", tree.NodeKindPage)).To(matchValidationPageID(validationUnresolved, BeEmpty()))
+			Expect(validationPageIDKindResolutionFor(routes, newFixtureRoutePath(""), tree.NodeKindPage)).To(matchValidationPageID(validationUnresolved, BeEmpty()))
 			Expect(validationPageIDKindResolutionFor((*Routes)(nil), newFixtureRoutePath("home"), tree.NodeKindPage)).To(matchValidationPageID(validationUnresolved, BeEmpty()))
 			Expect(validationPageIDResolutionFor(&Routes{}, newFixtureRoutePath("home"))).To(matchValidationPageID(validationUnresolved, BeEmpty()))
 			Expect(validationPageIDResolutionFor(routes, newFixtureRoutePath("missing"))).To(matchValidationPageID(validationUnresolved, BeEmpty()))
@@ -476,7 +495,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 			home, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 			Expect(err).NotTo(HaveOccurred())
 			assetService := coreassets.NewAssetService(mcpTestTempDir(), tree.NewSlugService())
-			_, err = assetService.SaveAssetForPage(home.PageNode, &memoryMultipartFile{Reader: bytes.NewReader([]byte("logo"))}, "logo.png", 1024)
+			_, err = assetService.SaveAssetForPage(home.PageNode, &memoryMultipartFile{Reader: bytes.NewReader([]byte("logo"))}, newFixtureAssetName("logo.png"), 1024)
 			Expect(err).NotTo(HaveOccurred())
 			routes.getAssets = wikiassets.NewListAssetsUseCase(routes.treeService, assetService)
 
@@ -512,7 +531,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 					return workspacesync.SyncStatus{RecentChangedMarkdownPaths: []string{"home.md"}}, refreshErr
 				},
 			}
-			_, err = routes.refreshWorkspaceSync(context.Background(), toolActor{ID: "editor", User: &coreauth.User{ID: "editor", Username: "editor"}}, refreshInput{Validate: &validate})
+			_, err = routes.refreshWorkspaceSync(context.Background(), toolActor{ID: newFixtureUserID("editor"), User: &coreauth.User{ID: newFixtureUserID("editor"), Username: "editor"}}, refreshInput{Validate: &validate})
 			Expect(err).To(MatchError(refreshErr))
 
 			routes.workspaceSyncRefresh = func(_ context.Context, req workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
@@ -520,7 +539,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 				Expect(req.Actor.ID).To(Equal(workspacesync.ActorIDFromUserID(coreauth.UserIDFromString("editor"))))
 				return workspacesync.SyncStatus{
 					Enabled:                    true,
-					LastCommitHash:             "commit-1",
+					LastCommitHash:             newFixtureCommitHash("commit-1"),
 					RecentChangedMarkdownPaths: []string{"home.md"},
 					ValidationErrors: []workspacesync.ValidationError{
 						{Path: "/workspace/home.md", Message: "broken", Severity: wikivalidation.IssueSeverityError},
@@ -528,7 +547,7 @@ var _ = Describe("MCP context checkpoints and route normalization", func() {
 				}, nil
 			}
 
-			out, err := routes.refreshWorkspaceSync(context.Background(), toolActor{ID: "editor", User: &coreauth.User{ID: "editor", Username: "editor"}}, refreshInput{Validate: &validate})
+			out, err := routes.refreshWorkspaceSync(context.Background(), toolActor{ID: newFixtureUserID("editor"), User: &coreauth.User{ID: newFixtureUserID("editor"), Username: "editor"}}, refreshInput{Validate: &validate})
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out).To(matchRefreshOutput(gstruct.Fields{

@@ -11,3 +11,15 @@ func newFixturePageID[T ~string](raw T) tree.PageID {
 func newFixtureRevisionID[T ~string](raw T) tree.RevisionID {
 	return tree.NewRevisionIDUnchecked(string(raw))
 }
+
+func newFixtureUserID[T ~string](raw T) tree.UserID {
+	return tree.NewUserIDUnchecked(string(raw))
+}
+
+func newFixtureSlug[T ~string](raw T) tree.Slug {
+	return tree.NewSlugUnchecked(raw)
+}
+
+func newFixtureAssetName[T ~string](raw T) tree.AssetName {
+	return tree.AssetNameFromString(raw)
+}

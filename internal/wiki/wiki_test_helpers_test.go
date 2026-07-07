@@ -243,18 +243,18 @@ func pageIDPtr(id tree.PageID) *tree.PageID {
 	return &id
 }
 
-func createPageForTest(w *Wiki, userID string, parentID *tree.PageID, title, slug string, kind *tree.NodeKind) *tree.Page {
+func createPageForTest(w *Wiki, userID tree.UserID, parentID *tree.PageID, title string, slug tree.Slug, kind *tree.NodeKind) *tree.Page {
 	ginkgo.GinkgoHelper()
 
 	out, err := wikipages.NewCreatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.CreatePageInput{UserID: tree.UserIDFromString(userID), ParentID: parentID, Title: title, Slug: tree.SlugFromString(slug), Kind: kind},
+		wikipages.CreatePageInput{UserID: userID, ParentID: parentID, Title: title, Slug: slug, Kind: kind},
 	)
 	Expect(err).To(Succeed())
 	return out.Page
 }
 
-func updatePageForTest(w *Wiki, userID string, id tree.PageID, title, slug string, content *string, kind *tree.NodeKind) *tree.Page {
+func updatePageForTest(w *Wiki, userID tree.UserID, id tree.PageID, title string, slug tree.Slug, content *string, kind *tree.NodeKind) *tree.Page {
 	ginkgo.GinkgoHelper()
 
 	current, err := w.tree.GetPage(id)
@@ -262,13 +262,13 @@ func updatePageForTest(w *Wiki, userID string, id tree.PageID, title, slug strin
 
 	out, err := wikipages.NewUpdatePageUseCase(w.tree, w.slug, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.UpdatePageInput{UserID: tree.UserIDFromString(userID), ID: id, Version: tree.PageVersionFromString(current.Version()), Title: title, Slug: tree.SlugFromString(slug), Content: content, Kind: kind},
+		wikipages.UpdatePageInput{UserID: userID, ID: id, Version: tree.PageVersionFromString(current.Version()), Title: title, Slug: slug, Content: content, Kind: kind},
 	)
 	Expect(err).To(Succeed())
 	return out.Page
 }
 
-func deletePageForTest(w *Wiki, userID string, id tree.PageID, recursive bool) {
+func deletePageForTest(w *Wiki, userID tree.UserID, id tree.PageID, recursive bool) {
 	ginkgo.GinkgoHelper()
 
 	current, err := w.tree.GetPage(id)
@@ -276,7 +276,7 @@ func deletePageForTest(w *Wiki, userID string, id tree.PageID, recursive bool) {
 
 	err = wikipages.NewDeletePageUseCase(w.tree, w.asset, w.newPageOrchestrator(), w.log).Execute(
 		context.Background(),
-		wikipages.DeletePageInput{UserID: tree.UserIDFromString(userID), ID: id, Version: tree.PageVersionFromString(current.Version()), Recursive: recursive},
+		wikipages.DeletePageInput{UserID: userID, ID: id, Version: tree.PageVersionFromString(current.Version()), Recursive: recursive},
 	)
 	Expect(err).To(Succeed())
 }

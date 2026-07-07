@@ -38,8 +38,8 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 
 	ginkgo.It("applies link index updates across update, move, restore, and delete event shapes", ginkgo.Label("integration"), func() {
 		_, treeService, linkService, effect := setupLinkSideEffect()
-		source := createMarkdownPage(treeService, "Source", "source", "[Target](/target)")
-		affected := createMarkdownPage(treeService, "Affected", "affected", "[Other](/other)")
+		source := createMarkdownPage(treeService, "Source", newFixtureSlug("source"), "[Target](/target)")
+		affected := createMarkdownPage(treeService, "Affected", newFixtureSlug("affected"), "[Other](/other)")
 
 		NewLinkIndexSideEffect(nil, nil).Apply(PageSaveEvent{Operation: PageOperationDelete})
 		effect.Apply(PageSaveEvent{Operation: PageOperationCreate})
@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 		})
 		effect.Apply(PageSaveEvent{
 			Operation:     PageOperationMove,
-			OldPath:       "",
+			OldPath:       newFixtureRoutePath(""),
 			After:         source,
 			AffectedPages: []*tree.Page{affected},
 		})
@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 
 	ginkgo.It("logs link index write failures without panicking", ginkgo.Label("integration"), func() {
 		dir, treeService, _, effect := setupLinkSideEffect()
-		page := createMarkdownPage(treeService, "Broken Links", "broken-links", "[Missing](/missing)")
+		page := createMarkdownPage(treeService, "Broken Links", newFixtureSlug("broken-links"), "[Missing](/missing)")
 		dropSQLiteTables(filepath.Join(dir, "links.db"), "links")
 
 		Expect(func() {
@@ -122,7 +122,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 
 	ginkgo.It("indexes search fallback pages and exposes deterministic search index failures", ginkgo.Label("integration"), func() {
 		dir, treeService, index, effect := setupSearchSideEffect()
-		page := createMarkdownPage(treeService, "Search Fallback", "search-fallback", "needle fallback content")
+		page := createMarkdownPage(treeService, "Search Fallback", newFixtureSlug("search-fallback"), "needle fallback content")
 
 		effect.Apply(PageSaveEvent{
 			Operation:     PageOperationUpdate,
@@ -137,7 +137,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 		})))
 
 		effect.indexPage(nil)
-		unreadable := createMarkdownPage(treeService, "Unreadable", "unreadable", "unreadable content")
+		unreadable := createMarkdownPage(treeService, "Unreadable", newFixtureSlug("unreadable"), "unreadable content")
 		relativeContentPath, err := treeService.ContentPathForNode(unreadable.PageNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(os.Remove(filepath.Join(treeService.RootDir(), relativeContentPath))).To(Succeed())
@@ -158,7 +158,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 
 	ginkgo.It("updates properties from fallback pages and logs write failures", ginkgo.Label("integration"), func() {
 		dir, treeService, service, effect := setupPropertiesSideEffect()
-		page := createRawPage(treeService, "Properties Fallback", "properties-fallback", "---\nstatus: staged\n---\n\nBody")
+		page := createRawPage(treeService, "Properties Fallback", newFixtureSlug("properties-fallback"), "---\nstatus: staged\n---\n\nBody")
 
 		effect.Apply(PageSaveEvent{
 			Operation:     PageOperationRestore,
@@ -184,7 +184,7 @@ var _ = ginkgo.Describe("page save side-effect fallback and failure behavior", f
 
 	ginkgo.It("updates tags from fallback pages and logs write failures", ginkgo.Label("integration"), func() {
 		dir, treeService, service, effect := setupTagsSideEffect()
-		page := createRawPage(treeService, "Tags Fallback", "tags-fallback", "---\ntags:\n  - branch\n---\n\nBody")
+		page := createRawPage(treeService, "Tags Fallback", newFixtureSlug("tags-fallback"), "---\ntags:\n  - branch\n---\n\nBody")
 
 		effect.Apply(PageSaveEvent{
 			Operation:     PageOperationUpdate,
@@ -276,25 +276,25 @@ func setupTreeService() (string, *tree.TreeService) {
 	return dir, treeService
 }
 
-func createMarkdownPage(treeService *tree.TreeService, title, slug, content string) *tree.Page {
+func createMarkdownPage(treeService *tree.TreeService, title string, slug tree.Slug, content string) *tree.Page {
 	ginkgo.GinkgoHelper()
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), &kind)
+	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
 	page, err := treeService.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(treeService.UpdateNode(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &content, tree.PageVersionFromString(page.Version()), false)).To(Succeed())
+	Expect(treeService.UpdateNode(newFixtureUserID("system"), *id, title, slug, &content, tree.PageVersionFromString(page.Version()), false)).To(Succeed())
 	page, err = treeService.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
 	return page
 }
 
-func createRawPage(treeService *tree.TreeService, title, slug, raw string) *tree.Page {
+func createRawPage(treeService *tree.TreeService, title string, slug tree.Slug, raw string) *tree.Page {
 	ginkgo.GinkgoHelper()
 	kind := tree.NodeKindPage
-	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, tree.SlugFromString(slug), &kind)
+	id, err := treeService.CreateNode(newFixtureUserID("system"), nil, title, slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, tree.SlugFromString(slug), &raw, true)).To(Succeed())
+	Expect(treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *id, title, slug, &raw, true)).To(Succeed())
 	page, err := treeService.GetPage(*id)
 	Expect(err).NotTo(HaveOccurred())
 	return page

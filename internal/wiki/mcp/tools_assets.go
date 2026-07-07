@@ -23,7 +23,7 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 		}
 		file := &memoryMultipartFile{Reader: bytes.NewReader(content)}
 		out, err := r.uploadAsset.Execute(ctx, wikiassets.UploadAssetInput{
-			UserID:   tree.UserIDFromString(actor.ID),
+			UserID:   actor.ID,
 			PageID:   tree.PageIDFromString(strings.TrimSpace(in.PageID)),
 			File:     file,
 			Filename: tree.AssetNameFromString(in.Filename),
@@ -64,7 +64,7 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 
 	addEditorTool[renameAssetInput, renameAssetOutput](r, server, toolRenameAsset, func(ctx context.Context, actor toolActor, in renameAssetInput) (renameAssetOutput, error) {
 		out, err := r.renameAsset.Execute(ctx, wikiassets.RenameAssetInput{
-			UserID:      tree.UserIDFromString(actor.ID),
+			UserID:      actor.ID,
 			PageID:      tree.PageIDFromString(strings.TrimSpace(in.PageID)),
 			OldFilename: tree.AssetNameFromString(in.OldFilename),
 			NewFilename: tree.AssetNameFromString(in.NewFilename),
@@ -77,7 +77,7 @@ func (r *Routes) registerAssetTools(server *sdkmcp.Server, opts httpinternal.Rou
 
 	addEditorTool[deleteAssetInput, messageOutput](r, server, toolDeleteAsset, func(ctx context.Context, actor toolActor, in deleteAssetInput) (messageOutput, error) {
 		if err := r.deleteAsset.Execute(ctx, wikiassets.DeleteAssetInput{
-			UserID:   tree.UserIDFromString(actor.ID),
+			UserID:   actor.ID,
 			PageID:   tree.PageIDFromString(strings.TrimSpace(in.PageID)),
 			Filename: tree.AssetNameFromString(in.Filename),
 		}); err != nil {

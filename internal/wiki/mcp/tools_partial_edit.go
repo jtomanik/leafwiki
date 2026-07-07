@@ -70,7 +70,7 @@ func (r *Routes) updatePageMetadataTool(ctx context.Context, actor toolActor, in
 	}
 	kind := tree.NodeKindPage
 	out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
-		UserID:     tree.UserIDFromString(actor.ID),
+		UserID:     actor.ID,
 		Source:     pagesave.PageMutationSourceMCP,
 		ID:         page.ID,
 		Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
@@ -100,7 +100,7 @@ func (r *Routes) replacePageSectionTool(ctx context.Context, actor toolActor, in
 	}
 	kind := tree.NodeKindPage
 	out, err := r.updatePage.Execute(ctx, pages.UpdatePageInput{
-		UserID:     tree.UserIDFromString(actor.ID),
+		UserID:     actor.ID,
 		Source:     pagesave.PageMutationSourceMCP,
 		ID:         page.ID,
 		Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),

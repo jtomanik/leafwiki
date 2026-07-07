@@ -149,7 +149,7 @@ var _ = Describe("OAuth dynamic client registration", Label("integration"), func
 		code := redirected.Query().Get("code")
 		Expect(code).NotTo(BeEmpty(), "dynamic client authorize redirect should include code: %s", redirected.String())
 
-		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		token := exchangeCodeForClient(router, "", clientID, oauthAuthorizationCode(code), redirectURI, verifier)
 		Expect(token).To(HaveKeyWithValue("token_type", "Bearer"))
 		Expect(token).To(HaveKeyWithValue("scope", oauthScope))
 		Expect(token).To(SatisfyAll(
@@ -193,7 +193,7 @@ var _ = Describe("OAuth dynamic client registration defaults", Label("integratio
 		Expect(err).NotTo(HaveOccurred())
 		code := redirected.Query().Get("code")
 		Expect(code).NotTo(BeEmpty(), "dynamic default client authorize redirect should include code: %s", redirected.String())
-		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		token := exchangeCodeForClient(router, "", clientID, oauthAuthorizationCode(code), redirectURI, verifier)
 		refreshToken := stringFromMap(token, "refresh_token")
 		Expect(refreshToken).NotTo(BeEmpty())
 
@@ -243,7 +243,7 @@ var _ = Describe("OAuth dynamic client registration scopes", Label("integration"
 		code := redirected.Query().Get("code")
 		Expect(code).NotTo(BeEmpty(), "omitted-scope DCR authorize redirect should include code: %s", redirected.String())
 
-		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		token := exchangeCodeForClient(router, "", clientID, oauthAuthorizationCode(code), redirectURI, verifier)
 		Expect(token).To(HaveKeyWithValue("scope", oauthScope))
 		Expect(token).To(SatisfyAll(
 			HaveKeyWithValue("access_token", Not(BeEmpty())),
@@ -280,7 +280,7 @@ var _ = Describe("OAuth dynamic client registration grant restrictions", Label("
 		Expect(err).NotTo(HaveOccurred())
 		code := redirected.Query().Get("code")
 		Expect(code).NotTo(BeEmpty(), "auth-code-only authorize redirect should include code: %s", redirected.String())
-		token := exchangeCodeForClient(router, "", clientID, code, redirectURI, verifier)
+		token := exchangeCodeForClient(router, "", clientID, oauthAuthorizationCode(code), redirectURI, verifier)
 		Expect(token).To(HaveKeyWithValue("access_token", Not(BeEmpty())))
 		Expect(token).NotTo(HaveKey("refresh_token"))
 	})

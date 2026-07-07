@@ -43,7 +43,7 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(actorOut.User).To(SatisfyAll(
-			HaveField("ID", Equal(publicEditorID)),
+			HaveField("ID", Equal(coreauth.UserIDFromString(publicEditorID))),
 			HaveField("Username", Equal(publicEditorID)),
 			HaveField("Role", Equal(coreauth.RoleEditor)),
 		))
@@ -69,17 +69,17 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 
 		routes.ensurePath = fakeMCPEnsurePathUseCase{err: backendErr}
 		pageKind := mcpInputNodeKindPage
-		_, err = routes.ensurePageTool(context.Background(), toolActor{ID: "user-1"}, ensurePageInput{Path: "new-page", Title: "New", Kind: &pageKind})
+		_, err = routes.ensurePageTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, ensurePageInput{Path: "new-page", Title: "New", Kind: &pageKind})
 		Expect(err).To(MatchError(backendErr))
 		routes.ensurePath = fakeMCPEnsurePathUseCase{out: &wikipages.EnsurePathOutput{Page: page}}
-		_, err = routes.ensurePageTool(context.Background(), toolActor{ID: "user-1"}, ensurePageInput{Path: "new-page", Title: "New", Kind: &pageKind})
+		_, err = routes.ensurePageTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, ensurePageInput{Path: "new-page", Title: "New", Kind: &pageKind})
 		Expect(err).NotTo(HaveOccurred())
 
 		routes.updatePage = fakeMCPUpdatePageUseCase{err: backendErr}
-		_, err = routes.updatePageTool(context.Background(), toolActor{ID: "user-1"}, updatePageInput{ID: page.ID.String(), TagsPresent: true, Tags: []string{""}})
+		_, err = routes.updatePageTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageInput{ID: page.ID.String(), TagsPresent: true, Tags: []string{""}})
 		Expect(err).To(havePageValidationFieldError("tags[0]", wikipages.FieldCodePageTagRequired, wikipages.MessageIDPageTagRequired))
 		content := "updated"
-		_, err = routes.updatePageTool(context.Background(), toolActor{ID: "user-1"}, updatePageInput{ID: "missing", Content: &content})
+		_, err = routes.updatePageTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageInput{ID: "missing", Content: &content})
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 
 		relPath, err := routes.treeService.ContentPathForNode(page.PageNode)
@@ -89,14 +89,14 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		routes.findByPath = fakeMCPFindByPathUseCase{out: &wikipages.FindByPathOutput{Page: page}}
 		Expect(os.Remove(absPath)).To(Succeed())
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{Path: "home", Version: page.Version().String()})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{Path: "home", Version: page.Version().String()})
 		Expect(err).To(matchTreeDriftError())
 		Expect(os.WriteFile(absPath, originalRaw, 0o644)).To(Succeed())
 		Expect(os.WriteFile(absPath, []byte("<!-- leafwiki\n: bad\n-->\nBody"), 0o644)).To(Succeed())
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{Path: "home", Version: page.Version().String()})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{Path: "home", Version: page.Version().String()})
 		Expect(err).To(MatchError(markdown.ErrMetadataParse))
 		Expect(os.WriteFile(absPath, originalRaw, 0o644)).To(Succeed())
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{Path: "home", Version: page.Version().String(), AddTags: []string{""}})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{Path: "home", Version: page.Version().String(), AddTags: []string{""}})
 		Expect(err).To(MatchError(backendErr))
 		originalBuildMarkdownWithPublicMetadataPatch := buildMarkdownWithPublicMetadataPatch
 		buildMarkdownWithPublicMetadataPatch = func(string, tree.PageID, string, wikipages.PublicMetadataPatch, string) (string, error) {
@@ -106,41 +106,41 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 			buildMarkdownWithPublicMetadataPatch = originalBuildMarkdownWithPublicMetadataPatch
 		})
 		builderContent := "Body"
-		_, err = routes.updatePageTool(context.Background(), toolActor{ID: "user-1"}, updatePageInput{ID: page.ID.String(), Title: page.Title, Slug: page.Slug.String(), Content: &builderContent})
+		_, err = routes.updatePageTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageInput{ID: page.ID.String(), Title: page.Title, Slug: page.Slug.String(), Content: &builderContent})
 		Expect(err).To(MatchError(backendErr))
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{Path: "home", Version: page.Version().String(), AddTags: []string{"tag"}})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{Path: "home", Version: page.Version().String(), AddTags: []string{"tag"}})
 		Expect(err).To(MatchError(backendErr))
 		buildMarkdownWithPublicMetadataPatch = originalBuildMarkdownWithPublicMetadataPatch
 		routes.findByPath = fakeMCPFindByPathUseCase{out: &wikipages.FindByPathOutput{Page: page}}
 		Expect(os.WriteFile(absPath, []byte("<!-- leafwiki extra\nversion: 1\npage:\n  id: page-123\n-->\nBody"), 0o644)).To(Succeed())
-		_, err = routes.updatePageTool(context.Background(), toolActor{ID: "user-1"}, updatePageInput{ID: page.ID.String(), TagsPresent: true, Tags: []string{"tag"}})
+		_, err = routes.updatePageTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageInput{ID: page.ID.String(), TagsPresent: true, Tags: []string{"tag"}})
 		Expect(err).To(MatchError(markdown.ErrMetadataParse))
 		Expect(os.WriteFile(absPath, originalRaw, 0o644)).To(Succeed())
 
 		routes.updatePage = fakeMCPUpdatePageUseCase{out: &wikipages.UpdatePageOutput{Page: page}}
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{})
 		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageTargetRequired))
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{PageID: page.ID.String(), Version: "stale"})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{PageID: page.ID.String(), Version: "stale"})
 		Expect(err).To(matchMCPToolLocalizedError(wikipages.ErrCodePageVersionConflict))
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{PageID: page.ID.String(), Version: page.Version().String(), AddTags: []string{"tag"}})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{PageID: page.ID.String(), Version: page.Version().String(), AddTags: []string{"tag"}})
 		Expect(err).NotTo(HaveOccurred())
 
 		routes.updatePage = fakeMCPUpdatePageUseCase{err: backendErr}
-		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: "user-1"}, updatePageMetadataInput{PageID: page.ID.String(), Version: page.Version().String(), AddTags: []string{"tag"}})
+		_, err = routes.updatePageMetadataTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, updatePageMetadataInput{PageID: page.ID.String(), Version: page.Version().String(), AddTags: []string{"tag"}})
 		Expect(err).To(MatchError(backendErr))
-		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: "user-1"}, replacePageSectionInput{})
+		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, replacePageSectionInput{})
 		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageTargetRequired))
-		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: "user-1"}, replacePageSectionInput{PageID: page.ID.String(), Version: page.Version().String(), HeadingPath: []string{"Missing"}, Content: "replacement"})
+		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, replacePageSectionInput{PageID: page.ID.String(), Version: page.Version().String(), HeadingPath: []string{"Missing"}, Content: "replacement"})
 		Expect(err).To(MatchError(wikipages.ErrSectionHeadingNotFound))
 		sectionContent := "# Heading\nold"
-		Expect(routes.treeService.UpdateNodeUncheckedVersion("system", page.ID, page.Title, page.Slug, &sectionContent, false)).To(Succeed())
+		Expect(routes.treeService.UpdateNodeUncheckedVersion(newFixtureUserID("system"), page.ID, page.Title, page.Slug, &sectionContent, false)).To(Succeed())
 		page, err = routes.treeService.GetPage(page.ID)
 		Expect(err).NotTo(HaveOccurred())
 		routes.updatePage = fakeMCPUpdatePageUseCase{out: &wikipages.UpdatePageOutput{Page: page}}
-		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: "user-1"}, replacePageSectionInput{PageID: page.ID.String(), Version: page.Version().String(), HeadingPath: []string{"Heading"}, Content: "replacement"})
+		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, replacePageSectionInput{PageID: page.ID.String(), Version: page.Version().String(), HeadingPath: []string{"Heading"}, Content: "replacement"})
 		Expect(err).NotTo(HaveOccurred())
 		routes.updatePage = fakeMCPUpdatePageUseCase{err: backendErr}
-		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: "user-1"}, replacePageSectionInput{PageID: page.ID.String(), Version: page.Version().String(), HeadingPath: []string{"Heading"}, Content: "replacement"})
+		_, err = routes.replacePageSectionTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, replacePageSectionInput{PageID: page.ID.String(), Version: page.Version().String(), HeadingPath: []string{"Heading"}, Content: "replacement"})
 		Expect(err).To(MatchError(backendErr))
 
 		_, err = routes.validatePageTool(context.Background(), validatePageInput{})
@@ -157,7 +157,7 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 
 		routes.workspaceRootDir = ""
 		routes.workspaceSyncStatus = func() workspacesync.SyncStatus {
-			return workspacesync.SyncStatus{ValidationErrors: []workspacesync.ValidationError{{Path: "home.md", Message: "broken", Severity: "error"}}}
+			return workspacesync.SyncStatus{ValidationErrors: []workspacesync.ValidationError{{Path: "home.md", Message: "broken", Severity: newFixtureIssueSeverity("error")}}}
 		}
 		wikiOut, err := routes.validateWikiTool(context.Background(), validateWikiInput{})
 		Expect(err).NotTo(HaveOccurred())
@@ -214,7 +214,7 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 
 		routes.search = fakeMCPSearchUseCase{out: &wikisearch.SearchOutput{Result: &coresearch.SearchResult{
 			Count:    2,
-			Items:    []coresearch.SearchResultItem{{PageID: "page-1"}},
+			Items:    []coresearch.SearchResultItem{{PageID: newFixturePageID("page-1")}},
 			StartAt:  0,
 			PageSize: 20,
 		}}}
@@ -234,9 +234,9 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
 		_, err = routes.previewRefactorTool(context.Background(), previewRefactorInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
-		_, err = routes.applyRefactorTool(context.Background(), toolActor{ID: "user-1"}, applyRefactorInput{})
+		_, err = routes.applyRefactorTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, applyRefactorInput{})
 		Expect(err).To(matchMCPToolLocalizedError(errCodeMCPPageIdentifierRequired))
-		_, err = routes.applyRefactorTool(context.Background(), toolActor{ID: "user-1"}, applyRefactorInput{PageID: "page-1"})
+		_, err = routes.applyRefactorTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, applyRefactorInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
 
 		routes = newContextToolTestRoutes()
@@ -247,14 +247,14 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 		preview, err := routes.previewRefactorTool(context.Background(), previewRefactorInput{PageID: page.ID.String()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(preview).NotTo(BeNil())
-		applied, err := routes.applyRefactorTool(context.Background(), toolActor{ID: "user-1"}, applyRefactorInput{PageID: page.ID.String()})
+		applied, err := routes.applyRefactorTool(context.Background(), toolActor{ID: newFixtureUserID("user-1")}, applyRefactorInput{PageID: page.ID.String()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(applied.Page.ID).To(Equal(mcpOutputPageID(page.ID)))
 	})
 
 	It("reports revision validation, backend failures, and revision payloads", func() {
 		backendErr := errors.New("revision failed")
-		actor := toolActor{ID: "user-1", User: &coreauth.User{ID: "user-1", Username: "user", Email: "user@example.com"}}
+		actor := toolActor{ID: newFixtureUserID("user-1"), User: &coreauth.User{ID: newFixtureUserID("user-1"), Username: "user", Email: "user@example.com"}}
 		routes := &Routes{}
 		_, err := routes.listRevisionsTool(context.Background(), listRevisionsInput{PageID: "page-1"})
 		Expect(err).To(matchMCPToolLocalizedError(wikirevisions.ErrCodeRevisionNotFound))
@@ -311,7 +311,7 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 		_, err = routes.restoreRevisionTool(context.Background(), actor, revisionIDInput{PageID: "page-1", RevisionID: "rev-1"})
 		Expect(err).To(MatchError(backendErr))
 
-		pageForBackendErrors := &tree.Page{PageNode: &tree.PageNode{ID: "page-1", Title: "Page", Slug: "page", Kind: tree.NodeKindPage}}
+		pageForBackendErrors := &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("page-1"), Title: "Page", Slug: newFixtureSlug("page"), Kind: tree.NodeKindPage}}
 		routes.getPage = fakeMCPGetPageUseCase{out: &wikipages.GetPageOutput{Page: pageForBackendErrors}}
 		_, err = routes.listRevisionsTool(context.Background(), listRevisionsInput{PageID: "page-1"})
 		Expect(err).To(MatchError(backendErr))
@@ -327,15 +327,15 @@ var _ = Describe("MCP extracted tool bodies", Label("integration"), func() {
 		routes = newContextToolTestRoutes()
 		page, err := routes.treeService.FindPageByRoutePathAndKind(newFixtureRoutePath("home"), tree.NodeKindPage)
 		Expect(err).NotTo(HaveOccurred())
-		rev := mcpTestRevision(page.ID, "rev-1")
+		rev := mcpTestRevision(page.ID, newFixtureRevisionID("rev-1"))
 		routes.getPage = fakeMCPGetPageUseCase{out: &wikipages.GetPageOutput{Page: page}}
 		routes.listWorkspaceRevisions = func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
 			return workspacesync.PageRevisionList{Revisions: []*corerevision.Revision{rev}, NextCursor: "next"}, nil
 		}
 		snapshots := map[tree.RevisionID]*corerevision.RevisionSnapshot{
-			tree.RevisionIDFromString("base"):   {Revision: mcpTestRevision(page.ID, "base"), Content: "base"},
-			tree.RevisionIDFromString("target"): {Revision: mcpTestRevision(page.ID, "target"), Content: "target"},
-			tree.RevisionIDFromString("rev-1"):  {Revision: rev, Content: "content"},
+			newFixtureRevisionID("base"):   {Revision: mcpTestRevision(page.ID, newFixtureRevisionID("base")), Content: "base"},
+			newFixtureRevisionID("target"): {Revision: mcpTestRevision(page.ID, newFixtureRevisionID("target")), Content: "target"},
+			newFixtureRevisionID("rev-1"):  {Revision: rev, Content: "content"},
 		}
 		routes.getWorkspaceRevision = func(_ context.Context, _ *tree.Page, id tree.RevisionID) (*corerevision.RevisionSnapshot, error) {
 			if snapshot := snapshots[id]; snapshot != nil {
@@ -397,14 +397,14 @@ const (
 	mcpInputNodeKindSection = "section"
 )
 
-func mcpTestRevision(pageID tree.PageID, id string) *corerevision.Revision {
+func mcpTestRevision(pageID tree.PageID, id tree.RevisionID) *corerevision.Revision {
 	GinkgoHelper()
 	return &corerevision.Revision{
-		ID:     tree.RevisionIDFromString(id),
+		ID:     id,
 		PageID: pageID,
 		Type:   corerevision.RevisionTypeContentUpdate,
 		Title:  "Home",
-		Slug:   "home",
+		Slug:   newFixtureSlug("home"),
 		Kind:   tree.NodeKindPage,
 		Path:   "home",
 	}

@@ -23,21 +23,21 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: pageKind(),
 		})
 		pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: newFixtureSlug("page-a"), Kind: pageKind(),
 		})
 		pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: newFixtureSlug("page-b"), Kind: pageKind(),
 		})
 		archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Archive", Slug: newFixtureSlug("archive"), Kind: pageKind(),
 		})
 
 		contentA := "[To B](./page-b.md)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
@@ -61,27 +61,27 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 		docs, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Docs", Slug: "docs", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Docs", Slug: newFixtureSlug("docs"), Kind: pageKind(),
 		})
 		pageA, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: "page-a", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ParentID: pageIDPtr(docs.Page.ID), Title: "Page A", Slug: newFixtureSlug("page-a"), Kind: pageKind(),
 		})
 		pageB, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: "page-b", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ParentID: pageIDPtr(docs.Page.ID), Title: "Page B", Slug: newFixtureSlug("page-b"), Kind: pageKind(),
 		})
 		archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Archive", Slug: newFixtureSlug("archive"), Kind: pageKind(),
 		})
 
 		contentA := "[To B](./page-b.md)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-			UserID:  "system",
+			UserID:  newFixtureUserID("system"),
 			Version: pageVersion(pageA.Page.Version()),
 			RefactorPreviewInput: pages.RefactorPreviewInput{
 				PageID:      pageID(pageA.Page.ID),
@@ -101,7 +101,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		Expect(err).To(Succeed())
 		Expect(outgoing).To(SatisfyAll(
 			HaveField("Count", Equal(1)),
-			HaveField("Outgoings", HaveExactElements(HaveHealthyOutgoing("/docs/page-b", pageB.Page.ID))),
+			HaveField("Outgoings", HaveExactElements(HaveHealthyOutgoing(newFixtureRoutePath("/docs/page-b"), pageB.Page.ID))),
 		))
 
 	})
@@ -113,13 +113,13 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		ensureUC := pages.NewEnsurePathUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default())
 
 		pageA, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Page A", Slug: "a", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Page A", Slug: newFixtureSlug("a"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 
 		contentA := "Links: [X](/x) and [XY](/x/y.md)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(pageA.Page.ID), Version: pageVersion(pageA.Page.Version()), Title: pageA.Page.Title, Slug: slug(pageA.Page.Slug), Content: &contentA, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
@@ -131,13 +131,13 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		Expect(out1).To(SatisfyAll(
 			HaveField("Count", Equal(2)),
 			HaveField("Outgoings", ConsistOf(
-				HaveBrokenOutgoing("/x"),
-				HaveBrokenOutgoing("/x/y"),
+				HaveBrokenOutgoing(newFixtureRoutePath("/x")),
+				HaveBrokenOutgoing(newFixtureRoutePath("/x/y")),
 			)),
 		))
 
 		if _, err := ensureUC.Execute(context.Background(), pages.EnsurePathInput{
-			UserID: "system", TargetPath: "/x/y", TargetTitle: "X Y", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), TargetPath: newFixtureRoutePath("/x/y"), TargetTitle: "X Y", Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
@@ -147,8 +147,8 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		Expect(out2).To(SatisfyAll(
 			HaveField("Count", Equal(2)),
 			HaveField("Outgoings", ConsistOf(
-				HaveHealthyOutgoingWithAnyTarget("/x"),
-				HaveHealthyOutgoingWithAnyTarget("/x/y"),
+				HaveHealthyOutgoingWithAnyTarget(newFixtureRoutePath("/x")),
+				HaveHealthyOutgoingWithAnyTarget(newFixtureRoutePath("/x/y")),
 			)),
 		))
 	})
@@ -160,30 +160,30 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		deleteUC := pages.NewDeletePageUseCase(deps.tree, deps.assets, deps.orchestrator(), slog.Default())
 
 		a, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Page A", Slug: "a", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Page A", Slug: newFixtureSlug("a"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 		contentA := "Link to B: [Go](/b)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(a.Page.ID), Version: pageVersion(a.Page.Version()), Title: a.Page.Title, Slug: slug(a.Page.Slug), Content: &contentA, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		b, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Page B", Slug: "b", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Page B", Slug: newFixtureSlug("b"), Kind: pageKind(),
 		})
 		Expect(err).To(Succeed())
 		contentB := "# Page B"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Title: b.Page.Title, Slug: slug(b.Page.Slug), Content: &contentB, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		Expect(deps.links.IndexAllPages()).To(Succeed())
 		if err := deleteUC.Execute(context.Background(), pages.DeletePageInput{
-			UserID: "system", ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Recursive: false,
+			UserID: newFixtureUserID("system"), ID: pageID(b.Page.ID), Version: pageVersion(b.Page.Version()), Recursive: false,
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
@@ -192,7 +192,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		Expect(err).To(Succeed())
 		Expect(out.Count).To(Equal(1))
 		got := out.Outgoings[0]
-		Expect(got).To(HaveBrokenOutgoing("/b"))
+		Expect(got).To(HaveBrokenOutgoing(newFixtureRoutePath("/b")))
 
 		bl, err := deps.links.GetBacklinksForPage(b.Page.ID)
 		Expect(err).To(Succeed())

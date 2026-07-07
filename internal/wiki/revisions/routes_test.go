@@ -42,7 +42,7 @@ var _ = ginkgo.Describe("revision routes", ginkgo.Label("integration"), func() {
 		})
 		Expect(treeService.LoadTree()).To(Succeed())
 		kind := tree.NodeKindPage
-		pageID, err := treeService.CreateNode("alice", nil, "Page A", "page-a", &kind)
+		pageID, err := treeService.CreateNode(newFixtureUserID("alice"), nil, "Page A", newFixtureSlug("page-a"), &kind)
 		Expect(err).NotTo(HaveOccurred())
 
 		var seenCursor string
@@ -60,7 +60,7 @@ var _ = ginkgo.Describe("revision routes", ginkgo.Label("integration"), func() {
 						Type:     revision.RevisionTypeContentUpdate,
 						AuthorID: "alice",
 						Title:    "Page A",
-						Slug:     "page-a",
+						Slug:     newFixtureSlug("page-a"),
 						Kind:     tree.NodeKindPage,
 						Path:     "page-a",
 					}},
@@ -397,7 +397,7 @@ var _ = ginkgo.Describe("revision routes", ginkgo.Label("integration"), func() {
 	ginkgo.It("restores revisions and maps auth, lookup, and backend failures", func() {
 		fixture := newRevisionRouteFixture()
 		revisionID := newFixtureRevisionID("rev-restore")
-		user := &coreauth.User{ID: "alice", Username: "Alice", Email: "alice@example.test", Role: coreauth.RoleEditor}
+		user := &coreauth.User{ID: newFixtureUserID("alice"), Username: "Alice", Email: "alice@example.test", Role: coreauth.RoleEditor}
 
 		rec := performRevisionHandlerRequest(
 			NewRoutes(RoutesConfig{}).handleRestoreRevision,

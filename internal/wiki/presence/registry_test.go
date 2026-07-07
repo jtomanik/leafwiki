@@ -35,12 +35,12 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 			Mode:      SessionModeEdit,
 			Dirty:     true,
 		}, &coreauth.User{
-			ID:       "editor-1",
+			ID:       newFixtureUserID("editor-1"),
 			Username: "Editor One",
 			Email:    "editor@example.test",
 			Role:     coreauth.RoleEditor,
 		}, &PageRef{
-			ID:    tree.PageIDFromString("page-1"),
+			ID:    newFixturePageID("page-1"),
 			Path:  "/docs/api",
 			Title: "API",
 		})
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 
 	ginkgo.It("rejects invalid heartbeats without dropping existing sessions", func() {
 		registry := NewWebPresenceRegistry(time.Minute, nil)
-		user := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
+		user := &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Role: coreauth.RoleEditor}
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeView}, user, nil)).To(Succeed())
 
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString(""), Mode: SessionModeView}, user, nil)).To(matchPresenceErrorCode(ErrCodePresenceSessionIDRequired))
@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 	ginkgo.DescribeTable("returns stable localized errors for invalid heartbeats",
 		func(heartbeat Heartbeat, code sharederrors.ErrorCode) {
 			registry := NewWebPresenceRegistry(time.Minute, nil)
-			user := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
+			user := &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Role: coreauth.RoleEditor}
 
 			err := registry.Record(heartbeat, user, nil)
 			Expect(err).To(testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code)))
@@ -99,8 +99,8 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 
 	ginkgo.It("keeps a web session bound to its original user", func() {
 		registry := NewWebPresenceRegistry(time.Minute, nil)
-		editor := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
-		other := &coreauth.User{ID: "editor-2", Username: "Editor Two", Role: coreauth.RoleEditor}
+		editor := &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Role: coreauth.RoleEditor}
+		other := &coreauth.User{ID: newFixtureUserID("editor-2"), Username: "Editor Two", Role: coreauth.RoleEditor}
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("shared-tab"), Mode: SessionModeView}, editor, nil)).To(Succeed())
 
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("shared-tab"), Mode: SessionModeEdit}, other, nil)).To(matchPresenceErrorCode(ErrCodePresenceSessionUserMismatch))
@@ -111,7 +111,7 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 			"SessionID": Equal(WebSessionIDFromString("shared-tab")),
 			"Mode":      Equal(SessionModeView),
 			"User": matchPresenceUserRef(gstruct.Fields{
-				"ID": Equal("editor-1"),
+				"ID": Equal(newFixtureUserID("editor-1")),
 			}),
 		})))
 		registry.Remove(WebSessionIDFromString("shared-tab"), editor)
@@ -129,7 +129,7 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 		Expect(normalized).To(matchPresenceHeartbeat(gstruct.Fields{
 			"SessionID": Equal(WebSessionIDFromString("tab-1")),
 			"Mode":      Equal(SessionModeUnknown),
-			"PageID":    Equal(tree.PageIDFromString("page-1")),
+			"PageID":    Equal(newFixturePageID("page-1")),
 			"Path":      Equal("/docs/api"),
 		}))
 		Expect(WebSessionIDFromString(" tab-2 ")).To(Equal(WebSessionIDFromString("tab-2")))
@@ -143,7 +143,7 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 		Expect(json.Unmarshal([]byte(`{"mode":"view"}`), &mode)).To(BeAssignableToTypeOf(&json.UnmarshalTypeError{}))
 		registry := NewWebPresenceRegistry(0, nil)
 		Expect(registry).To(matchPresenceRegistryDefaults())
-		user := &coreauth.User{ID: "editor-1", Username: "Editor One", Email: "editor@example.test", Role: coreauth.RoleEditor}
+		user := &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Email: "editor@example.test", Role: coreauth.RoleEditor}
 
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-b"), Mode: SessionModeView}, user, nil)).To(Succeed())
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-a"), Mode: SessionModeView}, user, nil)).To(Succeed())
@@ -163,10 +163,10 @@ var _ = ginkgo.Describe("web presence registry", ginkgo.Label("unit"), func() {
 		Expect(err).To(matchPresenceErrorCode(ErrCodePresenceSessionIDTooLong))
 
 		var registry *WebPresenceRegistry
-		err = registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeView}, &coreauth.User{ID: "editor-1"}, nil)
+		err = registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeView}, &coreauth.User{ID: newFixtureUserID("editor-1")}, nil)
 		Expect(err).To(matchPresenceErrorCode(ErrCodePresenceRegistryUnavailable))
 		Expect(registry.List(&coreauth.User{Role: coreauth.RoleAdmin})).To(BeEmpty())
-		registry.Remove(WebSessionIDFromString("tab-1"), &coreauth.User{ID: "editor-1"})
+		registry.Remove(WebSessionIDFromString("tab-1"), &coreauth.User{ID: newFixtureUserID("editor-1")})
 		Expect(registry.List(&coreauth.User{Role: coreauth.RoleAdmin})).To(BeEmpty())
 
 		err = NewWebPresenceRegistry(time.Minute, nil).Record(Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeView}, nil, nil)
@@ -202,7 +202,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 		routes := NewRoutes(RoutesConfig{Registry: registry})
 		router := gin.New()
 		router.POST("/heartbeat", func(c *gin.Context) {
-			c.Set("user", &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor})
+			c.Set("user", &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Role: coreauth.RoleEditor})
 			routes.handleHeartbeat(c)
 		})
 
@@ -220,7 +220,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 		routes := NewRoutes(RoutesConfig{Registry: registry})
 		router := gin.New()
 		router.POST("/heartbeat", func(c *gin.Context) {
-			c.Set("user", &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor})
+			c.Set("user", &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Role: coreauth.RoleEditor})
 			routes.handleHeartbeat(c)
 		})
 
@@ -248,7 +248,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 		router := gin.New()
 		router.POST("/heartbeat-without-user", routes.handleHeartbeat)
 		router.POST("/heartbeat", func(c *gin.Context) {
-			c.Set("user", &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor})
+			c.Set("user", &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Role: coreauth.RoleEditor})
 			routes.handleHeartbeat(c)
 		})
 
@@ -269,7 +269,7 @@ var _ = ginkgo.Describe("presence routes", func() {
 	})
 
 	ginkgo.It("forbids anonymous session deletion requests", ginkgo.Label("integration"), func() {
-		rec := exerciseDeleteSession(NewRoutes(RoutesConfig{Registry: NewWebPresenceRegistry(time.Minute, nil)}), "tab-1", nil)
+		rec := exerciseDeleteSession(NewRoutes(RoutesConfig{Registry: NewWebPresenceRegistry(time.Minute, nil)}), WebSessionIDFromString("tab-1"), nil)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusForbidden))
 	})
@@ -285,22 +285,22 @@ var _ = ginkgo.Describe("presence routes", func() {
 			"Title": Equal("Docs"),
 		})))
 
-		byPath := routes.resolvePage("", "/docs")
+		byPath := routes.resolvePage(newFixturePageID(""), "/docs")
 		Expect(byPath).To(gstruct.PointTo(matchPresencePageRef(gstruct.Fields{
 			"ID": Equal(*pageID),
 		})))
-		Expect(routes.resolvePage("", "/missing")).To(BeNil())
-		Expect(routes.resolvePage("", "/")).To(BeNil())
-		Expect(routes.resolvePage("", `bad\path`)).To(BeNil())
+		Expect(routes.resolvePage(newFixturePageID(""), "/missing")).To(BeNil())
+		Expect(routes.resolvePage(newFixturePageID(""), "/")).To(BeNil())
+		Expect(routes.resolvePage(newFixturePageID(""), `bad\path`)).To(BeNil())
 		Expect(NewRoutes(RoutesConfig{TreeService: tree.NewTreeServiceWithOptions(tree.TreeOptions{
 			DataDir: newPresenceTempDir(),
 			RootDir: newPresenceTempDir(),
-		})}).resolvePage("", "/docs")).To(BeNil())
+		})}).resolvePage(newFixturePageID(""), "/docs")).To(BeNil())
 		Expect((&Routes{}).resolvePage(*pageID, "/docs")).To(BeNil())
 
 		brokenTreeService, _, brokenRootDir := setupPresenceTreeWithRoot()
 		Expect(os.Remove(filepath.Join(brokenRootDir, "docs.md"))).To(Succeed())
-		Expect(NewRoutes(RoutesConfig{TreeService: brokenTreeService}).resolvePage("", "/docs")).To(BeNil())
+		Expect(NewRoutes(RoutesConfig{TreeService: brokenTreeService}).resolvePage(newFixturePageID(""), "/docs")).To(BeNil())
 
 		Expect(pageRefForPage(nil)).To(BeNil())
 		Expect(pageRefForPage(&tree.Page{})).To(BeNil())
@@ -308,16 +308,16 @@ var _ = ginkgo.Describe("presence routes", func() {
 
 	ginkgo.It("acknowledges session deletion while removing only the owner session", ginkgo.Label("integration"), func() {
 		registry := NewWebPresenceRegistry(time.Minute, nil)
-		owner := &coreauth.User{ID: "editor-1", Username: "Editor One", Role: coreauth.RoleEditor}
-		other := &coreauth.User{ID: "editor-2", Username: "Editor Two", Role: coreauth.RoleEditor}
+		owner := &coreauth.User{ID: newFixtureUserID("editor-1"), Username: "Editor One", Role: coreauth.RoleEditor}
+		other := &coreauth.User{ID: newFixtureUserID("editor-2"), Username: "Editor Two", Role: coreauth.RoleEditor}
 		Expect(registry.Record(Heartbeat{SessionID: WebSessionIDFromString("tab-1"), Mode: SessionModeView}, owner, nil)).To(Succeed())
 		routes := NewRoutes(RoutesConfig{Registry: registry})
 
-		otherRec := exerciseDeleteSession(routes, "tab-1", other)
+		otherRec := exerciseDeleteSession(routes, WebSessionIDFromString("tab-1"), other)
 		Expect(otherRec).To(HaveHTTPStatus(http.StatusOK))
 		Expect(registry.List(&coreauth.User{Role: coreauth.RoleAdmin})).To(HaveLen(1))
 
-		ownerRec := exerciseDeleteSession(routes, " tab-1 ", owner)
+		ownerRec := exerciseDeleteSession(routes, WebSessionIDFromString(" tab-1 "), owner)
 		Expect(ownerRec).To(SatisfyAll(
 			HaveHTTPStatus(http.StatusOK),
 			HaveHTTPBody(MatchJSON(`{"ok":true}`)),
@@ -407,7 +407,7 @@ func setupPresenceTreeWithRoot() (*tree.TreeService, *tree.PageID, string) {
 	})
 	Expect(treeService.LoadTree()).To(Succeed())
 	kind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode("editor-1", nil, "Docs", "docs", &kind)
+	pageID, err := treeService.CreateNode(newFixtureUserID("editor-1"), nil, "Docs", newFixtureSlug("docs"), &kind)
 	Expect(err).NotTo(HaveOccurred())
 	return treeService, pageID, treeService.RootDir()
 }
@@ -420,15 +420,27 @@ func newPresenceTempDir() string {
 	return dir
 }
 
-func exerciseDeleteSession(routes *Routes, sessionID string, user *coreauth.User) *httptest.ResponseRecorder {
+func exerciseDeleteSession(routes *Routes, sessionID WebSessionID, user *coreauth.User) *httptest.ResponseRecorder {
 	ginkgo.GinkgoHelper()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodDelete, "/presence/session/"+strings.TrimSpace(sessionID), nil)
-	c.Params = gin.Params{{Key: "id", Value: sessionID}}
+	c.Request = httptest.NewRequest(http.MethodDelete, "/presence/session/"+strings.TrimSpace(sessionID.String()), nil)
+	c.Params = gin.Params{{Key: "id", Value: sessionID.String()}}
 	if user != nil {
 		c.Set("user", user)
 	}
 	routes.handleDeleteSession(c)
 	return rec
+}
+
+func newFixtureUserID[T ~string](raw T) coreauth.UserID {
+	return coreauth.NewUserIDUnchecked(string(raw))
+}
+
+func newFixturePageID[T ~string](raw T) tree.PageID {
+	return tree.NewPageIDUnchecked(raw)
+}
+
+func newFixtureSlug[T ~string](raw T) tree.Slug {
+	return tree.NewSlugUnchecked(raw)
 }

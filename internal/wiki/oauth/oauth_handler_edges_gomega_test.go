@@ -16,6 +16,10 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 )
 
+func newFixtureOAuthUserID[T ~string](raw T) coreauth.UserID {
+	return coreauth.NewUserIDUnchecked(string(raw))
+}
+
 var _ = Describe("OAuth authorization handler behavior", Label("integration"), func() {
 	const redirectURI = "http://127.0.0.1:49152/callback"
 
@@ -31,7 +35,7 @@ var _ = Describe("OAuth authorization handler behavior", Label("integration"), f
 		routes = NewRoutes(service)
 		routerCtx = newOAuthRouterContext("/wiki")
 		currentUser = &coreauth.User{
-			ID:       "user-1",
+			ID:       newFixtureOAuthUserID("user-1"),
 			Username: "alice",
 			Email:    "alice@example.test",
 			Role:     coreauth.RoleEditor,
@@ -274,7 +278,7 @@ var _ = Describe("OAuth token and bearer behavior", Label("integration"), func()
 			HaveHTTPBody(ContainSubstring(oauthErrorInvalidGrant)),
 		))
 
-		withOAuthAccessRequest(fosite.NewAccessRequest(newFositeSession(user.ID, user.Username)), nil)
+		withOAuthAccessRequest(fosite.NewAccessRequest(newFositeSession(user.ID.MetadataValue(), user.Username)), nil)
 		withOAuthAccessResponse(nil, fosite.ErrServerError)
 
 		rec = performOAuthRequest(routes.handleToken, httptest.NewRequest(http.MethodPost, "/oauth/token", nil))
@@ -284,7 +288,7 @@ var _ = Describe("OAuth token and bearer behavior", Label("integration"), func()
 			HaveHTTPBody(ContainSubstring(oauthErrorServerError)),
 		))
 
-		withOAuthAccessRequest(fosite.NewAccessRequest(newFositeSession(user.ID, user.Username)), nil)
+		withOAuthAccessRequest(fosite.NewAccessRequest(newFositeSession(user.ID.MetadataValue(), user.Username)), nil)
 		withOAuthAccessResponse(&oauthAccessResponderStub{
 			body: map[string]interface{}{
 				"access_token": "access-1",
@@ -318,7 +322,7 @@ var _ = Describe("OAuth token and bearer behavior", Label("integration"), func()
 		Expect(err).To(matchOAuthInvalidTokenError())
 
 		withOAuthIntrospectToken(func(fosite.OAuth2Provider, context.Context, string, fosite.TokenUse, fosite.Session, ...string) (fosite.TokenUse, fosite.AccessRequester, error) {
-			return fosite.RefreshToken, fosite.NewAccessRequest(newFositeSession(user.ID, user.Username)), nil
+			return fosite.RefreshToken, fosite.NewAccessRequest(newFositeSession(user.ID.MetadataValue(), user.Username)), nil
 		})
 
 		info, err = service.VerifyBearerToken(context.Background(), "opaque", req)
@@ -335,7 +339,7 @@ var _ = Describe("OAuth token and bearer behavior", Label("integration"), func()
 		Expect(info).To(BeNil())
 		Expect(err).To(matchOAuthInvalidTokenError())
 
-		requester := fosite.NewAccessRequest(newFositeSession(user.ID, user.Username))
+		requester := fosite.NewAccessRequest(newFositeSession(user.ID.MetadataValue(), user.Username))
 		requester.GrantScope(ScopeMCP)
 		withOAuthIntrospectToken(func(fosite.OAuth2Provider, context.Context, string, fosite.TokenUse, fosite.Session, ...string) (fosite.TokenUse, fosite.AccessRequester, error) {
 			return fosite.AccessToken, requester, nil
@@ -345,7 +349,7 @@ var _ = Describe("OAuth token and bearer behavior", Label("integration"), func()
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(info).To(gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-			"UserID": Equal(user.ID),
+			"UserID": Equal(user.ID.MetadataValue()),
 			"Scopes": Equal([]string{ScopeMCP}),
 		})))
 	})

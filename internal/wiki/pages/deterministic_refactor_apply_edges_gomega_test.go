@@ -18,12 +18,12 @@ import (
 	"github.com/perber/wiki/internal/wiki/pagesave"
 )
 
-var _ = ginkgo.Describe("deterministic page helper edges", func() {
+var _ = ginkgo.Describe("page refactor apply failure mapping", func() {
 	ginkgo.It("returns refactor apply failures from mutation and rewrite steps", ginkgo.Label("unit"), func() {
 		ctx := context.Background()
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
 		slug := tree.NewSlugService()
-		userID := tree.UserIDFromString("refactor-execute-user")
+		userID := newFixtureUserID("refactor-execute-user")
 		newApply := func(fakeTree *pageUseCaseFakeTree, effect pagesave.PageSideEffect) *ApplyPageRefactorUseCase {
 			orchestrator := pagesave.NewPageSaveOrchestrator()
 			if effect != nil {
@@ -33,7 +33,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			return &ApplyPageRefactorUseCase{tree: fakeTree, slug: slug, preview: preview, log: log, orchestrator: orchestrator}
 		}
 
-		capturePage := testFixturePage("capture-exec", "Capture Exec", "capture-exec", tree.NodeKindPage)
+		capturePage := testFixturePage(newFixturePageID("capture-exec"), "Capture Exec", newFixtureSlug("capture-exec"), tree.NodeKindPage)
 		captureErr := errors.New("capture snapshots failed")
 		captureTree := &pageUseCaseFakeTree{
 			getPageFunc: func(tree.PageID) (*tree.Page, error) {
@@ -49,15 +49,15 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 				Kind:   RefactorKindRename,
 				PageID: capturePage.ID,
 				Title:  "Captured",
-				Slug:   tree.SlugFromString("captured"),
+				Slug:   newFixtureSlug("captured"),
 			},
 		})
 		Expect(err).To(MatchError(captureErr))
 
-		renameBefore := testFixturePage("rename-exec", "Rename Exec", "old", tree.NodeKindPage)
-		renameAfter := testFixturePage("rename-exec", "Rename Exec", "new", tree.NodeKindPage)
+		renameBefore := testFixturePage(newFixturePageID("rename-exec"), "Rename Exec", newFixtureSlug("old"), tree.NodeKindPage)
+		renameAfter := testFixturePage(newFixturePageID("rename-exec"), "Rename Exec", newFixtureSlug("new"), tree.NodeKindPage)
 		renameAfter.Content = "after rename"
-		renameAffected := testFixturePage("rename-affected", "Rename Affected", "rename-affected", tree.NodeKindPage)
+		renameAffected := testFixturePage(newFixturePageID("rename-affected"), "Rename Affected", newFixtureSlug("rename-affected"), tree.NodeKindPage)
 		renameAffected.Content = "[Old](/old.md)"
 		renameRewriteErr := errors.New("rename incoming rewrite failed")
 		renameUpdated := false
@@ -103,7 +103,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 			},
 		}
 		renameApply := newApply(renameTree, &failingSummaryPageSaveEffect{summary: "links rewritten", err: renameRewriteErr})
-		renameApply.refactorLinks = &fakeRefactorLinks{matches: []links.RefactorLinkMatch{{FromPageID: renameAffected.ID, FromTitle: renameAffected.Title, ToPath: "old", ToKind: links.TargetKindPage}}}
+		renameApply.refactorLinks = &fakeRefactorLinks{matches: []links.RefactorLinkMatch{{FromPageID: renameAffected.ID, FromTitle: renameAffected.Title, ToPath: newFixtureRoutePath("old"), ToKind: links.TargetKindPage}}}
 		_, err = renameApply.Execute(ctx, RefactorApplyInput{
 			UserID:       userID,
 			RewriteLinks: true,
@@ -111,7 +111,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 				Kind:   RefactorKindRename,
 				PageID: renameBefore.ID,
 				Title:  "Rename Exec",
-				Slug:   tree.SlugFromString("new"),
+				Slug:   newFixtureSlug("new"),
 			},
 		})
 		Expect(err).To(MatchError(renameRewriteErr))
@@ -125,14 +125,14 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 				Kind:   RefactorKindRename,
 				PageID: renameBefore.ID,
 				Title:  "Rename Exec",
-				Slug:   tree.SlugFromString("new"),
+				Slug:   newFixtureSlug("new"),
 			},
 		})
 		Expect(err).To(MatchError(renamePathErr))
 
-		movePage := testFixturePage("move-exec", "Move Exec", "move-exec", tree.NodeKindPage)
-		moveParent := testFixturePage("move-parent", "Move Parent", "move-parent", tree.NodeKindSection)
-		moveAffected := testFixturePage("move-affected", "Move Affected", "move-affected", tree.NodeKindPage)
+		movePage := testFixturePage(newFixturePageID("move-exec"), "Move Exec", newFixtureSlug("move-exec"), tree.NodeKindPage)
+		moveParent := testFixturePage(newFixturePageID("move-parent"), "Move Parent", newFixtureSlug("move-parent"), tree.NodeKindSection)
+		moveAffected := testFixturePage(newFixturePageID("move-affected"), "Move Affected", newFixtureSlug("move-affected"), tree.NodeKindPage)
 		moveAffected.Content = "[Move](/move-exec.md)"
 		moveErr := errors.New("move failed")
 		moveErrTree := &pageUseCaseFakeTree{
@@ -216,7 +216,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		}
 		moveRewriteErr := errors.New("move incoming rewrite failed")
 		moveApply := newApply(moveTree, &failingSummaryPageSaveEffect{summary: "links rewritten", err: moveRewriteErr})
-		moveApply.refactorLinks = &fakeRefactorLinks{matches: []links.RefactorLinkMatch{{FromPageID: moveAffected.ID, FromTitle: moveAffected.Title, ToPath: "move-exec", ToKind: links.TargetKindPage}}}
+		moveApply.refactorLinks = &fakeRefactorLinks{matches: []links.RefactorLinkMatch{{FromPageID: moveAffected.ID, FromTitle: moveAffected.Title, ToPath: newFixtureRoutePath("move-exec"), ToKind: links.TargetKindPage}}}
 		_, err = moveApply.Execute(ctx, RefactorApplyInput{
 			UserID:       userID,
 			RewriteLinks: true,
@@ -249,7 +249,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		_, err = (&Routes{treeService: unloadedTree}).findByPathInput(ctx, "", noKind)
 		Expect(err).To(MatchError(tree.ErrTreeNotLoaded))
 
-		docs := deps.createPage("Readme Route Docs", "readme-route-docs", tree.NodeKindSection, nil)
+		docs := deps.createPage("Readme Route Docs", newFixtureSlug("readme-route-docs"), tree.NodeKindSection, nil)
 		readmeDir := filepath.Join(deps.tree.RootDir(), docs.CalculateRoutePath().FilesystemPath())
 		Expect(os.MkdirAll(readmeDir, 0o755)).To(Succeed())
 		if err := os.Remove(filepath.Join(readmeDir, "index.md")); err != nil {
@@ -268,33 +268,33 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		slug := tree.NewSlugService()
 		kindPage := tree.NodeKindPage
 		kindSection := tree.NodeKindSection
-		invalidKind := tree.NodeKind("folder")
+		invalidKind := newFixtureNodeKind("folder")
 
-		_, err := deps.routes.createPage.Execute(ctx, CreatePageInput{Title: "", Slug: tree.SlugFromString("bad slug"), Kind: &invalidKind})
+		_, err := deps.routes.createPage.Execute(ctx, CreatePageInput{Title: "", Slug: newFixtureSlug("bad slug"), Kind: &invalidKind})
 		Expect(err).To(HavePageValidationFields("title", "kind", "slug"))
 
-		badParentID := tree.PageIDFromString(" parent ")
-		_, err = deps.routes.createPage.Execute(ctx, CreatePageInput{Title: "Bad Parent", Slug: tree.SlugFromString("bad-parent"), Kind: &kindPage, ParentID: &badParentID})
+		badParentID := newFixturePageID(" parent ")
+		_, err = deps.routes.createPage.Execute(ctx, CreatePageInput{Title: "Bad Parent", Slug: newFixtureSlug("bad-parent"), Kind: &kindPage, ParentID: &badParentID})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
-		_, err = deps.routes.createPage.Execute(ctx, CreatePageInput{Title: "Missing Parent", Slug: tree.SlugFromString("missing-parent"), Kind: &kindPage, ParentID: ptrPageID(tree.PageIDFromString("missing"))})
+		_, err = deps.routes.createPage.Execute(ctx, CreatePageInput{Title: "Missing Parent", Slug: newFixtureSlug("missing-parent"), Kind: &kindPage, ParentID: ptrPageID(newFixturePageID("missing"))})
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
-		existing := deps.createPage("Existing", "existing", tree.NodeKindPage, nil)
+		existing := deps.createPage("Existing", newFixtureSlug("existing"), tree.NodeKindPage, nil)
 		_, err = deps.routes.createPage.Execute(ctx, CreatePageInput{Title: "Conflict", Slug: existing.Slug, Kind: &kindPage})
 		Expect(err).To(MatchError(tree.ErrPageAlreadyExists))
 		createFailure := errors.New("create side effect failed")
 		_, err = NewCreatePageUseCase(deps.tree, slug, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: createFailure}), log).Execute(ctx, CreatePageInput{
-			UserID: tree.UserIDFromString("routes-test-user"),
+			UserID: newFixtureUserID("routes-test-user"),
 			Title:  "Create Fails",
-			Slug:   tree.SlugFromString("create-fails"),
+			Slug:   newFixtureSlug("create-fails"),
 			Kind:   &kindPage,
 		})
 		Expect(err).To(MatchError(createFailure))
 
-		_, err = deps.routes.updatePage.Execute(ctx, UpdatePageInput{Title: "Bad Slug", Slug: tree.SlugFromString("bad slug")})
+		_, err = deps.routes.updatePage.Execute(ctx, UpdatePageInput{Title: "Bad Slug", Slug: newFixtureSlug("bad slug")})
 		Expect(err).To(HavePageValidationField("slug"))
-		_, err = deps.routes.updatePage.Execute(ctx, UpdatePageInput{ID: tree.PageIDFromString("missing"), Title: "Missing", Slug: tree.SlugFromString("missing")})
+		_, err = deps.routes.updatePage.Execute(ctx, UpdatePageInput{ID: newFixturePageID("missing"), Title: "Missing", Slug: newFixtureSlug("missing")})
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
-		updatePage := deps.createPage("Update", "update", tree.NodeKindPage, nil)
+		updatePage := deps.createPage("Update", newFixtureSlug("update"), tree.NodeKindPage, nil)
 		Expect(updatePage.Version()).NotTo(BeEmpty())
 		_, err = deps.routes.updatePage.Execute(ctx, UpdatePageInput{
 			ID:      updatePage.ID,
@@ -305,7 +305,7 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(MatchError(tree.ErrVersionConflict))
 		updateFailure := errors.New("update side effect failed")
 		_, err = NewUpdatePageUseCase(deps.tree, slug, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: updateFailure}), log).Execute(ctx, UpdatePageInput{
-			UserID:  tree.UserIDFromString("routes-test-user"),
+			UserID:  newFixtureUserID("routes-test-user"),
 			ID:      updatePage.ID,
 			Version: updatePage.Version(),
 			Title:   "Update Side Effect",
@@ -314,86 +314,86 @@ var _ = ginkgo.Describe("deterministic page helper edges", func() {
 		Expect(err).To(MatchError(updateFailure))
 
 		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: tree.RootPageID})).To(MatchPageLocalizedCode(ErrCodePageRootOperation))
-		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: tree.PageIDFromString("missing"), Version: tree.PageVersionFromString("stale")})).To(MatchError(tree.ErrPageNotFound))
-		parent := deps.createPage("Delete Parent", "delete-parent", tree.NodeKindSection, nil)
-		_ = deps.createPage("Delete Child", "delete-child", tree.NodeKindPage, &parent.ID)
+		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: newFixturePageID("missing"), Version: tree.PageVersionFromString("stale")})).To(MatchError(tree.ErrPageNotFound))
+		parent := deps.createPage("Delete Parent", newFixtureSlug("delete-parent"), tree.NodeKindSection, nil)
+		_ = deps.createPage("Delete Child", newFixtureSlug("delete-child"), tree.NodeKindPage, &parent.ID)
 		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: parent.ID, Version: parent.Version()})).To(MatchError(tree.ErrPageHasChildren))
-		deletePage := deps.createPage("Delete Stale", "delete-stale", tree.NodeKindPage, nil)
+		deletePage := deps.createPage("Delete Stale", newFixtureSlug("delete-stale"), tree.NodeKindPage, nil)
 		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: deletePage.ID, Version: tree.PageVersionFromString("stale")})).To(MatchError(tree.ErrVersionConflict))
-		recursiveParent := deps.createPage("Recursive Delete", "recursive-delete", tree.NodeKindSection, nil)
-		_ = deps.createPage("Recursive Child", "recursive-child", tree.NodeKindPage, &recursiveParent.ID)
+		recursiveParent := deps.createPage("Recursive Delete", newFixtureSlug("recursive-delete"), tree.NodeKindSection, nil)
+		_ = deps.createPage("Recursive Child", newFixtureSlug("recursive-child"), tree.NodeKindPage, &recursiveParent.ID)
 		Expect(deps.routes.deletePage.Execute(ctx, DeletePageInput{ID: recursiveParent.ID, Version: recursiveParent.Version(), Recursive: true})).To(Succeed())
 		deleteFailure := errors.New("delete side effect failed")
-		deleteFailurePage := deps.createPage("Delete Failure", "delete-failure", tree.NodeKindPage, nil)
+		deleteFailurePage := deps.createPage("Delete Failure", newFixtureSlug("delete-failure"), tree.NodeKindPage, nil)
 		Expect(NewDeletePageUseCase(deps.tree, assets.NewAssetService(pagesTempDir(), slug), pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: deleteFailure}), log).Execute(ctx, DeletePageInput{
-			UserID:  tree.UserIDFromString("routes-test-user"),
+			UserID:  newFixtureUserID("routes-test-user"),
 			ID:      deleteFailurePage.ID,
 			Version: deleteFailurePage.Version(),
 		})).To(MatchError(deleteFailure))
 
 		Expect(deps.routes.movePage.Execute(ctx, MovePageInput{ID: tree.RootPageID})).To(MatchPageLocalizedCode(ErrCodePageRootOperation))
 		Expect(deps.routes.movePage.Execute(ctx, MovePageInput{ID: existing.ID, ParentID: badParentID, Version: existing.Version()})).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
-		moveDest := deps.createPage("Move Dest", "move-dest", tree.NodeKindSection, nil)
-		Expect(deps.routes.movePage.Execute(ctx, MovePageInput{ID: tree.PageIDFromString("missing"), ParentID: moveDest.ID, Version: tree.PageVersionFromString("stale")})).To(MatchError(tree.ErrPageNotFound))
-		movePage := deps.createPage("Move Stale", "move-stale", tree.NodeKindPage, nil)
+		moveDest := deps.createPage("Move Dest", newFixtureSlug("move-dest"), tree.NodeKindSection, nil)
+		Expect(deps.routes.movePage.Execute(ctx, MovePageInput{ID: newFixturePageID("missing"), ParentID: moveDest.ID, Version: tree.PageVersionFromString("stale")})).To(MatchError(tree.ErrPageNotFound))
+		movePage := deps.createPage("Move Stale", newFixtureSlug("move-stale"), tree.NodeKindPage, nil)
 		Expect(deps.routes.movePage.Execute(ctx, MovePageInput{ID: movePage.ID, ParentID: moveDest.ID, Version: tree.PageVersionFromString("stale")})).To(MatchError(tree.ErrVersionConflict))
 		moveFailure := errors.New("move side effect failed")
-		moveFailurePage := deps.createPage("Move Failure", "move-failure", tree.NodeKindPage, nil)
+		moveFailurePage := deps.createPage("Move Failure", newFixtureSlug("move-failure"), tree.NodeKindPage, nil)
 		Expect(NewMovePageUseCase(deps.tree, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: moveFailure}), log).Execute(ctx, MovePageInput{
-			UserID:   tree.UserIDFromString("routes-test-user"),
+			UserID:   newFixtureUserID("routes-test-user"),
 			ID:       moveFailurePage.ID,
 			ParentID: moveDest.ID,
 			Version:  moveFailurePage.Version(),
 		})).To(MatchError(moveFailure))
 
 		Expect(deps.routes.convertPage.Execute(ctx, ConvertPageInput{ID: tree.RootPageID})).To(MatchPageLocalizedCode(ErrCodePageRootOperation))
-		Expect(deps.routes.convertPage.Execute(ctx, ConvertPageInput{ID: tree.PageIDFromString("missing"), Version: tree.PageVersionFromString("stale"), TargetKind: tree.NodeKindSection})).To(MatchError(tree.ErrPageNotFound))
-		convertStale := deps.createPage("Convert Stale", "convert-stale", tree.NodeKindPage, nil)
+		Expect(deps.routes.convertPage.Execute(ctx, ConvertPageInput{ID: newFixturePageID("missing"), Version: tree.PageVersionFromString("stale"), TargetKind: tree.NodeKindSection})).To(MatchError(tree.ErrPageNotFound))
+		convertStale := deps.createPage("Convert Stale", newFixtureSlug("convert-stale"), tree.NodeKindPage, nil)
 		Expect(deps.routes.convertPage.Execute(ctx, ConvertPageInput{ID: convertStale.ID, Version: tree.PageVersionFromString("stale"), TargetKind: tree.NodeKindSection})).To(MatchError(tree.ErrVersionConflict))
-		convertParent := deps.createPage("Convert Parent", "convert-parent", tree.NodeKindSection, nil)
-		_ = deps.createPage("Convert Child", "convert-child", tree.NodeKindPage, &convertParent.ID)
+		convertParent := deps.createPage("Convert Parent", newFixtureSlug("convert-parent"), tree.NodeKindSection, nil)
+		_ = deps.createPage("Convert Child", newFixtureSlug("convert-child"), tree.NodeKindPage, &convertParent.ID)
 		Expect(deps.routes.convertPage.Execute(ctx, ConvertPageInput{ID: convertParent.ID, Version: convertParent.Version(), TargetKind: tree.NodeKindPage})).To(MatchError(tree.ErrPageHasChildren))
-		convertFailurePage := deps.createPage("Convert Failure", "convert-failure", tree.NodeKindPage, nil)
+		convertFailurePage := deps.createPage("Convert Failure", newFixtureSlug("convert-failure"), tree.NodeKindPage, nil)
 		convertFailure := errors.New("convert side effect failed")
 		Expect(NewConvertPageUseCase(deps.tree, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: convertFailure}), log).Execute(ctx, ConvertPageInput{
-			UserID:     tree.UserIDFromString("routes-test-user"),
+			UserID:     newFixtureUserID("routes-test-user"),
 			ID:         convertFailurePage.ID,
 			Version:    convertFailurePage.Version(),
 			TargetKind: tree.NodeKindSection,
 		})).To(MatchError(convertFailure))
-		convertWithoutEffects := deps.createPage("Convert Without Effects", "convert-without-effects", tree.NodeKindPage, nil)
+		convertWithoutEffects := deps.createPage("Convert Without Effects", newFixtureSlug("convert-without-effects"), tree.NodeKindPage, nil)
 		Expect(NewConvertPageUseCase(deps.tree, nil, log).Execute(ctx, ConvertPageInput{ID: convertWithoutEffects.ID, Version: convertWithoutEffects.Version(), TargetKind: tree.NodeKindSection})).To(Succeed())
 
-		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{Title: "", Slug: tree.SlugFromString("bad slug")})
+		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{Title: "", Slug: newFixtureSlug("bad slug")})
 		Expect(err).To(HavePageValidationFields("title", "slug"))
-		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{SourcePageID: existing.ID, TargetParentID: &badParentID, Title: "Bad Parent", Slug: tree.SlugFromString("bad-parent")})
+		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{SourcePageID: existing.ID, TargetParentID: &badParentID, Title: "Bad Parent", Slug: newFixtureSlug("bad-parent")})
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
-		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{SourcePageID: tree.PageIDFromString("missing"), Title: "Missing", Slug: tree.SlugFromString("missing")})
+		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{SourcePageID: newFixturePageID("missing"), Title: "Missing", Slug: newFixtureSlug("missing")})
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
-		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{SourcePageID: existing.ID, TargetParentID: ptrPageID(tree.PageIDFromString("missing")), Title: "Missing Parent", Slug: tree.SlugFromString("copy-missing-parent")})
+		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{SourcePageID: existing.ID, TargetParentID: ptrPageID(newFixturePageID("missing")), Title: "Missing Parent", Slug: newFixtureSlug("copy-missing-parent")})
 		Expect(err).To(MatchError(tree.ErrParentNotFound), "error = %v", err)
 		_, err = deps.routes.copyPage.Execute(ctx, CopyPageInput{SourcePageID: existing.ID, Title: "Conflict Copy", Slug: existing.Slug})
 		Expect(err).To(MatchError(tree.ErrPageAlreadyExists))
-		copyFailurePage := deps.createPage("Copy Failure", "copy-failure", tree.NodeKindPage, nil)
+		copyFailurePage := deps.createPage("Copy Failure", newFixtureSlug("copy-failure"), tree.NodeKindPage, nil)
 		copyFailure := errors.New("copy side effect failed")
 		_, err = NewCopyPageUseCase(deps.tree, slug, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: copyFailure}), assets.NewAssetService(pagesTempDir(), slug), log).Execute(ctx, CopyPageInput{
-			UserID:       tree.UserIDFromString("routes-test-user"),
+			UserID:       newFixtureUserID("routes-test-user"),
 			SourcePageID: copyFailurePage.ID,
 			Title:        "Copy Failure Result",
-			Slug:         tree.SlugFromString("copy-failure-result"),
+			Slug:         newFixtureSlug("copy-failure-result"),
 		})
 		Expect(err).To(MatchError(copyFailure))
 
-		_, err = deps.routes.ensurePath.Execute(ctx, EnsurePathInput{TargetPath: "", TargetTitle: ""})
+		_, err = deps.routes.ensurePath.Execute(ctx, EnsurePathInput{TargetPath: newFixtureRoutePath(""), TargetTitle: ""})
 		Expect(err).To(HavePageValidationFields("path", "title"))
-		ensuredExisting := deps.createPage("Ensured Existing", "ensured-existing", tree.NodeKindPage, nil)
+		ensuredExisting := deps.createPage("Ensured Existing", newFixtureSlug("ensured-existing"), tree.NodeKindPage, nil)
 		ensureOut, err := deps.routes.ensurePath.Execute(ctx, EnsurePathInput{TargetPath: ensuredExisting.CalculateRoutePath(), TargetTitle: "Ignored", Kind: &kindPage})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ensureOut.Page.ID).To(Equal(ensuredExisting.ID))
 		ensureFailure := errors.New("ensure side effect failed")
 		_, err = NewEnsurePathUseCase(deps.tree, slug, pagesave.NewPageSaveOrchestrator(&failingPageSaveEffect{err: ensureFailure}), log).Execute(ctx, EnsurePathInput{
-			UserID:      tree.UserIDFromString("routes-test-user"),
-			TargetPath:  "ensure/failure",
+			UserID:      newFixtureUserID("routes-test-user"),
+			TargetPath:  newFixtureRoutePath("ensure/failure"),
 			TargetTitle: "Failure",
 			Kind:        &kindSection,
 		})

@@ -62,7 +62,7 @@ var _ = ginkgo.Describe("page save side effects", func() {
 	ginkgo.Describe("link indexing", ginkgo.Label("integration"), func() {
 		ginkgo.It("records outgoing markdown links for created pages", func() {
 			_, treeService, linkService, effect := setupLinkSideEffect()
-			source := createMarkdownPage(treeService, "Source Page", "source-page", "[Target](/target-page)")
+			source := createMarkdownPage(treeService, "Source Page", newFixtureSlug("source-page"), "[Target](/target-page)")
 
 			effect.Apply(PageSaveEvent{
 				Operation: PageOperationCreate,

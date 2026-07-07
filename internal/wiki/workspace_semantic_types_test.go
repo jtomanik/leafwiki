@@ -11,13 +11,13 @@ import (
 var _ = ginkgo.Describe("workspace identity validation", ginkgo.Label("unit"), func() {
 	ginkgo.It("preserves validated semantic workspace IDs on normalized workspaces", func() {
 		workspace := NormalizeWorkspace(Workspace{
-			ID:      workspaceid.WorkspaceID("docs"),
+			ID:      newFixtureWorkspaceID("docs"),
 			DataDir: filepath.Join(wikiTestTempDir(), "data"),
 		})
 		var _ workspaceid.WorkspaceID = workspace.ID
 
 		invalid := NormalizeWorkspace(Workspace{
-			ID:      workspaceid.WorkspaceID("Docs"),
+			ID:      newFixtureWorkspaceID("Docs"),
 			DataDir: filepath.Join(wikiTestTempDir(), "data"),
 		})
 		Expect(ValidateWorkspace(invalid)).To(WithTransform(workspaceid.WorkspaceIDErrorCode, Equal(workspaceid.ErrCodeWorkspaceIDInvalid)))
@@ -25,7 +25,7 @@ var _ = ginkgo.Describe("workspace identity validation", ginkgo.Label("unit"), f
 
 	ginkgo.It("rejects whitespace-padded workspace IDs before normalization", func() {
 		workspace := Workspace{
-			ID:      workspaceid.WorkspaceID(" docs "),
+			ID:      newFixtureWorkspaceID(" docs "),
 			DataDir: filepath.Join(wikiTestTempDir(), "data"),
 		}
 

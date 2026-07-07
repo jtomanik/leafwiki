@@ -14,6 +14,7 @@ import (
 	"github.com/onsi/gomega/types"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 // Canonical Markdown links plan scenarios covered by tests in this file:
@@ -57,10 +58,10 @@ func normalizeRestorePayload(page map[string]any) map[string]any {
 	return normalized
 }
 
-func readPageMarkdownByRoutePath(rootDir, routePath string) string {
+func readPageMarkdownByRoutePath(rootDir string, routePath tree.RoutePath) string {
 	GinkgoHelper()
 
-	path := filepath.Join(append([]string{rootDir}, strings.Split(routePath, "/")...)...) + ".md"
+	path := filepath.Join(append([]string{rootDir}, strings.Split(routePath.String(), "/")...)...) + ".md"
 	raw, err := os.ReadFile(path)
 	Expect(err).NotTo(HaveOccurred(), "read markdown page %s", path)
 	return string(raw)
@@ -85,10 +86,10 @@ func matchJSONEqual(want any) types.GomegaMatcher {
 	}, Equal(normalizedWant))
 }
 
-func mapWithoutField(payload map[string]any, field string) map[string]any {
+func mapWithoutField(payload map[string]any, field jsonPayloadField) map[string]any {
 	out := make(map[string]any, len(payload))
 	for key, value := range payload {
-		if key == field {
+		if key == string(field) {
 			continue
 		}
 		out[key] = value

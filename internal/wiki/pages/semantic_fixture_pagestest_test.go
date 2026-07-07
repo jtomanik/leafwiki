@@ -23,8 +23,20 @@ func newFixturePageVersion[T ~string](raw T) tree.PageVersion {
 	return tree.NewPageVersionUnchecked(raw)
 }
 
+func newFixtureRawPageVersion[T ~string](raw T) tree.PageVersion {
+	return tree.PageVersion(raw)
+}
+
 func newFixtureSlug[T ~string](raw T) tree.Slug {
 	return tree.NewSlugUnchecked(raw)
+}
+
+func newFixtureRoutePath[T ~string](raw T) tree.RoutePath {
+	return tree.NewRoutePathUnchecked(string(raw))
+}
+
+func newFixtureAssetName[T ~string](raw T) tree.AssetName {
+	return tree.AssetNameFromString(raw)
 }
 
 func newFixtureUserID[T ~string](raw T) tree.UserID {

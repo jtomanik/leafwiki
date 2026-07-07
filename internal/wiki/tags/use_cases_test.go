@@ -104,10 +104,10 @@ func setupUseCasesWithDataDir() (*GetPagesByTagsUseCase, *coretags.TagsService, 
 	return uc, svc, ts, dir
 }
 
-func createAndIndexPage(ts *tree.TreeService, svc *coretags.TagsService, title, slug string, tags []string, body string) tree.PageID {
+func createAndIndexPage(ts *tree.TreeService, svc *coretags.TagsService, title string, slug tree.Slug, tags []string, body string) tree.PageID {
 	ginkgo.GinkgoHelper()
 	kind := tree.NodeKindPage
-	idPtr, err := ts.CreateNode("system", nil, title, tree.SlugFromString(slug), &kind)
+	idPtr, err := ts.CreateNode(newFixtureUserID("system"), nil, title, slug, &kind)
 	Expect(err).NotTo(HaveOccurred())
 
 	fm := "---\ntags:\n"
@@ -116,7 +116,7 @@ func createAndIndexPage(ts *tree.TreeService, svc *coretags.TagsService, title, 
 	}
 	fm += "---\n\n" + body
 
-	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, tree.SlugFromString(slug), &fm, true)).To(Succeed())
+	Expect(ts.UpdateNodeUncheckedVersion(newFixtureUserID("system"), *idPtr, title, slug, &fm, true)).To(Succeed())
 
 	raw, err := ts.ReadPageRaw(*idPtr)
 	Expect(err).NotTo(HaveOccurred())
@@ -131,8 +131,8 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 	ginkgo.It("returns pages that match a requested tag", ginkgo.Label("integration"), func() {
 		uc, svc, ts := setupUseCases()
 
-		id1 := createAndIndexPage(ts, svc, "React Guide", "react-guide", []string{"react", "frontend"}, "React guide body.")
-		createAndIndexPage(ts, svc, "Go Handbook", "go-handbook", []string{"go", "backend"}, "Go handbook body.")
+		id1 := createAndIndexPage(ts, svc, "React Guide", newFixtureSlug("react-guide"), []string{"react", "frontend"}, "React guide body.")
+		createAndIndexPage(ts, svc, "Go Handbook", newFixtureSlug("go-handbook"), []string{"go", "backend"}, "Go handbook body.")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"react"}})
 
@@ -143,7 +143,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 	ginkgo.It("returns indexed excerpts for matching pages", ginkgo.Label("integration"), func() {
 		uc, svc, ts := setupUseCases()
 
-		createAndIndexPage(ts, svc, "Excerpt Page", "excerpt-page", []string{"docs"}, "This is the excerpt content.")
+		createAndIndexPage(ts, svc, "Excerpt Page", newFixtureSlug("excerpt-page"), []string{"docs"}, "This is the excerpt content.")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"docs"}})
 
@@ -154,8 +154,8 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 	ginkgo.It("requires every requested tag to match", ginkgo.Label("integration"), func() {
 		uc, svc, ts := setupUseCases()
 
-		id1 := createAndIndexPage(ts, svc, "Both Tags", "both", []string{"react", "typescript"}, "body")
-		createAndIndexPage(ts, svc, "Only React", "only-react", []string{"react"}, "body")
+		id1 := createAndIndexPage(ts, svc, "Both Tags", newFixtureSlug("both"), []string{"react", "typescript"}, "body")
+		createAndIndexPage(ts, svc, "Only React", newFixtureSlug("only-react"), []string{"react"}, "body")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"react", "typescript"}})
 
@@ -175,7 +175,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 	ginkgo.It("normalizes query tags before matching pages", ginkgo.Label("integration"), func() {
 		uc, svc, ts := setupUseCases()
 
-		pageID := createAndIndexPage(ts, svc, "Go Page", "go-page", []string{"go"}, "body")
+		pageID := createAndIndexPage(ts, svc, "Go Page", newFixtureSlug("go-page"), []string{"go"}, "body")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"GO", " go "}})
 
@@ -186,7 +186,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 	ginkgo.It("returns no pages when no indexed page matches", ginkgo.Label("integration"), func() {
 		uc, svc, ts := setupUseCases()
 
-		createAndIndexPage(ts, svc, "Go Page", "go-page", []string{"go"}, "body")
+		createAndIndexPage(ts, svc, "Go Page", newFixtureSlug("go-page"), []string{"go"}, "body")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"rust"}})
 
@@ -197,7 +197,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 	ginkgo.It("includes indexed tag metadata in each matching page", ginkgo.Label("integration"), func() {
 		uc, svc, ts := setupUseCases()
 
-		createAndIndexPage(ts, svc, "Multi Tag", "multi", []string{"go", "testing", "backend"}, "body")
+		createAndIndexPage(ts, svc, "Multi Tag", newFixtureSlug("multi"), []string{"go", "testing", "backend"}, "body")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
 
@@ -217,7 +217,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 
 	ginkgo.It("returns tag lookup errors from the backing store", ginkgo.Label("integration"), func() {
 		uc, svc, _, dataDir := setupUseCasesWithDataDir()
-		createAndIndexPage(uc.treeService, svc, "Go Page", "go-page", []string{"go"}, "body")
+		createAndIndexPage(uc.treeService, svc, "Go Page", newFixtureSlug("go-page"), []string{"go"}, "body")
 		dropTagTables(dataDir, "DROP TABLE page_tags")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
@@ -243,7 +243,7 @@ var _ = ginkgo.Describe("tagged page lookup", func() {
 
 	ginkgo.It("returns excerpt lookup errors from the backing store", ginkgo.Label("integration"), func() {
 		uc, svc, _, dataDir := setupUseCasesWithDataDir()
-		createAndIndexPage(uc.treeService, svc, "Go Page", "go-page", []string{"go"}, "body")
+		createAndIndexPage(uc.treeService, svc, "Go Page", newFixtureSlug("go-page"), []string{"go"}, "body")
 		dropTagTables(dataDir, "DROP TABLE page_meta")
 
 		out, err := uc.Execute(context.Background(), GetPagesByTagsInput{Tags: []string{"go"}})
@@ -270,9 +270,9 @@ var _ = ginkgo.Describe("tags API boundary helpers", func() {
 
 	ginkgo.It("lists tags with filter, selection normalization, and page-size clamping", ginkgo.Label("integration"), func() {
 		_, svc, _ := setupUseCases()
-		Expect(svc.SetTagsForPage("page-1", []string{"go", "react"})).To(Succeed())
-		Expect(svc.SetTagsForPage("page-2", []string{"go", "rust"})).To(Succeed())
-		Expect(svc.SetTagsForPage("page-3", []string{"go", "react", "testing"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "react"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-2"), []string{"go", "rust"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-3"), []string{"go", "react", "testing"})).To(Succeed())
 		uc := NewGetTagsUseCase(svc)
 
 		out, err := uc.Execute(context.Background(), GetTagsInput{
@@ -309,8 +309,8 @@ var _ = ginkgo.Describe("tags API boundary helpers", func() {
 var _ = ginkgo.Describe("tags routes", func() {
 	ginkgo.It("serves tag counts through the public route", ginkgo.Label("integration"), func() {
 		_, svc, _ := setupUseCases()
-		Expect(svc.SetTagsForPage("page-1", []string{"go", "react"})).To(Succeed())
-		Expect(svc.SetTagsForPage("page-2", []string{"go", "testing"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "react"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-2"), []string{"go", "testing"})).To(Succeed())
 		router := newTagsTestRouter(RoutesConfig{
 			GetTags: NewGetTagsUseCase(svc),
 		}, httpinternal.RouterOptions{PublicAccess: true})
@@ -326,8 +326,8 @@ var _ = ginkgo.Describe("tags routes", func() {
 
 	ginkgo.It("serves tag suggestions filtered by selected tags", ginkgo.Label("integration"), func() {
 		_, svc, _ := setupUseCases()
-		Expect(svc.SetTagsForPage("page-1", []string{"go", "react"})).To(Succeed())
-		Expect(svc.SetTagsForPage("page-2", []string{"go", "rust"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "react"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-2"), []string{"go", "rust"})).To(Succeed())
 		router := newTagsTestRouter(RoutesConfig{
 			GetTags: NewGetTagsUseCase(svc),
 		}, httpinternal.RouterOptions{PublicAccess: true})
@@ -343,8 +343,8 @@ var _ = ginkgo.Describe("tags routes", func() {
 
 	ginkgo.It("serves pages matching tags through the public route", ginkgo.Label("integration"), func() {
 		uc, svc, ts := setupUseCases()
-		pageID := createAndIndexPage(ts, svc, "Go Guide", "go-guide", []string{"go", "testing"}, "Guide body.")
-		createAndIndexPage(ts, svc, "React Guide", "react-guide", []string{"react"}, "React body.")
+		pageID := createAndIndexPage(ts, svc, "Go Guide", newFixtureSlug("go-guide"), []string{"go", "testing"}, "Guide body.")
+		createAndIndexPage(ts, svc, "React Guide", newFixtureSlug("react-guide"), []string{"react"}, "React body.")
 		router := newTagsTestRouter(RoutesConfig{
 			GetPagesByTags: uc,
 		}, httpinternal.RouterOptions{PublicAccess: true})
@@ -376,7 +376,7 @@ var _ = ginkgo.Describe("tags routes", func() {
 
 	ginkgo.It("returns structured route errors when tag services fail", ginkgo.Label("integration"), func() {
 		_, svc, _, dataDir := setupUseCasesWithDataDir()
-		Expect(svc.SetTagsForPage("page-1", []string{"go"})).To(Succeed())
+		Expect(svc.SetTagsForPage(newFixturePageID("page-1"), []string{"go"})).To(Succeed())
 		dropTagTables(dataDir, "DROP TABLE page_tags")
 		router := newTagsTestRouter(RoutesConfig{
 			GetTags: NewGetTagsUseCase(svc),
@@ -390,7 +390,7 @@ var _ = ginkgo.Describe("tags routes", func() {
 
 	ginkgo.It("returns structured route errors when page tag services fail", ginkgo.Label("integration"), func() {
 		uc, svc, _, dataDir := setupUseCasesWithDataDir()
-		createAndIndexPage(uc.treeService, svc, "Go Page", "go-page", []string{"go"}, "body")
+		createAndIndexPage(uc.treeService, svc, "Go Page", newFixtureSlug("go-page"), []string{"go"}, "body")
 		dropTagTables(dataDir, "DROP TABLE page_meta")
 		router := newTagsTestRouter(RoutesConfig{
 			GetPagesByTags: uc,

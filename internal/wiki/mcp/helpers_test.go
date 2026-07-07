@@ -44,7 +44,7 @@ var _ = Describe("actor/request helpers", func() {
 			Username:    "editor",
 			Email:       "editor@example.com",
 			Role:        coreauth.RoleEditor,
-			WorkspaceID: "current",
+			WorkspaceID: newFixtureWorkspaceID("current"),
 			AuthMethod:  "oauth",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),
@@ -52,7 +52,7 @@ var _ = Describe("actor/request helpers", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		routes := &Routes{
-			workspaceID:          "current",
+			workspaceID:          newFixtureWorkspaceID("current"),
 			now:                  func() time.Time { return now.Add(time.Minute) },
 			actorContextAllowed:  true,
 			actorContextRequired: true,
@@ -69,7 +69,7 @@ var _ = Describe("actor/request helpers", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(user).To(SatisfyAll(
-			HaveField("ID", Equal("editor-1")),
+			HaveField("ID", Equal(newFixtureUserID("editor-1"))),
 			HaveField("Username", Equal("editor")),
 			HaveField("Role", Equal(coreauth.RoleEditor)),
 		))
@@ -111,7 +111,7 @@ var _ = Describe("actor/request helpers", func() {
 			Subject:     "user:viewer-1",
 			Username:    "viewer",
 			Role:        coreauth.RoleViewer,
-			WorkspaceID: "current",
+			WorkspaceID: newFixtureWorkspaceID("current"),
 			AuthMethod:  "oauth",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),
@@ -120,7 +120,7 @@ var _ = Describe("actor/request helpers", func() {
 		header := http.Header{}
 		header.Set(projectdaemon.ActorContextHeader, encoded)
 		routes := &Routes{
-			workspaceID:          "current",
+			workspaceID:          newFixtureWorkspaceID("current"),
 			now:                  func() time.Time { return now.Add(time.Minute) },
 			actorContextAllowed:  true,
 			actorContextRequired: true,

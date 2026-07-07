@@ -13,15 +13,15 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
-func contextSessionKey(req *sdkmcp.CallToolRequest, actor toolActor) string {
-	sessionID := ""
+func contextSessionKey(req *sdkmcp.CallToolRequest, actor toolActor) contextSessionScope {
+	var sessionID contextSessionID
 	if req != nil && req.Session != nil {
-		sessionID = req.Session.ID()
+		sessionID = contextSessionIDFromString(req.Session.ID())
 	}
-	if sessionID == "" {
-		sessionID = "sessionless"
+	if sessionID.IsEmpty() {
+		sessionID = contextSessionIDFromString("sessionless")
 	}
-	return actor.ID + ":" + sessionID
+	return contextSessionScope{ActorID: actor.ID, SessionID: sessionID}
 }
 
 func workspaceActorForToolActor(actor toolActor) workspacesync.Actor {
@@ -29,7 +29,7 @@ func workspaceActorForToolActor(actor toolActor) workspacesync.Actor {
 		return workspacesync.PublicEditorActor()
 	}
 	return workspacesync.Actor{
-		ID:    workspacesync.ActorIDFromUserID(auth.UserIDFromString(actor.User.ID)),
+		ID:    workspacesync.ActorIDFromUserID(actor.ID),
 		Name:  actor.User.Username,
 		Email: actor.User.Email,
 	}

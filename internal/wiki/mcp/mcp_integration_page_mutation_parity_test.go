@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/assets"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
@@ -114,7 +115,8 @@ func runLocalMCPProtocolPageMutationParity() {
 
 	httpPage := getHTTPPageByPath(router, "mcp-draft")
 	Expect(httpPage).To(HaveKeyWithValue("id", pageID))
-	Expect(createdPage).To(matchJSONEqual(getHTTPPageByID(router, pageID)), "create_page HTTP page")
+	pageSemanticID := tree.PageIDFromString(pageID)
+	Expect(createdPage).To(matchJSONEqual(getHTTPPageByID(router, pageSemanticID)), "create_page HTTP page")
 
 	mcpCreateParent := nestedMap(callToolStructured(session, "wiki_create_page", map[string]any{
 		"title": "MCP Create Parent",
@@ -166,8 +168,8 @@ func runLocalMCPProtocolPageMutationParity() {
 		"slug":     "created-child",
 		"kind":     "section",
 	}, http.StatusCreated)
-	Expect(getHTTPPageByPath(router, "mcp-create-parent/created-child")).To(matchPageState(stringField(mcpCreatedChild, "id"), "Created Child", "created-child", "mcp-create-parent/created-child", "section", ""), "MCP create_page child")
-	Expect(getHTTPPageByPath(router, "http-create-parent/created-child")).To(matchPageState(stringField(httpCreatedChild, "id"), "Created Child", "created-child", "http-create-parent/created-child", "section", ""), "HTTP create_page child")
+	Expect(getHTTPPageByPath(router, "mcp-create-parent/created-child")).To(matchPageState(tree.PageIDFromString(stringField(mcpCreatedChild, "id")), "Created Child", newFixtureSlug("created-child"), "mcp-create-parent/created-child", "section", newFixturePageID("")), "MCP create_page child")
+	Expect(getHTTPPageByPath(router, "http-create-parent/created-child")).To(matchPageState(tree.PageIDFromString(stringField(httpCreatedChild, "id")), "Created Child", newFixtureSlug("created-child"), "http-create-parent/created-child", "section", newFixturePageID("")), "HTTP create_page child")
 	recordHTTPMCPParity("wiki_create_page", "POST /api/pages")
 
 	content := "Hello from MCP\n"
@@ -190,11 +192,11 @@ func runLocalMCPProtocolPageMutationParity() {
 		HaveKeyWithValue("title", "MCP Draft Updated"),
 		HaveKeyWithValue("content", content),
 	))
-	Expect(updatedPage).To(matchJSONEqual(getHTTPPageByID(router, pageID)), "wiki_update_page HTTP page")
+	Expect(updatedPage).To(matchJSONEqual(getHTTPPageByID(router, pageSemanticID)), "wiki_update_page HTTP page")
 	Expect(stringSliceField(httpPage, "tags")).To(Equal([]string{"mcp", "parity"}))
 	props := nestedMap(httpPage, "properties")
 	Expect(props).To(HaveKeyWithValue("status", "draft"))
-	rawMCPMetadata := readPageMarkdownByRoutePath(w.GetRootDir(), "mcp-draft")
+	rawMCPMetadata := readPageMarkdownByRoutePath(w.GetRootDir(), newFixtureRoutePath("mcp-draft"))
 	mcpDoc := canonicalPageMarkdown("MCP update raw markdown", rawMCPMetadata)
 	Expect(mcpDoc.Metadata).To(SatisfyAll(
 		HaveField("Tags", Equal([]string{"mcp", "parity"})),
@@ -210,7 +212,7 @@ func runLocalMCPProtocolPageMutationParity() {
 		"slug":  "http-metadata",
 		"kind":  "page",
 	}, http.StatusCreated)
-	httpMetadataUpdated := updateHTTPPage(router, stringField(httpMetadataPage, "id"), map[string]any{
+	httpMetadataUpdated := updateHTTPPage(router, tree.PageIDFromString(stringField(httpMetadataPage, "id")), map[string]any{
 		"version": stringField(httpMetadataPage, "version"),
 		"title":   "HTTP Metadata Updated",
 		"slug":    "http-metadata",
@@ -223,7 +225,7 @@ func runLocalMCPProtocolPageMutationParity() {
 	Expect(stringSliceField(httpMetadataUpdated, "tags")).To(Equal([]string{"http", "metadata"}))
 	httpMetadataProps := nestedMap(httpMetadataUpdated, "properties")
 	Expect(httpMetadataProps).To(HaveKeyWithValue("status", "review"))
-	rawHTTPMetadata := readPageMarkdownByRoutePath(w.GetRootDir(), "http-metadata")
+	rawHTTPMetadata := readPageMarkdownByRoutePath(w.GetRootDir(), newFixtureRoutePath("http-metadata"))
 	httpDoc := canonicalPageMarkdown("HTTP update raw markdown", rawHTTPMetadata)
 	Expect(httpDoc.Metadata).To(SatisfyAll(
 		HaveField("Tags", Equal([]string{"http", "metadata"})),

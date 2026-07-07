@@ -45,7 +45,7 @@ func (r *Routes) applyRefactorTool(ctx context.Context, actor toolActor, in appl
 		return pageOutput{}, err
 	}
 	page, err := r.applyRef.Execute(ctx, wikipages.RefactorApplyInput{
-		UserID:       tree.UserIDFromString(actor.ID),
+		UserID:       actor.ID,
 		Source:       pagesave.PageMutationSourceMCP,
 		Version:      tree.PageVersionFromString(strings.TrimSpace(in.Version)),
 		RewriteLinks: in.RewriteLinks,

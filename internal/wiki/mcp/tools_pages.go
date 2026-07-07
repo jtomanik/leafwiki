@@ -82,7 +82,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return pageOutput{}, err
 		}
 		out, err := r.createPage.Execute(ctx, wikipages.CreatePageInput{
-			UserID:   tree.UserIDFromString(actor.ID),
+			UserID:   actor.ID,
 			Source:   pagesave.PageMutationSourceMCP,
 			ParentID: mcpPageIDPtr(in.ParentID),
 			Title:    in.Title,
@@ -101,7 +101,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 
 	addEditorTool[deletePageInput, messageOutput](r, server, toolDeletePage, func(ctx context.Context, actor toolActor, in deletePageInput) (messageOutput, error) {
 		if err := r.deletePage.Execute(ctx, wikipages.DeletePageInput{
-			UserID:    tree.UserIDFromString(actor.ID),
+			UserID:    actor.ID,
 			Source:    pagesave.PageMutationSourceMCP,
 			ID:        tree.PageIDFromString(strings.TrimSpace(in.ID)),
 			Version:   tree.PageVersionFromString(strings.TrimSpace(in.Version)),
@@ -118,7 +118,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			parentID = *in.ParentID
 		}
 		if err := r.movePage.Execute(ctx, wikipages.MovePageInput{
-			UserID:   tree.UserIDFromString(actor.ID),
+			UserID:   actor.ID,
 			Source:   pagesave.PageMutationSourceMCP,
 			ID:       tree.PageIDFromString(strings.TrimSpace(in.ID)),
 			Version:  tree.PageVersionFromString(strings.TrimSpace(in.Version)),
@@ -149,7 +149,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 			return messageOutput{}, err
 		}
 		if err := r.convertPage.Execute(ctx, wikipages.ConvertPageInput{
-			UserID:     tree.UserIDFromString(actor.ID),
+			UserID:     actor.ID,
 			Source:     pagesave.PageMutationSourceMCP,
 			ID:         tree.PageIDFromString(strings.TrimSpace(in.ID)),
 			Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
@@ -162,7 +162,7 @@ func (r *Routes) registerPageTools(server *sdkmcp.Server) {
 
 	addEditorTool[copyPageInput, pageOutput](r, server, toolCopyPage, func(ctx context.Context, actor toolActor, in copyPageInput) (pageOutput, error) {
 		out, err := r.copyPage.Execute(ctx, wikipages.CopyPageInput{
-			UserID:         tree.UserIDFromString(actor.ID),
+			UserID:         actor.ID,
 			Source:         pagesave.PageMutationSourceMCP,
 			SourcePageID:   tree.PageIDFromString(strings.TrimSpace(in.ID)),
 			TargetParentID: mcpPageIDPtr(in.TargetParentID),
@@ -251,7 +251,7 @@ func (r *Routes) updatePageTool(ctx context.Context, actor toolActor, in updateP
 	}
 	kind := tree.NodeKindPage
 	out, err := r.updatePage.Execute(ctx, wikipages.UpdatePageInput{
-		UserID:     tree.UserIDFromString(actor.ID),
+		UserID:     actor.ID,
 		Source:     pagesave.PageMutationSourceMCP,
 		ID:         tree.PageIDFromString(strings.TrimSpace(in.ID)),
 		Version:    tree.PageVersionFromString(strings.TrimSpace(in.Version)),
@@ -277,7 +277,7 @@ func (r *Routes) ensurePageTool(ctx context.Context, actor toolActor, in ensureP
 		return pageOutput{}, err
 	}
 	out, err := r.ensurePath.Execute(ctx, wikipages.EnsurePathInput{
-		UserID:      tree.UserIDFromString(actor.ID),
+		UserID:      actor.ID,
 		Source:      pagesave.PageMutationSourceMCP,
 		TargetPath:  targetPath,
 		TargetTitle: in.Title,

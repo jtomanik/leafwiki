@@ -352,7 +352,7 @@ func (r *Routes) verifyBearerToken(ctx context.Context, token string, req *http.
 			return nil, fmt.Errorf("%w: invalid api key", sdkauth.ErrInvalidToken)
 		}
 		return &sdkauth.TokenInfo{
-			UserID:     verified.User.ID,
+			UserID:     verified.User.ID.MetadataValue(),
 			Scopes:     []string{wikioauth.ScopeMCP},
 			Expiration: time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
 		}, nil

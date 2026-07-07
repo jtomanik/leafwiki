@@ -80,8 +80,8 @@ var _ = ginkgo.Describe("page route handlers", ginkgo.Label("integration"), func
 
 	ginkgo.It("serves tree, page, path, lookup, permalink, and slug suggestion reads", func() {
 		deps := newRoutesSpecDeps()
-		docs := deps.createPage("Docs", "docs", tree.NodeKindSection, nil)
-		guide := deps.createPage("Guide", "guide", tree.NodeKindPage, &docs.ID)
+		docs := deps.createPage("Docs", newFixtureSlug("docs"), tree.NodeKindSection, nil)
+		guide := deps.createPage("Guide", newFixtureSlug("guide"), tree.NodeKindPage, &docs.ID)
 
 		rec := performRoutesRequest(http.MethodGet, "/api/tree?depth=bad", "", nil, nil, deps.routes.handleGetTree)
 		Expect(rec).To(SatisfyAll(
@@ -94,7 +94,7 @@ var _ = ginkgo.Describe("page route handlers", ginkgo.Label("integration"), func
 		page := decodeRoutesJSON[routePageJSON](rec)
 		Expect(page).To(matchRoutePage(gstruct.Fields{
 			"Title": Equal("Guide"),
-			"Path":  Equal(tree.RoutePath("docs/guide")),
+			"Path":  Equal(newFixtureRoutePath("docs/guide")),
 		}))
 
 		rec = performRoutesRequest(http.MethodGet, "/api/pages/by-path?path=docs/guide&kind=page", "", nil, nil, deps.routes.handleGetByPath)
@@ -107,12 +107,12 @@ var _ = ginkgo.Describe("page route handlers", ginkgo.Label("integration"), func
 		rec = performRoutesRequest(http.MethodGet, "/api/pages/lookup?path=docs/guide&kind=page", "", nil, nil, deps.routes.handleLookupPath)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 		lookup := decodeRoutesJSON[tree.PathLookup](rec)
-		Expect(lookup).To(matchExistingRoutePathLookup(tree.RoutePath("docs/guide")))
+		Expect(lookup).To(matchExistingRoutePathLookup(newFixtureRoutePath("docs/guide")))
 
 		rec = performRoutesRequest(http.MethodGet, permalinkRouteTarget(guide.ID), "", pageIDRouteParams(guide.ID), nil, deps.routes.handleResolvePermalink)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 		target := decodeRoutesJSON[tree.PermalinkTarget](rec)
-		Expect(target).To(matchRoutePermalinkTarget(guide.ID, tree.RoutePath("docs/guide")))
+		Expect(target).To(matchRoutePermalinkTarget(guide.ID, newFixtureRoutePath("docs/guide")))
 
 		rec = performRoutesRequest(http.MethodGet, slugSuggestionRouteTarget{parentID: docs.ID, currentID: guide.ID}, "", nil, nil, deps.routes.handleSuggestSlug)
 		Expect(rec).To(SatisfyAll(
@@ -167,14 +167,14 @@ var _ = ginkgo.Describe("page route handlers", ginkgo.Label("integration"), func
 
 	ginkgo.It("drives mutating handlers for ensure, copy, move, sort, convert, and delete", func() {
 		deps := newRoutesSpecDeps()
-		source := deps.createPage("Source", "source", tree.NodeKindPage, nil)
-		archive := deps.createPage("Archive", "archive", tree.NodeKindSection, nil)
+		source := deps.createPage("Source", newFixtureSlug("source"), tree.NodeKindPage, nil)
+		archive := deps.createPage("Archive", newFixtureSlug("archive"), tree.NodeKindSection, nil)
 
 		rec := performRoutesRequest(http.MethodPost, "/api/pages/ensure", `{"path":"docs/created","title":"Created","kind":"page"}`, nil, routesSpecUser(), deps.routes.handleEnsurePath)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
 		ensured := decodeRoutesJSON[routePageJSON](rec)
 		Expect(ensured).To(matchRoutePage(gstruct.Fields{
-			"Path": Equal(tree.RoutePath("docs/created")),
+			"Path": Equal(newFixtureRoutePath("docs/created")),
 		}))
 
 		rec = performRoutesRequest(
@@ -241,7 +241,7 @@ var _ = ginkgo.Describe("page route handlers", ginkgo.Label("integration"), func
 
 	ginkgo.It("wires refactor preview and apply handlers to the use cases", func() {
 		deps := newRoutesSpecDeps()
-		page := deps.createPage("Old", "old", tree.NodeKindPage, nil)
+		page := deps.createPage("Old", newFixtureSlug("old"), tree.NodeKindPage, nil)
 
 		rec := performRoutesRequest(
 			http.MethodPost,
@@ -271,13 +271,13 @@ var _ = ginkgo.Describe("page route handlers", ginkgo.Label("integration"), func
 		renamed := decodeRoutesJSON[routePageJSON](rec)
 		Expect(renamed).To(matchRoutePage(gstruct.Fields{
 			"Title": Equal("New"),
-			"Path":  Equal(tree.RoutePath("new")),
+			"Path":  Equal(newFixtureRoutePath("new")),
 		}))
 	})
 
 	ginkgo.It("returns structured errors for route validation failures", func() {
 		deps := newRoutesSpecDeps()
-		page := deps.createPage("Convertible", "convertible", tree.NodeKindPage, nil)
+		page := deps.createPage("Convertible", newFixtureSlug("convertible"), tree.NodeKindPage, nil)
 
 		rec := performRoutesRequest(http.MethodGet, "/api/pages/by-path", "", nil, nil, deps.routes.handleGetByPath)
 		Expect(rec).To(HavePageErrorResponse(http.StatusBadRequest, ErrCodePageMissingPath), rec.Body.String())
@@ -343,14 +343,14 @@ func newRoutesSpecDeps() *routesSpecDeps {
 	return &routesSpecDeps{tree: treeService, routes: routes}
 }
 
-func (d *routesSpecDeps) createPage(title string, slug string, kind tree.NodeKind, parentID *tree.PageID) *tree.Page {
+func (d *routesSpecDeps) createPage(title string, slug tree.Slug, kind tree.NodeKind, parentID *tree.PageID) *tree.Page {
 	ginkgo.GinkgoHelper()
 
 	out, err := d.routes.createPage.Execute(context.Background(), CreatePageInput{
-		UserID:   tree.UserIDFromString("routes-test-user"),
+		UserID:   newFixtureUserID("routes-test-user"),
 		ParentID: parentID,
 		Title:    title,
-		Slug:     tree.SlugFromString(slug),
+		Slug:     slug,
 		Kind:     &kind,
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -505,7 +505,7 @@ func pageIDRouteParams(id tree.PageID) gin.Params {
 
 func routesSpecUser() *coreauth.User {
 	return &coreauth.User{
-		ID:       "routes-test-user",
+		ID:       newFixtureUserID("routes-test-user"),
 		Username: "routes-test-user",
 		Role:     coreauth.RoleEditor,
 	}

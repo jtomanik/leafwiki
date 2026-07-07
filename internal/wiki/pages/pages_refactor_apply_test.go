@@ -26,26 +26,26 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Target", Slug: newFixtureSlug("target"), Kind: pageKind(),
 		})
 		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Ref", Slug: newFixtureSlug("ref"), Kind: pageKind(),
 		})
 		content := "[Target](/target.md)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		updated, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-			UserID:  "system",
+			UserID:  newFixtureUserID("system"),
 			Version: pageVersion(target.Page.Version()),
 			RefactorPreviewInput: pages.RefactorPreviewInput{
 				PageID:  pageID(target.Page.ID),
 				Kind:    pages.RefactorKindRename,
 				Title:   "Target Renamed",
-				Slug:    "target-renamed",
+				Slug:    newFixtureSlug("target-renamed"),
 				Content: &target.Page.Content,
 			},
 			RewriteLinks: true,
@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		Expect(err).To(Succeed())
 		Expect(outgoing).To(SatisfyAll(
 			HaveField("Count", Equal(1)),
-			HaveField("Outgoings", HaveExactElements(HaveHealthyOutgoing("/target-renamed", target.Page.ID))),
+			HaveField("Outgoings", HaveExactElements(HaveHealthyOutgoing(newFixtureRoutePath("/target-renamed"), target.Page.ID))),
 		))
 
 	})
@@ -78,27 +78,27 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
 
 		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Target", Slug: newFixtureSlug("target"), Kind: pageKind(),
 		})
 		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Ref", Slug: newFixtureSlug("ref"), Kind: pageKind(),
 		})
 		content := "[Target](/target.md)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-			UserID:  "mcp-user",
+			UserID:  newFixtureUserID("mcp-user"),
 			Source:  pagesave.PageMutationSourceMCP,
 			Version: pageVersion(target.Page.Version()),
 			RefactorPreviewInput: pages.RefactorPreviewInput{
 				PageID:  pageID(target.Page.ID),
 				Kind:    pages.RefactorKindRename,
 				Title:   "Target Renamed",
-				Slug:    "target-renamed",
+				Slug:    newFixtureSlug("target-renamed"),
 				Content: &target.Page.Content,
 			},
 			RewriteLinks: true,
@@ -135,26 +135,26 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		applyUC := pages.NewApplyPageRefactorUseCaseWithOrchestrator(deps.tree, deps.slug, deps.links, orchestrator, slog.Default())
 
 		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Target", Slug: newFixtureSlug("target"), Kind: pageKind(),
 		})
 		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Ref", Slug: newFixtureSlug("ref"), Kind: pageKind(),
 		})
 		content := "refactorsearchtoken [Target](/target.md)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &content, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		if _, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-			UserID:  "system",
+			UserID:  newFixtureUserID("system"),
 			Version: pageVersion(target.Page.Version()),
 			RefactorPreviewInput: pages.RefactorPreviewInput{
 				PageID:  pageID(target.Page.ID),
 				Kind:    pages.RefactorKindRename,
 				Title:   "Target Renamed",
-				Slug:    "target-renamed",
+				Slug:    newFixtureSlug("target-renamed"),
 				Content: &target.Page.Content,
 			},
 			RewriteLinks: true,
@@ -174,14 +174,14 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Target", Slug: newFixtureSlug("target"), Kind: pageKind(),
 		})
 		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Ref", Slug: newFixtureSlug("ref"), Kind: pageKind(),
 		})
 		refContent := "[Target](/target)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
@@ -189,19 +189,19 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		staleVersion := target.Page.Version()
 		newerTargetContent := "newer target content"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(target.Page.ID), Version: pageVersion(staleVersion), Title: target.Page.Title, Slug: slug(target.Page.Slug), Content: &newerTargetContent, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(target.Page.ID), Version: pageVersion(staleVersion), Title: target.Page.Title, Slug: slug(target.Page.Slug), Content: &newerTargetContent, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-			UserID:  "system",
+			UserID:  newFixtureUserID("system"),
 			Version: pageVersion(staleVersion),
 			RefactorPreviewInput: pages.RefactorPreviewInput{
 				PageID: pageID(target.Page.ID),
 				Kind:   pages.RefactorKindRename,
 				Title:  "Target Renamed",
-				Slug:   "target-renamed",
+				Slug:   newFixtureSlug("target-renamed"),
 			},
 			RewriteLinks: true,
 		})
@@ -220,31 +220,31 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 		target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Target", Slug: newFixtureSlug("target"), Kind: pageKind(),
 		})
 		if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Existing", Slug: "existing", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Existing", Slug: newFixtureSlug("existing"), Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 		ref, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Ref", Slug: "ref", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Ref", Slug: newFixtureSlug("ref"), Kind: pageKind(),
 		})
 		refContent := "[Target](/target)"
 		if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
-			UserID: "system", ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
+			UserID: newFixtureUserID("system"), ID: pageID(ref.Page.ID), Version: pageVersion(ref.Page.Version()), Title: ref.Page.Title, Slug: slug(ref.Page.Slug), Content: &refContent, Kind: pageKind(),
 		}); err != nil {
 			Expect(err).To(Succeed())
 		}
 
 		_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
-			UserID:  "system",
+			UserID:  newFixtureUserID("system"),
 			Version: pageVersion(target.Page.Version()),
 			RefactorPreviewInput: pages.RefactorPreviewInput{
 				PageID: pageID(target.Page.ID),
 				Kind:   pages.RefactorKindRename,
 				Title:  "Target",
-				Slug:   "existing",
+				Slug:   newFixtureSlug("existing"),
 			},
 			RewriteLinks: true,
 		})
@@ -264,14 +264,14 @@ var _ = ginkgo.Describe("page use case behavior", ginkgo.Label("integration"), f
 		previewUC := pages.NewPreviewPageRefactorUseCase(deps.tree, deps.slug, deps.links, slog.Default())
 
 		page, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-			UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+			UserID: newFixtureUserID("system"), Title: "Target", Slug: newFixtureSlug("target"), Kind: pageKind(),
 		})
 
 		preview, err := previewUC.Execute(context.Background(), pages.RefactorPreviewInput{
 			PageID: pageID(page.Page.ID),
 			Kind:   pages.RefactorKindRename,
 			Title:  page.Page.Title,
-			Slug:   "target-renamed",
+			Slug:   newFixtureSlug("target-renamed"),
 		})
 		Expect(err).To(Succeed())
 		Expect(preview.WarningDetails).NotTo(BeNil())

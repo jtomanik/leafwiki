@@ -325,7 +325,7 @@ var _ = ginkgo.Describe("OAuth routes and responses", ginkgo.Label("integration"
 		missing := fosite.NewAccessRequest(newFositeSession("missing-user", "Missing"))
 		Expect(service.validateTokenSubject(missing)).To(MatchError(fosite.ErrInvalidGrant))
 
-		request := fosite.NewAccessRequest(newFositeSession(user.ID, user.Username))
+		request := fosite.NewAccessRequest(newFositeSession(user.ID.MetadataValue(), user.Username))
 		Expect(service.validateTokenSubject(request)).To(Succeed())
 
 		rec := performOAuthResponseRequest(NewRoutes(service).handleToken)

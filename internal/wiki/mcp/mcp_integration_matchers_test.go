@@ -11,7 +11,9 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 	wikivalidation "github.com/perber/wiki/internal/core/markdownvalidation"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	wikimcp "github.com/perber/wiki/internal/wiki/mcp"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 )
 
@@ -110,33 +112,38 @@ func matchRestoreVolatileFields() types.GomegaMatcher {
 	)
 }
 
-func matchPageState(id, title, slug, pathValue, kind, parentID string) types.GomegaMatcher {
+func matchPageState(id tree.PageID, title string, slug tree.Slug, pathValue, kind string, parentID tree.PageID) types.GomegaMatcher {
 	GinkgoHelper()
 
 	return SatisfyAll(
-		HaveKeyWithValue("id", id),
+		HaveKeyWithValue("id", id.MetadataValue()),
 		HaveKeyWithValue("title", title),
-		HaveKeyWithValue("slug", slug),
+		WithTransform(pageSlugFromWire, Equal(slug)),
 		HaveKeyWithValue("path", pathValue),
 		HaveKeyWithValue("kind", kind),
 		WithTransform(func(page map[string]any) string {
 			return stringValue(page["parentId"])
-		}, Equal(parentID)),
+		}, Equal(parentID.MetadataValue())),
 	)
 }
 
-func matchChildOrder(childIDs ...string) types.GomegaMatcher {
+func pageSlugFromWire(page map[string]any) tree.Slug {
+	GinkgoHelper()
+	return tree.SlugFromString(stringValue(page["slug"]))
+}
+
+func matchChildOrder(childIDs ...tree.PageID) types.GomegaMatcher {
 	GinkgoHelper()
 
 	return HaveKeyWithValue("children", HaveExactElements(childIDMatchers(childIDs)...))
 }
 
-func matchChildrenExcludingIDs(childIDs ...string) types.GomegaMatcher {
+func matchChildrenExcludingIDs(childIDs ...tree.PageID) types.GomegaMatcher {
 	GinkgoHelper()
 
 	matchers := make([]types.GomegaMatcher, 0, len(childIDs))
 	for _, childID := range childIDs {
-		matchers = append(matchers, Not(ContainElement(childID)))
+		matchers = append(matchers, Not(ContainElement(childID.MetadataValue())))
 	}
 	return WithTransform(childIDsFromPage, SatisfyAll(matchers...))
 }
@@ -163,10 +170,10 @@ func childIDsFromPage(page map[string]any) []string {
 	return ids
 }
 
-func childIDMatchers(childIDs []string) []any {
+func childIDMatchers(childIDs []tree.PageID) []any {
 	matchers := make([]any, 0, len(childIDs))
 	for _, id := range childIDs {
-		matchers = append(matchers, HaveKeyWithValue("id", id))
+		matchers = append(matchers, HaveKeyWithValue("id", id.MetadataValue()))
 	}
 	return matchers
 }
@@ -181,27 +188,27 @@ func canonicalPageMarkdown(label, raw string) markdown.PageDocument {
 	return doc
 }
 
-func matchAssetURLResult(field, pageID string) types.GomegaMatcher {
+func matchAssetURLResult(field string, pageID tree.PageID) types.GomegaMatcher {
 	GinkgoHelper()
 
-	prefix := "/assets/" + pageID + "/"
+	prefix := "/assets/" + pageID.MetadataValue() + "/"
 	return SatisfyAll(
 		HaveKeyWithValue(field, SatisfyAll(HavePrefix(prefix), Not(Equal(prefix)))),
 		HaveLen(1),
 	)
 }
 
-func matchScopedSuccessPayload(httpPayload map[string]any, mcpMessageID, httpMessageID string) types.GomegaMatcher {
+func matchScopedSuccessPayload(httpPayload map[string]any, mcpMessageID wikimcp.ToolMessageID, httpMessageID sharederrors.MessageID) types.GomegaMatcher {
 	GinkgoHelper()
 
 	expected := scopedSuccessPayloadProjection{
 		MCPMessageID:  mcpMessageID,
 		HTTPMessageID: httpMessageID,
-		Body:          successPayloadFromWire("HTTP success payload", httpPayload).Body,
+		Body:          httpSuccessPayloadFromWire("HTTP success payload", httpPayload).Body,
 	}
 	return WithTransform(func(mcpPayload map[string]any) scopedSuccessPayloadProjection {
-		httpSuccess := successPayloadFromWire("HTTP success payload", httpPayload)
-		mcpSuccess := successPayloadFromWire("MCP success payload", mcpPayload)
+		httpSuccess := httpSuccessPayloadFromWire("HTTP success payload", httpPayload)
+		mcpSuccess := mcpSuccessPayloadFromWire("MCP success payload", mcpPayload)
 		return scopedSuccessPayloadProjection{
 			MCPMessageID:  mcpSuccess.MessageID,
 			HTTPMessageID: httpSuccess.MessageID,
@@ -211,28 +218,47 @@ func matchScopedSuccessPayload(httpPayload map[string]any, mcpMessageID, httpMes
 	)
 }
 
-type successPayloadWire struct {
-	MessageID string `json:"messageId"`
+type mcpSuccessPayloadWire struct {
+	MessageID wikimcp.ToolMessageID `json:"messageId"`
+	Body      any
+}
+
+type httpSuccessPayloadWire struct {
+	MessageID sharederrors.MessageID `json:"messageId"`
 	Body      any
 }
 
 type scopedSuccessPayloadProjection struct {
-	MCPMessageID  string
-	HTTPMessageID string
+	MCPMessageID  wikimcp.ToolMessageID
+	HTTPMessageID sharederrors.MessageID
 	Body          any
 }
 
-func successPayloadFromWire(label string, payload map[string]any) successPayloadWire {
+func mcpSuccessPayloadFromWire(label string, payload map[string]any) mcpSuccessPayloadWire {
 	GinkgoHelper()
 	raw, err := json.Marshal(payload)
 	Expect(err).NotTo(HaveOccurred(), "%s should marshal", label)
 	var decoded struct {
-		MessageID string `json:"messageId"`
+		MessageID wikimcp.ToolMessageID `json:"messageId"`
 	}
 	Expect(json.Unmarshal(raw, &decoded)).To(Succeed(), "%s should decode", label)
-	return successPayloadWire{
+	return mcpSuccessPayloadWire{
 		MessageID: decoded.MessageID,
-		Body:      normalizeJSON(mapWithoutField(payload, "messageId")),
+		Body:      normalizeJSON(mapWithoutField(payload, newFixtureJSONPayloadField("messageId"))),
+	}
+}
+
+func httpSuccessPayloadFromWire(label string, payload map[string]any) httpSuccessPayloadWire {
+	GinkgoHelper()
+	raw, err := json.Marshal(payload)
+	Expect(err).NotTo(HaveOccurred(), "%s should marshal", label)
+	var decoded struct {
+		MessageID sharederrors.MessageID `json:"messageId"`
+	}
+	Expect(json.Unmarshal(raw, &decoded)).To(Succeed(), "%s should decode", label)
+	return httpSuccessPayloadWire{
+		MessageID: decoded.MessageID,
+		Body:      normalizeJSON(mapWithoutField(payload, newFixtureJSONPayloadField("messageId"))),
 	}
 }
 
