@@ -166,6 +166,40 @@ or maintainability:
 | architecture/i18n analyzers | keep package boundaries and user-facing text contracts explicit | move code across layers just to silence lint, duplicate strings, or bypass catalogs |
 | dead-code linters | remove stale helpers or make the behaviour contract visible where genuinely needed | keep unused scaffolding, blank imports, or unused parameters as migration residue |
 
+Coverage cleanup must preserve truthful taxonomy labels and meet the active
+labelled coverage targets:
+
+- `unit` labelled Ginkgo specs: 100% composite statement coverage.
+- `integration` labelled Ginkgo specs: at least 90% composite statement coverage.
+- `e2e` labelled Ginkgo specs, excluding `e2e-proxy`: at least 75% subprocess
+  `GOCOVERDIR` profile coverage.
+- `e2e` labelled Ginkgo specs, excluding `e2e-proxy`: at least 25% main merged
+  coverprofile statement coverage.
+
+Do not move work between labels to improve percentages. Add or correct labels
+only when the behavioural boundary is actually wrong. Subprocess coverage is
+for LeafWiki binaries exercised by e2e specs; main coverprofile coverage is for
+the Go test process and merged package profile. `e2e-proxy` stays outside these
+coverage thresholds because it depends on the external Docker/nginx stack.
+
+Measure non-proxy e2e-labelled Ginkgo coverage through `go test` with Ginkgo
+flags, not `ginkgo --cover`. The `cmd/leafwiki` e2e helpers re-exec the test
+binary via `os.Args[0]`; `go test` keeps that binary stable for helper
+subprocesses, while the Ginkgo CLI cover runner can leave helpers pointing at a
+missing `leafwiki.test`. The current non-proxy e2e-labelled package is
+`./cmd/leafwiki`; `./e2e` and `./e2e/cmd/...` may be run for focused package
+tests, but they currently have no selected `e2e` specs under the label filter.
+
+```sh
+rtk bash -lc 'rm -rf target/coverage/labels/e2e && mkdir -p target/coverage/labels/e2e/raw && GOCOVERDIR=$PWD/target/coverage/labels/e2e/raw go test ./cmd/leafwiki -timeout=10m -run TestLeafWikiSuite -coverprofile=target/coverage/labels/e2e/cover.profile -ginkgo.label-filter=e2e'
+rtk go tool cover -func=target/coverage/labels/e2e/cover.profile | tail -n 1
+rtk bash -lc 'go tool covdata textfmt -i=target/coverage/labels/e2e/raw -o=target/coverage/labels/e2e/subprocess.out && go tool cover -func=target/coverage/labels/e2e/subprocess.out | tail -n 1'
+```
+
+If the subprocess raw directory is empty, fix the test helper coverage plumbing
+instead of treating the subprocess target as passed. Helper re-execs must pass
+the test binary `-test.gocoverdir` flag when `GOCOVERDIR` is set.
+
 Only the supervisor may change checker code, `.golangci.leafwiki.yml`, the
 custom golangci plugin, gate scripts, or module files. If cleanup exposes a
 repeatable project-specific bad pattern that is not caught, harden the checker
