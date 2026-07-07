@@ -56,6 +56,20 @@ var _ = ginkgo.Describe("selection-aware tag suggestions", ginkgo.Label("unit"),
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal([]TagCount{{Tag: "react", Count: 2}}))
 	})
+
+	ginkgo.It("keeps wildcard characters literal while suggesting additive tags", func() {
+		store := newTestStore()
+		Expect(store.SetTagsForPage(newFixturePageID("page-1"), []string{"go", "r%tag", "r_tag"})).To(Succeed())
+		Expect(store.SetTagsForPage(newFixturePageID("page-2"), []string{"go", "react"})).To(Succeed())
+
+		percentFiltered, err := store.GetAllTagsForSelection("r%", []string{"go"}, 0)
+		Expect(err).To(Succeed())
+		Expect(percentFiltered).To(Equal([]TagCount{{Tag: "r%tag", Count: 1}}))
+
+		underscoreFiltered, err := store.GetAllTagsForSelection("r_", []string{"go"}, 0)
+		Expect(err).To(Succeed())
+		Expect(underscoreFiltered).To(Equal([]TagCount{{Tag: "r_tag", Count: 1}}))
+	})
 })
 
 var _ = ginkgo.Describe("tag normalization", ginkgo.Label("unit"), func() {
