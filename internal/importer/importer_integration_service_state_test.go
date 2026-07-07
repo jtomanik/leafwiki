@@ -192,6 +192,34 @@ var _ = ginkgo.Describe("import plan execution state through real wiki storage",
 })
 
 var _ = ginkgo.Describe("zip upload import state through real wiki storage", ginkgo.Label("integration"), func() {
+	ginkgo.It("imports uploaded archive pages beneath the configured target base path", func() {
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
+		probe := newImporterProbe(w)
+
+		plan, err := is.CreateImportPlanFromZipUpload(integZipArchive(
+			integZipEntry{name: "Docs/Page.md", content: "# Page\nBody"},
+		), "imports")
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(ConsistOf(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"SourcePath": Equal(integWorkspaceSourcePath("Docs/Page.md")),
+			"TargetPath": Equal(integRoutePath("imports/docs/page")),
+			"Action":     Equal(importer.PlanActionCreate),
+		})))
+
+		result, err := is.ExecuteCurrentPlan(integFixtureUserID("system"))
+		Expect(err).To(Succeed())
+		Expect(result.Items).To(ConsistOf(SatisfyAll(
+			HaveField("TargetPath", Equal(integRoutePath("imports/docs/page"))),
+			HaveField("Action", Equal(importer.ExecutionActionCreated)),
+		)))
+
+		importedPage, err := probe.FindByPath("imports/docs/page")
+		Expect(err).To(Succeed())
+		Expect(importedPage.Content).To(Equal("# Page\nBody"))
+	})
+
 	ginkgo.It("rejects absolute archive entries without storing a plan", func() {
 		w := newTestWiki()
 		integWrapCloseWithErrorCheck(w.Close)
