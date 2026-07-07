@@ -25,15 +25,24 @@ type nodeKindParseObservation struct {
 	State nodeKindParseState
 }
 
-type semanticStringState string
+type pageVersionCheckState uint8
 
 const (
-	semanticStringRendered semanticStringState = "rendered"
-	semanticStringMismatch semanticStringState = "mismatch"
+	pageVersionChecked pageVersionCheckState = iota
+	pageVersionUncheckedState
 )
 
-type semanticStringObservation struct {
-	State semanticStringState
+type semanticWrapperBehavior struct {
+	VersionState            pageVersionCheckState
+	RouteMarkdownPagePath   MarkdownPath
+	RouteWorkspacePagePath  WorkspaceSourcePath
+	RouteWorkspaceIndexPath WorkspaceSourcePath
+	MarkdownRoutePath       RoutePath
+	MarkdownSourceDir       MarkdownPath
+	WorkspaceSourceDir      WorkspaceSourcePath
+	SlugRoutePath           RoutePath
+	SlugKey                 SlugKey
+	AssetClean              AssetName
 }
 
 func observeNodeKindValueParse(kind NodeKind) nodeKindParseObservation {
@@ -59,17 +68,48 @@ func matchNodeKindValueParse(kind NodeKind, state nodeKindParseState) types.Gome
 	}))
 }
 
-func semanticStringRendering[T interface{ String() string }](value T, expected string) semanticStringObservation {
-	if value.String() != expected {
-		return semanticStringObservation{State: semanticStringMismatch}
+func observePageVersionCheckState(version PageVersion) pageVersionCheckState {
+	if version.IsUnchecked() {
+		return pageVersionUncheckedState
 	}
-	return semanticStringObservation{State: semanticStringRendered}
+	return pageVersionChecked
 }
 
-func matchSemanticStringRendering[T interface{ String() string }](expected string) types.GomegaMatcher {
-	return WithTransform(func(value T) semanticStringObservation {
-		return semanticStringRendering(value, expected)
-	}, Equal(semanticStringObservation{State: semanticStringRendered}))
+func observeSemanticWrapperBehavior(
+	version PageVersion,
+	route RoutePath,
+	markdownPath MarkdownPath,
+	workspacePath WorkspaceSourcePath,
+	slug Slug,
+	assetName AssetName,
+) semanticWrapperBehavior {
+	return semanticWrapperBehavior{
+		VersionState:            observePageVersionCheckState(version),
+		RouteMarkdownPagePath:   route.MarkdownPagePath(),
+		RouteWorkspacePagePath:  route.WorkspaceSourcePath(NodeKindPage),
+		RouteWorkspaceIndexPath: route.WorkspaceSourcePath(NodeKindSection),
+		MarkdownRoutePath:       markdownPath.RoutePath(),
+		MarkdownSourceDir:       markdownPath.SourceDir(),
+		WorkspaceSourceDir:      workspacePath.Dir(),
+		SlugRoutePath:           slug.RoutePath(),
+		SlugKey:                 slug.SlugKey(),
+		AssetClean:              assetName.Clean(),
+	}
+}
+
+func matchSemanticWrapperBehavior(expected semanticWrapperBehavior) types.GomegaMatcher {
+	return gstruct.MatchAllFields(gstruct.Fields{
+		"VersionState":            Equal(expected.VersionState),
+		"RouteMarkdownPagePath":   Equal(expected.RouteMarkdownPagePath),
+		"RouteWorkspacePagePath":  Equal(expected.RouteWorkspacePagePath),
+		"RouteWorkspaceIndexPath": Equal(expected.RouteWorkspaceIndexPath),
+		"MarkdownRoutePath":       Equal(expected.MarkdownRoutePath),
+		"MarkdownSourceDir":       Equal(expected.MarkdownSourceDir),
+		"WorkspaceSourceDir":      Equal(expected.WorkspaceSourceDir),
+		"SlugRoutePath":           Equal(expected.SlugRoutePath),
+		"SlugKey":                 Equal(expected.SlugKey),
+		"AssetClean":              Equal(expected.AssetClean),
+	})
 }
 
 type treeDomainErrorContract struct {
@@ -153,13 +193,29 @@ var _ = ginkgo.Describe("semantic page value wrappers", ginkgo.Label("unit"), fu
 
 	})
 
-	ginkgo.It("renders semantic wrapper strings without changing their domain values", func() {
-		Expect(newFixturePageVersion("v2")).To(matchSemanticStringRendering[PageVersion]("v2"))
-		Expect(newFixtureRoutePath("docs/guide")).To(matchSemanticStringRendering[RoutePath]("docs/guide"))
-		Expect(newFixtureMarkdownPath("docs/guide.md")).To(matchSemanticStringRendering[MarkdownPath]("docs/guide.md"))
-		Expect(newFixtureWorkspaceSourcePath("docs/guide.md")).To(matchSemanticStringRendering[WorkspaceSourcePath]("docs/guide.md"))
-		Expect(newFixtureSlug("guide")).To(matchSemanticStringRendering[Slug]("guide"))
-		Expect(newFixtureAssetName("logo.png")).To(matchSemanticStringRendering[AssetName]("logo.png"))
+	ginkgo.It("exposes semantic wrapper behavior through typed path and asset operations", func() {
+		route := newFixtureRoutePath("docs/guide")
+		assetName := newFixtureAssetName(" logo.png ")
+
+		Expect(observeSemanticWrapperBehavior(
+			newFixturePageVersion("v2"),
+			route,
+			newFixtureMarkdownPath("docs/guide.md"),
+			newFixtureWorkspaceSourcePath("docs/guide.md"),
+			newFixtureSlug("guide"),
+			assetName,
+		)).To(matchSemanticWrapperBehavior(semanticWrapperBehavior{
+			VersionState:            pageVersionChecked,
+			RouteMarkdownPagePath:   newFixtureMarkdownPath("docs/guide.md"),
+			RouteWorkspacePagePath:  newFixtureWorkspaceSourcePath("docs/guide.md"),
+			RouteWorkspaceIndexPath: newFixtureWorkspaceSourcePath("docs/guide"),
+			MarkdownRoutePath:       route,
+			MarkdownSourceDir:       newFixtureMarkdownPath("docs"),
+			WorkspaceSourceDir:      newFixtureWorkspaceSourcePath("docs"),
+			SlugRoutePath:           newFixtureRoutePath("guide"),
+			SlugKey:                 newFixtureSlug("guide").SlugKey(),
+			AssetClean:              newFixtureAssetName("logo.png"),
+		}))
 	})
 })
 
