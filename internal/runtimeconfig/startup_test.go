@@ -28,6 +28,7 @@ func matchRuntimeConfigUsageError() types.GomegaMatcher {
 	return WithTransform(func(err error) ConfigUsageError {
 		var usage ConfigUsageError
 		_ = errors.As(err, &usage)
+		_ = usage.Error()
 		return usage
 	}, testmatchers.HaveStructuredError(errCodeRuntimeConfigUsage, sharederrors.MessageIDForCode(errCodeRuntimeConfigUsage)))
 }
@@ -42,18 +43,103 @@ func matchConfigFileError(reason ConfigFileErrorReason, key string) types.Gomega
 	return WithTransform(func(err error) ConfigFileError {
 		var configErr ConfigFileError
 		_ = errors.As(err, &configErr)
+		_ = configErr.Error()
 		return configErr
 	}, gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+func matchConfigFileErrorContract(reason ConfigFileErrorReason, source string, path string, key string, cause error) types.GomegaMatcher {
+	fields := gstruct.Fields{
+		"Reason":    Equal(reason),
+		"Source":    Equal(source),
+		"Path":      Equal(path),
+		"Key":       Equal(key),
+		"Unwrapped": BeNil(),
+	}
+	if cause != nil {
+		fields["Err"] = MatchError(cause)
+		fields["Unwrapped"] = MatchError(cause)
+	}
+	return WithTransform(func(err error) configFileErrorObservation {
+		var configErr ConfigFileError
+		_ = errors.As(err, &configErr)
+		_ = configErr.Error()
+		return configFileErrorObservation{
+			Reason:    configErr.Reason,
+			Source:    configErr.Source,
+			Path:      configErr.Path,
+			Key:       configErr.Key,
+			Err:       configErr.Err,
+			Unwrapped: errors.Unwrap(configErr),
+		}
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, fields))
+}
+
+type configFileErrorObservation struct {
+	Reason    ConfigFileErrorReason
+	Source    string
+	Path      string
+	Key       string
+	Err       error
+	Unwrapped error
 }
 
 func matchDaemonServiceConfigMissing(path string) types.GomegaMatcher {
 	return WithTransform(func(err error) DaemonServiceConfigMissingError {
 		var missing DaemonServiceConfigMissingError
 		_ = errors.As(err, &missing)
+		_ = missing.Error()
 		return missing
 	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Path": Equal(path),
 		"Err":  MatchError(os.ErrNotExist),
+	}))
+}
+
+func matchDaemonServiceConfigMissingContract(path string, cause error) types.GomegaMatcher {
+	return WithTransform(func(err error) daemonServiceConfigMissingObservation {
+		var missing DaemonServiceConfigMissingError
+		_ = errors.As(err, &missing)
+		_ = missing.Error()
+		return daemonServiceConfigMissingObservation{
+			Path:      missing.Path,
+			Err:       missing.Err,
+			Unwrapped: errors.Unwrap(missing),
+		}
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Path":      Equal(path),
+		"Err":       MatchError(cause),
+		"Unwrapped": MatchError(cause),
+	}))
+}
+
+type daemonServiceConfigMissingObservation struct {
+	Path      string
+	Err       error
+	Unwrapped error
+}
+
+func matchConfigFlagMix(flag string) types.GomegaMatcher {
+	return WithTransform(func(err error) ConfigFlagMixError {
+		var mixErr ConfigFlagMixError
+		_ = errors.As(err, &mixErr)
+		_ = mixErr.Error()
+		return mixErr
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Flag": Equal(flag),
+	}))
+}
+
+func matchConfigUsageReason(reason ConfigUsageReason) types.GomegaMatcher {
+	return WithTransform(func(err error) ConfigUsageError {
+		var usage ConfigUsageError
+		_ = errors.As(err, &usage)
+		_ = usage.Error()
+		return usage
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Code":      Equal(errCodeRuntimeConfigUsage),
+		"MessageID": Equal(sharederrors.MessageIDForCode(errCodeRuntimeConfigUsage)),
+		"Reason":    Equal(reason),
 	}))
 }
 
@@ -101,6 +187,25 @@ func classifyDaemonInvocation(args []string) daemonInvocationClassification {
 }
 
 var _ = Describe("startup config validation", Label("unit"), func() {
+	It("exposes typed startup error contracts for command callers", func() {
+		parseErr := errors.New("yaml parser rejected the document")
+		flagErr := errors.New("flag parser rejected the value")
+		missingErr := errors.New("default config file is absent")
+
+		Expect(ConfigFlagMixError{Flag: "--port"}).To(matchConfigFlagMix("--port"))
+		Expect(newConfigUsageError(ConfigUsageReasonConfigPathRequired, "--config requires a path")).To(matchConfigUsageReason(ConfigUsageReasonConfigPathRequired))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonRead, Source: "daemon config", Path: "/tmp/leafwiki.yml", Err: parseErr}).To(matchConfigFileErrorContract(ConfigFileErrorReasonRead, "daemon config", "/tmp/leafwiki.yml", "", parseErr))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonParse, Source: "daemon config", Path: "/tmp/leafwiki.yml", Err: parseErr}).To(matchConfigFileErrorContract(ConfigFileErrorReasonParse, "daemon config", "/tmp/leafwiki.yml", "", parseErr))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonRootMapping, Source: "daemon config"}).To(matchConfigFileErrorContract(ConfigFileErrorReasonRootMapping, "daemon config", "", "", nil))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonScalarKey, Source: "daemon config"}).To(matchConfigFileErrorContract(ConfigFileErrorReasonScalarKey, "daemon config", "", "", nil))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonDuplicateKey, Source: "daemon config", Key: "host"}).To(matchConfigFileErrorContract(ConfigFileErrorReasonDuplicateKey, "daemon config", "", "host", nil))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonUnknownKey, Source: "daemon config", Key: "host"}).To(matchConfigFileErrorContract(ConfigFileErrorReasonUnknownKey, "daemon config", "", "host", nil))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonScalarValue, Source: "daemon config", Key: "host"}).To(matchConfigFileErrorContract(ConfigFileErrorReasonScalarValue, "daemon config", "", "host", nil))
+		Expect(ConfigFileError{Reason: ConfigFileErrorReasonInvalidFlagValue, Source: "daemon config", Key: "port", Err: flagErr}).To(matchConfigFileErrorContract(ConfigFileErrorReasonInvalidFlagValue, "daemon config", "", "port", flagErr))
+		Expect(ConfigFileError{Reason: "future_reason"}).To(matchConfigFileErrorContract("future_reason", "", "", "", nil))
+		Expect(DaemonServiceConfigMissingError{Path: "/tmp/leafwiki.yml", Err: missingErr}).To(matchDaemonServiceConfigMissingContract("/tmp/leafwiki.yml", missingErr))
+	})
+
 	DescribeTable("parses raw flag names",
 		func(arg string, wantName string, wantInline bool, wantOK bool) {
 			name, inline, ok := RawFlagName(arg)
@@ -258,11 +363,11 @@ var _ = Describe("daemon service startup config", Label("unit"), func() {
 		setRuntimeConfigEnv("HOME", home)
 
 		dataDir, err := DefaultDaemonServiceDataDir()
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(dataDir).To(Equal(filepath.Join(home, ".leafwiki")))
 
 		configPath, err := DefaultDaemonServiceConfigPath()
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(configPath).To(Equal(filepath.Join(home, ".leafwiki", "leafwiki.yml")))
 	})
 
@@ -434,7 +539,7 @@ func tempRuntimeConfigDir() string {
 	GinkgoHelper()
 
 	path, err := os.MkdirTemp("", "leafwiki-runtimeconfig-*")
-	Expect(err).NotTo(HaveOccurred())
+	Expect(err).To(Succeed())
 	DeferCleanup(os.RemoveAll, path)
 	return path
 }

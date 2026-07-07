@@ -20,6 +20,7 @@ func matchMCPTransportError(reason MCPTransportErrorReason) types.GomegaMatcher 
 	return WithTransform(func(err error) MCPTransportError {
 		var transportErr MCPTransportError
 		_ = errors.As(err, &transportErr)
+		_ = transportErr.Error()
 		return transportErr
 	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Reason": Equal(reason),
@@ -30,7 +31,7 @@ var _ = Describe("MCP transport parsing", Label("unit"), func() {
 	It("enables HTTP and stdio transports from a comma-separated runtime setting", func() {
 		got, err := ParseMCPTransports("http,stdio")
 
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(got).To(matchMCPTransports(true, true))
 	})
 })
@@ -61,7 +62,7 @@ var _ = DescribeTable("MCP transport parsing accepts empty, single, and mixed ru
 	func(tc validMCPTransportCase) {
 		got, err := ParseMCPTransports(tc.raw)
 
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(got).To(Equal(tc.want))
 	},
 	Entry("empty defaults to none", validMCPTransportCase{raw: "", want: MCPTransports{}}),
