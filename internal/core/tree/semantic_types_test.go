@@ -1,6 +1,7 @@
 package tree
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/perber/wiki/internal/core/identity"
@@ -35,23 +36,20 @@ type semanticStringObservation struct {
 	State semanticStringState
 }
 
-func observeNodeKindParse(raw string) nodeKindParseObservation {
+func observeNodeKindValueParse(kind NodeKind) nodeKindParseObservation {
+	encoded, err := json.Marshal(kind)
+	if err != nil {
+		return nodeKindParseObservation{State: nodeKindRejected}
+	}
+	var raw string
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		return nodeKindParseObservation{State: nodeKindRejected}
+	}
 	kind, ok := ParseNodeKind(raw)
 	if !ok {
 		return nodeKindParseObservation{State: nodeKindRejected}
 	}
 	return nodeKindParseObservation{Kind: kind, State: nodeKindRecognized}
-}
-
-func observeNodeKindValueParse(kind NodeKind) nodeKindParseObservation {
-	return observeNodeKindParse(string(kind))
-}
-
-func matchNodeKindParse(kind NodeKind, state nodeKindParseState) types.GomegaMatcher {
-	return WithTransform(observeNodeKindParse, gstruct.MatchAllFields(gstruct.Fields{
-		"Kind":  Equal(kind),
-		"State": Equal(state),
-	}))
 }
 
 func matchNodeKindValueParse(kind NodeKind, state nodeKindParseState) types.GomegaMatcher {
@@ -167,15 +165,17 @@ var _ = ginkgo.Describe("semantic page value wrappers", ginkgo.Label("unit"), fu
 
 var _ = ginkgo.Describe("node kind parsing", ginkgo.Label("unit"), func() {
 	ginkgo.It("accepts known node kinds and rejects unknown ones", func() {
+		unknownKind := treeNodeKind(treemigration.NodeKindUnknown)
+
 		Expect(NodeKindPage).To(matchNodeKindValueParse(NodeKindPage, nodeKindRecognized))
 		Expect(NodeKindSection).To(matchNodeKindValueParse(NodeKindSection, nodeKindRecognized))
-		Expect(newFixtureNodeKind("archive")).To(matchNodeKindValueParse("", nodeKindRejected))
+		Expect(unknownKind).To(matchNodeKindValueParse(unknownKind, nodeKindRejected))
 	})
 
 	ginkgo.It("maps tree and migration node kind boundaries conservatively", func() {
 		Expect(migrationNodeKind(NodeKindPage)).To(Equal(treemigration.NodeKindPage))
 		Expect(migrationNodeKind(NodeKindSection)).To(Equal(treemigration.NodeKindSection))
-		Expect(migrationNodeKind(newFixtureNodeKind("archive"))).To(Equal(treemigration.NodeKindUnknown))
+		Expect(migrationNodeKind(treeNodeKind(treemigration.NodeKindUnknown))).To(Equal(treemigration.NodeKindUnknown))
 
 		Expect(treeNodeKind(treemigration.NodeKindPage)).To(Equal(NodeKindPage))
 		Expect(treeNodeKind(treemigration.NodeKindSection)).To(Equal(NodeKindSection))

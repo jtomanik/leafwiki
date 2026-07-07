@@ -113,25 +113,6 @@ func matchAuthUser(expected authUserContract) types.GomegaMatcher {
 	}))
 }
 
-func matchAPIKey(expected apiKeyContract) types.GomegaMatcher {
-	return WithTransform(func(key *APIKey) apiKeyContract {
-		if key == nil {
-			return apiKeyContract{}
-		}
-		return apiKeyContract{
-			UserID:          key.UserID,
-			Name:            key.Name,
-			Scopes:          key.Scopes,
-			CreatedByUserID: key.CreatedByUserID,
-		}
-	}, gstruct.MatchAllFields(gstruct.Fields{
-		"UserID":          Equal(expected.UserID),
-		"Name":            Equal(expected.Name),
-		"Scopes":          ConsistOf(expected.Scopes),
-		"CreatedByUserID": Equal(expected.CreatedByUserID),
-	}))
-}
-
 func apiKeyCreationFields(result *APIKeyCreateResult) apiKeyCreationContract {
 	if result == nil || result.Key == nil {
 		return apiKeyCreationContract{}

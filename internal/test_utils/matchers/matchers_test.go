@@ -21,6 +21,8 @@ import (
 var (
 	testErrorCode = newFixtureErrorCode("page_not_found")
 	testMessageID = newFixtureMessageID("errors.page.not_found")
+	zeroErrorCode sharederrors.ErrorCode
+	zeroMessageID sharederrors.MessageID
 )
 
 const (
@@ -38,8 +40,8 @@ const (
 
 type structuredErrorObservation struct {
 	State     matcherObservationState
-	Code      sharederrors.ErrorCode
-	MessageID sharederrors.MessageID
+	Code      string
+	MessageID string
 }
 
 type matcherAttemptObservation struct {
@@ -106,16 +108,16 @@ func observeStructuredError(actual any) structuredErrorObservation {
 	}
 	return structuredErrorObservation{
 		State:     matcherObserved,
-		Code:      newFixtureErrorCode(data.Code),
-		MessageID: newFixtureMessageID(data.MessageID),
+		Code:      data.Code,
+		MessageID: data.MessageID,
 	}
 }
 
 func matchStructuredErrorExtraction(state matcherObservationState, code sharederrors.ErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
 	return WithTransform(observeStructuredError, gstruct.MatchAllFields(gstruct.Fields{
 		"State":     Equal(state),
-		"Code":      Equal(code),
-		"MessageID": Equal(messageID),
+		"Code":      Equal(errorCodeWireValue(code)),
+		"MessageID": Equal(messageIDWireValue(messageID)),
 	}))
 }
 
@@ -126,16 +128,16 @@ func observeStructuredLocalizedError(actual any) structuredErrorObservation {
 	}
 	return structuredErrorObservation{
 		State:     matcherObserved,
-		Code:      newFixtureErrorCode(data.Code),
-		MessageID: newFixtureMessageID(data.MessageID),
+		Code:      data.Code,
+		MessageID: data.MessageID,
 	}
 }
 
 func matchStructuredLocalizedErrorExtraction(state matcherObservationState, code sharederrors.ErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
 	return WithTransform(observeStructuredLocalizedError, gstruct.MatchAllFields(gstruct.Fields{
 		"State":     Equal(state),
-		"Code":      Equal(code),
-		"MessageID": Equal(messageID),
+		"Code":      Equal(errorCodeWireValue(code)),
+		"MessageID": Equal(messageIDWireValue(messageID)),
 	}))
 }
 
@@ -360,17 +362,17 @@ var _ = ginkgo.Describe("semantic test matchers", ginkgo.Label("unit"), func() {
 		localized := sharederrors.NewLocalizedErrorFromCode(testErrorCode, errors.New("store unavailable"))
 		messageIDOnly := map[string]any{"messageID": testMessageID}
 
-		Expect(nil).To(matchStructuredErrorExtraction(matcherRejected, newFixtureErrorCode(""), newFixtureMessageID("")))
-		Expect((*sharederrors.LocalizedErrorDetail)(nil)).To(matchStructuredErrorExtraction(matcherRejected, newFixtureErrorCode(""), newFixtureMessageID("")))
-		Expect((*sharederrors.LocalizedError)(nil)).To(matchStructuredLocalizedErrorExtraction(matcherRejected, newFixtureErrorCode(""), newFixtureMessageID("")))
-		Expect(struct{}{}).To(matchStructuredLocalizedErrorExtraction(matcherRejected, newFixtureErrorCode(""), newFixtureMessageID("")))
-		Expect(map[string]string{}).To(matchStructuredErrorExtraction(matcherRejected, newFixtureErrorCode(""), newFixtureMessageID("")))
-		Expect([]string{"not", "an", "error"}).To(matchStructuredErrorExtraction(matcherRejected, newFixtureErrorCode(""), newFixtureMessageID("")))
+		Expect(nil).To(matchStructuredErrorExtraction(matcherRejected, zeroErrorCode, zeroMessageID))
+		Expect((*sharederrors.LocalizedErrorDetail)(nil)).To(matchStructuredErrorExtraction(matcherRejected, zeroErrorCode, zeroMessageID))
+		Expect((*sharederrors.LocalizedError)(nil)).To(matchStructuredLocalizedErrorExtraction(matcherRejected, zeroErrorCode, zeroMessageID))
+		Expect(struct{}{}).To(matchStructuredLocalizedErrorExtraction(matcherRejected, zeroErrorCode, zeroMessageID))
+		Expect(map[string]string{}).To(matchStructuredErrorExtraction(matcherRejected, zeroErrorCode, zeroMessageID))
+		Expect([]string{"not", "an", "error"}).To(matchStructuredErrorExtraction(matcherRejected, zeroErrorCode, zeroMessageID))
 		Expect(&detailPtr).To(matchStructuredErrorExtraction(matcherObserved, testErrorCode, testMessageID))
 		Expect(&detail).To(matchStructuredErrorExtraction(matcherObserved, testErrorCode, testMessageID))
 		Expect(localized).To(matchStructuredLocalizedErrorExtraction(matcherObserved, testErrorCode, testMessageID))
 		Expect(*localized).To(matchStructuredErrorExtraction(matcherObserved, testErrorCode, testMessageID))
-		Expect(messageIDOnly).To(matchStructuredErrorExtraction(matcherObserved, newFixtureErrorCode(""), testMessageID))
+		Expect(messageIDOnly).To(matchStructuredErrorExtraction(matcherObserved, zeroErrorCode, testMessageID))
 		Expect(detail).To(matchReflectDereference(matcherObserved, reflect.Struct))
 		Expect(nil).To(matchReflectDereference(matcherRejected, reflect.Invalid))
 	})
