@@ -122,7 +122,7 @@ var _ = Describe("required authentication middleware", Label("integration"), fun
 		router.ServeHTTP(w2, req)
 
 		Expect(w2).To(HaveHTTPStatus(http.StatusOK))
-		Expect(w2.Body.String()).To(MatchJSON(`{"role":"editor","username":"public-editor"}`))
+		Expect(w2).To(HaveHTTPBody(MatchJSON(`{"role":"editor","username":"public-editor"}`)))
 	})
 
 	It("returns a structured missing-user error when authentication is disabled without an injected user", func() {
@@ -244,7 +244,7 @@ var _ = Describe("required authentication middleware", Label("integration"), fun
 		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		Expect(w.Body.String()).To(MatchJSON(`{"role":"admin","username":"admin"}`))
+		Expect(w).To(HaveHTTPBody(MatchJSON(`{"role":"admin","username":"admin"}`)))
 	})
 
 	It("returns a structured missing-token error when authentication is enabled without a token", func() {

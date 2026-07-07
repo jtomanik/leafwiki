@@ -66,7 +66,7 @@ var _ = Describe("optional authentication middleware", Label("integration"), fun
 		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		Expect(w.Body.String()).To(MatchJSON(`{"username":"admin"}`))
+		Expect(w).To(HaveHTTPBody(MatchJSON(`{"username":"admin"}`)))
 	})
 
 	It("passes through invalid tokens without adding a user context", func() {
@@ -134,6 +134,6 @@ var _ = Describe("optional authentication middleware", Label("integration"), fun
 		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		Expect(w.Body.String()).To(MatchJSON(`{"username":"proxy"}`))
+		Expect(w).To(HaveHTTPBody(MatchJSON(`{"username":"proxy"}`)))
 	})
 })

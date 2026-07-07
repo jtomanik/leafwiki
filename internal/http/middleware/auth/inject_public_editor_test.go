@@ -72,9 +72,9 @@ var _ = Describe("public editor injection", Label("integration"), func() {
 
 			if tc.expectUser {
 				expectedBody := `{"user":{"role":"` + tc.expectRole + `","username":"` + tc.expectUsername + `"}}`
-				Expect(w.Body.String()).To(MatchJSON(expectedBody))
+				Expect(w).To(HaveHTTPBody(MatchJSON(expectedBody)))
 			} else {
-				Expect(w.Body.String()).To(MatchJSON(`{"user":null}`))
+				Expect(w).To(HaveHTTPBody(MatchJSON(`{"user":null}`)))
 			}
 		},
 		Entry("injects a public editor when auth is disabled and no user exists", injectPublicEditorScenario{
@@ -137,7 +137,7 @@ var _ = Describe("public editor injection", Label("integration"), func() {
 		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		Expect(w.Body.String()).To(MatchJSON(`{"id":"public-editor","role":"editor","username":"public-editor"}`))
+		Expect(w).To(HaveHTTPBody(MatchJSON(`{"id":"public-editor","role":"editor","username":"public-editor"}`)))
 
 	})
 

@@ -175,7 +175,7 @@ var _ = Describe("reverse proxy user injection", Label("integration"), func() {
 		router.ServeHTTP(w, req)
 
 		Expect(w).To(HaveHTTPStatus(http.StatusOK))
-		Expect(w.Body.String()).To(MatchJSON(`{"username":"admin"}`))
+		Expect(w).To(HaveHTTPBody(MatchJSON(`{"username":"admin"}`)))
 		Expect(remoteSource).To(Equal(remoteUserSourcePresent))
 	})
 
