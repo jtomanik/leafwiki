@@ -108,7 +108,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 
 		dataDir := filepath.Join(httpTestTempDir(), "data")
 		rootDir := filepath.Join(httpTestTempDir(), "content")
-		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
@@ -222,7 +222,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			Expect(err).NotTo(HaveOccurred(), "write child: %v", err)
 		}
 
-		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
@@ -336,7 +336,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		write("docs/sync.md", "---\nleafwiki_id: sync-page\nleafwiki_title: Sync Page\n---\n# Sync Page\n")
 		write("docs/sync/index.md", "---\nleafwiki_id: sync-section\nleafwiki_title: Sync Section\n---\n# Sync Section\n")
 
-		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
@@ -349,7 +349,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			Expect(err).NotTo(HaveOccurred(), "parse page response: %v", err)
 		}
 
-		Expect(pageResp).To(SatisfyAll(HaveKeyWithValue("id", "sync-page"), HaveKeyWithValue("kind", "page")), "page response = %#v, want sync-page page", pageResp)
+		Expect(pageResp).To(matchAPIPageMapIdentity(newFixturePageID("sync-page"), tree.NodeKindPage), "page response = %#v, want sync-page page", pageResp)
 
 		pageMarkdownPathRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/sync.md", nil)
 		Expect(pageMarkdownPathRec).To(HaveHTTPStatus(http.StatusOK), "Expected page markdown-path status 200, got %d - %s", pageMarkdownPathRec.Code, pageMarkdownPathRec.Body.String())
@@ -360,7 +360,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			Expect(err).NotTo(HaveOccurred(), "parse page markdown-path response: %v", err)
 		}
 
-		Expect(pageMarkdownPathResp).To(SatisfyAll(HaveKeyWithValue("id", "sync-page"), HaveKeyWithValue("kind", "page")), "page markdown-path response = %#v, want sync-page page", pageMarkdownPathResp)
+		Expect(pageMarkdownPathResp).To(matchAPIPageMapIdentity(newFixturePageID("sync-page"), tree.NodeKindPage), "page markdown-path response = %#v, want sync-page page", pageMarkdownPathResp)
 
 		sectionRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/sync&kind=section", nil)
 		Expect(sectionRec).To(HaveHTTPStatus(http.StatusOK), "Expected section status 200, got %d - %s", sectionRec.Code, sectionRec.Body.String())

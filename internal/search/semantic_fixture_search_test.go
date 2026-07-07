@@ -7,3 +7,7 @@ import (
 func newFixturePageID[T ~string](raw T) tree.PageID {
 	return tree.NewPageIDUnchecked(raw)
 }
+
+func newFixtureAssetName[T ~string](raw T) tree.AssetName {
+	return tree.AssetNameFromString(raw)
+}

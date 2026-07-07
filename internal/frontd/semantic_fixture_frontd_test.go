@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
@@ -21,4 +22,21 @@ func matchFrontdActorSubjectID(subjectID string) types.GomegaMatcher {
 	return WithTransform(func(ctx projectdaemon.ActorContext) string {
 		return ctx.SubjectID()
 	}, Equal(subjectID))
+}
+
+type frontdActorIdentity struct {
+	SubjectID  string
+	AuthMethod string
+}
+
+func matchFrontdActorIdentity(subjectID string, authMethod string) types.GomegaMatcher {
+	return WithTransform(func(ctx projectdaemon.ActorContext) frontdActorIdentity {
+		return frontdActorIdentity{
+			SubjectID:  ctx.SubjectID(),
+			AuthMethod: ctx.AuthMethod,
+		}
+	}, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"SubjectID":  Equal(subjectID),
+		"AuthMethod": Equal(authMethod),
+	}))
 }

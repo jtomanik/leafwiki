@@ -33,7 +33,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d: %s", rec.Code, rec.Body.String())
-		Expect(logs.String()).NotTo(ContainSubstring("http request"), "request log was written despite DisableRequestLog: %s", logs.String())
+		Expect(jsonLogEntries(logs.String())).NotTo(ContainElement(matchHTTPRequestLogEntry(http.MethodGet, "/api/health", http.StatusOK)), "request log was written despite DisableRequestLog: %s", logs.String())
 
 	})
 })
@@ -57,14 +57,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK), "expected 200, got %d: %s", rec.Code, rec.Body.String())
 
 		entries := jsonLogEntries(logs.String())
-		Expect(entries).To(ContainElement(SatisfyAll(
-			HaveKeyWithValue("msg", "http request"),
-			HaveKeyWithValue("method", http.MethodGet),
-			HaveKeyWithValue("path", "/api/health"),
-			HaveKeyWithValue("status", float64(http.StatusOK)),
-			HaveKey("latency"),
-			HaveKey("ip"),
-		)), "request log entries = %#v", entries)
+		Expect(entries).To(ContainElement(matchHTTPRequestLogEntry(http.MethodGet, "/api/health", http.StatusOK)), "request log entries = %#v", entries)
 
 	})
 })
@@ -84,7 +77,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError), "expected 500, got %d: %s", rec.Code, rec.Body.String())
-		Expect(logs.String()).To(ContainSubstring("panic route"), "recovery log did not include panic text: %s", logs.String())
+		Expect(jsonLogEntries(logs.String())).To(ContainElement(matchHTTPRecoveryLogEntry()), "recovery log entries = %s", logs.String())
 
 	})
 })

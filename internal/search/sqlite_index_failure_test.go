@@ -17,7 +17,7 @@ var _ = ginkgo.Describe("SQLite search index database failure behavior", func() 
 			_, err := db.Exec(`DROP TABLE pages`)
 			return err
 		})).To(Succeed())
-		Expect(index.IndexPage("docs/delete-error", "docs/delete-error.md", "delete-error", "Delete Error", tree.NodeKindPage, "body")).To(matchSQLitePrimaryError())
+		Expect(index.IndexPage("docs/delete-error", "docs/delete-error.md", newFixturePageID("delete-error"), "Delete Error", tree.NodeKindPage, "body")).To(matchSQLitePrimaryError())
 
 		insertErrorIndex := newSQLiteIndexForSpec()
 		Expect(insertErrorIndex.withDB(func(db *sql.DB) error {
@@ -27,7 +27,7 @@ var _ = ginkgo.Describe("SQLite search index database failure behavior", func() 
 			_, err := db.Exec(`CREATE TABLE pages (pageID TEXT PRIMARY KEY)`)
 			return err
 		})).To(Succeed())
-		Expect(insertErrorIndex.IndexPage("docs/insert-error", "docs/insert-error.md", "insert-error", "Insert Error", tree.NodeKindPage, "body")).To(matchSQLitePrimaryError())
+		Expect(insertErrorIndex.IndexPage("docs/insert-error", "docs/insert-error.md", newFixturePageID("insert-error"), "Insert Error", tree.NodeKindPage, "body")).To(matchSQLitePrimaryError())
 
 		rows, err := index.RemovePageByFilePath("docs/delete-error.md")
 		Expect(err).To(matchSQLitePrimaryError())
@@ -36,7 +36,7 @@ var _ = ginkgo.Describe("SQLite search index database failure behavior", func() 
 
 	ginkgo.It("returns rows-affected errors while removing pages by filepath", ginkgo.Label("integration"), func() {
 		index := newSQLiteIndexForSpec()
-		Expect(index.IndexPage("docs/delete-error", "docs/delete-error.md", "delete-error", "Delete Error", tree.NodeKindPage, "body")).To(Succeed())
+		Expect(index.IndexPage("docs/delete-error", "docs/delete-error.md", newFixturePageID("delete-error"), "Delete Error", tree.NodeKindPage, "body")).To(Succeed())
 		previousRowsAffected := searchRowsAffected
 		rowsAffectedErr := errors.New("rows affected failed")
 		searchRowsAffected = func(sql.Result) (int64, error) {
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("SQLite search index database failure behavior", func() 
 			return err
 		})).To(Succeed())
 
-		_, err = queryErrorIndex.Search("", []tree.PageID{"alpha"}, 0, 10)
+		_, err = queryErrorIndex.Search("", []tree.PageID{newFixturePageID("alpha")}, 0, 10)
 		Expect(err).To(matchSQLitePrimaryError())
 	})
 
@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("SQLite search index database failure behavior", func() 
 			return err
 		})).To(Succeed())
 
-		_, err := index.Search("", []tree.PageID{"42"}, 0, 10)
+		_, err := index.Search("", []tree.PageID{newFixturePageID("42")}, 0, 10)
 		Expect(err).To(MatchError(tree.ErrScanPageID))
 
 		pageIDIndex := newSQLiteIndexForSpec()
@@ -107,13 +107,13 @@ var _ = ginkgo.Describe("SQLite search index database failure behavior", func() 
 			return err
 		})).To(Succeed())
 
-		_, err = pageIDIndex.SearchPageIDs("", []tree.PageID{"42"})
+		_, err = pageIDIndex.SearchPageIDs("", []tree.PageID{newFixturePageID("42")})
 		Expect(err).To(MatchError(tree.ErrScanPageID))
 	})
 
 	ginkgo.It("logs row close errors from search readers", ginkgo.Label("integration"), func() {
 		index := newSQLiteIndexForSpec()
-		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", "alpha", "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
+		Expect(index.IndexPage("docs/alpha", "docs/alpha.md", newFixturePageID("alpha"), "Alpha", tree.NodeKindPage, "shared token")).To(Succeed())
 		previousCloseRows := closeSearchRows
 		closeRowsErr := errors.New("close rows failed")
 		closeSearchRows = func(rows *sql.Rows) error {
@@ -130,6 +130,6 @@ var _ = ginkgo.Describe("SQLite search index database failure behavior", func() 
 
 		pageIDs, err := index.SearchPageIDs("shared", nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(pageIDs).To(Equal([]tree.PageID{"alpha"}))
+		Expect(pageIDs).To(Equal([]tree.PageID{newFixturePageID("alpha")}))
 	})
 })

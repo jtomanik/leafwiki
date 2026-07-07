@@ -30,7 +30,7 @@ var _ = Describe("public editor injection", Label("integration"), func() {
 			if tc.existingUser {
 				router.Use(func(c *gin.Context) {
 					c.Set("user", &auth.User{
-						ID:       "existing-user-id",
+						ID:       auth.UserIDFromString("existing-user-id"),
 						Username: "existing-user",
 						Role:     auth.RoleAdmin,
 					})

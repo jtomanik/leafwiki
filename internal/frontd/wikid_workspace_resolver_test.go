@@ -165,7 +165,7 @@ var _ = Describe("wikid workspace resolver request construction", Label("unit"),
 
 		resolver, err := NewWikidWorkspaceResolver("http://127.0.0.1:1", "token")
 		Expect(err).To(Succeed())
-		_, err = resolver(nil, "home")
+		_, err = resolver(nil, mustDecodeWorkspaceID("home"))
 		Expect(err).To(MatchError(requestErr))
 
 		singleResolver, err := NewWikidSingleWorkspaceResolver("http://127.0.0.1:1", "token")

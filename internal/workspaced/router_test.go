@@ -132,7 +132,7 @@ func authenticatedWorkspacedRouterFactory(w *wiki.Wiki) http.Handler {
 	opts.CustomStylesheet = "custom.css"
 	return NewAuthenticatedRouter(w, opts, PrivateAuthOptions{
 		DaemonToken: "private-token",
-		WorkspaceID: "current",
+		WorkspaceID: mustDecodeWorkspaceID("current"),
 		Now:         func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) },
 	})
 }

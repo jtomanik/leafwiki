@@ -221,19 +221,19 @@ var _ = ginkgo.Describe("project daemon control server", ginkgo.Label("integrati
 	})
 
 	ginkgo.It("exposes structured control error text and status matching", func() {
-		conflictCode := mustDecodeErrorCode("daemon_control_conflict")
-			err := &ControlHTTPError{
-				StatusCode: http.StatusConflict,
-				Code:       conflictCode,
-				MessageID:  sharederrors.MessageIDForCode(conflictCode),
-				Message:    conflictCode.String(),
-			}
+		detail := sharederrors.NewLocalizedErrorDetailFromCode(errCodeDaemonSessionNotFound)
+		err := &ControlHTTPError{
+			StatusCode: http.StatusNotFound,
+			Code:       detail.Code,
+			MessageID:  detail.MessageID,
+			Message:    detail.Message,
+		}
 
-		Expect(err).To(matchControlHTTPError(http.StatusConflict, conflictCode))
-		Expect(err).To(haveControlStatus(http.StatusConflict))
-		Expect(fmt.Errorf("wrapped: %w", err)).To(haveControlStatus(http.StatusConflict))
+		Expect(err).To(matchControlHTTPError(http.StatusNotFound, errCodeDaemonSessionNotFound))
+		Expect(err).To(haveControlStatus(http.StatusNotFound))
+		Expect(fmt.Errorf("wrapped: %w", err)).To(haveControlStatus(http.StatusNotFound))
 		Expect(err).NotTo(haveControlStatus(http.StatusUnauthorized))
-		Expect(errors.New("plain")).NotTo(haveControlStatus(http.StatusConflict))
+		Expect(errors.New("plain")).NotTo(haveControlStatus(http.StatusNotFound))
 		Expect((*ControlHTTPError)(nil).Error()).To(BeEmpty())
 	})
 

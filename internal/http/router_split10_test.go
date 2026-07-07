@@ -56,7 +56,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		write("docs/indexed/README.md", "---\nleafwiki_id: indexed-readme-page\nleafwiki_title: Indexed README\n---\n# Indexed README\n")
 		write("docs/no-readme/index.md", "---\nleafwiki_id: no-readme-section\nleafwiki_title: No README\n---\n# No README\n")
 
-		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
@@ -91,7 +91,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			Expect(err).NotTo(HaveOccurred(), "parse README page response: %v", err)
 		}
 
-		Expect(readmePageResp).To(SatisfyAll(HaveKeyWithValue("id", "indexed-readme-page"), HaveKeyWithValue("kind", "page")), "README page response = %#v, want indexed README page", readmePageResp)
+		Expect(readmePageResp).To(matchAPIPageMapIdentity(newFixturePageID("indexed-readme-page"), tree.NodeKindPage), "README page response = %#v, want indexed README page", readmePageResp)
 
 		inactiveExplicitSectionRec := authenticatedRequest(router, http.MethodGet, "/api/pages/by-path?path=docs/indexed/README.md&kind=section", nil)
 		Expect(inactiveExplicitSectionRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected inactive explicit README section status 404, got %d - %s", inactiveExplicitSectionRec.Code, inactiveExplicitSectionRec.Body.String())
@@ -133,17 +133,17 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		write("docs/README.md", "---\nleafwiki_id: docs-readme\nleafwiki_title: Docs README\n---\n# Docs README\n")
 		write("guides/README.md", "---\nleafwiki_id: guides-section\nleafwiki_title: Guides\n---\n# Guides README\n")
 
-		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: "default", DataDir: dataDir, RootDir: rootDir})
+		w := createWikiTestInstanceWithWorkspace(wiki.Workspace{ID: newFixtureWorkspaceID("default"), DataDir: dataDir, RootDir: rootDir})
 		wrapCloseWithErrorCheck(w.Close)
 		router := createRouterTestInstance(w)
 
 		root := getTreeViaAPI(router)
 		Expect(root.Children).To(ContainElement(matchExplicitContentSectionNode(
-			tree.RoutePath("docs"),
-			tree.MarkdownPath("docs/INDEX.MD"),
+			newFixtureRoutePath("docs"),
+			newFixtureMarkdownPath("docs/INDEX.MD"),
 		)), "docs section missing from tree: %#v", root.Children)
 		Expect(root.Children).To(ContainElement(matchReadmeFallbackSectionNode(
-			tree.RoutePath("guides"),
+			newFixtureRoutePath("guides"),
 		)), "guides section missing from tree: %#v", root.Children)
 
 	})
@@ -218,12 +218,12 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		updateRec := authenticatedRequest(router, http.MethodPut, "/api/pages/"+guide.ID, strings.NewReader(updatePayload))
 		Expect(updateRec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK on update, got %d - %s", updateRec.Code, updateRec.Body.String())
 
-		target := getPermalinkTargetViaAPI(router, apiPageDTOID(guide))
-		Expect(target).To(SatisfyAll(
-			HaveField("ID", guide.ID),
-			HaveField("Slug", "user-guide"),
-			HaveField("Path", "archive/user-guide"),
-			HaveField("Kind", tree.NodeKindPage),
+		target := getPermalinkTargetViaAPI(router, apiPageDTOPathSegment(guide))
+		Expect(target).To(matchAPIPermalinkTarget(
+			apiPageDTOID(guide),
+			newFixtureSlug("user-guide"),
+			newFixtureRoutePath("archive/user-guide"),
+			tree.NodeKindPage,
 		), "permalink target = %#v", target)
 
 	})
@@ -404,7 +404,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		page2 := createPageViaAPI(router, "Page 2", newFixtureSlug("page-2"), nil, pageNodeKind())
 		page3 := createPageViaAPI(router, "Page 3", newFixtureSlug("page-3"), nil, pageNodeKind())
 		welcomePage := getPageByPathViaAPI(router, "welcome-to-leafwiki")
-		deletePageViaAPI(router, apiPageDTOID(welcomePage), welcomePage.Version, false)
+		deletePageViaAPI(router, apiPageDTOPathSegment(welcomePage), welcomePage.Version, false)
 
 		// Sort pages
 		payload := map[string]interface{}{

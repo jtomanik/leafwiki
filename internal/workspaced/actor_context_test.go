@@ -16,7 +16,6 @@ import (
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
-	"github.com/perber/wiki/internal/workspaceid"
 )
 
 var _ = ginkgo.Describe("authenticated workspaced router", func() {
@@ -37,7 +36,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 				MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 			}, PrivateAuthOptions{
 				DaemonToken: "private-token",
-				WorkspaceID: "current",
+				WorkspaceID: mustDecodeWorkspaceID("current"),
 				Now:         func() time.Time { return now },
 			})
 
@@ -65,7 +64,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 		}, PrivateAuthOptions{
 			DaemonToken: "private-token",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			Now:         func() time.Time { return now },
 		})
 
@@ -75,7 +74,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			Subject:     "user:admin",
 			Username:    "admin",
 			Role:        "admin",
-			WorkspaceID: "other",
+			WorkspaceID: mustDecodeWorkspaceID("other"),
 			AuthMethod:  "disabled",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),
@@ -91,7 +90,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			Subject:     "user:admin",
 			Username:    "admin",
 			Role:        "admin",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			AuthMethod:  "disabled",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),
@@ -114,7 +113,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			Subject:     "user:admin",
 			Username:    "admin",
 			Role:        "admin",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			AuthMethod:  "disabled",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),
@@ -122,7 +121,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(err).NotTo(HaveOccurred())
 		router := NewAuthenticatedRouter(w, workspacedRouterOptions(), PrivateAuthOptions{
 			DaemonToken: "",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			Now:         func() time.Time { return now },
 		})
 
@@ -142,7 +141,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			Subject:     "user:admin",
 			Username:    "admin",
 			Role:        "admin",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			AuthMethod:  "disabled",
 			IssuedAt:    now.Add(-10 * time.Minute),
 			ExpiresAt:   now.Add(-time.Minute),
@@ -150,7 +149,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 		Expect(err).NotTo(HaveOccurred())
 		router := NewAuthenticatedRouter(w, workspacedRouterOptions(), PrivateAuthOptions{
 			DaemonToken: "private-token",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			Now:         func() time.Time { return now },
 		})
 
@@ -159,9 +158,9 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 	})
 
 	ginkgo.It("carries workspace IDs as the semantic workspace type", ginkgo.Label("unit"), func() {
-		auth := PrivateAuthOptions{WorkspaceID: workspaceid.WorkspaceID("current")}
+		auth := PrivateAuthOptions{WorkspaceID: mustDecodeWorkspaceID("current")}
 
-		var _ workspaceid.WorkspaceID = auth.WorkspaceID
+		Expect(auth.WorkspaceID).To(Equal(mustDecodeWorkspaceID("current")))
 	})
 
 	ginkgo.It("installs the actor context as the request user for workspace routes", ginkgo.Label("integration"), func() {
@@ -177,7 +176,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 		}, PrivateAuthOptions{
 			DaemonToken: "private-token",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			Now:         func() time.Time { return now },
 		})
 		actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
@@ -187,7 +186,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			Username:    "editor",
 			Email:       "editor@example.com",
 			Role:        "editor",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			AuthMethod:  "cookie",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),
@@ -212,7 +211,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			MaxAssetUploadSizeBytes: assets.DefaultMaxUploadSizeBytes,
 		}, PrivateAuthOptions{
 			DaemonToken: "private-token",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			Now:         func() time.Time { return now },
 		})
 		actor, err := projectdaemon.EncodeActorContext(projectdaemon.ActorContext{
@@ -221,7 +220,7 @@ var _ = ginkgo.Describe("authenticated workspaced router", func() {
 			Subject:     "user:editor-1",
 			Username:    "editor",
 			Role:        "editor",
-			WorkspaceID: "current",
+			WorkspaceID: mustDecodeWorkspaceID("current"),
 			AuthMethod:  "cookie",
 			IssuedAt:    now,
 			ExpiresAt:   now.Add(5 * time.Minute),

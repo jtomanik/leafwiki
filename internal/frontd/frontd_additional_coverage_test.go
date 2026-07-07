@@ -87,7 +87,7 @@ var _ = Describe("frontd MCP proxy behavior", func() {
 
 	It("preserves an existing binding when DELETE has no session header", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
-		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), "alpha")).To(Succeed())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID("alpha"))).To(Succeed())
 		handler := NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
 			Resolve: func(_ *http.Request, workspaceID workspaceid.WorkspaceID) (WorkspaceRoute, error) {

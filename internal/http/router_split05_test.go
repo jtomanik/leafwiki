@@ -19,6 +19,13 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
+type apiRevisionPathSegment string
+
+func apiPageRevisionURLPath(page apiPagePathSegment, revision apiRevisionPathSegment, suffix string) string {
+	GinkgoHelper()
+	return apiPageURLPath(page, "/revisions/"+string(revision)+suffix)
+}
+
 var _ = Describe("HTTP router", Label("integration"), func() {
 	It("restores markdown files from a workspace sync snapshot", func() {
 
@@ -218,7 +225,7 @@ previous content`
 		Expect(revisionsRec).To(HaveHTTPStatus(http.StatusOK), "GET revisions = %d: %s", revisionsRec.Code, revisionsRec.Body.String())
 
 		type revisionListItem struct {
-			ID string `json:"id"`
+			ID apiRevisionPathSegment `json:"id"`
 		}
 		var revisionsResp struct {
 			Revisions []revisionListItem `json:"revisions"`
@@ -249,7 +256,8 @@ previous content`
 			Expect(err).NotTo(HaveOccurred(), "WorkspaceSyncRefresh current: %v", err)
 		}
 
-		snapshotReq := httptest.NewRequest(http.MethodGet, "/api/pages/restore-page/revisions/"+oldRevisionID, nil)
+		restorePage := newFixtureAPIPagePathSegment("restore-page")
+		snapshotReq := httptest.NewRequest(http.MethodGet, apiPageRevisionURLPath(restorePage, oldRevisionID, ""), nil)
 		snapshotRec := httptest.NewRecorder()
 		router.ServeHTTP(snapshotRec, snapshotReq)
 		Expect(snapshotRec).To(HaveHTTPStatus(http.StatusOK), "GET revision snapshot = %d: %s", snapshotRec.Code, snapshotRec.Body.String())
@@ -272,7 +280,7 @@ previous content`
 		configRec := httptest.NewRecorder()
 		router.ServeHTTP(configRec, configReq)
 		csrfToken := configRec.Header().Get("X-CSRF-Token")
-		restoreReq := httptest.NewRequest(http.MethodPost, "/api/pages/restore-page/revisions/"+oldRevisionID+"/restore", nil)
+		restoreReq := httptest.NewRequest(http.MethodPost, apiPageRevisionURLPath(restorePage, oldRevisionID, "/restore"), nil)
 		restoreReq.Header.Set("X-CSRF-Token", csrfToken)
 		for _, cookie := range configRec.Result().Cookies() {
 			restoreReq.AddCookie(cookie)

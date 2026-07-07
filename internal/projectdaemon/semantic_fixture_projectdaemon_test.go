@@ -8,7 +8,6 @@ import (
 	"github.com/onsi/gomega/gstruct"
 	"github.com/onsi/gomega/types"
 	"github.com/perber/wiki/internal/agenthooks"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
@@ -64,16 +63,6 @@ func mustDecodeProviderID(raw string) agenthooks.ProviderID {
 	var provider agenthooks.ProviderID
 	Expect(json.Unmarshal(payload, &provider)).To(Succeed())
 	return provider
-}
-
-func mustDecodeErrorCode(raw string) sharederrors.ErrorCode {
-	ginkgo.GinkgoHelper()
-
-	payload, err := json.Marshal(raw)
-	Expect(err).To(Succeed())
-	var code sharederrors.ErrorCode
-	Expect(json.Unmarshal(payload, &code)).To(Succeed())
-	return code
 }
 
 func matchActorContextIdentity(subject string, role string, authMethod string) types.GomegaMatcher {

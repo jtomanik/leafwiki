@@ -104,10 +104,7 @@ var _ = Describe("frontd proxy routing", Label("integration"), func() {
 		))
 		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: mustDecodeWorkspaceID("current")})
 		Expect(err).To(Succeed())
-		Expect(decoded).To(SatisfyAll(
-			matchFrontdActorSubjectID("admin"),
-			HaveField("AuthMethod", Equal("cookie")),
-		))
+		Expect(decoded).To(matchFrontdActorIdentity("admin", "cookie"))
 	})
 
 	It("strips public credentials and injects private actor context for MCP requests", func() {
@@ -160,10 +157,7 @@ var _ = Describe("frontd proxy routing", Label("integration"), func() {
 		))
 		decoded, err := projectdaemon.DecodeActorContext(seen.ActorContext, projectdaemon.ActorContextValidation{Now: now.Add(time.Minute), WorkspaceID: mustDecodeWorkspaceID("current")})
 		Expect(err).To(Succeed())
-		Expect(decoded).To(SatisfyAll(
-			matchFrontdActorSubjectID("editor-1"),
-			HaveField("AuthMethod", Equal("oauth")),
-		))
+		Expect(decoded).To(matchFrontdActorIdentity("editor-1", "oauth"))
 	})
 
 	It("returns a retryable structured unavailable error when workspaced is down", func() {

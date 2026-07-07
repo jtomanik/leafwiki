@@ -133,10 +133,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 			Expect(err).NotTo(HaveOccurred(), "decode synced page: %v", err)
 		}
 
-		Expect(page).To(SatisfyAll(
-			HaveField("ID", "direct"),
-			HaveField("Title", "Direct"),
-		), "synced page = %#v, want direct page", page)
+		Expect(page).To(matchAPIPageIdentity(newFixturePageID("direct"), "Direct"), "synced page = %#v, want direct page", page)
 
 	})
 })

@@ -157,37 +157,16 @@ type FrontendConfig struct {
 // NewRouter creates the HTTP engine, builds the shared RouterContext, delegates all
 // API and static routes to the provided registrars, and wires up the embedded SPA.
 func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts RouterOptions) *gin.Engine {
-	if opts.MaxAssetUploadSizeBytes <= 0 {
-		opts.MaxAssetUploadSizeBytes = assets.DefaultMaxUploadSizeBytes
-	}
-
-	if Environment == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	} else {
-		gin.SetMode(gin.DebugMode)
-	}
-
-	gin.DefaultWriter = &slogWriter{logger: slog.Default().With("component", "gin")}
-	gin.DefaultErrorWriter = &slogErrorWriter{logger: slog.Default().With("component", "gin")}
+	opts = routerOptionsWithDefaults(opts)
+	configureGinRuntime()
 
 	authCookies := auth_middleware.NewAuthCookies(opts.AllowInsecure, opts.AccessTokenTimeout, opts.RefreshTokenTimeout)
 	csrfCookie := security.NewCSRFCookie(opts.AllowInsecure, 3*24*time.Hour)
 
 	engine := gin.New()
-	if !opts.DisableRequestLog {
-		engine.Use(slogRequestLogger())
-	}
-	engine.Use(gin.RecoveryWithWriter(gin.DefaultErrorWriter))
+	installRouterMiddleware(engine, opts)
 	base := engine.Group(opts.BasePath)
-
-	if opts.HTTPRemoteUser.Enabled {
-		base.Use(auth_middleware.InjectRemoteUser(auth_middleware.RemoteUserConfig{
-			Enabled:        opts.HTTPRemoteUser.Enabled,
-			HeaderName:     opts.HTTPRemoteUser.HeaderName,
-			TrustedProxies: opts.HTTPRemoteUser.TrustedProxies,
-			UserService:    opts.HTTPRemoteUser.UserService,
-		}))
-	}
+	installRemoteUserMiddleware(base, opts.HTTPRemoteUser)
 
 	ctx := RouterContext{
 		Engine:      engine,
@@ -201,127 +180,224 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 		r.RegisterRoutes(ctx)
 	}
 
-	customStylesheetPath := frontendCfg.CustomStylesheetPath
-	if !opts.DisableFrontendRoutes {
-		// Resolve custom stylesheet: prefer pre-validated FrontendConfig path,
-		// fall back to normalizing opts.CustomStylesheet against StorageDir.
-		if customStylesheetPath == "" && opts.CustomStylesheet != "" {
-			resolved, err := NormalizeCustomStylesheetPath(frontendCfg.StorageDir, opts.CustomStylesheet)
-			if err != nil {
-				slog.Default().Error("custom stylesheet disabled", "error", err)
-			} else {
-				customStylesheetPath = resolved
-			}
-		}
-
-		// Serve custom stylesheet if a valid path was provided.
-		if customStylesheetPath != "" {
-			cssPath := customStylesheetPath
-			base.GET("/custom.css", func(c *gin.Context) {
-				if _, err := os.Stat(cssPath); os.IsNotExist(err) {
-					c.Status(http.StatusNotFound)
-					return
-				} else if err != nil {
-					slog.Default().Error("error checking custom stylesheet existence", "error", err, "path", cssPath)
-					c.Status(http.StatusInternalServerError)
-					return
-				}
-				c.Header("Content-Type", "text/css; charset=utf-8")
-				c.File(cssPath)
-			})
-		}
-	}
-
-	// Serve the embedded frontend SPA on all unknown routes.
-	if EmbedFrontend == "true" && !opts.DisableFrontendRoutes {
-		fsys, err := frontendSubFS(frontend, "dist")
-		if err != nil {
-			panic("failed to create sub FS: " + err.Error())
-		}
-		staticFS, err := frontendSubFS(frontend, "dist/static")
-		if err != nil {
-			panic("failed to create sub FS: " + err.Error())
-		}
-
-		base.StaticFS("/static", http.FS(staticFS))
-
-		base.GET("/favicon.svg", func(c *gin.Context) {
-			disableClientCache(c)
-			// favicon is served by the branding registrar if a custom one exists;
-			// fall back to the default leaf SVG.
-			c.Data(http.StatusOK, "image/svg+xml", []byte(DefaultFaviconSVG))
-		})
-
-		engine.NoRoute(func(c *gin.Context) {
-			path := c.Request.URL.Path
-			if opts.BasePath != "" {
-				if path != opts.BasePath && !strings.HasPrefix(path, opts.BasePath+"/") {
-					c.String(http.StatusNotFound, "Page not found")
-					return
-				}
-				path = strings.TrimPrefix(path, opts.BasePath)
-				if path == "" {
-					path = "/"
-				}
-			}
-
-			if c.Request.Method == http.MethodGet &&
-				!strings.HasPrefix(path, "/api") &&
-				!strings.HasPrefix(path, "/assets") &&
-				!strings.HasPrefix(path, "/static") &&
-				!strings.HasPrefix(path, "/branding") &&
-				!strings.HasPrefix(path, "/.well-known") &&
-				path != "/agent-presence" &&
-				!strings.HasPrefix(path, "/agent-presence/") &&
-				path != "/mcp" &&
-				!strings.HasPrefix(path, "/mcp/") {
-
-				if path == "/oauth/approve" {
-					disableClientCache(c)
-					c.Header("Content-Security-Policy", "frame-ancestors 'none'")
-					c.Header("X-Frame-Options", "DENY")
-				}
-				c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-				data, err := frontendReadFile(fsys, "index.html")
-				if err != nil {
-					c.Status(http.StatusNotFound)
-					return
-				}
-
-				siteName := "LeafWiki"
-				if frontendCfg.GetSiteName != nil {
-					if name := frontendCfg.GetSiteName(); name != "" {
-						siteName = name
-					}
-				}
-				faviconFile := ""
-				if frontendCfg.GetFaviconFile != nil {
-					faviconFile = frontendCfg.GetFaviconFile()
-				}
-
-				html := string(data)
-				html = strings.ReplaceAll(html, "{{__SITE_NAME__}}", siteName)
-				html = strings.ReplaceAll(html, "{{__BASE_PATH__}}", opts.BasePath)
-				html = strings.ReplaceAll(html, "{{__FAVICON_HREF__}}", BuildFrontendFaviconHref(opts.BasePath, faviconFile))
-
-				if opts.BasePath != "" {
-					html = strings.ReplaceAll(html, `"/static/`, `"`+opts.BasePath+`/static/`)
-				}
-
-				html = injectIntoHead(html, buildCustomStylesheetTag(opts.BasePath, customStylesheetPath))
-
-				if opts.InjectCodeInHeader != "" {
-					html = injectIntoHead(html, opts.InjectCodeInHeader)
-				}
-
-				c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
-			} else {
-				c.String(http.StatusNotFound, "Page not found")
-			}
-		})
-	}
+	registerFrontendRoutes(engine, base, frontendCfg, opts)
 
 	return engine
+}
+
+func routerOptionsWithDefaults(opts RouterOptions) RouterOptions {
+	if opts.MaxAssetUploadSizeBytes <= 0 {
+		opts.MaxAssetUploadSizeBytes = assets.DefaultMaxUploadSizeBytes
+	}
+	return opts
+}
+
+func configureGinRuntime() {
+	if Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	} else {
+		gin.SetMode(gin.DebugMode)
+	}
+
+	gin.DefaultWriter = &slogWriter{logger: slog.Default().With("component", "gin")}
+	gin.DefaultErrorWriter = &slogErrorWriter{logger: slog.Default().With("component", "gin")}
+}
+
+func installRouterMiddleware(engine *gin.Engine, opts RouterOptions) {
+	if !opts.DisableRequestLog {
+		engine.Use(slogRequestLogger())
+	}
+	engine.Use(gin.RecoveryWithWriter(gin.DefaultErrorWriter))
+}
+
+func installRemoteUserMiddleware(base *gin.RouterGroup, cfg HTTPRemoteUserConfig) {
+	if cfg.Enabled {
+		base.Use(auth_middleware.InjectRemoteUser(auth_middleware.RemoteUserConfig{
+			Enabled:        cfg.Enabled,
+			HeaderName:     cfg.HeaderName,
+			TrustedProxies: cfg.TrustedProxies,
+			UserService:    cfg.UserService,
+		}))
+	}
+}
+
+func registerFrontendRoutes(engine *gin.Engine, base *gin.RouterGroup, frontendCfg FrontendConfig, opts RouterOptions) {
+	if opts.DisableFrontendRoutes {
+		return
+	}
+
+	customStylesheetPath := resolveCustomStylesheetPath(frontendCfg, opts)
+	registerCustomStylesheetRoute(base, customStylesheetPath)
+	if EmbedFrontend == "true" {
+		registerEmbeddedFrontendRoutes(engine, base, frontendCfg, opts, customStylesheetPath)
+	}
+}
+
+func resolveCustomStylesheetPath(frontendCfg FrontendConfig, opts RouterOptions) string {
+	customStylesheetPath := frontendCfg.CustomStylesheetPath
+	if customStylesheetPath != "" || opts.CustomStylesheet == "" {
+		return customStylesheetPath
+	}
+
+	resolved, err := NormalizeCustomStylesheetPath(frontendCfg.StorageDir, opts.CustomStylesheet)
+	if err != nil {
+		slog.Default().Error("custom stylesheet disabled", "error", err)
+		return ""
+	}
+	return resolved
+}
+
+func registerCustomStylesheetRoute(base *gin.RouterGroup, customStylesheetPath string) {
+	if customStylesheetPath == "" {
+		return
+	}
+
+	cssPath := customStylesheetPath
+	base.GET("/custom.css", func(c *gin.Context) {
+		if _, err := os.Stat(cssPath); os.IsNotExist(err) {
+			c.Status(http.StatusNotFound)
+			return
+		} else if err != nil {
+			slog.Default().Error("error checking custom stylesheet existence", "error", err, "path", cssPath)
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Header("Content-Type", "text/css; charset=utf-8")
+		c.File(cssPath)
+	})
+}
+
+func registerEmbeddedFrontendRoutes(engine *gin.Engine, base *gin.RouterGroup, frontendCfg FrontendConfig, opts RouterOptions, customStylesheetPath string) {
+	fsys, err := frontendSubFS(frontend, "dist")
+	if err != nil {
+		panic("failed to create sub FS: " + err.Error())
+	}
+	staticFS, err := frontendSubFS(frontend, "dist/static")
+	if err != nil {
+		panic("failed to create sub FS: " + err.Error())
+	}
+
+	base.StaticFS("/static", http.FS(staticFS))
+	base.GET("/favicon.svg", serveDefaultFavicon)
+	engine.NoRoute(frontendNoRouteHandler(fsys, frontendCfg, opts, customStylesheetPath))
+}
+
+func serveDefaultFavicon(c *gin.Context) {
+	disableClientCache(c)
+	// favicon is served by the branding registrar if a custom one exists;
+	// fall back to the default leaf SVG.
+	c.Data(http.StatusOK, "image/svg+xml", []byte(DefaultFaviconSVG))
+}
+
+func frontendNoRouteHandler(fsys fs.FS, frontendCfg FrontendConfig, opts RouterOptions, customStylesheetPath string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path, ok := frontendRequestPath(c.Request.URL.Path, opts.BasePath)
+		if !ok || !isFrontendSPARoute(c.Request.Method, path) {
+			c.String(http.StatusNotFound, "Page not found")
+			return
+		}
+
+		serveFrontendIndex(c, fsys, frontendCfg, opts, customStylesheetPath, path)
+	}
+}
+
+func frontendRequestPath(requestPath string, basePath string) (string, bool) {
+	path := requestPath
+	if basePath == "" {
+		return path, true
+	}
+	if path != basePath && !strings.HasPrefix(path, basePath+"/") {
+		return "", false
+	}
+	path = strings.TrimPrefix(path, basePath)
+	if path == "" {
+		path = "/"
+	}
+	return path, true
+}
+
+var frontendSPABlockedExactPaths = map[string]struct{}{
+	"/agent-presence": {},
+	"/mcp":            {},
+}
+
+var frontendSPABlockedPrefixes = []string{
+	"/api",
+	"/assets",
+	"/static",
+	"/branding",
+	"/.well-known",
+	"/agent-presence/",
+	"/mcp/",
+}
+
+func isFrontendSPARoute(method string, path string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	if _, blocked := frontendSPABlockedExactPaths[path]; blocked {
+		return false
+	}
+	return !hasFrontendSPABlockedPrefix(path)
+}
+
+func hasFrontendSPABlockedPrefix(path string) bool {
+	for _, prefix := range frontendSPABlockedPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func serveFrontendIndex(c *gin.Context, fsys fs.FS, frontendCfg FrontendConfig, opts RouterOptions, customStylesheetPath string, path string) {
+	if path == "/oauth/approve" {
+		disableClientCache(c)
+		c.Header("Content-Security-Policy", "frame-ancestors 'none'")
+		c.Header("X-Frame-Options", "DENY")
+	}
+	c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data, err := frontendReadFile(fsys, "index.html")
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	html := frontendIndexHTML(string(data), frontendCfg, opts, customStylesheetPath)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+}
+
+func frontendIndexHTML(html string, frontendCfg FrontendConfig, opts RouterOptions, customStylesheetPath string) string {
+	html = strings.ReplaceAll(html, "{{__SITE_NAME__}}", frontendSiteName(frontendCfg))
+	html = strings.ReplaceAll(html, "{{__BASE_PATH__}}", opts.BasePath)
+	html = strings.ReplaceAll(html, "{{__FAVICON_HREF__}}", BuildFrontendFaviconHref(opts.BasePath, frontendFaviconFile(frontendCfg)))
+	html = rewriteFrontendStaticPaths(html, opts.BasePath)
+	html = injectIntoHead(html, buildCustomStylesheetTag(opts.BasePath, customStylesheetPath))
+	return injectIntoHead(html, opts.InjectCodeInHeader)
+}
+
+func frontendSiteName(frontendCfg FrontendConfig) string {
+	if frontendCfg.GetSiteName == nil {
+		return "LeafWiki"
+	}
+	if name := frontendCfg.GetSiteName(); name != "" {
+		return name
+	}
+	return "LeafWiki"
+}
+
+func frontendFaviconFile(frontendCfg FrontendConfig) string {
+	if frontendCfg.GetFaviconFile == nil {
+		return ""
+	}
+	return frontendCfg.GetFaviconFile()
+}
+
+func rewriteFrontendStaticPaths(html string, basePath string) string {
+	if basePath == "" {
+		return html
+	}
+	return strings.ReplaceAll(html, `"/static/`, `"`+basePath+`/static/`)
 }
 
 func BuildFrontendFaviconHref(basePath, faviconFile string) string {

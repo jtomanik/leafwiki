@@ -87,7 +87,7 @@ var _ = Describe("required authentication middleware", Label("integration"), fun
 		// Middleware to inject user (simulating authmw.InjectPublicEditor)
 		router.Use(func(c *gin.Context) {
 			c.Set("user", &coreauth.User{
-				ID:       "public-editor",
+				ID:       coreauth.UserIDFromString("public-editor"),
 				Username: "public-editor",
 				Role:     coreauth.RoleEditor,
 			})
@@ -413,7 +413,7 @@ var _ = Describe("required authentication middleware", Label("integration"), fun
 			if tc.injectUser {
 				router.Use(func(c *gin.Context) {
 					c.Set("user", &coreauth.User{
-						ID:       "public-editor",
+						ID:       coreauth.UserIDFromString("public-editor"),
 						Username: "public-editor",
 						Role:     coreauth.RoleEditor,
 					})
@@ -599,7 +599,7 @@ var _ = Describe("optional authentication middleware", Label("integration"), fun
 	It("preserves an existing user context without token validation", func() {
 		gin.SetMode(gin.TestMode)
 		authCookies := authmw.NewAuthCookies(true, time.Hour, time.Hour*24)
-		injected := &coreauth.User{ID: "proxy-user", Username: "proxy", Role: coreauth.RoleViewer}
+		injected := &coreauth.User{ID: coreauth.UserIDFromString("proxy-user"), Username: "proxy", Role: coreauth.RoleViewer}
 
 		router := gin.New()
 		router.Use(func(c *gin.Context) {

@@ -47,7 +47,7 @@ var _ = Describe("current user lookup", Label("unit"), func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(rec)
-		user := &coreauth.User{ID: "user-1", Username: "editor"}
+		user := &coreauth.User{ID: coreauth.UserIDFromString("user-1"), Username: "editor"}
 		ctx.Set("user", user)
 
 		Expect(authmw.TryGetUser(ctx)).To(BeIdenticalTo(user))
@@ -57,7 +57,7 @@ var _ = Describe("current user lookup", Label("unit"), func() {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(rec)
-		user := &coreauth.User{ID: "user-1", Username: "editor"}
+		user := &coreauth.User{ID: coreauth.UserIDFromString("user-1"), Username: "editor"}
 		ctx.Set("user", user)
 
 		Expect(authmw.MustGetUser(ctx)).To(BeIdenticalTo(user))

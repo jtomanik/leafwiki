@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,6 +71,180 @@ func apiPageDTOID(page *apiPageDTO) tree.PageID {
 	GinkgoHelper()
 	return tree.PageIDFromString(page.ID)
 }
+
+type apiPagePathSegment string
+
+func newFixtureAPIPagePathSegment[T ~string](raw T) apiPagePathSegment {
+	return apiPagePathSegment(raw)
+}
+
+func apiPageDTOPathSegment(page *apiPageDTO) apiPagePathSegment {
+	GinkgoHelper()
+	return apiPagePathSegment(page.ID)
+}
+
+func apiPageURLPath(page apiPagePathSegment, suffix string) string {
+	GinkgoHelper()
+	return "/api/pages/" + string(page) + suffix
+}
+
+func apiPermalinkURLPath(page apiPagePathSegment) string {
+	GinkgoHelper()
+	return "/api/pages/permalink/" + string(page)
+}
+
+func apiPageAssetsURLPath(page apiPagePathSegment) string {
+	GinkgoHelper()
+	return apiPageURLPath(page, "/assets")
+}
+
+type apiPageIdentity struct {
+	ID    tree.PageID
+	Title string
+}
+
+func apiPageIdentityFor(page apiPageDTO) apiPageIdentity {
+	return apiPageIdentity{
+		ID:    tree.PageIDFromString(page.ID),
+		Title: page.Title,
+	}
+}
+
+func matchAPIPageIdentity(id tree.PageID, title string) types.GomegaMatcher {
+	return WithTransform(apiPageIdentityFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":    Equal(id),
+		"Title": Equal(title),
+	}))
+}
+
+type apiPageMapIdentity struct {
+	ID             tree.PageID
+	Kind           tree.NodeKind
+	KindParseState apiNodeKindParseState
+}
+
+type apiNodeKindParseState uint8
+
+const (
+	apiNodeKindUnrecognized apiNodeKindParseState = iota
+	apiNodeKindRecognized
+)
+
+func apiPageMapIdentityFor(page map[string]interface{}) apiPageMapIdentity {
+	rawID, _ := page["id"].(string)
+	rawKind, _ := page["kind"].(string)
+	kind, recognized := tree.ParseNodeKind(rawKind)
+	state := apiNodeKindUnrecognized
+	if recognized {
+		state = apiNodeKindRecognized
+	}
+	return apiPageMapIdentity{
+		ID:             tree.PageIDFromString(rawID),
+		Kind:           kind,
+		KindParseState: state,
+	}
+}
+
+func matchAPIPageMapIdentity(id tree.PageID, kind tree.NodeKind) types.GomegaMatcher {
+	return WithTransform(apiPageMapIdentityFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":             Equal(id),
+		"Kind":           Equal(kind),
+		"KindParseState": Equal(apiNodeKindRecognized),
+	}))
+}
+
+type apiPermalinkTargetObservation struct {
+	ID   tree.PageID
+	Slug tree.Slug
+	Path tree.RoutePath
+	Kind tree.NodeKind
+}
+
+func apiPermalinkTargetObservationFor(target *apiPermalinkTargetDTO) apiPermalinkTargetObservation {
+	if target == nil {
+		return apiPermalinkTargetObservation{}
+	}
+	return apiPermalinkTargetObservation{
+		ID:   tree.PageIDFromString(target.ID),
+		Slug: tree.SlugFromString(target.Slug),
+		Path: tree.RoutePathFromString(target.Path),
+		Kind: target.Kind,
+	}
+}
+
+func matchAPIPermalinkTarget(id tree.PageID, slug tree.Slug, path tree.RoutePath, kind tree.NodeKind) types.GomegaMatcher {
+	return WithTransform(apiPermalinkTargetObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"ID":   Equal(id),
+		"Slug": Equal(slug),
+		"Path": Equal(path),
+		"Kind": Equal(kind),
+	}))
+}
+
+type routerLogEntryObservation struct {
+	Level   string
+	Method  string
+	Path    string
+	Status  int
+	Latency routerLogFieldPresence
+	IP      routerLogFieldPresence
+	Message routerLogFieldPresence
+}
+
+type routerLogFieldPresence uint8
+
+const (
+	routerLogFieldMissing routerLogFieldPresence = iota
+	routerLogFieldPresent
+)
+
+func routerLogPresence(present bool) routerLogFieldPresence {
+	if present {
+		return routerLogFieldPresent
+	}
+	return routerLogFieldMissing
+}
+
+func routerLogEntryObservationFor(entry map[string]any) routerLogEntryObservation {
+	status := 0
+	if rawStatus, ok := entry["status"].(float64); ok {
+		status = int(rawStatus)
+	}
+	msg, _ := entry["msg"].(string)
+	method, _ := entry["method"].(string)
+	path, _ := entry["path"].(string)
+	level, _ := entry["level"].(string)
+	_, hasLatency := entry["latency"]
+	_, hasIP := entry["ip"]
+	return routerLogEntryObservation{
+		Level:   level,
+		Method:  method,
+		Path:    path,
+		Status:  status,
+		Latency: routerLogPresence(hasLatency),
+		IP:      routerLogPresence(hasIP),
+		Message: routerLogPresence(strings.TrimSpace(msg) != ""),
+	}
+}
+
+func matchHTTPRequestLogEntry(method string, path string, status int) types.GomegaMatcher {
+	return WithTransform(routerLogEntryObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Method":  Equal(method),
+		"Path":    Equal(path),
+		"Status":  Equal(status),
+		"Latency": Equal(routerLogFieldPresent),
+		"IP":      Equal(routerLogFieldPresent),
+		"Message": Equal(routerLogFieldPresent),
+	}))
+}
+
+func matchHTTPRecoveryLogEntry() types.GomegaMatcher {
+	return WithTransform(routerLogEntryObservationFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Level":   Equal(slog.LevelError.String()),
+		"Message": Equal(routerLogFieldPresent),
+	}))
+}
+
 func httpTestTempDir() string {
 	GinkgoHelper()
 	dir, err := os.

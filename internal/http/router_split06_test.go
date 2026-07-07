@@ -15,8 +15,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/importer"
+	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
+	wikiimporter "github.com/perber/wiki/internal/wiki/importer"
 )
 
 var _ = Describe("HTTP router", Label("integration"), func() {
@@ -182,13 +185,11 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 		getRec := authenticatedRequest(router, http.MethodGet, "/api/import/plan", nil)
 		Expect(getRec).To(HaveHTTPStatus(http.StatusNotFound), "Expected status 404 when fetching canceled import plan, got %d: %s", getRec.Code, getRec.Body.String())
 
-		var resp map[string]interface{}
-		{
-			err := json.Unmarshal(getRec.Body.Bytes(), &resp)
-			Expect(err).NotTo(HaveOccurred(), "Invalid JSON response: %v", err)
-		}
-
-		Expect(resp).To(HaveKeyWithValue("error", HaveKey("code")), "Expected structured error response after canceling import plan, got: %v", resp)
+		Expect(getRec).To(testmatchers.HaveHTTPStructuredError(
+			http.StatusNotFound,
+			wikiimporter.ErrCodeImporterNoPlan,
+			sharederrors.MessageIDForCode(wikiimporter.ErrCodeImporterNoPlan),
+		), "Expected structured error response after canceling import plan, got: %v", getRec.Body.String())
 
 	})
 })
@@ -319,7 +320,7 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 
 		}
 
-		assets := listAssetsViaAPI(router, apiPageDTOID(setupPage))
+		assets := listAssetsViaAPI(router, apiPageDTOPathSegment(setupPage))
 		Expect(assets).To(HaveLen(2), "expected 2 uploaded assets, got %#v", assets)
 
 		_ = getPageByPathViaAPI(router, "reference/api-1")

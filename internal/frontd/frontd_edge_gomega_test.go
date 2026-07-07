@@ -39,11 +39,11 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(err).To(MatchError(errDaemonTokenRequired))
 
 		_, err = NewWorkspaceProxy(WorkspaceProxyOptions{Upstream: "://bad", DaemonToken: "token", Actor: func(*http.Request) (projectdaemon.ActorContext, error) {
-			return validFrontdActor("home"), nil
+			return validFrontdActor(mustDecodeWorkspaceID("home")), nil
 		}})
 		Expect(err).To(MatchError(errInvalidWorkspacedUpstream))
 		_, err = NewWorkspaceProxy(WorkspaceProxyOptions{Upstream: "http://127.0.0.1:1", DaemonToken: " ", Actor: func(*http.Request) (projectdaemon.ActorContext, error) {
-			return validFrontdActor("home"), nil
+			return validFrontdActor(mustDecodeWorkspaceID("home")), nil
 		}})
 		Expect(err).To(MatchError(errDaemonTokenRequired))
 		_, err = NewWorkspaceProxy(WorkspaceProxyOptions{Upstream: "http://127.0.0.1:1", DaemonToken: "token"})
@@ -92,7 +92,9 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		handler, err = NewWorkspaceProxy(WorkspaceProxyOptions{
 			Upstream:    upstream.URL,
 			DaemonToken: "token",
-			Actor:       func(*http.Request) (projectdaemon.ActorContext, error) { return validFrontdActor("home"), nil },
+			Actor: func(*http.Request) (projectdaemon.ActorContext, error) {
+				return validFrontdActor(mustDecodeWorkspaceID("home")), nil
+			},
 		})
 		Expect(err).ToNot(HaveOccurred())
 		rec = httptest.NewRecorder()
@@ -137,7 +139,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 				return WorkspaceRoute{Upstream: "http://127.0.0.1:1", DaemonToken: "token"}, nil
 			},
 			Actor: func(*http.Request, workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
-				return validFrontdActor("home"), nil
+				return validFrontdActor(mustDecodeWorkspaceID("home")), nil
 			},
 		})
 		rec = httptest.NewRecorder()
@@ -155,7 +157,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 					return route, nil
 				},
 				Actor: func(*http.Request, workspaceid.WorkspaceID) (projectdaemon.ActorContext, error) {
-					return validFrontdActor("home"), nil
+					return validFrontdActor(mustDecodeWorkspaceID("home")), nil
 				},
 			})
 			rec = httptest.NewRecorder()
@@ -216,7 +218,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		Expect(rec).To(HaveHTTPStatus(http.StatusInternalServerError))
 		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("server-session")))
 
-		Expect(bindings.Bind(MCPSessionIDFromHeader("server-session"), "other")).To(Succeed())
+		Expect(bindings.Bind(MCPSessionIDFromHeader("server-session"), mustDecodeWorkspaceID("other"))).To(Succeed())
 		handler = NewWorkspaceMCPHandler(WorkspaceMCPHandlerOptions{
 			Sessions: bindings,
 			Resolve: func(*http.Request, workspaceid.WorkspaceID) (WorkspaceRoute, error) {
@@ -298,7 +300,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 
 		resolver, err := NewWikidWorkspaceResolver("http://127.0.0.1:1", "token")
 		Expect(err).ToNot(HaveOccurred())
-		_, err = resolver(nil, "bad id")
+		_, err = resolver(nil, mustDecodeWorkspaceID("bad id"))
 		Expect(err).To(MatchError(ErrWorkspaceNotFound))
 
 		originalNewRequest := newFrontdRequestWithContext
@@ -309,7 +311,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		ginkgo.DeferCleanup(func() {
 			newFrontdRequestWithContext = originalNewRequest
 		})
-		_, err = resolver(nil, "home")
+		_, err = resolver(nil, mustDecodeWorkspaceID("home"))
 		Expect(err).To(MatchError(requestErr))
 		newFrontdRequestWithContext = originalNewRequest
 
@@ -337,7 +339,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 			ginkgo.DeferCleanup(server.Close)
 			resolver, err := NewWikidWorkspaceResolver(server.URL, "token")
 			Expect(err).ToNot(HaveOccurred())
-			_, err = resolver(httptest.NewRequest(http.MethodGet, "/workspace", nil), "home")
+			_, err = resolver(httptest.NewRequest(http.MethodGet, "/workspace", nil), mustDecodeWorkspaceID("home"))
 			Expect(err).To(tt.want, tt.name)
 		}
 
@@ -347,7 +349,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		ginkgo.DeferCleanup(server.Close)
 		resolver, err = NewWikidWorkspaceResolver(server.URL, "token")
 		Expect(err).ToNot(HaveOccurred())
-		route, err := resolver(nil, "home")
+		route, err := resolver(nil, mustDecodeWorkspaceID("home"))
 		Expect(err).ToNot(HaveOccurred())
 		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"WorkspaceID": Equal(mustDecodeWorkspaceID("home")),
@@ -360,7 +362,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		ginkgo.DeferCleanup(server.Close)
 		resolver, err = NewWikidWorkspaceResolver(server.URL, "token")
 		Expect(err).ToNot(HaveOccurred())
-		route, err = resolver(nil, "home")
+		route, err = resolver(nil, mustDecodeWorkspaceID("home"))
 		Expect(err).ToNot(HaveOccurred())
 		Expect(route).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"WorkspaceID": Equal(mustDecodeWorkspaceID("body-id")),
@@ -370,7 +372,7 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 		resolver, err = NewWikidWorkspaceResolver(server.URL, "token")
 		Expect(err).ToNot(HaveOccurred())
 		server.Close()
-		_, err = resolver(nil, "home")
+		_, err = resolver(nil, mustDecodeWorkspaceID("home"))
 		Expect(err).To(matchFrontdUpstreamRequestError(http.MethodPost))
 	})
 
@@ -396,10 +398,34 @@ var _ = ginkgo.Describe("frontd routing and proxy edge behavior", func() {
 
 func matchFrontdJSONDecodeError() types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return Satisfy(func(err error) bool {
-		var syntaxErr *json.SyntaxError
-		return errors.As(err, &syntaxErr) || errors.Is(err, io.ErrUnexpectedEOF)
-	})
+	return frontdErrorMatcher{
+		label: "frontd JSON decode error",
+		match: func(err error) bool {
+			var syntaxErr *json.SyntaxError
+			return errors.As(err, &syntaxErr) || errors.Is(err, io.ErrUnexpectedEOF)
+		},
+	}
+}
+
+type frontdErrorMatcher struct {
+	label string
+	match func(error) bool
+}
+
+func (matcher frontdErrorMatcher) Match(actual interface{}) (bool, error) {
+	err, ok := actual.(error)
+	if !ok {
+		return false, nil
+	}
+	return matcher.match(err), nil
+}
+
+func (matcher frontdErrorMatcher) FailureMessage(actual interface{}) string {
+	return "Expected error to satisfy " + matcher.label
+}
+
+func (matcher frontdErrorMatcher) NegatedFailureMessage(actual interface{}) string {
+	return "Expected error not to satisfy " + matcher.label
 }
 
 func matchFrontdWorkspaceIDError(code sharederrors.ErrorCode) types.GomegaMatcher {
@@ -409,8 +435,11 @@ func matchFrontdWorkspaceIDError(code sharederrors.ErrorCode) types.GomegaMatche
 
 func matchFrontdUpstreamRequestError(method string) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
-	return Satisfy(func(err error) bool {
-		var urlErr *url.Error
-		return errors.As(err, &urlErr) && strings.EqualFold(urlErr.Op, method)
-	})
+	return frontdErrorMatcher{
+		label: "frontd upstream request error",
+		match: func(err error) bool {
+			var urlErr *url.Error
+			return errors.As(err, &urlErr) && strings.EqualFold(urlErr.Op, method)
+		},
+	}
 }

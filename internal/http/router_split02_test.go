@@ -216,10 +216,10 @@ func getPageByPathViaAPI(router http.Handler, path string) *apiPageDTO {
 	return &page
 }
 
-func getPermalinkTargetViaAPI(router http.Handler, id tree.PageID) *apiPermalinkTargetDTO {
+func getPermalinkTargetViaAPI(router http.Handler, page apiPagePathSegment) *apiPermalinkTargetDTO {
 	GinkgoHelper()
 
-	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/permalink/"+id.String(), nil)
+	rec := authenticatedRequest(router, http.MethodGet, apiPermalinkURLPath(page), nil)
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var target apiPermalinkTargetDTO
@@ -246,10 +246,10 @@ func getTreeViaAPI(router http.Handler) *apiPageDTO {
 	return &node
 }
 
-func deletePageViaAPI(router http.Handler, pageID tree.PageID, version string, recursive bool) {
+func deletePageViaAPI(router http.Handler, page apiPagePathSegment, version string, recursive bool) {
 	GinkgoHelper()
 
-	url := "/api/pages/" + pageID.String() + "?version=" + version
+	url := apiPageURLPath(page, "?version="+version)
 	if recursive {
 		url += "&recursive=true"
 	}
@@ -259,10 +259,10 @@ func deletePageViaAPI(router http.Handler, pageID tree.PageID, version string, r
 
 }
 
-func listAssetsViaAPI(router http.Handler, pageID tree.PageID) []string {
+func listAssetsViaAPI(router http.Handler, page apiPagePathSegment) []string {
 	GinkgoHelper()
 
-	rec := authenticatedRequest(router, http.MethodGet, "/api/pages/"+pageID.String()+"/assets", nil)
+	rec := authenticatedRequest(router, http.MethodGet, apiPageAssetsURLPath(page), nil)
 	Expect(rec).To(HaveHTTPStatus(http.StatusOK), "Expected 200 OK, got %d - %s", rec.Code, rec.Body.String())
 
 	var resp struct {
