@@ -254,6 +254,17 @@ var _ = ginkgo.Describe("properties store", ginkgo.Label("integration"), func() 
 			Expect(err).To(Succeed())
 			Expect(underscoreKeys).To(BeEmpty())
 		})
+
+		ginkgo.It("treats backslashes as literal filter text", func() {
+			store := newTestStore()
+
+			Expect(store.SetPropertiesForPage(newFixturePageID("page-1"), props(`team\owner`, "alice", "team_owner", "bob", "team", "root"))).To(Succeed())
+
+			keys, err := store.GetAllPropertyKeys(`team\`, 50)
+
+			Expect(err).To(Succeed())
+			Expect(keys).To(havePropertyKeys(PropertyKeyCount{Key: `team\owner`, Count: 1}))
+		})
 	})
 
 	ginkgo.When("pages are queried by property value", func() {
