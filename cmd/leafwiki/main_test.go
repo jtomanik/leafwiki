@@ -70,13 +70,36 @@ func terminateProjectDaemonDescriptorsUnder(root string) {
 		if entry == nil || entry.IsDir() || filepath.Ext(path) != ".json" {
 			return nil
 		}
-		desc, readDescriptorErr := projectdaemon.ReadTrustedDescriptor(path)
-		if readDescriptorErr != nil || desc.PID == os.Getpid() || !leafwikiInternalProcessPID(desc.PID) {
+		if !leafwikiProjectDaemonDescriptorCleanupCandidate(path) {
+			return nil
+		}
+		desc := trustedProjectDaemonDescriptorForCleanup(path)
+		if desc == nil {
+			return nil
+		}
+		if desc.PID == os.Getpid() || !leafwikiInternalProcessPID(desc.PID) {
 			return nil
 		}
 		terminateProjectDaemonProcess(desc.PID)
 		return nil
 	})).To(Succeed())
+}
+
+func trustedProjectDaemonDescriptorForCleanup(path string) *projectdaemon.Descriptor {
+	desc, err := projectdaemon.ReadTrustedDescriptor(path)
+	if err != nil {
+		return nil
+	}
+	return desc
+}
+
+func leafwikiProjectDaemonDescriptorCleanupCandidate(path string) bool {
+	switch filepath.Base(path) {
+	case projectdaemon.DescriptorFileName, "wikid.json", "frontd.json", "workspaced.json":
+		return true
+	default:
+		return false
+	}
 }
 
 func leafwikiSetenv(key string, value string) {
