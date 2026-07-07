@@ -224,11 +224,26 @@ var _ = ginkgo.Describe("project daemon descriptors", func() {
 		})))
 	})
 
-	ginkgo.It("builds global descriptor paths for daemon roles", ginkgo.Label("unit"), func() {
-		runtimeDir := filepath.Join(tempProjectdaemonDir(), ".leafwiki", "runtime")
+	ginkgo.DescribeTable("global descriptor paths for daemon roles",
+		ginkgo.Label("unit"),
+		func(role RoleName, want globalDescriptorPathObservation) {
+			runtimeDir := filepath.Join(tempProjectdaemonDir(), ".leafwiki", "runtime")
 
-		Expect(GlobalDescriptorPath(runtimeDir, RoleWikid)).To(Equal(filepath.Join(runtimeDir, "wikid.json")))
-	})
+			Expect(globalDescriptorPathFor(runtimeDir, role)).To(Equal(want))
+		},
+		ginkgo.Entry("uses the wikid role descriptor filename", RoleWikid, globalDescriptorPathObservation{
+			Filename: "wikid.json",
+		}),
+		ginkgo.Entry("uses the frontd role descriptor filename", RoleFrontd, globalDescriptorPathObservation{
+			Filename: "frontd.json",
+		}),
+		ginkgo.Entry("uses the workspaced role descriptor filename", RoleWorkspaced, globalDescriptorPathObservation{
+			Filename: "workspaced.json",
+		}),
+		ginkgo.Entry("uses a fallback descriptor filename for unknown roles", RoleName("sidecar"), globalDescriptorPathObservation{
+			Filename: "unknown-role.json",
+		}),
+	)
 
 	ginkgo.It("removes missing and existing descriptors idempotently", ginkgo.Label("unit"), func() {
 		path := DescriptorPath(tempProjectdaemonDir())
@@ -319,4 +334,15 @@ func matchPrivateReadyWorkspacedRoleHealth(updatedAt time.Time) types.GomegaMatc
 		Private:   true,
 		UpdatedAt: updatedAt,
 	})
+}
+
+type globalDescriptorPathObservation struct {
+	Filename string
+}
+
+func globalDescriptorPathFor(runtimeDir string, role RoleName) globalDescriptorPathObservation {
+	path := GlobalDescriptorPath(runtimeDir, role)
+	return globalDescriptorPathObservation{
+		Filename: filepath.Base(path),
+	}
 }
