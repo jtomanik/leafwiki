@@ -3,11 +3,14 @@ package frontd
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/projectdaemon"
 	"github.com/perber/wiki/internal/workspaceid"
 )
 
@@ -33,6 +36,28 @@ var _ = Describe("frontd path and session primitives", Label("unit"), func() {
 			Path:    "/public/api/tree",
 		}))
 	})
+
+	DescribeTable("public base path stripping",
+		func(path string, basePath string, want frontdBasePathResult) {
+			Expect(basePathResult(path, basePath)).To(Equal(want))
+		},
+		Entry("treats an empty base as the public root", "", "", frontdBasePathResult{
+			Outcome: frontdPathAccepted,
+			Path:    "/",
+		}),
+		Entry("maps the configured base path to the public root", "/wiki", " /wiki/ ", frontdBasePathResult{
+			Outcome: frontdPathAccepted,
+			Path:    "/",
+		}),
+		Entry("strips the configured base path from nested routes", "/wiki/api/tree", "/wiki", frontdBasePathResult{
+			Outcome: frontdPathAccepted,
+			Path:    "/api/tree",
+		}),
+		Entry("rejects sibling prefixes that only share text", "/wikid/api/tree", "/wiki", frontdBasePathResult{
+			Outcome: frontdPathRejected,
+			Path:    "/wikid/api/tree",
+		}),
+	)
 
 	It("clones request paths without changing the original body or headers", func() {
 		body := io.NopCloser(strings.NewReader("request body"))
@@ -84,6 +109,50 @@ var _ = Describe("frontd path and session primitives", Label("unit"), func() {
 	It("parses explicit workspace MCP paths into typed workspace IDs", func() {
 		Expect(workspaceMCPPathResult("/mcp/workspaces/home/messages")).To(ResolveWorkspaceMCPPath(mustDecodeWorkspaceID("home")))
 	})
+
+	It("classifies upstream constructor failures without losing sentinel identity", func() {
+		_, wikidErr := NewControlPlaneProxy("http://", "control-token")
+		_, workspacedErr := NewWorkspaceProxy(WorkspaceProxyOptions{
+			Upstream:    "http://",
+			DaemonToken: "control-token",
+			Actor: func(*http.Request) (projectdaemon.ActorContext, error) {
+				return projectdaemon.ActorContext{}, nil
+			},
+		})
+		_, tokenErr := NewMCPProxy("http://127.0.0.1:43111", " ")
+		_, actorErr := NewWorkspaceProxy(WorkspaceProxyOptions{
+			Upstream:    "http://127.0.0.1:43111",
+			DaemonToken: "control-token",
+		})
+
+		Expect(frontdUpstreamErrorFor(wikidErr)).To(Equal(frontdWikidUpstreamRejected))
+		Expect(frontdUpstreamErrorFor(workspacedErr)).To(Equal(frontdWorkspacedUpstreamRejected))
+		Expect(tokenErr).To(MatchError(errDaemonTokenRequired))
+		Expect(actorErr).To(MatchError(errActorContextResolverRequired))
+	})
+
+	It("writes retryable structured errors for unavailable private upstreams", func() {
+		rec := httptest.NewRecorder()
+
+		retryableUnavailable(rec, httptest.NewRequest(http.MethodGet, "/api/tree", nil), io.ErrClosedPipe)
+
+		Expect(rec).To(SatisfyAll(
+			matchStructuredFrontdError(
+				http.StatusServiceUnavailable,
+				errCodeWorkspacedUnavailable,
+				sharederrors.MessageIDForCode(errCodeWorkspacedUnavailable),
+			),
+			HaveHTTPHeaderWithValue("Retry-After", "1"),
+		))
+	})
+
+	DescribeTable("leading slash normalization",
+		func(path string, want string) {
+			Expect(ensureLeadingSlash(path)).To(Equal(want))
+		},
+		Entry("preserves rooted paths", "/api/tree", "/api/tree"),
+		Entry("roots relative paths", "api/tree", "/api/tree"),
+	)
 })
 
 type frontdIngressPathFamily uint8
@@ -152,4 +221,23 @@ func mcpSessionLookupFor(bindings *MCPSessionBindings, sessionID MCPSessionID) m
 		return mcpSessionLookup{Outcome: mcpSessionBound, WorkspaceID: workspaceID}
 	}
 	return mcpSessionLookup{Outcome: mcpSessionUnbound}
+}
+
+type frontdUpstreamError uint8
+
+const (
+	frontdUpstreamAccepted frontdUpstreamError = iota
+	frontdWikidUpstreamRejected
+	frontdWorkspacedUpstreamRejected
+)
+
+func frontdUpstreamErrorFor(err error) frontdUpstreamError {
+	switch {
+	case IsInvalidWikidUpstream(err):
+		return frontdWikidUpstreamRejected
+	case IsInvalidWorkspacedUpstream(err):
+		return frontdWorkspacedUpstreamRejected
+	default:
+		return frontdUpstreamAccepted
+	}
 }

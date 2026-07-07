@@ -1,6 +1,7 @@
 package wikid
 
 import (
+	"errors"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -29,6 +30,51 @@ var _ = ginkgo.Describe("wikid document and supervisor values", ginkgo.Label("un
 		}}
 
 		Expect(document.Validate()).To(Succeed())
+	})
+
+	ginkgo.DescribeTable("grant role parsing",
+		func(raw string, want parsedGrantRole) {
+			Expect(parseGrantRoleFor(raw)).To(Equal(want))
+		},
+		ginkgo.Entry("accepts viewer roles", "viewer", parsedGrantRole{
+			Outcome: grantRoleParsed,
+			Role:    GrantRoleViewer,
+		}),
+		ginkgo.Entry("accepts administrator roles", "admin", parsedGrantRole{
+			Outcome: grantRoleParsed,
+			Role:    GrantRoleAdmin,
+		}),
+		ginkgo.Entry("rejects empty roles", " ", parsedGrantRole{
+			Outcome: grantRoleParseRejected,
+		}),
+	)
+
+	ginkgo.DescribeTable("grant document validation failures",
+		func(document GrantDocument, want grantDocumentValidation) {
+			Expect(grantDocumentValidationFor(document)).To(Equal(want))
+		},
+		ginkgo.Entry("rejects incompatible schema versions", GrantDocument{SchemaVersion: 0}, grantDocumentSchemaRejected),
+		ginkgo.Entry("rejects empty grant subjects", GrantDocument{
+			SchemaVersion: GrantSchemaVersion,
+			Grants: []Grant{{
+				WorkspaceID: HomeWorkspaceID,
+				Role:        GrantRoleViewer,
+			}},
+		}, grantDocumentSubjectRejected),
+		ginkgo.Entry("rejects unknown grant roles", GrantDocument{
+			SchemaVersion: GrantSchemaVersion,
+			Grants: []Grant{{
+				Subject:     "user:admin",
+				WorkspaceID: HomeWorkspaceID,
+				Role:        mustDecodeGrantRole("owner"),
+			}},
+		}, grantDocumentRoleRejected),
+	)
+
+	ginkgo.It("rejects capability lookups for unknown grant roles", func() {
+		Expect(capabilityLookupFor(mustDecodeGrantRole("owner"))).To(Equal(capabilityLookup{
+			Outcome: capabilityLookupRejected,
+		}))
 	})
 
 	ginkgo.It("reports registry lookup and validation state without mutating workspace records", func() {
@@ -121,4 +167,69 @@ func registryLookupFor(registry RegistryDocument, workspaceID workspaceid.Worksp
 		return registryLookup{Outcome: recordFound, Record: record}
 	}
 	return registryLookup{Outcome: recordMissing}
+}
+
+type grantRoleParseOutcome uint8
+
+const (
+	grantRoleParseRejected grantRoleParseOutcome = iota
+	grantRoleParsed
+)
+
+type parsedGrantRole struct {
+	Outcome grantRoleParseOutcome
+	Role    GrantRole
+}
+
+func parseGrantRoleFor(raw string) parsedGrantRole {
+	role, err := ParseGrantRole(raw)
+	if err != nil {
+		return parsedGrantRole{Outcome: grantRoleParseRejected}
+	}
+	return parsedGrantRole{Outcome: grantRoleParsed, Role: role}
+}
+
+type grantDocumentValidation uint8
+
+const (
+	grantDocumentAccepted grantDocumentValidation = iota
+	grantDocumentSchemaRejected
+	grantDocumentSubjectRejected
+	grantDocumentRoleRejected
+)
+
+func grantDocumentValidationFor(document GrantDocument) grantDocumentValidation {
+	err := document.Validate()
+	switch {
+	case err == nil:
+		return grantDocumentAccepted
+	case errors.Is(err, ErrGrantSchemaVersion):
+		return grantDocumentSchemaRejected
+	case errors.Is(err, ErrGrantSubjectRequired):
+		return grantDocumentSubjectRejected
+	case errors.Is(err, ErrUnknownGrantRole):
+		return grantDocumentRoleRejected
+	default:
+		return 0
+	}
+}
+
+type capabilityLookupOutcome uint8
+
+const (
+	capabilityLookupRejected capabilityLookupOutcome = iota
+	capabilityLookupAccepted
+)
+
+type capabilityLookup struct {
+	Outcome      capabilityLookupOutcome
+	Capabilities RoleCapabilities
+}
+
+func capabilityLookupFor(role GrantRole) capabilityLookup {
+	capabilities, err := CapabilitiesForRole(role)
+	if err != nil {
+		return capabilityLookup{Outcome: capabilityLookupRejected}
+	}
+	return capabilityLookup{Outcome: capabilityLookupAccepted, Capabilities: capabilities}
 }
