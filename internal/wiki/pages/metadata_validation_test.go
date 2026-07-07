@@ -2,6 +2,7 @@ package pages
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,6 +52,14 @@ func publicMetadataPatchDocumentProjectionFor(doc markdown.PageDocument) publicM
 	}
 }
 
+func pageNodeKindWireValue(kind tree.NodeKind) string {
+	return fmt.Sprint(kind)
+}
+
+func paddedPageNodeKindWireValue(kind tree.NodeKind) string {
+	return " " + pageNodeKindWireValue(kind) + " "
+}
+
 var _ = ginkgo.Describe("page metadata validation", func() {
 	ginkgo.It("registers public, private, and refactor page route sets", ginkgo.Label("integration"), func() {
 		publicRouter := httpinternal.NewRouter(
@@ -85,7 +94,7 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 				},
 			},
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		EnrichPageMetadata(page, func(id tree.PageID) (string, error) {
 			Expect(id).To(Equal(newFixturePageID("page-1")))
@@ -140,12 +149,12 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 				},
 			},
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		rendered, err := BuildMarkdownWithPublicMetadataPatch(current, newFixturePageID("page-1"), " Page ", PublicMetadataPatch{}, "Body")
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		doc, _, err := markdown.ParsePageDocument(rendered)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(doc.Metadata).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Tags":   Equal([]string{"keep"}),
 			"Fields": Equal(map[string]interface{}{"status": "draft"}),
@@ -168,7 +177,7 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 				},
 			},
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		rendered, err := BuildMarkdownWithPublicMetadataPatch(current, newFixturePageID("page-2"), " New Title ", PublicMetadataPatch{
 			TagsPresent:       true,
@@ -176,10 +185,10 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 			PropertiesPresent: true,
 			Properties:        map[string]string{"status": "published"},
 		}, "New body")
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		doc, _, err := markdown.ParsePageDocument(rendered)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(doc).To(matchPublicMetadataPatchDocument(
 			"New body",
 			newFixturePageID("page-2"),
@@ -203,7 +212,7 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 				RemoveProperties: []string{"owner"},
 			},
 		)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(tags).To(Equal([]string{"alpha", "gamma"}))
 		Expect(properties).To(Equal(map[string]string{"status": "published"}))
 
@@ -212,16 +221,24 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 	})
 
 	ginkgo.It("validates and normalizes route path and page kind inputs", ginkgo.Label("unit"), func() {
-		routePath, kind, err := NormalizePagePathInput(" /Docs/Index.md ", "section")
-		Expect(err).NotTo(HaveOccurred())
+		routePath, kind, err := NormalizePagePathInput(" /Docs/Index.md ", pageNodeKindWireValue(tree.NodeKindSection))
+		Expect(err).To(Succeed())
 		Expect(routePath).To(Equal(newFixtureRoutePath("Docs")))
 		Expect(kind).To(Equal(tree.NodeKindSection))
 
-		_, _, err = NormalizePagePathInput("docs/page.md", "section")
+		routePath, kind, err = NormalizePagePathKindInput("docs/page", tree.NodeKindPage)
+		Expect(err).To(Succeed())
+		Expect(routePath).To(Equal(newFixtureRoutePath("docs/page")))
+		Expect(kind).To(Equal(tree.NodeKindPage))
+
+		Expect(MarkdownPathInputKind(newFixtureMarkdownPath("docs/page.md"))).To(Equal(tree.NodeKindPage))
+		Expect(MarkdownPathInputKind(newFixtureMarkdownPath("docs/page.txt"))).To(BeEmpty())
+
+		_, _, err = NormalizePagePathInput("docs/page.md", pageNodeKindWireValue(tree.NodeKindSection))
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidKind))
 
 		kind, err = ValidatePageKind(nil)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(kind).To(Equal(tree.NodeKindPage))
 
 		_, err = ValidatePageRoutePath(" ")
@@ -233,35 +250,76 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 		Expect(MarkdownContentPathForRoute(newFixtureRoutePath("docs/page"), tree.NodeKindPage)).To(Equal(newFixtureMarkdownPath("docs/page.md")))
 
 		validatedParent, err := ValidateMoveParentID("root")
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(validatedParent).To(Equal("root"))
 
 		_, err = ValidateMoveParentID(" parent ")
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidParentID))
 
+		validTargetKind, err := ValidateConvertTargetKind(pageNodeKindWireValue(tree.NodeKindSection))
+		Expect(err).To(Succeed())
+		Expect(validTargetKind).To(Equal(tree.NodeKindSection))
+
+		_, err = ValidateConvertTargetKind(pageNodeKindWireValue(newFixtureNodeKind("bad-kind")))
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidTargetKind))
+
+		validTitle, err := ValidateSuggestSlugTitle(" Leaf Wiki ")
+		Expect(err).To(Succeed())
+		Expect(validTitle).To(Equal("Leaf Wiki"))
+
+		_, err = ValidateSuggestSlugTitle(" ")
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageMissingTitle))
+
+		_, err = ValidateSuggestSlugTitle("!!!")
+		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidTitle))
+
 		parent := "parent-1"
 		optionalParent, err := ValidateOptionalParentID(&parent)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(optionalParent).NotTo(BeNil())
 		Expect(*optionalParent).To(Equal("parent-1"))
 
 		typedParent := newFixturePageID("parent-1")
 		optionalSemanticParent, err := ValidateOptionalSemanticParentID(&typedParent)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(optionalSemanticParent).NotTo(BeNil())
 		Expect(*optionalSemanticParent).To(Equal(typedParent))
 
 		_, err = ValidateSemanticRoutePath(" ")
 		Expect(err).To(HavePageValidationFieldError("path", FieldCodePagePathRequired, MessageIDPagePathRequired))
 
+		validatedRoutePath, err := ValidateSemanticRoutePath(" docs/page ")
+		Expect(err).To(Succeed())
+		Expect(validatedRoutePath).To(Equal(newFixtureRoutePath("docs/page")))
+
+		_, err = ValidateSemanticRoutePath("../escape")
+		Expect(err).To(HavePageValidationFieldError("path", FieldCodePagePathInvalid, MessageIDPagePathInvalid))
+
 		_, err = ValidateRoutePathValue(newFixtureRoutePath(""))
 		Expect(err).To(HavePageValidationFieldError("path", FieldCodePagePathRequired, MessageIDPagePathRequired))
+
+		validatedRoutePath, err = ValidateRoutePathValue(newFixtureRoutePath("docs/page"))
+		Expect(err).To(Succeed())
+		Expect(validatedRoutePath).To(Equal(newFixtureRoutePath("docs/page")))
 
 		id := newFixturePageID("page-1")
 		Expect(optionalPageIDString(nil)).To(BeNil())
 		optionalID := optionalPageIDString(&id)
 		Expect(optionalID).NotTo(BeNil())
 		Expect(*optionalID).To(Equal("page-1"))
+
+		wireParentID := newFixturePageID("parent-page").MetadataValue()
+		Expect(semanticPageIDPtr(nil)).To(BeNil())
+		semanticParentID := semanticPageIDPtr(&wireParentID)
+		Expect(semanticParentID).NotTo(BeNil())
+		Expect(*semanticParentID).To(Equal(newFixturePageID("parent-page")))
+		Expect(semanticPageIDs([]string{
+			newFixturePageID("first-page").MetadataValue(),
+			newFixturePageID("second-page").MetadataValue(),
+		})).To(Equal([]tree.PageID{
+			newFixturePageID("first-page"),
+			newFixturePageID("second-page"),
+		}))
 	})
 
 	ginkgo.It("resolves README markdown path fallback routes", ginkgo.Label("unit"), func() {
@@ -270,24 +328,41 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 		Expect("docs/page.md").To(BeIgnoredByReadmeMarkdownFallbackRoutes())
 
 		input, err := requireReadmeMarkdownPathFallbackInput("README.md", newFixtureNodeKind(""))
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(input).To(HavePageAndSectionReadmeMarkdownFallback("README", ""))
 
 		input, err = requireReadmeMarkdownPathFallbackInput("docs/README.md", tree.NodeKindSection)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(input).To(HaveSectionReadmeMarkdownFallback("docs/README", "docs"))
 
-		_, err = requireReadmeMarkdownPathFallbackRawInput("docs/README.md", "bad-kind")
+		input, err = requireReadmeMarkdownPathFallbackRawInput("docs/README.md", paddedPageNodeKindWireValue(tree.NodeKindPage))
+		Expect(err).To(Succeed())
+		Expect(input).To(HavePageOnlyReadmeMarkdownFallback("docs/README", "docs"))
+
+		_, err = requireReadmeMarkdownPathFallbackRawInput("docs/README.md", pageNodeKindWireValue(newFixtureNodeKind("bad-kind")))
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidKind))
 
 		rootDir := pagesTempDir()
-		Expect(ReadmeFallbackSectionIsActive("", "docs")).To(BeFalse())
-		Expect(ReadmeFallbackSectionIsActive(rootDir, "missing")).To(BeFalse())
+		Expect(ReadmeFallbackSection("", "docs")).To(HaveInactiveReadmeFallbackSection())
+		Expect(ReadmeFallbackSection(rootDir, "missing")).To(HaveInactiveReadmeFallbackSection())
 		Expect(os.MkdirAll(filepath.Join(rootDir, "docs", "child"), 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "README.md"), []byte("# Docs"), 0o644)).To(Succeed())
-		Expect(ReadmeFallbackSectionIsActive(rootDir, "docs")).To(BeTrue())
+		Expect(ReadmeFallbackSection(rootDir, "docs")).To(HaveActiveReadmeFallbackSection())
+		sectionOut := &FindByPathOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("docs-section")}}}
+		rawOut, err := requireReadmeMarkdownPathFallbackRaw("docs/README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
+			RootDir: rootDir,
+			FindByPath: func(in FindByPathInput) (*FindByPathOutput, error) {
+				Expect(in).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+					"RoutePath": Equal(newFixtureRoutePath("docs")),
+					"Kind":      Equal(tree.NodeKindSection),
+				}))
+				return sectionOut, nil
+			},
+		})
+		Expect(err).To(Succeed())
+		Expect(rawOut).To(BeIdenticalTo(sectionOut))
 		Expect(os.WriteFile(filepath.Join(rootDir, "docs", "index.md"), []byte("# Index"), 0o644)).To(Succeed())
-		Expect(ReadmeFallbackSectionIsActive(rootDir, "docs")).To(BeFalse())
+		Expect(ReadmeFallbackSection(rootDir, "docs")).To(HaveInactiveReadmeFallbackSection())
 
 		pageOut := &FindByPathOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: newFixturePageID("readme")}}}
 		out, err := requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
@@ -299,10 +374,24 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 				return pageOut, nil
 			},
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(out).To(BeIdenticalTo(pageOut))
 
 		Expect(ignoreReadmeMarkdownPathFallback("docs/page.md", newFixtureNodeKind(""), ReadmeMarkdownPathFallbackLookup{})).To(Succeed())
+
+		Expect(os.WriteFile(filepath.Join(rootDir, "README.md"), []byte("# Root"), 0o644)).To(Succeed())
+		rootOut := &FindByPathOutput{Page: &tree.Page{PageNode: &tree.PageNode{ID: tree.RootPageID}}}
+		input, err = requireReadmeMarkdownPathFallbackRawInput("README.md", pageNodeKindWireValue(tree.NodeKindSection))
+		Expect(err).To(Succeed())
+		Expect(input).To(HaveSectionReadmeMarkdownFallback("README", ""))
+		rootFallback, err := requireReadmeMarkdownPathFallback("README.md", tree.NodeKindSection, ReadmeMarkdownPathFallbackLookup{
+			RootDir: rootDir,
+			RootPage: func() (*tree.Page, error) {
+				return rootOut.Page, nil
+			},
+		})
+		Expect(err).To(Succeed())
+		Expect(rootFallback.Page).To(BeIdenticalTo(rootOut.Page))
 
 		_, err = requireReadmeMarkdownPathFallback("docs/README.md", tree.NodeKindPage, ReadmeMarkdownPathFallbackLookup{
 			FindByPath: func(FindByPathInput) (*FindByPathOutput, error) {
@@ -331,6 +420,7 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 			{tree.ErrMovePageCircularReference, http.StatusBadRequest, ErrCodePageCircularMove},
 			{tree.ErrPageCannotBeMovedToItself, http.StatusBadRequest, ErrCodePageCannotMoveToSelf},
 			{tree.ErrConvertNotAllowed, http.StatusBadRequest, ErrCodePageConvertNotAllowed},
+			{tree.ErrVersionConflict, http.StatusConflict, ErrCodePageVersionConflict},
 			{tree.ErrVersionRequired, http.StatusBadRequest, ErrCodePageVersionRequired},
 			{tree.ErrTreeNotLoaded, http.StatusInternalServerError, ErrCodePageInternalError},
 		}
@@ -341,6 +431,9 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 
 		Expect(pageErrorStatus(ErrCodePageVersionConflict)).To(Equal(http.StatusConflict))
 		Expect(pageErrorStatus(ErrCodePageInternalError)).To(Equal(http.StatusInternalServerError))
+		Expect(newPageRootOperationError("delete")).To(MatchPageLocalizedCode(ErrCodePageRootOperation))
+		Expect(apiSuccessMessage(MessageIDAPIPagesDeleteSuccess)).NotTo(BeEmpty())
+		Expect(ErrSectionHeadingNotFound).To(HaveSectionEditErrorCode(ErrCodeSectionHeadingNotFound))
 	})
 
 	ginkgo.It("writes structured page errors for localized, validation, sentinel, and fallback failures", ginkgo.Label("integration"), func() {
@@ -350,8 +443,12 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 		validationErr := sharederrors.NewValidationErrors()
 		validationErr.AddWithCode("title", FieldCodePageTitleRequired, MessageIDPageTitleRequired)
 		rec = respondWithPageErrorRecorder(validationErr)
-		Expect(rec).To(HaveHTTPStatus(http.StatusBadRequest), rec.Body.String())
-		Expect(rec).To(HaveHTTPBody(ContainSubstring(pageValidationErrorCode)))
+		Expect(rec).To(HavePageValidationErrorResponse(
+			http.StatusBadRequest,
+			"title",
+			FieldCodePageTitleRequired,
+			MessageIDPageTitleRequired,
+		))
 
 		rec = respondWithPageErrorRecorder(tree.ErrPageNotFound)
 		Expect(rec).To(HavePageErrorResponse(http.StatusNotFound, ErrCodePageNotFound), rec.Body.String())

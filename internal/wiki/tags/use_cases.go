@@ -78,7 +78,12 @@ type GetPagesByTagsOutput struct {
 type GetPagesByTagsUseCase struct {
 	svc          tagsService
 	treeService  *tree.TreeService
+	pageFinder   tagPageFinder
 	userResolver *auth.UserResolver
+}
+
+type tagPageFinder interface {
+	FindPageByID(id tree.PageID) (*tree.PageNode, error)
 }
 
 type tagsService interface {
@@ -93,6 +98,9 @@ func NewGetPagesByTagsUseCase(svc *coretags.TagsService, treeService *tree.TreeS
 	uc := &GetPagesByTagsUseCase{treeService: treeService, userResolver: userResolver}
 	if svc != nil {
 		uc.svc = svc
+	}
+	if treeService != nil {
+		uc.pageFinder = treeService
 	}
 	return uc
 }
@@ -130,8 +138,12 @@ func (uc *GetPagesByTagsUseCase) Execute(_ context.Context, in GetPagesByTagsInp
 	}
 
 	pages := make([]*dto.TaggedPage, 0, len(pageIDs))
+	pageFinder := uc.pageFinder
+	if pageFinder == nil {
+		pageFinder = uc.treeService
+	}
 	for _, id := range pageIDs {
-		node, err := uc.treeService.FindPageByID(id)
+		node, err := pageFinder.FindPageByID(id)
 		if err != nil || node == nil {
 			continue
 		}

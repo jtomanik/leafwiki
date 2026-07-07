@@ -70,6 +70,36 @@ var _ = ginkgo.Describe("health routes", ginkgo.Label("integration"), func() {
 			),
 		}))
 	})
+
+	ginkgo.DescribeTable("publishes non-ready runtime role states",
+		func(state projectdaemon.RoleState, expected healthStatus) {
+			routes := NewRoutes(RoutesConfig{
+				StorageDir:    healthTempDir(),
+				RequiredRoles: []projectdaemon.RoleName{projectdaemon.RoleWikid},
+				RoleHealth: func() []projectdaemon.RoleHealth {
+					return []projectdaemon.RoleHealth{{Name: projectdaemon.RoleWikid, State: state}}
+				},
+			})
+			router := httpinternal.NewRouter([]httpinternal.RouteRegistrar{routes}, httpinternal.FrontendConfig{}, httpinternal.RouterOptions{})
+
+			rec := performHealthRequest(router)
+
+			Expect(rec).To(HaveHTTPStatus(http.StatusServiceUnavailable), rec.Body.String())
+			body := decodeHealthResponse(rec)
+			Expect(body).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Status": Equal(healthStatusDegraded),
+				"Checks": HaveKeyWithValue(
+					healthCheckRoleWikid.String(),
+					expected,
+				),
+			}))
+		},
+		ginkgo.Entry("starting roles are reported as starting", projectdaemon.RoleStateStarting, healthStatusStarting),
+		ginkgo.Entry("degraded roles are reported as degraded", projectdaemon.RoleStateDegraded, healthStatusDegraded),
+		ginkgo.Entry("restarting roles are reported as restarting", projectdaemon.RoleStateRestarting, healthStatusRestarting),
+		ginkgo.Entry("stopped roles are reported as stopped", projectdaemon.RoleStateStopped, healthStatusStopped),
+		ginkgo.Entry("unrecognized roles are reported as unknown", newFixtureRoleState("custom"), healthStatusUnknown),
+	)
 })
 
 var _ = ginkgo.Describe("health evaluation", func() {

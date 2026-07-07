@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"os"
@@ -55,6 +56,17 @@ func requireReadmeMarkdownPathFallbackRawInput(path string, kind string) (Readme
 
 func requireReadmeMarkdownPathFallback(path string, kind tree.NodeKind, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, error) {
 	out, handled, err := FindReadmeMarkdownPathFallback(path, kind, lookup)
+	if err != nil {
+		return out, err
+	}
+	if !handled {
+		return out, errors.New("README fallback was not handled")
+	}
+	return out, nil
+}
+
+func requireReadmeMarkdownPathFallbackRaw(rawPath string, kind tree.NodeKind, lookup ReadmeMarkdownPathFallbackLookup) (*FindByPathOutput, error) {
+	out, handled, err := FindReadmeMarkdownPathFallbackRawInput(rawPath, pageNodeKindWireValue(kind), lookup)
 	if err != nil {
 		return out, err
 	}
@@ -251,6 +263,37 @@ func readmeMarkdownFallbackAttemptObservationFor(input ReadmeMarkdownPathFallbac
 	}
 }
 
+func ReadmeFallbackSection(rootDir string, rawSectionRoute string) readmeFallbackSectionProbe {
+	return readmeFallbackSectionProbe{RootDir: rootDir, RawSectionRoute: rawSectionRoute}
+}
+
+func HaveActiveReadmeFallbackSection() types.GomegaMatcher {
+	return WithTransform(readmeFallbackSectionStateFor, Equal(readmeFallbackSectionActive))
+}
+
+func HaveInactiveReadmeFallbackSection() types.GomegaMatcher {
+	return WithTransform(readmeFallbackSectionStateFor, Equal(readmeFallbackSectionInactive))
+}
+
+type readmeFallbackSectionState uint8
+
+const (
+	readmeFallbackSectionInactive readmeFallbackSectionState = iota
+	readmeFallbackSectionActive
+)
+
+type readmeFallbackSectionProbe struct {
+	RootDir         string
+	RawSectionRoute string
+}
+
+func readmeFallbackSectionStateFor(probe readmeFallbackSectionProbe) readmeFallbackSectionState {
+	if ReadmeFallbackSectionIsActive(probe.RootDir, probe.RawSectionRoute) {
+		return readmeFallbackSectionActive
+	}
+	return readmeFallbackSectionInactive
+}
+
 func HavePageSaveContentChange() types.GomegaMatcher {
 	return WithTransform(pageSaveChangeSetFor, HaveField("Content", Equal(pageSaveChangePresent)))
 }
@@ -390,4 +433,47 @@ func respondWithPageErrorRecorder(err error) *httptest.ResponseRecorder {
 
 func HavePageErrorResponse(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
 	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
+}
+
+type pageValidationHTTPResponse struct {
+	Status int
+	Fields []sharederrors.FieldError
+}
+
+func HavePageValidationErrorResponse(status int, field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(pageValidationHTTPResponseFor, gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+		"Status": Equal(status),
+		"Fields": HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Field":     Equal(field.String()),
+			"Code":      Equal(code),
+			"MessageID": Equal(messageID),
+		})),
+	}))
+}
+
+func pageValidationHTTPResponseFor(rec *httptest.ResponseRecorder) pageValidationHTTPResponse {
+	if rec == nil || rec.Body == nil {
+		return pageValidationHTTPResponse{}
+	}
+	var body struct {
+		Fields []sharederrors.FieldError `json:"fields"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		return pageValidationHTTPResponse{Status: rec.Code}
+	}
+	return pageValidationHTTPResponse{Status: rec.Code, Fields: body.Fields}
+}
+
+func HaveSectionEditErrorCode(code SectionEditErrorCode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(sectionEditErrorCodeFor, Equal(code))
+}
+
+func sectionEditErrorCodeFor(err error) SectionEditErrorCode {
+	var sectionErr sectionEditError
+	if !errors.As(err, &sectionErr) {
+		return ""
+	}
+	return sectionErr.Code()
 }

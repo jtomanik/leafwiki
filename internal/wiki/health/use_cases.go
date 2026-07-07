@@ -57,11 +57,15 @@ func (checks healthChecks) HTTPMap() map[string]string {
 }
 
 type HealthUseCase struct {
-	index         *search.SQLiteIndex
+	index         healthIndexPinger
 	status        *search.IndexingStatus
 	storageDir    string
 	requiredRoles []projectdaemon.RoleName
 	roleHealth    func() []projectdaemon.RoleHealth
+}
+
+type healthIndexPinger interface {
+	Ping() error
 }
 
 type HealthUseCaseOptions struct {
@@ -70,6 +74,14 @@ type HealthUseCaseOptions struct {
 }
 
 func NewHealthUseCase(index *search.SQLiteIndex, status *search.IndexingStatus, storageDir string, opts ...HealthUseCaseOptions) *HealthUseCase {
+	var pinger healthIndexPinger
+	if index != nil {
+		pinger = index
+	}
+	return newHealthUseCase(pinger, status, storageDir, opts...)
+}
+
+func newHealthUseCase(index healthIndexPinger, status *search.IndexingStatus, storageDir string, opts ...HealthUseCaseOptions) *HealthUseCase {
 	uc := &HealthUseCase{
 		index:      index,
 		status:     status,
@@ -88,11 +100,11 @@ func (uc *HealthUseCase) SetRoleHealth(required []projectdaemon.RoleName, roleHe
 }
 
 func NewLegacyHealthUseCase(index *search.SQLiteIndex, status *search.IndexingStatus, storageDir string) *HealthUseCase {
-	return &HealthUseCase{
-		index:      index,
-		status:     status,
-		storageDir: storageDir,
+	var pinger healthIndexPinger
+	if index != nil {
+		pinger = index
 	}
+	return newHealthUseCase(pinger, status, storageDir)
 }
 
 func (uc *HealthUseCase) Execute() (bool, healthChecks) {

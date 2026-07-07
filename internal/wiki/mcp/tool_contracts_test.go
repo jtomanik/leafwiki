@@ -7,7 +7,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
+	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
+	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/localization"
+	wikipages "github.com/perber/wiki/internal/wiki/pages"
 )
 
 var _ = Describe("Tool descriptor contracts", Label("unit"), func() {
@@ -55,5 +58,19 @@ var _ = Describe("Tool descriptor contracts", Label("unit"), func() {
 
 		result := mcpToolErrorResult(rawErr)
 		Expect(result.Meta).To(matchMCPToolErrorMeta(errCodeMCPToolError))
+	})
+
+	It("projects localized tool errors into the MCP error envelope", func() {
+		err := sharederrors.NewLocalizedErrorFromCode(errCodeMCPPageIdentifierRequired, nil)
+
+		result := mcpToolErrorResult(err)
+
+		Expect(result.Meta).To(matchMCPToolErrorDetail(errCodeMCPPageIdentifierRequired))
+	})
+
+	It("projects page-domain errors into the MCP error envelope", func() {
+		result := mcpToolErrorResult(tree.ErrPageNotFound)
+
+		Expect(result.Meta).To(matchMCPToolErrorDetail(wikipages.ErrCodePageNotFound))
 	})
 })

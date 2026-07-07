@@ -2,7 +2,7 @@ package revisions
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,6 +19,8 @@ import (
 	"github.com/perber/wiki/internal/workspacesync"
 )
 
+var errRevisionTreeServiceUnavailable = errors.New("tree service is unavailable")
+
 // Routes is the RouteRegistrar for the revisions domain.
 type Routes struct {
 	listWorkspaceRevisions   func(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error)
@@ -26,7 +28,12 @@ type Routes struct {
 	restoreWorkspaceRevision func(context.Context, *tree.Page, revision.RevisionID, workspacesync.Actor, workspacesync.Source) (*tree.Page, error)
 	userResolver             *coreauth.UserResolver
 	authService              *coreauth.AuthService
-	treeService              *tree.TreeService
+	treeService              revisionPageStore
+}
+
+type revisionPageStore interface {
+	GetPage(id tree.PageID) (*tree.Page, error)
+	ReadPageRaw(id tree.PageID) (string, error)
 }
 
 // RoutesConfig holds the dependencies required to build a Routes instance.
@@ -41,13 +48,17 @@ type RoutesConfig struct {
 
 // NewRoutes constructs the revisions RouteRegistrar.
 func NewRoutes(cfg RoutesConfig) *Routes {
+	var treeService revisionPageStore
+	if cfg.TreeService != nil {
+		treeService = cfg.TreeService
+	}
 	return &Routes{
 		listWorkspaceRevisions:   cfg.ListWorkspaceRevisions,
 		getWorkspaceRevision:     cfg.GetWorkspaceRevision,
 		restoreWorkspaceRevision: cfg.RestoreWorkspaceRevision,
 		userResolver:             cfg.UserResolver,
 		authService:              cfg.AuthService,
-		treeService:              cfg.TreeService,
+		treeService:              treeService,
 	}
 }
 
@@ -254,7 +265,7 @@ func (r *Routes) handleRestoreRevision(c *gin.Context) {
 
 func (r *Routes) workspacePage(pageID tree.PageID) (*tree.Page, error) {
 	if r.treeService == nil {
-		return nil, fmt.Errorf("tree service is unavailable")
+		return nil, errRevisionTreeServiceUnavailable
 	}
 	return r.treeService.GetPage(pageID)
 }

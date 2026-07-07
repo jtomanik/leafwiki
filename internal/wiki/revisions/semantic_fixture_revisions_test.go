@@ -20,6 +20,10 @@ func newFixtureSlug[T ~string](raw T) tree.Slug {
 	return tree.NewSlugUnchecked(raw)
 }
 
+func newFixtureRoutePath[T ~string](raw T) tree.RoutePath {
+	return tree.NewRoutePathUnchecked(string(raw))
+}
+
 func newFixtureAssetName[T ~string](raw T) tree.AssetName {
 	return tree.AssetNameFromString(raw)
 }

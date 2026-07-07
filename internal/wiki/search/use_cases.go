@@ -47,7 +47,7 @@ func ValidateSearchRequest(query string, tags []string) error {
 type SearchUseCase struct {
 	index searchIndex
 	tags  searchTags
-	tree  *tree.TreeService
+	tree  searchTree
 }
 
 type searchIndex interface {
@@ -61,13 +61,20 @@ type searchTags interface {
 	GetExcerptsForPages(pageIDs []tree.PageID) (map[tree.PageID]string, error)
 }
 
+type searchTree interface {
+	FindPageByID(id tree.PageID) (*tree.PageNode, error)
+}
+
 func NewSearchUseCase(idx *coresearch.SQLiteIndex, tags *coretags.TagsService, tree *tree.TreeService) *SearchUseCase {
-	uc := &SearchUseCase{tree: tree}
+	uc := &SearchUseCase{}
 	if idx != nil {
 		uc.index = idx
 	}
 	if tags != nil {
 		uc.tags = tags
+	}
+	if tree != nil {
+		uc.tree = tree
 	}
 	return uc
 }

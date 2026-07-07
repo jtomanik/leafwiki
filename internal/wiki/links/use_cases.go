@@ -32,11 +32,31 @@ type GetLinkStatusOutput struct {
 }
 
 type GetLinkStatusUseCase struct {
-	links *corelinks.LinkService
-	tree  *tree.TreeService
+	links linkStatusService
+	tree  linkPageGetter
+}
+
+type linkStatusService interface {
+	GetLinkStatusForPage(pageID tree.PageID, pagePath tree.RoutePath) (*corelinks.LinkStatusResult, error)
+}
+
+type linkPageGetter interface {
+	GetPage(id tree.PageID) (*tree.Page, error)
 }
 
 func NewGetLinkStatusUseCase(l *corelinks.LinkService, t *tree.TreeService) *GetLinkStatusUseCase {
+	var links linkStatusService
+	if l != nil {
+		links = l
+	}
+	var treeService linkPageGetter
+	if t != nil {
+		treeService = t
+	}
+	return newGetLinkStatusUseCase(links, treeService)
+}
+
+func newGetLinkStatusUseCase(l linkStatusService, t linkPageGetter) *GetLinkStatusUseCase {
 	return &GetLinkStatusUseCase{links: l, tree: t}
 }
 
@@ -69,10 +89,22 @@ type GetBacklinksOutput struct {
 }
 
 type GetBacklinksUseCase struct {
-	links *corelinks.LinkService
+	links backlinksService
+}
+
+type backlinksService interface {
+	GetBacklinksForPage(pageID tree.PageID) (*corelinks.BacklinkResult, error)
 }
 
 func NewGetBacklinksUseCase(l *corelinks.LinkService) *GetBacklinksUseCase {
+	var links backlinksService
+	if l != nil {
+		links = l
+	}
+	return newGetBacklinksUseCase(links)
+}
+
+func newGetBacklinksUseCase(l backlinksService) *GetBacklinksUseCase {
 	return &GetBacklinksUseCase{links: l}
 }
 
@@ -98,10 +130,22 @@ type GetOutgoingLinksOutput struct {
 }
 
 type GetOutgoingLinksUseCase struct {
-	links *corelinks.LinkService
+	links outgoingLinksService
+}
+
+type outgoingLinksService interface {
+	GetOutgoingLinksForPage(pageID tree.PageID) (*corelinks.OutgoingResult, error)
 }
 
 func NewGetOutgoingLinksUseCase(l *corelinks.LinkService) *GetOutgoingLinksUseCase {
+	var links outgoingLinksService
+	if l != nil {
+		links = l
+	}
+	return newGetOutgoingLinksUseCase(links)
+}
+
+func newGetOutgoingLinksUseCase(l outgoingLinksService) *GetOutgoingLinksUseCase {
 	return &GetOutgoingLinksUseCase{links: l}
 }
 
@@ -119,10 +163,22 @@ func (uc *GetOutgoingLinksUseCase) Execute(_ context.Context, in GetOutgoingLink
 // ─── ReindexLinksUseCase ─────────────────────────────────────────────────────
 
 type ReindexLinksUseCase struct {
-	links *corelinks.LinkService
+	links linkReindexService
+}
+
+type linkReindexService interface {
+	IndexAllPages() error
 }
 
 func NewReindexLinksUseCase(l *corelinks.LinkService) *ReindexLinksUseCase {
+	var links linkReindexService
+	if l != nil {
+		links = l
+	}
+	return newReindexLinksUseCase(links)
+}
+
+func newReindexLinksUseCase(l linkReindexService) *ReindexLinksUseCase {
 	return &ReindexLinksUseCase{links: l}
 }
 

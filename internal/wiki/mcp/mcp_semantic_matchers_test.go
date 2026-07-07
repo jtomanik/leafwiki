@@ -224,6 +224,13 @@ func matchMCPToolErrorMeta(code sharederrors.ErrorCode) types.GomegaMatcher {
 	))
 }
 
+func matchMCPToolErrorDetail(code sharederrors.ErrorCode) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(func(meta map[string]any) any {
+		return meta["error"]
+	}, testmatchers.HaveMCPStructuredError(code, sharederrors.MessageIDForCode(code)))
+}
+
 type validationIssueOutputProjection struct {
 	Code      wikivalidation.IssueCode
 	Path      string

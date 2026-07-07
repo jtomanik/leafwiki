@@ -40,6 +40,19 @@ var _ = Describe("MCP context checkpoint retention", Label("unit"), func() {
 		Expect(store.limit).To(Equal(10))
 	})
 
+	It("projects retained checkpoints into context history output", func() {
+		createdAt := time.Date(2026, 6, 20, 12, 30, 0, 0, time.UTC)
+
+		Expect(checkpointOutputs([]contextCheckpoint{{
+			Token:      "ctx_1",
+			CreatedAt:  createdAt,
+			CommitHash: newFixtureCommitHash("internal-commit"),
+		}})).To(Equal([]contextCheckpointOutput{{
+			Token:     "ctx_1",
+			CreatedAt: "2026-06-20T12:30:00Z",
+		}}))
+	})
+
 	It("honors disabled pruning and session limits", func() {
 		base := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 		store := newContextCheckpointStore(2)

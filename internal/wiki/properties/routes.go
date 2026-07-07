@@ -1,6 +1,7 @@
 package properties
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -14,9 +15,17 @@ import (
 
 // Routes is the RouteRegistrar for the properties domain.
 type Routes struct {
-	getPropertyKeys    *GetPropertyKeysUseCase
-	getPagesByProperty *GetPagesByPropertyUseCase
+	getPropertyKeys    propertyKeysExecutor
+	getPagesByProperty pagesByPropertyExecutor
 	authService        *coreauth.AuthService
+}
+
+type propertyKeysExecutor interface {
+	Execute(ctx context.Context, in GetPropertyKeysInput) (*GetPropertyKeysOutput, error)
+}
+
+type pagesByPropertyExecutor interface {
+	Execute(ctx context.Context, in GetPagesByPropertyInput) (*GetPagesByPropertyOutput, error)
 }
 
 // RoutesConfig holds the dependencies required to build a Routes instance.
@@ -28,9 +37,17 @@ type RoutesConfig struct {
 
 // NewRoutes constructs the properties RouteRegistrar.
 func NewRoutes(cfg RoutesConfig) *Routes {
+	var getPropertyKeys propertyKeysExecutor
+	if cfg.GetPropertyKeys != nil {
+		getPropertyKeys = cfg.GetPropertyKeys
+	}
+	var getPagesByProperty pagesByPropertyExecutor
+	if cfg.GetPagesByProperty != nil {
+		getPagesByProperty = cfg.GetPagesByProperty
+	}
 	return &Routes{
-		getPropertyKeys:    cfg.GetPropertyKeys,
-		getPagesByProperty: cfg.GetPagesByProperty,
+		getPropertyKeys:    getPropertyKeys,
+		getPagesByProperty: getPagesByProperty,
 		authService:        cfg.AuthService,
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,87 +14,13 @@ import (
 	"github.com/gin-gonic/gin"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
-	"github.com/onsi/gomega/types"
 
 	coreassets "github.com/perber/wiki/internal/core/assets"
-	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/shared"
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 )
-
-type inMemoryMultipartFile struct {
-	*bytes.Reader
-}
-
-func (f inMemoryMultipartFile) Close() error {
-	return nil
-}
-
-func matchAssetLocalizedError(code sharederrors.ErrorCode) types.GomegaMatcher {
-	return testmatchers.MatchLocalizedError(code, sharederrors.MessageIDForCode(code))
-}
-
-func matchAssetStructuredError(status int, code sharederrors.ErrorCode) types.GomegaMatcher {
-	return testmatchers.HaveHTTPStructuredError(status, code, sharederrors.MessageIDForCode(code))
-}
-
-func matchAssetDownload(filename tree.AssetName, mimeType string, content []byte) types.GomegaMatcher {
-	return gstruct.PointTo(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Filename": Equal(filename),
-		"MIMEType": Equal(mimeType),
-		"Content":  Equal(content),
-	}))
-}
-
-type assetLogEvent struct {
-	Level slog.Level
-	Attrs map[string]any
-}
-
-type assetLogRecords struct {
-	Events []assetLogEvent
-}
-
-type uploadedAssetCloseCause struct{}
-
-func (uploadedAssetCloseCause) Error() string {
-	return "uploaded asset close cause"
-}
-
-func (r *assetLogRecords) Enabled(context.Context, slog.Level) bool {
-	return true
-}
-
-func (r *assetLogRecords) Handle(_ context.Context, record slog.Record) error {
-	event := assetLogEvent{
-		Level: record.Level,
-		Attrs: map[string]any{},
-	}
-	record.Attrs(func(attr slog.Attr) bool {
-		event.Attrs[attr.Key] = attr.Value.Any()
-		return true
-	})
-	r.Events = append(r.Events, event)
-	return nil
-}
-
-func (r *assetLogRecords) WithAttrs([]slog.Attr) slog.Handler {
-	return r
-}
-
-func (r *assetLogRecords) WithGroup(string) slog.Handler {
-	return r
-}
-
-func matchUploadedAssetCloseErrorLog(closeErr error) types.GomegaMatcher {
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"Level": Equal(slog.LevelError),
-		"Attrs": HaveKeyWithValue("error", BeIdenticalTo(closeErr)),
-	})
-}
 
 var _ = ginkgo.Describe("asset helpers", func() {
 	ginkgo.It("assigns HTTP status classes to validation missing duplicate and unknown asset failures", ginkgo.Label("unit"), func() {
@@ -145,6 +70,35 @@ var _ = ginkgo.Describe("asset helpers", func() {
 		Expect(DetectAssetMIMEType("style.css", []byte("not css"))).To(Equal("text/css; charset=utf-8"))
 		Expect(DetectAssetMIMEType("asset.unknownext", []byte("%PDF-1.7\n"))).To(Equal("application/pdf"))
 	})
+
+	ginkgo.It("preserves asset use-case dependency contracts before route registration", ginkgo.Label("unit"), func() {
+		treeService := tree.NewTreeService(assetTempDir())
+		assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		assetsDir := assetTempDir()
+
+		upload := NewUploadAssetUseCase(treeService, assetService, logger)
+		list := NewListAssetsUseCase(treeService, assetService)
+		get := NewGetAssetUseCase(treeService, assetService)
+		rename := NewRenameAssetUseCase(treeService, assetService, logger)
+		deleteAsset := NewDeleteAssetUseCase(treeService, assetService, logger)
+		routes := NewRoutes(RoutesConfig{
+			Upload:    upload,
+			List:      list,
+			Rename:    rename,
+			Delete:    deleteAsset,
+			AssetsDir: assetsDir,
+			Log:       logger,
+		})
+
+		Expect(upload).To(matchUploadAssetDependencies(treeService, assetService, logger))
+		Expect(list).To(matchListAssetDependencies(treeService, assetService))
+		Expect(get).To(matchGetAssetDependencies(treeService, assetService))
+		Expect(rename).To(matchRenameAssetDependencies(treeService, assetService, logger))
+		Expect(deleteAsset).To(matchDeleteAssetDependencies(treeService, assetService, logger))
+		Expect(routes).To(matchAssetRouteDependencies(upload, list, rename, deleteAsset, assetsDir, logger))
+		Expect(apiSuccessMessage(MessageIDAssetDeleteSuccess)).NotTo(BeEmpty())
+	})
 })
 
 var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
@@ -159,18 +113,18 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			Filename: newFixtureAssetName("my-image.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(uploadOut.URL).To(Equal(pageAssetURL(*pageID, tree.AssetNameFromString("my-image.png"))))
 
 		listOut, err := NewListAssetsUseCase(treeService, assetService).Execute(context.Background(), ListAssetsInput{PageID: *pageID})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(listOut.Files).To(Equal([]string{pageAssetURL(*pageID, tree.AssetNameFromString("my-image.png"))}))
 
 		getOut, err := NewGetAssetUseCase(treeService, assetService).Execute(context.Background(), GetAssetInput{
 			PageID:   *pageID,
 			Filename: newFixtureAssetName("my-image.png"),
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(getOut).To(matchAssetDownload(newFixtureAssetName("my-image.png"), "image/png", []byte("hello image")))
 
 		renameOut, err := NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
@@ -179,7 +133,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			OldFilename: newFixtureAssetName("my-image.png"),
 			NewFilename: newFixtureAssetName("renamed.png"),
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(renameOut.URL).To(Equal(pageAssetURL(*pageID, tree.AssetNameFromString("renamed.png"))))
 
 		Expect(NewDeleteAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), DeleteAssetInput{
@@ -189,7 +143,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 		})).To(Succeed())
 
 		listOut, err = NewListAssetsUseCase(treeService, assetService).Execute(context.Background(), ListAssetsInput{PageID: *pageID})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(listOut.Files).To(BeEmpty())
 	})
 
@@ -264,7 +218,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			Filename: newFixtureAssetName("asset.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		_, err = NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
@@ -289,7 +243,7 @@ var _ = ginkgo.Describe("asset use cases", ginkgo.Label("integration"), func() {
 			Filename: newFixtureAssetName("other.png"),
 			ByteCap:  shared.MaxBytes(1024),
 		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		_, err = NewRenameAssetUseCase(treeService, assetService, slog.Default()).Execute(context.Background(), RenameAssetInput{
 			UserID:      newFixtureUserID("user-1"),
@@ -448,140 +402,3 @@ var _ = ginkgo.Describe("asset route handlers", ginkgo.Label("integration"), fun
 		Expect(deleteReq).To(HaveHTTPStatus(http.StatusForbidden), deleteReq.Body.String())
 	})
 })
-
-func setupAssetUseCaseTree() (*tree.TreeService, *tree.PageID) {
-	ginkgo.GinkgoHelper()
-	treeService := tree.NewTreeServiceWithOptions(tree.TreeOptions{
-		DataDir: assetTempDir(),
-		RootDir: assetTempDir(),
-	})
-	Expect(treeService.LoadTree()).To(Succeed())
-	kind := tree.NodeKindPage
-	pageID, err := treeService.CreateNode(newFixtureUserID("user-1"), nil, "Asset Page", newFixtureSlug("asset-page"), &kind)
-	Expect(err).NotTo(HaveOccurred())
-	return treeService, pageID
-}
-
-type assetRouteFixture struct {
-	treeService  *tree.TreeService
-	assetService *coreassets.AssetService
-	pageID       tree.PageID
-	routes       *Routes
-}
-
-func newAssetRouteFixture() assetRouteFixture {
-	ginkgo.GinkgoHelper()
-	treeService, pageID := setupAssetUseCaseTree()
-	assetService := coreassets.NewAssetService(assetTempDir(), tree.NewSlugService())
-	routes := NewRoutes(RoutesConfig{
-		Upload: NewUploadAssetUseCase(treeService, assetService, slog.Default()),
-		List:   NewListAssetsUseCase(treeService, assetService),
-		Rename: NewRenameAssetUseCase(treeService, assetService, slog.Default()),
-		Delete: NewDeleteAssetUseCase(treeService, assetService, slog.Default()),
-		Log:    slog.Default(),
-	})
-	return assetRouteFixture{
-		treeService:  treeService,
-		assetService: assetService,
-		pageID:       *pageID,
-		routes:       routes,
-	}
-}
-
-func (fixture assetRouteFixture) uploadAsset(filename tree.AssetName, content []byte) {
-	ginkgo.GinkgoHelper()
-	_, err := NewUploadAssetUseCase(fixture.treeService, fixture.assetService, slog.Default()).Execute(context.Background(), UploadAssetInput{
-		UserID:   newFixtureUserID("user-1"),
-		PageID:   fixture.pageID,
-		File:     inMemoryMultipartFile{Reader: bytes.NewReader(content)},
-		Filename: filename,
-		ByteCap:  shared.MaxBytes(1024),
-	})
-	Expect(err).NotTo(HaveOccurred())
-}
-
-func (fixture assetRouteFixture) routerWithUser() http.Handler {
-	ginkgo.GinkgoHelper()
-	return fixture.router(func(c *gin.Context) {
-		c.Set("user", &coreauth.User{ID: newFixtureUserID("user-1")})
-	})
-}
-
-func (fixture assetRouteFixture) routerWithoutUser() http.Handler {
-	ginkgo.GinkgoHelper()
-	return fixture.router(nil)
-}
-
-func (fixture assetRouteFixture) router(setup gin.HandlerFunc) http.Handler {
-	ginkgo.GinkgoHelper()
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	if setup != nil {
-		router.Use(setup)
-	}
-	router.POST("/api/pages/:id/assets", fixture.routes.handleUpload(shared.MaxBytes(64*1024)))
-	router.GET("/api/pages/:id/assets", fixture.routes.handleList)
-	router.PUT("/api/pages/:id/assets/rename", fixture.routes.handleRename)
-	router.DELETE("/api/pages/:id/assets/:name", fixture.routes.handleDelete)
-	router.DELETE("/api/pages/:id/assets/", fixture.routes.handleDelete)
-	return router
-}
-
-func assetMultipartBody(filename tree.AssetName, fileContent []byte) (*bytes.Buffer, string) {
-	ginkgo.GinkgoHelper()
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if filename != "" {
-		part, err := writer.CreateFormFile("file", filename.Filename())
-		Expect(err).NotTo(HaveOccurred())
-		_, err = part.Write(fileContent)
-		Expect(err).NotTo(HaveOccurred())
-	}
-	Expect(writer.Close()).To(Succeed())
-	return &body, writer.FormDataContentType()
-}
-
-func performAssetHandlerRequest(router http.Handler, method string, path string, body io.Reader, contentType string) *httptest.ResponseRecorder {
-	ginkgo.GinkgoHelper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(method, path, body)
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	router.ServeHTTP(rec, req)
-	return rec
-}
-
-func assetsPagePath(pageID tree.PageID) string {
-	return "/api/pages/" + pageID.MetadataValue() + "/assets"
-}
-
-func assetRenamePath(pageID tree.PageID) string {
-	return assetsPagePath(pageID) + "/rename"
-}
-
-func assetFilePath(pageID tree.PageID, name tree.AssetName) string {
-	return assetsPagePath(pageID) + "/" + name.Filename()
-}
-
-func pageAssetURL(pageID tree.PageID, name tree.AssetName) string {
-	return "/assets/" + pageID.MetadataValue() + "/" + name.Filename()
-}
-
-type failingAssetLister struct {
-	err error
-}
-
-func (l failingAssetLister) ListAssetsForPage(*tree.PageNode) ([]string, error) {
-	return nil, l.err
-}
-
-type closeErrorFile struct {
-	err error
-}
-
-func (f closeErrorFile) Close() error {
-	return f.err
-}
-
-var _ io.Reader = inMemoryMultipartFile{}

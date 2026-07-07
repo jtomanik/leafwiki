@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -228,6 +229,23 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		))
 	})
 
+	ginkgo.It("returns stable localized field codes for invalid user update input", ginkgo.Label("unit"), func() {
+		uc := NewUpdateUserUseCase(nil, nil, slog.Default())
+
+		_, err := uc.Execute(context.Background(), UpdateUserInput{
+			ID:               coreauth.UserIDFromString("user-1"),
+			Email:            "not-an-email",
+			Role:             "superuser",
+			RequesterIsAdmin: true,
+		})
+
+		Expect(err).To(SatisfyAll(
+			HaveAuthFieldErrorCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired),
+			HaveAuthFieldErrorCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid),
+			HaveAuthFieldErrorCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid),
+		))
+	})
+
 	ginkgo.It("returns stable localized field codes for missing API key names", ginkgo.Label("unit"), func() {
 		uc := NewCreateAPIKeyUseCase(nil, nil)
 
@@ -236,14 +254,18 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		Expect(err).To(HaveAuthFieldErrorCode("name", FieldCodeAuthAPIKeyNameRequired, MessageIDAuthAPIKeyNameRequired))
 	})
 
-	ginkgo.It("requires semantic user and API key identifiers in use-case inputs", ginkgo.Label("unit"), func() {
-		_ = GetUserByIDInput{ID: newFixtureUserID("user-1")}
-		_ = CreateAPIKeyInput{
-			UserID:          newFixtureUserID("user-1"),
-			CreatedByUserID: newFixtureUserID("admin-1"),
-		}
-		_ = ListAPIKeysInput{UserID: newFixtureUserID("user-1")}
-		_ = RevokeAPIKeyInput{UserID: newFixtureUserID("user-1"), KeyID: newFixtureAPIKeyID("key-1")}
+	ginkgo.It("returns stable localized field codes for invalid API key policy input", ginkgo.Label("unit"), func() {
+		uc := NewCreateAPIKeyUseCase(nil, nil)
+
+		_, err := uc.Execute(context.Background(), CreateAPIKeyInput{
+			Name:                   strings.Repeat("a", maxAPIKeyNameLength+1),
+			RequireCurrentPassword: true,
+		})
+
+		Expect(err).To(SatisfyAll(
+			HaveAuthFieldErrorCode("name", FieldCodeAuthAPIKeyNameTooLong, MessageIDAuthAPIKeyNameTooLong),
+			HaveAuthFieldErrorCode("currentPassword", FieldCodeAuthCurrentPasswordRequired, MessageIDAuthCurrentPasswordRequired),
+		))
 	})
 
 	ginkgo.It("returns auth-disabled errors for login, logout, and refresh when no auth service is configured", ginkgo.Label("unit"), func() {
@@ -405,10 +427,34 @@ var _ = ginkgo.Describe("auth use cases", func() {
 	})
 
 	ginkgo.It("auth error helpers map localized codes and success messages", ginkgo.Label("unit"), func() {
-		Expect(authErrorStatus(ErrCodeAuthUserNotFound)).To(Equal(404))
-		Expect(authErrorStatus(ErrCodeAuthForbidden)).To(Equal(403))
-		Expect(authErrorStatus(newFixtureErrorCode("unknown"))).To(Equal(500))
+		statusCases := []struct {
+			code   sharederrors.ErrorCode
+			status int
+		}{
+			{ErrCodeAuthUserNotFound, http.StatusNotFound},
+			{ErrCodeAuthInvalidCredentials, http.StatusUnauthorized},
+			{ErrCodeAuthTokenExpired, http.StatusUnauthorized},
+			{ErrCodeAuthInvalidRefreshToken, http.StatusUnprocessableEntity},
+			{ErrCodeAuthUserAlreadyExists, http.StatusConflict},
+			{ErrCodeAuthInvalidRole, http.StatusBadRequest},
+			{ErrCodeAuthAdminCannotDelete, http.StatusBadRequest},
+			{ErrCodeAuthLastAdminCannotBeDemoted, http.StatusBadRequest},
+			{ErrCodeAuthInvalidPayload, http.StatusBadRequest},
+			{ErrCodeAuthCookieFailed, http.StatusBadRequest},
+			{ErrCodeAuthCsrfFailed, http.StatusBadRequest},
+			{ErrCodeAuthInvalidRequest, http.StatusBadRequest},
+			{ErrCodeAuthAccountLocked, http.StatusUnauthorized},
+			{ErrCodeAuthDisabled, http.StatusForbidden},
+			{ErrCodeAuthForbidden, http.StatusForbidden},
+			{newFixtureErrorCode("unknown"), http.StatusInternalServerError},
+		}
+		for _, tc := range statusCases {
+			tc := tc
+			Expect(authErrorStatus(tc.code)).To(Equal(tc.status))
+		}
 		Expect(apiSuccessMessage(MessageIDAuthLoginSuccess)).NotTo(BeEmpty())
+		Expect(apiSuccessMessage(MessageIDAuthLogoutSuccess)).NotTo(BeEmpty())
+		Expect(apiSuccessMessage(MessageIDAuthRefreshTokenSuccess)).NotTo(BeEmpty())
 	})
 
 	ginkgo.It("delegates login, refresh, and logout operations to the configured auth service", ginkgo.Label("integration"), func() {

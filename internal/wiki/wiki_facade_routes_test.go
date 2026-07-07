@@ -11,18 +11,14 @@ import (
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gstruct"
-	"github.com/onsi/gomega/types"
 
 	corebranding "github.com/perber/wiki/internal/branding"
 	coreauth "github.com/perber/wiki/internal/core/auth"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/shared"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/projectdaemon"
-	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
 	wikipages "github.com/perber/wiki/internal/wiki/pages"
 	wikipresence "github.com/perber/wiki/internal/wiki/presence"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -136,13 +132,75 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(fake).To(haveWorkspaceSyncLifecycleObserved())
 	})
 
+	ginkgo.It("exposes workspace identity and route registry domains before service startup", ginkgo.Label("unit"), func() {
+		workspace := Workspace{
+			ID:      newFixtureWorkspaceID("workspace-1"),
+			DataDir: "data-dir",
+			RootDir: "root-dir",
+		}
+		w := &Wiki{
+			storageDir: "data-dir",
+			workspace:  workspace,
+		}
+
+		Expect(w).To(exposeStartupWorkspaceFacade(workspace, "data-dir", "root-dir"))
+		Expect(w.Registrars()).To(exposeRouteRegistryDomains(applicationRouteRegistryDomains()...))
+		Expect(w.FrontdRegistrars()).To(exposeRouteRegistryDomains(frontdRouteRegistryDomains()...))
+		Expect(w.WorkspacedRegistrars()).To(exposeRouteRegistryDomains(workspacedRouteRegistryDomains()...))
+		Expect(w.Close()).To(Succeed())
+	})
+
+	ginkgo.It("builds application route domains from configured wiki services", ginkgo.Label("unit"), func() {
+		w := newRouteAssemblyWiki()
+
+		w.buildRoutes(&WikiOptions{MaxAssetUploadSizeBytes: shared.MaxBytes(2048)})
+
+		Expect(w.Registrars()).To(exposeRouteRegistryDomains(applicationRouteRegistryDomains()...))
+		Expect(w.FrontdRegistrars()).To(exposeRouteRegistryDomains(frontdRouteRegistryDomains()...))
+		Expect(w.WorkspacedRegistrars()).To(exposeRouteRegistryDomains(workspacedRouteRegistryDomains()...))
+	})
+
+	ginkgo.It("builds control-plane route domains without workspace services", ginkgo.Label("unit"), func() {
+		w := &Wiki{
+			storageDir: wikiTestTempDir(),
+			log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}
+
+		w.buildControlPlaneRoutes(&WikiOptions{})
+
+		Expect(w).To(exposeControlPlaneRouteRegistry())
+	})
+
+	ginkgo.It("returns configured presence registries without service startup", ginkgo.Label("unit"), func() {
+		w := &Wiki{}
+		viewer := &coreauth.User{ID: newFixtureUserID("viewer")}
+
+		webSessions, err := w.WebPresenceSessions(viewer)
+		Expect(err).To(matchWebPresenceUnavailable())
+		Expect(webSessions).To(BeNil())
+
+		w.webPresence = wikipresence.NewWebPresenceRegistry(time.Minute, nil)
+		webSessions, err = w.WebPresenceSessions(viewer)
+		Expect(err).To(Succeed())
+		Expect(webSessions).To(BeEmpty())
+
+		agentSessions, err := w.AgentPresenceSessions()
+		Expect(err).To(matchAgentPresenceUnavailable())
+		Expect(agentSessions).To(BeNil())
+
+		w.SetAgentPresenceRegistry(projectdaemon.NewAgentPresenceRegistry(time.Minute, nil))
+		agentSessions, err = w.AgentPresenceSessions()
+		Expect(err).To(Succeed())
+		Expect(agentSessions).To(BeEmpty())
+	})
+
 	ginkgo.It("route registrar accessors expose the expected route groups", ginkgo.Label("integration"), func() {
 		w := createWikiTestInstance()
 		ginkgo.DeferCleanup(closeWithErrorCheckForTest, w.Close)
 
-		Expect(w.Registrars()).To(HaveLen(15))
-		Expect(w.FrontdRegistrars()).To(HaveLen(4))
-		Expect(w.WorkspacedRegistrars()).To(HaveLen(10))
+		Expect(w.Registrars()).To(exposeRouteRegistryDomains(applicationRouteRegistryDomains()...))
+		Expect(w.FrontdRegistrars()).To(exposeRouteRegistryDomains(frontdRouteRegistryDomains()...))
+		Expect(w.WorkspacedRegistrars()).To(exposeRouteRegistryDomains(workspacedRouteRegistryDomains()...))
 	})
 
 	ginkgo.It("MCP handlers and presence accessors are available through the facade", ginkgo.Label("integration"), func() {
@@ -165,7 +223,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 
 		(&Wiki{}).SetRuntimeRoleHealth(nil, nil)
 		webSessions, err := (&Wiki{}).WebPresenceSessions(&coreauth.User{ID: newFixtureUserID("viewer")})
-		expectWebPresenceUnavailable(err)
+		Expect(err).To(matchWebPresenceUnavailable())
 		Expect(webSessions).To(BeNil())
 
 		w.webPresence = wikipresence.NewWebPresenceRegistry(time.Minute, nil)
@@ -174,7 +232,7 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(webSessions).To(BeEmpty())
 
 		agentSessions, err := (&Wiki{}).AgentPresenceSessions()
-		expectAgentPresenceUnavailable(err)
+		Expect(err).To(matchAgentPresenceUnavailable())
 		Expect(agentSessions).To(BeNil())
 
 		w.SetAgentPresenceRegistry(projectdaemon.NewAgentPresenceRegistry(time.Minute, nil))
@@ -327,188 +385,3 @@ var _ = ginkgo.Describe("wiki facade route and service behavior", func() {
 		Expect(err).To(MatchError(tree.ErrPageNotFound))
 	})
 })
-
-type fakeWorkspaceSyncFacade struct {
-	status                 workspacesync.SyncStatus
-	refreshStatus          workspacesync.SyncStatus
-	snapshots              []workspacesync.Snapshot
-	snapshotPage           workspacesync.SnapshotList
-	restoreStatus          workspacesync.SyncStatus
-	pageRevisions          workspacesync.PageRevisionList
-	revisionSnapshot       *revision.RevisionSnapshot
-	syncErr                error
-	restoreDocumentErr     error
-	restoredDocumentCommit workspacesync.CommitHash
-	afterSync              func() error
-	startErr               error
-	startCalled            bool
-	stopCalled             bool
-}
-
-func (f *fakeWorkspaceSyncFacade) Status() workspacesync.SyncStatus {
-	return f.status
-}
-
-func (f *fakeWorkspaceSyncFacade) SyncNow(context.Context, workspacesync.SyncRequest) (workspacesync.SyncStatus, error) {
-	return f.refreshStatus, f.syncErr
-}
-
-func (f *fakeWorkspaceSyncFacade) ListSnapshots(context.Context, workspacesync.SnapshotLimit) ([]workspacesync.Snapshot, error) {
-	return f.snapshots, nil
-}
-
-func (f *fakeWorkspaceSyncFacade) ListSnapshotPage(context.Context, workspacesync.CommitHash, workspacesync.SnapshotLimit) (workspacesync.SnapshotList, error) {
-	return f.snapshotPage, nil
-}
-
-func (f *fakeWorkspaceSyncFacade) RestoreWorkspaceWithSource(context.Context, workspacesync.CommitHash, workspacesync.Actor, workspacesync.Source) (workspacesync.SyncStatus, error) {
-	return f.restoreStatus, nil
-}
-
-func (f *fakeWorkspaceSyncFacade) ListPageRevisions(context.Context, *tree.Page, string, workspacesync.PageRevisionLimit) (workspacesync.PageRevisionList, error) {
-	return f.pageRevisions, nil
-}
-
-func (f *fakeWorkspaceSyncFacade) GetPageRevisionSnapshot(context.Context, *tree.Page, workspacesync.CommitHash) (*revision.RevisionSnapshot, error) {
-	return f.revisionSnapshot, nil
-}
-
-func (f *fakeWorkspaceSyncFacade) RestoreDocumentWithSource(_ context.Context, _ *tree.Page, commitID workspacesync.CommitHash, _ workspacesync.Actor, _ workspacesync.Source) (workspacesync.SyncStatus, error) {
-	f.restoredDocumentCommit = commitID
-	return f.restoreStatus, f.restoreDocumentErr
-}
-
-func (f *fakeWorkspaceSyncFacade) SetAfterSync(fn func() error) {
-	f.afterSync = fn
-}
-
-func (f *fakeWorkspaceSyncFacade) StartWatcher(context.Context) error {
-	f.startCalled = true
-	return f.startErr
-}
-
-func (f *fakeWorkspaceSyncFacade) StopWatcher() {
-	f.stopCalled = true
-}
-
-var (
-	expectedWorkspaceSyncDisabledError = errors.New("workspace sync is not enabled")
-	expectedWebPresenceUnavailable     = errors.New("web presence is unavailable")
-	expectedAgentPresenceUnavailable   = errors.New("agent presence is unavailable")
-)
-
-type workspaceSyncMode string
-
-const (
-	workspaceSyncModeEnabled  workspaceSyncMode = "enabled"
-	workspaceSyncModeDisabled workspaceSyncMode = "disabled"
-)
-
-func haveWorkspaceSyncMode(mode workspaceSyncMode) types.GomegaMatcher {
-	ginkgo.GinkgoHelper()
-	return WithTransform(func(status workspacesync.SyncStatus) workspaceSyncMode {
-		if status.Enabled {
-			return workspaceSyncModeEnabled
-		}
-		return workspaceSyncModeDisabled
-	}, Equal(mode))
-}
-
-type workspaceSyncLifecycleObservation string
-
-const (
-	workspaceSyncLifecycleMissing  workspaceSyncLifecycleObservation = "missing"
-	workspaceSyncLifecycleObserved workspaceSyncLifecycleObservation = "rebuilder configured and watcher stopped"
-	workspaceSyncLifecyclePartial  workspaceSyncLifecycleObservation = "partial"
-)
-
-func haveWorkspaceSyncLifecycleObserved() types.GomegaMatcher {
-	ginkgo.GinkgoHelper()
-	return WithTransform(workspaceSyncLifecycleFromFacade, Equal(workspaceSyncLifecycleObserved))
-}
-
-func workspaceSyncLifecycleFromFacade(fake *fakeWorkspaceSyncFacade) workspaceSyncLifecycleObservation {
-	if fake == nil {
-		return workspaceSyncLifecycleMissing
-	}
-	if fake.afterSync != nil && fake.startCalled && fake.stopCalled {
-		return workspaceSyncLifecycleObserved
-	}
-	return workspaceSyncLifecyclePartial
-}
-
-func haveWorkspaceSyncActor(id workspacesync.ActorID, name types.GomegaMatcher, email types.GomegaMatcher) types.GomegaMatcher {
-	ginkgo.GinkgoHelper()
-	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-		"ID":    Equal(id),
-		"Name":  name,
-		"Email": email,
-	})
-}
-
-func haveMissingWikiPathLookup(path tree.RoutePath) types.GomegaMatcher {
-	ginkgo.GinkgoHelper()
-	return WithTransform(func(lookup *tree.PathLookup) wikiPathLookupObservation {
-		return wikiPathLookupFromResult(lookup)
-	}, Equal(wikiPathLookupObservation{Path: path, State: wikiPathLookupMissing}))
-}
-
-func haveExistingWikiPathLookup(path tree.RoutePath) types.GomegaMatcher {
-	ginkgo.GinkgoHelper()
-	return WithTransform(func(lookup *tree.PathLookup) wikiPathLookupObservation {
-		return wikiPathLookupFromResult(lookup)
-	}, Equal(wikiPathLookupObservation{Path: path, State: wikiPathLookupExisting}))
-}
-
-type wikiPathLookupState string
-
-const (
-	wikiPathLookupUnavailable wikiPathLookupState = "unavailable"
-	wikiPathLookupMissing     wikiPathLookupState = "missing"
-	wikiPathLookupExisting    wikiPathLookupState = "existing"
-)
-
-type wikiPathLookupObservation struct {
-	Path  tree.RoutePath
-	State wikiPathLookupState
-}
-
-func wikiPathLookupFromResult(lookup *tree.PathLookup) wikiPathLookupObservation {
-	if lookup == nil {
-		return wikiPathLookupObservation{State: wikiPathLookupUnavailable}
-	}
-	state := wikiPathLookupMissing
-	if lookup.Exists {
-		state = wikiPathLookupExisting
-	}
-	return wikiPathLookupObservation{
-		Path:  lookup.Path,
-		State: state,
-	}
-}
-
-func matchWorkspaceSyncDisabled() types.GomegaMatcher {
-	ginkgo.GinkgoHelper()
-	return MatchError(expectedWorkspaceSyncDisabledError)
-}
-
-func havePageValidationFieldError(field testmatchers.ValidationField, code sharederrors.FieldErrorCode, messageID sharederrors.MessageID) types.GomegaMatcher {
-	ginkgo.GinkgoHelper()
-	return WithTransform(func(err error) *sharederrors.ValidationErrors {
-		var validation *sharederrors.ValidationErrors
-		if !errors.As(err, &validation) {
-			return nil
-		}
-		return validation
-	}, testmatchers.ContainFieldError(field, code, messageID))
-}
-
-func expectWebPresenceUnavailable(err error) {
-	ginkgo.GinkgoHelper()
-	Expect(err).To(MatchError(expectedWebPresenceUnavailable))
-}
-
-func expectAgentPresenceUnavailable(err error) {
-	ginkgo.GinkgoHelper()
-	Expect(err).To(MatchError(expectedAgentPresenceUnavailable))
-}

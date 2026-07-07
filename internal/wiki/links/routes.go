@@ -1,6 +1,7 @@
 package links
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,8 +14,12 @@ import (
 
 // Routes is the RouteRegistrar for the links domain.
 type Routes struct {
-	getLinkStatus *GetLinkStatusUseCase
+	getLinkStatus linkStatusExecutor
 	authService   *coreauth.AuthService
+}
+
+type linkStatusExecutor interface {
+	Execute(ctx context.Context, in GetLinkStatusInput) (*GetLinkStatusOutput, error)
 }
 
 // RoutesConfig holds the dependencies required to build a Routes instance.
