@@ -31,6 +31,11 @@ type publicMetadataPatchDocumentProjection struct {
 	Fields map[string]interface{}
 }
 
+type markdownContentPathCase struct {
+	RoutePath tree.RoutePath
+	Kind      tree.NodeKind
+}
+
 func matchPublicMetadataPatchDocument(body string, pageID tree.PageID, title string, tags []string, fields map[string]interface{}) types.GomegaMatcher {
 	ginkgo.GinkgoHelper()
 	return WithTransform(publicMetadataPatchDocumentProjectionFor, Equal(publicMetadataPatchDocumentProjection{
@@ -50,6 +55,15 @@ func publicMetadataPatchDocumentProjectionFor(doc markdown.PageDocument) publicM
 		Tags:   doc.Metadata.Tags,
 		Fields: doc.Metadata.Fields,
 	}
+}
+
+func matchMarkdownContentPath(want tree.MarkdownPath) types.GomegaMatcher {
+	ginkgo.GinkgoHelper()
+	return WithTransform(markdownContentPathForCase, Equal(want))
+}
+
+func markdownContentPathForCase(row markdownContentPathCase) tree.MarkdownPath {
+	return MarkdownContentPathForRoute(row.RoutePath, row.Kind)
 }
 
 func pageNodeKindWireValue(kind tree.NodeKind) string {
@@ -247,7 +261,9 @@ var _ = ginkgo.Describe("page metadata validation", func() {
 		_, err = ValidatePageRoutePath("../escape")
 		Expect(err).To(MatchPageLocalizedCode(ErrCodePageInvalidPath))
 
-		Expect(MarkdownContentPathForRoute(newFixtureRoutePath("docs/page"), tree.NodeKindPage)).To(Equal(newFixtureMarkdownPath("docs/page.md")))
+		Expect(markdownContentPathCase{RoutePath: newFixtureRoutePath("docs/page"), Kind: tree.NodeKindPage}).To(matchMarkdownContentPath(newFixtureMarkdownPath("docs/page.md")))
+		Expect(markdownContentPathCase{RoutePath: newFixtureRoutePath("docs"), Kind: tree.NodeKindSection}).To(matchMarkdownContentPath(newFixtureMarkdownPath("docs/index.md")))
+		Expect(markdownContentPathCase{RoutePath: newFixtureRoutePath(""), Kind: tree.NodeKindSection}).To(matchMarkdownContentPath(newFixtureMarkdownPath("index.md")))
 
 		validatedParent, err := ValidateMoveParentID("root")
 		Expect(err).To(Succeed())
