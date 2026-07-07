@@ -213,7 +213,11 @@ var _ = Describe("document restore from workspace revisions", Label("integration
 		Expect(fakeRevisionStoreRestoreContentStateFor(store)).To(SatisfyAll(
 			HaveField("FilesAtCalls", BeZero()),
 			HaveField("RestoreDocumentContentToPathCalls", Equal(1)),
-			HaveField("RestoredContent", ContainSubstring("Page A restored")),
+			HaveField("RestoredMarkdown", Equal(restoredMarkdownContentObservation{
+				PageID:        newFixturePageID("page-a"),
+				MetadataTitle: "Page A",
+				FirstHeading:  "Page A restored",
+			})),
 		))
 	})
 })

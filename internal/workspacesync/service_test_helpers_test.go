@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -13,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 
+	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/revision"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/workspacesync/gitrevisions"
@@ -152,7 +154,13 @@ type fakeRevisionStore struct {
 type fakeRevisionStoreRestoreContentState struct {
 	FilesAtCalls                      int
 	RestoreDocumentContentToPathCalls int
-	RestoredContent                   string
+	RestoredMarkdown                  restoredMarkdownContentObservation
+}
+
+type restoredMarkdownContentObservation struct {
+	PageID        tree.PageID
+	MetadataTitle string
+	FirstHeading  string
 }
 
 func fakeRevisionStoreRestoreContentStateFor(store *fakeRevisionStore) fakeRevisionStoreRestoreContentState {
@@ -161,8 +169,31 @@ func fakeRevisionStoreRestoreContentStateFor(store *fakeRevisionStore) fakeRevis
 	return fakeRevisionStoreRestoreContentState{
 		FilesAtCalls:                      store.filesAtCalls,
 		RestoreDocumentContentToPathCalls: store.restoreDocumentContentToPathCalls,
-		RestoredContent:                   store.restoredContent,
+		RestoredMarkdown:                  restoredMarkdownContentObservationFor(store.restoredContent),
 	}
+}
+
+func restoredMarkdownContentObservationFor(raw string) restoredMarkdownContentObservation {
+	GinkgoHelper()
+
+	doc, _, err := markdown.ParsePageDocument(raw)
+	Expect(err).To(Succeed())
+
+	return restoredMarkdownContentObservation{
+		PageID:        tree.PageIDFromString(doc.Metadata.Page.ID),
+		MetadataTitle: doc.Metadata.Page.Title,
+		FirstHeading:  markdownFirstHeading(doc.Body),
+	}
+}
+
+func markdownFirstHeading(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	return ""
 }
 
 func (f *fakeRevisionStore) Capture(_ context.Context, req gitrevisions.CommitRequest) (*gitrevisions.Commit, error) {
