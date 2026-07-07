@@ -35,12 +35,39 @@ type nilLocalizedErrorContract struct {
 	WrappedCause error
 }
 
+type validationFieldCollectionState uint8
+
+const (
+	validationFieldCollectionEmpty validationFieldCollectionState = iota
+	validationFieldCollectionPopulated
+)
+
+type validationErrorContract struct {
+	Fields validationFieldCollectionState
+}
+
+type localizedErrorCauseContract struct {
+	WrappedCause error
+}
+
 func HaveLocalizedRendering(expected localizedRenderingExpectation) types.GomegaMatcher {
 	return WithTransform(renderedLocalizedFields, Equal(expected))
 }
 
 func HaveNilLocalizedErrorContract() types.GomegaMatcher {
 	return WithTransform(nilLocalizedErrorFields, Equal(nilLocalizedErrorContract{}))
+}
+
+func HaveValidationErrorContract(fields validationFieldCollectionState) types.GomegaMatcher {
+	return WithTransform(validationErrorContractFor, Equal(validationErrorContract{
+		Fields: fields,
+	}))
+}
+
+func HaveLocalizedErrorWrappedCause(cause error) types.GomegaMatcher {
+	return WithTransform(localizedCauseRenderingFor, Equal(localizedErrorCauseContract{
+		WrappedCause: cause,
+	}))
 }
 
 func renderedFieldErrorFields(actual *sharederrors.FieldError) (renderedFieldErrorExpectation, error) {
@@ -62,11 +89,31 @@ func validationFieldErrors(actual *sharederrors.ValidationErrors) ([]*sharederro
 	return actual.Errors, nil
 }
 
+func validationErrorContractFor(actual *sharederrors.ValidationErrors) (validationErrorContract, error) {
+	if actual == nil {
+		return validationErrorContract{}, fmt.Errorf("HaveValidationErrorContract expects a non-nil validation error collection")
+	}
+	fields := validationFieldCollectionEmpty
+	if actual.HasErrors() {
+		fields = validationFieldCollectionPopulated
+	}
+	return validationErrorContract{Fields: fields}, nil
+}
+
 func nilLocalizedErrorFields(actual *sharederrors.LocalizedError) nilLocalizedErrorContract {
 	return nilLocalizedErrorContract{
 		RenderedText: actual.Error(),
 		WrappedCause: actual.Unwrap(),
 	}
+}
+
+func localizedCauseRenderingFor(actual *sharederrors.LocalizedError) (localizedErrorCauseContract, error) {
+	if actual == nil {
+		return localizedErrorCauseContract{}, fmt.Errorf("HaveLocalizedErrorWrappedCause expects a non-nil localized error")
+	}
+	return localizedErrorCauseContract{
+		WrappedCause: actual.Unwrap(),
+	}, nil
 }
 
 func renderedLocalizedFields(actual any) (localizedRenderingExpectation, error) {

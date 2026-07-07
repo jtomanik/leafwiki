@@ -74,9 +74,11 @@ var _ = Describe("field validation state", Label("unit"), func() {
 	It("tracks empty and populated field-error collections", func() {
 		validation := sharederrors.NewValidationErrors()
 
+		Expect(validation).To(HaveValidationErrorContract(validationFieldCollectionEmpty))
 		Expect(validation).To(MatchValidationErrors(BeEmpty()))
 
 		validation.Add(testSiteNameValidationField, testSiteNameRequiredFallback)
+		Expect(validation).To(HaveValidationErrorContract(validationFieldCollectionPopulated))
 		Expect(validation).To(MatchValidationErrors(ConsistOf(MatchRenderedFieldError(renderedFieldErrorExpectation{
 			Field:     testSiteNameValidationField,
 			Code:      sharederrors.FieldValidationErrorCode,

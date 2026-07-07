@@ -7,27 +7,24 @@ import (
 
 var _ = Describe("semantic identity types", Label("unit"), func() {
 	It("normalizes user IDs for metadata and actor contracts", func() {
-		expectedUserID := newFixtureUserID(" user-1 ")
 		userID := UserIDFromString(" user-1 ")
 
-		Expect(userID).To(Equal(expectedUserID))
+		Expect(userID).To(Equal(testUserIDWithWhitespace))
 		Expect(userID.HashPayload()).To(Equal(" user-1 "))
 		Expect(userID.MetadataValue()).To(Equal("user-1"))
 		Expect(userID.ActorID()).To(Equal("user-1"))
 	})
 
 	It("preserves revision IDs for revision and commit contracts", func() {
-		expectedRevisionID := newFixtureRevisionID("rev-1")
 		revisionID := RevisionIDFromString("rev-1")
 
-		Expect(revisionID).To(Equal(expectedRevisionID))
+		Expect(revisionID).To(Equal(testRevisionIDRev1))
 		Expect(revisionID.CommitID()).To(Equal("rev-1"))
 	})
 
-	It("preserves commit hash string values", func() {
-		expectedCommitHash := newFixtureCommitHash("abc123")
+	It("preserves commit hash typed values", func() {
 		commitHash := CommitHashFromString("abc123")
 
-		Expect(commitHash).To(Equal(expectedCommitHash))
+		Expect(commitHash).To(Equal(testCommitHashABC123))
 	})
 })

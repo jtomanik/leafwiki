@@ -37,7 +37,7 @@ func newFixtureAPIKeyID[T ~string](raw T) APIKeyID {
 }
 
 func newFixtureUserID[T ~string](raw T) tree.UserID {
-	return tree.NewUserIDUnchecked(string(raw))
+	return NewUserIDUnchecked(string(raw))
 }
 
 func activeAuthSession(active bool, err error) error {

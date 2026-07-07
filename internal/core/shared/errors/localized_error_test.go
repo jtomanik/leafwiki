@@ -155,6 +155,7 @@ var _ = Describe("localized error derived contracts", Label("unit"), func() {
 			Message:   testVisibleLocalizedMessage,
 			Template:  testVisibleLocalizedMessage,
 		}))
+		Expect(err).To(HaveLocalizedErrorWrappedCause(cause))
 	})
 
 	It("renders fallback text when a code has no catalog entry", func() {

@@ -18,7 +18,7 @@ func newFixturePageID[T ~string](raw T) tree.PageID {
 }
 
 func newFixtureRevisionID[T ~string](raw T) tree.RevisionID {
-	return tree.NewRevisionIDUnchecked(string(raw))
+	return NewRevisionIDUnchecked(string(raw))
 }
 
 func newFixtureSlug[T ~string](raw T) tree.Slug {
