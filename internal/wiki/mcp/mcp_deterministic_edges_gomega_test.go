@@ -431,6 +431,32 @@ var _ = Describe("MCP validation source and asset resolution", func() {
 			BeEmpty(),
 		))
 	})
+
+	It("resolves validation section links and reports orphan markdown files as broken targets", Label("integration"), func() {
+		sectionRoutes := newContextToolTestRoutes()
+		sectionRoutes.workspaceRootDir = ""
+		sectionID, err := sectionRoutes.treeService.CreateNode(newFixtureUserID("system"), nil, "Guide", newFixtureSlug("guide"), testNodeKindPtr(tree.NodeKindSection))
+		Expect(err).To(Succeed())
+
+		Expect(validationMarkdownLinkResolutionFor(sectionRoutes, newFixtureRoutePath(""), tree.NodeKindSection, "/guide")).To(matchValidationMarkdownLink(
+			validationResolved,
+			Equal(*sectionID),
+			Equal(tree.NodeKindSection),
+			BeEmpty(),
+		))
+
+		orphanRoutes := newContextToolTestRoutes()
+		orphanRoot := mcpTestTempDir()
+		orphanRoutes.workspaceRootDir = orphanRoot
+		Expect(os.WriteFile(filepath.Join(orphanRoot, "orphan.md"), []byte("# Orphan\n"), 0o644)).To(Succeed())
+
+		Expect(validationMarkdownLinkResolutionFor(orphanRoutes, newFixtureRoutePath(""), tree.NodeKindSection, "/orphan.md")).To(matchValidationMarkdownLink(
+			validationUnresolved,
+			BeEmpty(),
+			BeEmpty(),
+			Equal(wikivalidation.IssueCodeBrokenLink),
+		))
+	})
 })
 
 var _ = Describe("MCP subtree rendering limits", func() {
