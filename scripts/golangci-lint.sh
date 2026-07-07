@@ -121,7 +121,7 @@ generate_crap4go_coverage() {
 	set +e
 	(
 		cd "$module_dir"
-		rtk go test -timeout="$crap4go_coverage_timeout" "$@" -coverprofile="$crap4go_coverage_profile"
+		rtk go test -timeout="$crap4go_coverage_timeout" -coverprofile="$crap4go_coverage_profile" "$@"
 	)
 	local coverage_status=$?
 	set -e
@@ -138,7 +138,10 @@ generate_crap4go_coverage() {
 
 generate_crap4go_coverage "$repo_root" "${root_packages[@]}" || status=$?
 
-generate_crap4go_coverage "$repo_root/e2e-proxy" "${proxy_packages[@]}" || {
+# e2e-proxy specs require the Docker/nginx stack for real execution. The static
+# gate still scans the module, but coverage generation must not make that
+# external runtime a prerequisite for linting.
+generate_crap4go_coverage "$repo_root/e2e-proxy" "${proxy_packages[@]}" -ginkgo.dry-run || {
 	module_status=$?
 	if [[ "$status" -eq 0 ]]; then
 		status=$module_status

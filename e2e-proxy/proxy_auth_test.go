@@ -45,7 +45,9 @@ func doProxyRequest(method, path, testUser string, body io.Reader, extraHeaders 
 
 func readBody(r *http.Response) string {
 	GinkgoHelper()
-	defer r.Body.Close()
+	defer func() {
+		Expect(r.Body.Close()).To(Succeed())
+	}()
 	b, err := io.ReadAll(r.Body)
 	Expect(err).NotTo(HaveOccurred())
 	return strings.TrimSpace(string(b))
@@ -56,9 +58,9 @@ func haveProxyHTTPStatus(want int) types.GomegaMatcher {
 	return HaveHTTPStatus(want)
 }
 
-// loginAdmin obtains an access-token cookie by logging in as admin directly
+// adminAccessToken obtains an access-token cookie by logging in as admin directly
 // via the proxy. The login endpoint is public and unaffected by proxy auth.
-func loginAdmin() string {
+func adminAccessToken() string {
 	GinkgoHelper()
 	payload := `{"identifier":"admin","password":"admin"}`
 	req, err := http.NewRequest(http.MethodPost, proxyURL+"/api/auth/login", strings.NewReader(payload))
@@ -67,62 +69,63 @@ func loginAdmin() string {
 
 	resp, err := http.DefaultClient.Do(req)
 	Expect(err).NotTo(HaveOccurred())
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		Fail("login failed " + resp.Status + ": " + string(b))
-	}
-	for _, c := range resp.Cookies() {
-		if c.Name == "leafwiki_at" {
-			return c.Value
-		}
-	}
-	Fail("no leafwiki_at cookie in login response")
-	return ""
+	defer func() {
+		Expect(resp.Body.Close()).To(Succeed())
+	}()
+	rawBody, err := io.ReadAll(resp.Body)
+	Expect(err).NotTo(HaveOccurred())
+	body := strings.TrimSpace(string(rawBody))
+	Expect(resp).To(haveProxyHTTPStatus(http.StatusOK), "body: %s", body)
+
+	var accessCookie *http.Cookie
+	Expect(resp.Cookies()).To(ContainElement(HaveField("Name", "leafwiki_at"), &accessCookie))
+	return accessCookie.Value
 }
 
-var _ = Describe("proxy authentication", func() {
-	It("ProxyAuth_ValidUser_Admin", func() {
+var _ = Describe("proxy authentication", Label("e2e"), func() {
+	It("allows the trusted proxy admin user to reach protected user routes", func() {
 		resp := doProxy("/api/users", "admin", nil)
 		body := readBody(resp)
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusOK), "body: %s", body)
 	})
 
-	It("ProxyAuth_UnknownUser", func() {
+	It("rejects a trusted proxy user that does not exist in LeafWiki", func() {
 		resp := doProxy("/api/users", "no-such-user-xyz", nil)
 		body := readBody(resp)
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusUnauthorized), "body: %s", body)
 	})
 
-	It("ProxyAuth_NoHeader_ProtectedRoute", func() {
+	It("rejects protected user routes when the proxy provides no user", func() {
 		resp := doProxy("/api/users", "", nil)
 		body := readBody(resp)
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusUnauthorized), "body: %s", body)
 	})
 
-	It("ProxyAuth_PublicRoute_NoHeader", func() {
+	It("serves public configuration when the proxy provides no user", func() {
 		resp := doProxy("/api/config", "", nil)
 		body := readBody(resp)
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusOK), "body: %s", body)
 	})
 
-	It("ProxyAuth_PublicRoute_WithUser", func() {
+	It("serves public configuration when the proxy provides an admin user", func() {
 		resp := doProxy("/api/config", "admin", nil)
 		body := readBody(resp)
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusOK), "body: %s", body)
 	})
 
-	It("ProxyAuth_ConfigResponse_Roundtrip", func() {
+	It("returns configuration JSON through the proxy without an authenticated user", func() {
 		resp := doProxy("/api/config", "", nil)
 		Expect(resp).To(HaveHTTPStatus(http.StatusOK))
-		defer resp.Body.Close()
+		defer func() {
+			Expect(resp.Body.Close()).To(Succeed())
+		}()
 		var body map[string]any
 		Expect(json.NewDecoder(resp.Body).Decode(&body)).To(Succeed())
 		Expect(body).To(HaveKey("authDisabled"))
 	})
 
-	It("ProxyAuth_FallbackToJWT", func() {
-		token := loginAdmin()
+	It("falls back to a LeafWiki access-token cookie when no proxy user is provided", func() {
+		token := adminAccessToken()
 
 		req, err := http.NewRequest(http.MethodGet, proxyURL+"/api/users", nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -134,14 +137,14 @@ var _ = Describe("proxy authentication", func() {
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusOK), "body: %s", body)
 	})
 
-	It("RefreshToken_NoSession_Returns422", func() {
+	It("rejects refresh-token requests without a backing session", func() {
 		resp := refreshTokenWithoutSessionResponse("", nil)
 		body := readBody(resp)
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusUnprocessableEntity), "body: %s", body)
 		Expect(body).To(haveProxyErrorCode(proxyErrorCodeAuthInvalidRefreshToken))
 	})
 
-	It("ProxyAuth_DirectRemoteUserInjection", func() {
+	It("ignores client-supplied Remote-User headers when the proxy provides no user", func() {
 		resp := doProxy("/api/users", "", map[string]string{
 			"Remote-User": "admin",
 		})
@@ -149,7 +152,7 @@ var _ = Describe("proxy authentication", func() {
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusUnauthorized), "body: %s", body)
 	})
 
-	It("ProxyAuth_RemoteUserInjectionIgnoredWhenProxyUserIsAdmin", func() {
+	It("keeps the trusted proxy admin user when clients inject another Remote-User", func() {
 		resp := doProxy("/api/users", "admin", map[string]string{
 			"Remote-User": "no-such-user-xyz",
 		})
@@ -157,7 +160,7 @@ var _ = Describe("proxy authentication", func() {
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusOK), "body: %s", body)
 	})
 
-	It("ProxyAuth_RemoteUserInjectionDoesNotBypassUnknownProxyUser", func() {
+	It("rejects an unknown trusted proxy user even when clients inject admin as Remote-User", func() {
 		resp := doProxy("/api/users", "no-such-user-xyz", map[string]string{
 			"Remote-User": "admin",
 		})
@@ -165,17 +168,19 @@ var _ = Describe("proxy authentication", func() {
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusUnauthorized), "body: %s", body)
 	})
 
-	It("RefreshToken_NoSession_WithProxyUserStillReturns422", func() {
+	It("rejects refresh-token requests without a session even when the proxy provides an admin user", func() {
 		resp := refreshTokenWithoutSessionResponse("admin", nil)
 		body := readBody(resp)
 		Expect(resp).To(haveProxyHTTPStatus(http.StatusUnprocessableEntity), "body: %s", body)
 		Expect(body).To(haveProxyErrorCode(proxyErrorCodeAuthInvalidRefreshToken))
 	})
 
-	It("ProxyAuth_ConfigResponse_WithUserRoundtrip", func() {
+	It("returns configuration JSON through the proxy with an admin user", func() {
 		resp := doProxy("/api/config", "admin", nil)
 		Expect(resp).To(HaveHTTPStatus(http.StatusOK))
-		defer resp.Body.Close()
+		defer func() {
+			Expect(resp.Body.Close()).To(Succeed())
+		}()
 		var body map[string]any
 		Expect(json.NewDecoder(resp.Body).Decode(&body)).To(Succeed())
 		Expect(body).To(HaveKey("authDisabled"))

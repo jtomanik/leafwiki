@@ -100,8 +100,8 @@ chmod +x "$tmpdir/rtk"
 
 	expected_root="$repo_root"$'\t'"run --config $repo_root/.golangci.leafwiki.yml --timeout 5m --output.text.colors=false ./cmd/... ./internal/... ./e2e/... ./tools/..."
 	expected_proxy="$repo_root/e2e-proxy"$'\t'"run --config $repo_root/.golangci.leafwiki.yml --timeout 5m --output.text.colors=false ./..."
-	expected_root_coverage="go test -timeout=5m ./cmd/... ./internal/... ./e2e/... ./tools/... -coverprofile=target/coverage/crap4go.out"
-	expected_proxy_coverage="go test -timeout=5m ./... -coverprofile=target/coverage/crap4go.out"
+	expected_root_coverage="go test -timeout=5m -coverprofile=target/coverage/crap4go.out ./cmd/... ./internal/... ./e2e/... ./tools/..."
+	expected_proxy_coverage="go test -timeout=5m -coverprofile=target/coverage/crap4go.out ./... -ginkgo.dry-run"
 
 if ! grep -Fxq "$expected_root_coverage" "$rtk_log_file"; then
 	echo "missing root module crap4go coverage generation" >&2

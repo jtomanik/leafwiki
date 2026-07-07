@@ -64,7 +64,9 @@ func waitReachable(ctx context.Context, url string, timeout time.Duration) error
 
 		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return closeErr
+			}
 			return nil
 		}
 		lastErr = err
