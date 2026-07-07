@@ -166,7 +166,7 @@ var _ = Describe("workspace MCP session routing", func() {
 		handler.ServeHTTP(rec, req)
 
 		Expect(rec).To(HaveHTTPStatus(http.StatusOK))
-		Expect(rec.Body.String()).To(MatchJSON(`{"jsonrpc":"2.0","result":{}}`))
+		Expect(rec).To(HaveHTTPBody(MatchJSON(`{"jsonrpc":"2.0","result":{}}`)))
 		Expect(bindings).To(HaveMCPSessionBinding(MCPSessionIDFromHeader("server-session-stream"), mustDecodeWorkspaceID("alpha")))
 	})
 
