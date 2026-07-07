@@ -122,6 +122,10 @@ func testHelperMessageParameterDiagnostic(funcName string, paramName string) str
 	return fmt.Sprintf("test helper %s parameter %s accepts rendered prose; assert MessageID/catalog semantics instead", funcName, paramName)
 }
 
+func renderedErrorPresencePredicateDiagnostic() string {
+	return "rendered error message presence predicate uses Error() text; assert structured error code, message ID, or semantic state instead"
+}
+
 func testHelperFieldParameterDiagnostic(funcName string, paramName string) string {
 	return fmt.Sprintf("test helper %s parameter %s uses string for validation field identity; use a semantic field-name type or helper constant", funcName, paramName)
 }

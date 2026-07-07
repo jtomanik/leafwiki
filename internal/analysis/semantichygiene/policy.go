@@ -20,6 +20,7 @@ const (
 	ruleI18nResponseStatusForward         ruleID = "i18n.response-status-forward"
 	ruleI18nMessageField                  ruleID = "i18n.message-field"
 	ruleI18nMessageParameter              ruleID = "i18n.message-parameter"
+	ruleI18nRenderedErrorPresence         ruleID = "i18n.rendered-error-presence"
 	ruleContractRawLiteral                ruleID = "contract.raw-literal"
 )
 
@@ -51,6 +52,7 @@ var ruleMetadataByID = map[ruleID]ruleMetadata{
 	ruleI18nResponseStatusForward:         hardRule(ruleI18nResponseStatusForward),
 	ruleI18nMessageField:                  hardRule(ruleI18nMessageField),
 	ruleI18nMessageParameter:              hardRule(ruleI18nMessageParameter),
+	ruleI18nRenderedErrorPresence:         hardRule(ruleI18nRenderedErrorPresence),
 	ruleContractRawLiteral:                hardRule(ruleContractRawLiteral),
 }
 
@@ -93,6 +95,7 @@ func semanticRuleMetadata() map[checkerpolicy.RuleID]checkerpolicy.RuleMetadata 
 		ruleI18nResponseStatusForward,
 		ruleI18nMessageField,
 		ruleI18nMessageParameter,
+		ruleI18nRenderedErrorPresence,
 		ruleContractRawLiteral,
 	} {
 		metadata[checkerpolicy.RuleID(id)] = checkerpolicy.HardRule(checkerpolicy.RuleID(id))

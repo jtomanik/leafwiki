@@ -39,6 +39,7 @@ func run(pass *analysis.Pass) (any, error) {
 			checkUncheckedConstructorCall(ctx, n)
 			checkFixtureSemanticConstructorCall(ctx, n)
 			checkMessagePassthroughCall(ctx, n)
+			checkRenderedErrorPresencePredicate(ctx, n)
 		case *ast.FuncDecl:
 			checkSignature(ctx, n)
 			checkValidatorReturn(ctx, n)

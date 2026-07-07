@@ -1,5 +1,7 @@
 package semanticcases
 
+import "testing"
+
 func allowedSerializedComparisonInTest(pageID PageID) bool {
 	return pageID.String() == "page-1"
 }
@@ -30,4 +32,53 @@ func forbiddenRawSemanticLiteralsInTest() {
 	var assignedPageID PageID = "page-assigned"                                       // want "semh:semantic.test-raw-literal: raw string literal assigned as PageID in test code; use a semantic fixture/helper value"
 	_ = []PageID{"page-sliced"}                                                       // want "semh:semantic.test-raw-literal: raw string literal assigned as PageID in test code; use a semantic fixture/helper value"
 	_ = assignedPageID
+}
+
+type renderedPresenceState int
+
+const (
+	renderedMessageUnknown renderedPresenceState = iota
+	renderedMessagePresent
+	renderedMessageMissing
+)
+
+func hiddenRenderedErrorPresence(actual error) renderedPresenceState {
+	state := renderedMessageUnknown
+	if actual == nil {
+		return state
+	}
+	if actual.Error() != "" { // want "semh:i18n.rendered-error-presence: rendered error message presence predicate uses Error\\(\\) text"
+		state = renderedMessagePresent
+	}
+	if actual.Error() == "" { // want "semh:i18n.rendered-error-presence: rendered error message presence predicate uses Error\\(\\) text"
+		state = renderedMessageMissing
+	}
+	return state
+}
+
+type pointerRenderedError struct{}
+
+func (*pointerRenderedError) Error() string {
+	return ""
+}
+
+func hiddenPointerRenderedErrorPresence(actual pointerRenderedError) renderedPresenceState {
+	state := renderedMessageUnknown
+	if actual.Error() != "" { // want "semh:i18n.rendered-error-presence: rendered error message presence predicate uses Error\\(\\) text"
+		state = renderedMessagePresent
+	}
+	return state
+}
+
+type renderedContractError struct{}
+
+func (renderedContractError) Error() string {
+	return ""
+}
+
+func TestRenderedErrorContractPresence(t *testing.T) {
+	actual := renderedContractError{}
+	if actual.Error() == "" {
+		t.Helper()
+	}
 }

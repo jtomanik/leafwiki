@@ -50,6 +50,7 @@ var _ = ginkgo.Describe("policy helpers", ginkgo.Label("unit"), func() {
 			ginkgo.Entry("i18n response status forward", ruleID("i18n.response-status-forward"), false, waiverScopeNone),
 			ginkgo.Entry("i18n message field", ruleID("i18n.message-field"), false, waiverScopeNone),
 			ginkgo.Entry("i18n message parameter", ruleID("i18n.message-parameter"), false, waiverScopeNone),
+			ginkgo.Entry("i18n rendered error presence", ruleID("i18n.rendered-error-presence"), false, waiverScopeNone),
 			ginkgo.Entry("contract raw literal", ruleID("contract.raw-literal"), false, waiverScopeNone),
 		)
 	})
