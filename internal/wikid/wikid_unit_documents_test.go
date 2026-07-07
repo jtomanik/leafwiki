@@ -118,6 +118,30 @@ var _ = ginkgo.Describe("wikid document and supervisor values", ginkgo.Label("un
 		}))
 	})
 
+	ginkgo.DescribeTable("workspace storage location equivalence",
+		func(left WorkspaceRecord, right WorkspaceRecord, want workspaceStorageLocationRelation) {
+			Expect(workspaceStorageLocationRelationFor(left, right)).To(Equal(want))
+		},
+		ginkgo.Entry(
+			"matches data and root paths after cleaning path segments",
+			workspaceStorageLocationRecord("data/home/.", "root/home/sub/.."),
+			workspaceStorageLocationRecord("data/home", "root/home"),
+			workspaceStorageLocationSame,
+		),
+		ginkgo.Entry(
+			"keeps different data directories distinct",
+			workspaceStorageLocationRecord("data/home", "root/home"),
+			workspaceStorageLocationRecord("data/docs", "root/home"),
+			workspaceStorageLocationDistinct,
+		),
+		ginkgo.Entry(
+			"keeps different root directories distinct",
+			workspaceStorageLocationRecord("data/home", "root/home"),
+			workspaceStorageLocationRecord("data/home", "root/docs"),
+			workspaceStorageLocationDistinct,
+		),
+	)
+
 	ginkgo.It("keeps empty workspace statuses out of supervisor snapshots", func() {
 		now := time.Date(2026, 7, 7, 9, 30, 0, 0, time.UTC)
 		supervisor := NewWorkspaceSupervisor(WorkspaceSupervisorOptions{
@@ -185,6 +209,24 @@ func registryLookupFor(registry RegistryDocument, workspaceID workspaceid.Worksp
 		return registryLookup{Outcome: recordFound, Record: record}
 	}
 	return registryLookup{Outcome: recordMissing}
+}
+
+type workspaceStorageLocationRelation uint8
+
+const (
+	workspaceStorageLocationDistinct workspaceStorageLocationRelation = iota
+	workspaceStorageLocationSame
+)
+
+func workspaceStorageLocationRecord(dataDir string, rootDir string) WorkspaceRecord {
+	return WorkspaceRecord{DataDir: dataDir, RootDir: rootDir}
+}
+
+func workspaceStorageLocationRelationFor(left WorkspaceRecord, right WorkspaceRecord) workspaceStorageLocationRelation {
+	if sameWorkspaceLocation(left, right) {
+		return workspaceStorageLocationSame
+	}
+	return workspaceStorageLocationDistinct
 }
 
 type grantRoleParseOutcome uint8
