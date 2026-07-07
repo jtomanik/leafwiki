@@ -160,6 +160,10 @@ var _ = ginkgo.Describe("property extraction from page metadata", ginkgo.Label("
 			content: "---\nstatus: \"  draft  \"\n---\n",
 			matcher: matchExtractedProperties("status", "draft"),
 		}),
+		ginkgo.Entry("keeps keys that only share the managed prefix stem", propertyExtractionCase{
+			content: "---\nleafwikiish: visible\nstatus: draft\n---\n",
+			matcher: matchExtractedProperties("leafwikiish", "visible", "status", "draft"),
+		}),
 	)
 
 	ginkgo.DescribeTable("ignores metadata that is not an indexable text property",
