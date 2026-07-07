@@ -76,6 +76,21 @@ var _ = ginkgo.Describe("i18n catalog repository checks", ginkgo.Label("unit"), 
 		Expect(otherPackageDiagnostics).NotTo(ContainElement(matchRepositoryDiagnostic("e2e/page.spec.ts", "E2E behavior tests")))
 	})
 
+	ginkgo.It("skips repository diagnostics when no LeafWiki module root is visible", func() {
+		repoRoot, err := os.MkdirTemp("", "i18ncatalog-repository-*")
+		Expect(err).To(Succeed())
+		ginkgo.DeferCleanup(func() {
+			ginkgo.GinkgoHelper()
+			Expect(os.RemoveAll(repoRoot)).To(Succeed())
+		})
+		writeFixtureFile(repoRoot, "internal/localization/messages.go", "package localization\n")
+
+		diagnostics, err := runAnalyzerOnFixturePackage(repoRoot, "internal/localization/messages.go", "github.com/perber/wiki/internal/localization")
+
+		Expect(err).To(Succeed())
+		Expect(diagnostics).To(BeEmpty())
+	})
+
 	ginkgo.It("reports missing repository files through analyzer diagnostics", func() {
 		repoRoot := writeRepositoryPolicyFixture()
 		Expect(os.Remove(filepath.Join(repoRoot, "scripts/run_messages.sh"))).To(Succeed())
