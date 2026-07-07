@@ -76,6 +76,44 @@ func normalizedAgentHookEventStateFor(event Event) normalizedAgentHookEventState
 }
 
 var _ = Describe("agent hook normalization", Label("unit"), func() {
+	DescribeTable("semantic value normalization",
+		func(rawProvider ProviderID, rawEvent AgentEventName, rawTool AgentToolName, want agentHookValueNormalization) {
+			Expect(agentHookValueNormalizationFor(rawProvider, rawEvent, rawTool)).To(Equal(want))
+		},
+		Entry("trims provider and event identity while preserving plain tool names",
+			newFixtureProviderID(" Codex "),
+			newFixtureAgentEventName(" PreToolUse "),
+			newFixtureAgentToolName(" Shell "),
+			agentHookValueNormalization{
+				Provider:      ProviderCodex,
+				EventName:     AgentEventPreToolUse,
+				ToolName:      newFixtureAgentToolName("Shell"),
+				ToolTransport: agentHookPlainTool,
+			},
+		),
+		Entry("classifies MCP-prefixed tool names after trimming",
+			ProviderClaude,
+			AgentEventPreToolUse,
+			newFixtureAgentToolName(" mcp__leafwiki__wiki_get_page "),
+			agentHookValueNormalization{
+				Provider:      ProviderClaude,
+				EventName:     AgentEventPreToolUse,
+				ToolName:      newFixtureAgentToolName("mcp__leafwiki__wiki_get_page"),
+				ToolTransport: agentHookMCPTool,
+			},
+		),
+		Entry("removes unsafe tool metadata before transport classification",
+			ProviderCodex,
+			AgentEventPreToolUse,
+			newFixtureAgentToolName(" bearer token "),
+			agentHookValueNormalization{
+				Provider:      ProviderCodex,
+				EventName:     AgentEventPreToolUse,
+				ToolTransport: agentHookPlainTool,
+			},
+		),
+	)
+
 	It("hashes Codex session identity while preserving safe tool metadata", func() {
 		seenAt := time.Date(2026, 6, 7, 10, 11, 12, 0, time.UTC)
 		raw := []byte(`{
@@ -398,4 +436,35 @@ var _ = Describe("agent hook normalized event validation", Label("unit"), func()
 
 func testSessionHash(provider ProviderID, rawSessionID string) string {
 	return hashSessionID(provider, SessionIDFromString(rawSessionID))
+}
+
+type agentHookToolTransport uint8
+
+const (
+	agentHookPlainTool agentHookToolTransport = iota
+	agentHookMCPTool
+)
+
+type agentHookValueNormalization struct {
+	Provider      ProviderID
+	EventName     AgentEventName
+	ToolName      AgentToolName
+	ToolTransport agentHookToolTransport
+}
+
+func agentHookValueNormalizationFor(provider ProviderID, eventName AgentEventName, toolName AgentToolName) agentHookValueNormalization {
+	normalizedToolName := toolName.Normalize().SanitizedMetadataValue(160)
+	return agentHookValueNormalization{
+		Provider:      provider.Normalize(),
+		EventName:     eventName.Normalize(),
+		ToolName:      normalizedToolName,
+		ToolTransport: agentHookToolTransportFor(normalizedToolName),
+	}
+}
+
+func agentHookToolTransportFor(toolName AgentToolName) agentHookToolTransport {
+	if toolName.HasMCPPrefix() {
+		return agentHookMCPTool
+	}
+	return agentHookPlainTool
 }

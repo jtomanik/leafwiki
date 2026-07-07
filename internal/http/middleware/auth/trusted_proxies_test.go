@@ -76,11 +76,11 @@ var _ = Describe("trusted proxy parsing", Label("unit"), func() {
 	})
 
 	It("honors trusted remote addresses after removing the port", func() {
-		tp, err := authmw.ParseTrustedProxies("127.0.0.1")
+		tp, err := authmw.ParseTrustedProxies("127.0.0.1, ::1")
 		Expect(err).To(Succeed())
 
-		Expect(observeTrustedProxyHeaderPolicy(tp, "127.0.0.1:54321")).To(matchTrustedProxyHeaderPolicy(
-			ConsistOf("127.0.0.1:54321"),
+		Expect(observeTrustedProxyHeaderPolicy(tp, "127.0.0.1:54321", "[::1]:54321")).To(matchTrustedProxyHeaderPolicy(
+			ConsistOf("127.0.0.1:54321", "[::1]:54321"),
 			BeEmpty(),
 		))
 	})
