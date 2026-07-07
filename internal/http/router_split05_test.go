@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/perber/wiki/internal/core/assets"
+	"github.com/perber/wiki/internal/core/markdown"
 	httpinternal "github.com/perber/wiki/internal/http"
 	"github.com/perber/wiki/internal/wiki"
 	"github.com/perber/wiki/internal/workspacesync"
@@ -31,13 +32,14 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 
 		dataDir := httpTestTempDir()
 		rootDir := filepath.Join(httpTestTempDir(), "content")
+		initialOneMarkdown := "---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One A\n"
 		{
 			err := os.MkdirAll(rootDir, 0o755)
 			Expect(err).NotTo(HaveOccurred(), "create root dir: %v", err)
 		}
 		{
 
-			err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte("---\nleafwiki_id: one\nleafwiki_title: One\n---\n# One A\n"), 0o644)
+			err := os.WriteFile(filepath.Join(rootDir, "one.md"), []byte(initialOneMarkdown), 0o644)
 			Expect(err).NotTo(HaveOccurred(), "write one.md: %v", err)
 		}
 
@@ -94,7 +96,13 @@ var _ = Describe("HTTP router", Label("integration"), func() {
 
 		raw, err := os.ReadFile(filepath.Join(rootDir, "one.md"))
 		Expect(err).NotTo(HaveOccurred(), "read restored one.md: %v", err)
-		Expect(string(raw)).To(ContainSubstring("# One A"), "one.md was not restored: %q", string(raw))
+		restoredOne, _, err := markdown.ParsePageDocument(string(raw))
+		Expect(err).To(Succeed(), "parse restored one.md: %v", err)
+		Expect(restoredOne).To(SatisfyAll(
+			HaveField("Body", Equal("# One A\n")),
+			HaveField("Metadata.Page.ID", Equal("one")),
+			HaveField("Metadata.Page.Title", Equal("One")),
+		), "one.md was not restored: %q", string(raw))
 		Expect(filepath.Join(rootDir, "two.md")).NotTo(BeAnExistingFile(), "two.md should be removed")
 
 		raw, err = os.ReadFile(filepath.Join(rootDir, "image.png"))
@@ -193,6 +201,7 @@ leafwiki_title: Restore Page
 # Restore Page
 
 previous content`
+		previousBody := "\n# Restore Page\n\nprevious content"
 		{
 			err := os.WriteFile(filepath.Join(rootDir, "restore-page.md"), []byte(previous), 0o644)
 			Expect(err).NotTo(HaveOccurred(), "write previous markdown: %v", err)
@@ -271,10 +280,14 @@ previous content`
 			Expect(err).NotTo(HaveOccurred(), "decode snapshot: %v", err)
 		}
 
-		Expect(snapshot).To(SatisfyAll(
-			HaveField("Content", ContainSubstring("previous content")),
-			HaveField("Assets", BeEmpty()),
+		snapshotPage, _, err := markdown.ParsePageDocument(snapshot.Content)
+		Expect(err).To(Succeed(), "parse revision snapshot: %v", err)
+		Expect(snapshotPage).To(SatisfyAll(
+			HaveField("Body", Equal(previousBody)),
+			HaveField("Metadata.Page.ID", Equal("restore-page")),
+			HaveField("Metadata.Page.Title", Equal("Restore Page")),
 		), "unexpected snapshot: %#v", snapshot)
+		Expect(snapshot.Assets).To(BeEmpty(), "unexpected snapshot assets: %#v", snapshot.Assets)
 
 		configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 		configRec := httptest.NewRecorder()
@@ -291,7 +304,13 @@ previous content`
 
 		raw, err := os.ReadFile(filepath.Join(rootDir, "restore-page.md"))
 		Expect(err).NotTo(HaveOccurred(), "read restored markdown: %v", err)
-		Expect(string(raw)).To(ContainSubstring("previous content"), "restored markdown = %q, want previous content", string(raw))
+		restoredPage, _, err := markdown.ParsePageDocument(string(raw))
+		Expect(err).To(Succeed(), "parse restored markdown: %v", err)
+		Expect(restoredPage).To(SatisfyAll(
+			HaveField("Body", Equal(previousBody)),
+			HaveField("Metadata.Page.ID", Equal("restore-page")),
+			HaveField("Metadata.Page.Title", Equal("Restore Page")),
+		), "restored markdown = %q, want previous snapshot content", string(raw))
 
 	})
 })
