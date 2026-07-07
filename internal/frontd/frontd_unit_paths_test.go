@@ -59,6 +59,30 @@ var _ = Describe("frontd path and session primitives", Label("unit"), func() {
 		}),
 	)
 
+	DescribeTable("public workspace API route translation",
+		func(method string, path string, want frontdWorkspaceAPIRoute) {
+			Expect(workspaceAPIRouteFor(method, path)).To(Equal(want))
+		},
+		Entry("maps workspace listing to the private control route", http.MethodGet, PublicWorkspacesPrefix, frontdWorkspaceAPIRoute{
+			Outcome:     frontdWorkspaceAPIRouteAccepted,
+			PrivatePath: "/__leafwiki/workspaces",
+		}),
+		Entry("maps workspace status lookups to the private control route", http.MethodGet, PublicWorkspacesPrefix+"/home/status", frontdWorkspaceAPIRoute{
+			Outcome:     frontdWorkspaceAPIRouteAccepted,
+			PrivatePath: "/__leafwiki/workspaces/home/status",
+		}),
+		Entry("maps workspace ensure requests to the private control route", http.MethodPost, PublicWorkspacesPrefix+"/home/ensure", frontdWorkspaceAPIRoute{
+			Outcome:     frontdWorkspaceAPIRouteAccepted,
+			PrivatePath: "/__leafwiki/workspaces/home/ensure",
+		}),
+		Entry("rejects unsupported workspace methods", http.MethodDelete, PublicWorkspacesPrefix+"/home/status", frontdWorkspaceAPIRoute{
+			Outcome: frontdWorkspaceAPIRouteRejected,
+		}),
+		Entry("rejects malformed workspace paths", http.MethodGet, PublicWorkspacesPrefix+"/home/status/extra", frontdWorkspaceAPIRoute{
+			Outcome: frontdWorkspaceAPIRouteRejected,
+		}),
+	)
+
 	It("clones request paths without changing the original body or headers", func() {
 		body := io.NopCloser(strings.NewReader("request body"))
 		req, err := http.NewRequest(http.MethodPost, "http://frontd.local/base/tree", body)
@@ -187,6 +211,28 @@ func frontdIngressFamiliesFor(path string) []frontdIngressPathFamily {
 		families = append(families, frontdIngressPublic)
 	}
 	return families
+}
+
+type frontdWorkspaceAPIRouteOutcome uint8
+
+const (
+	frontdWorkspaceAPIRouteRejected frontdWorkspaceAPIRouteOutcome = iota
+	frontdWorkspaceAPIRouteAccepted
+)
+
+type frontdWorkspaceAPIRoute struct {
+	Outcome     frontdWorkspaceAPIRouteOutcome
+	PrivatePath string
+}
+
+func workspaceAPIRouteFor(method string, path string) frontdWorkspaceAPIRoute {
+	if !isWorkspacesAPIPath(method, path) {
+		return frontdWorkspaceAPIRoute{Outcome: frontdWorkspaceAPIRouteRejected}
+	}
+	return frontdWorkspaceAPIRoute{
+		Outcome:     frontdWorkspaceAPIRouteAccepted,
+		PrivatePath: privateWorkspaceAPIPath(path),
+	}
 }
 
 type requestPathObservation struct {

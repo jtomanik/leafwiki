@@ -77,6 +77,24 @@ var _ = ginkgo.Describe("wikid document and supervisor values", ginkgo.Label("un
 		}))
 	})
 
+	ginkgo.DescribeTable("grant capability lookup",
+		func(role GrantRole, want capabilityLookup) {
+			Expect(capabilityLookupFor(role)).To(Equal(want))
+		},
+		ginkgo.Entry("allows viewers to read content", GrantRoleViewer, capabilityLookup{
+			Outcome:      capabilityLookupAccepted,
+			Capabilities: grantCapabilityReadContent,
+		}),
+		ginkgo.Entry("allows editors to read and write content", GrantRoleEditor, capabilityLookup{
+			Outcome:      capabilityLookupAccepted,
+			Capabilities: grantCapabilityReadContent | grantCapabilityWriteContent,
+		}),
+		ginkgo.Entry("allows administrators to manage grants", GrantRoleAdmin, capabilityLookup{
+			Outcome:      capabilityLookupAccepted,
+			Capabilities: grantCapabilityReadContent | grantCapabilityWriteContent | grantCapabilityAdministerGrants,
+		}),
+	)
+
 	ginkgo.It("reports registry lookup and validation state without mutating workspace records", func() {
 		now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
 		home := WorkspaceRecord{
@@ -223,7 +241,7 @@ const (
 
 type capabilityLookup struct {
 	Outcome      capabilityLookupOutcome
-	Capabilities RoleCapabilities
+	Capabilities grantCapabilitySet
 }
 
 func capabilityLookupFor(role GrantRole) capabilityLookup {
@@ -231,5 +249,27 @@ func capabilityLookupFor(role GrantRole) capabilityLookup {
 	if err != nil {
 		return capabilityLookup{Outcome: capabilityLookupRejected}
 	}
-	return capabilityLookup{Outcome: capabilityLookupAccepted, Capabilities: capabilities}
+	return capabilityLookup{Outcome: capabilityLookupAccepted, Capabilities: grantCapabilitySetFor(capabilities)}
+}
+
+type grantCapabilitySet uint8
+
+const (
+	grantCapabilityReadContent grantCapabilitySet = 1 << iota
+	grantCapabilityWriteContent
+	grantCapabilityAdministerGrants
+)
+
+func grantCapabilitySetFor(capabilities RoleCapabilities) grantCapabilitySet {
+	var set grantCapabilitySet
+	if capabilities.ReadContent {
+		set |= grantCapabilityReadContent
+	}
+	if capabilities.WriteContent {
+		set |= grantCapabilityWriteContent
+	}
+	if capabilities.AdministerGrants {
+		set |= grantCapabilityAdministerGrants
+	}
+	return set
 }
