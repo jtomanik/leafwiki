@@ -229,6 +229,20 @@ var _ = ginkgo.Describe("auth use cases", func() {
 		))
 	})
 
+	ginkgo.It("returns required field codes before user creation reaches storage", ginkgo.Label("unit"), func() {
+		uc := NewCreateUserUseCase(nil, nil, slog.Default())
+
+		_, err := uc.Execute(context.Background(), CreateUserInput{
+			Role: coreauth.RoleViewer,
+		})
+
+		Expect(err).To(SatisfyAll(
+			HaveAuthFieldErrorCode("username", FieldCodeAuthUsernameRequired, MessageIDAuthUsernameRequired),
+			HaveAuthFieldErrorCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired),
+			HaveAuthFieldErrorCode("password", FieldCodeAuthPasswordRequired, MessageIDAuthPasswordRequired),
+		))
+	})
+
 	ginkgo.It("returns stable localized field codes for invalid user update input", ginkgo.Label("unit"), func() {
 		uc := NewUpdateUserUseCase(nil, nil, slog.Default())
 
@@ -244,6 +258,16 @@ var _ = ginkgo.Describe("auth use cases", func() {
 			HaveAuthFieldErrorCode("email", FieldCodeAuthEmailInvalid, MessageIDAuthEmailInvalid),
 			HaveAuthFieldErrorCode("role", FieldCodeAuthRoleInvalid, MessageIDAuthRoleInvalid),
 		))
+	})
+
+	ginkgo.It("returns required field codes before user updates reach storage", ginkgo.Label("unit"), func() {
+		uc := NewUpdateUserUseCase(nil, nil, slog.Default())
+
+		_, err := uc.Execute(context.Background(), UpdateUserInput{
+			Username: "alice",
+		})
+
+		Expect(err).To(HaveAuthFieldErrorCode("email", FieldCodeAuthEmailRequired, MessageIDAuthEmailRequired))
 	})
 
 	ginkgo.It("returns stable localized field codes for missing API key names", ginkgo.Label("unit"), func() {
