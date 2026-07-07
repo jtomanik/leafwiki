@@ -136,6 +136,38 @@ var _ = ginkgo.Describe("import plan execution state through real wiki storage",
 		}))
 	})
 
+	ginkgo.It("keeps the current running plan when replacement planning is requested", func() {
+		runningWorkspace := integTempDir()
+		runningMarker := integMustWrite(runningWorkspace, "Running.md", "# Running")
+		replacementWorkspace := integTempDir()
+		integMustWrite(replacementWorkspace, "Replacement.md", "# Replacement")
+
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		stateFile := filepath.Join(w.GetStorageDir(), ".importer", "current-plan.json")
+		workspaceBaseDir := filepath.Join(w.GetStorageDir(), ".importer", "workspaces")
+		planner := importer.NewPlanner(wiki.NewWikiImportAdapter(w), tree.NewSlugService())
+		store := importer.NewPlanStore(stateFile)
+		is := importer.NewImporterService(planner, store, workspaceBaseDir, 0)
+
+		plan, err := is.CreateImportPlanFromFolder(runningWorkspace, "")
+		Expect(err).To(Succeed())
+		_, err = integStartStoredPlanExecutionResult(store, integFixtureUserID("system"))
+		Expect(err).To(Succeed())
+
+		_, err = is.CreateImportPlanFromFolder(replacementWorkspace, "")
+		Expect(err).To(MatchError(importer.ErrImportExecutionRunning))
+		_, err = os.Stat(runningMarker)
+		Expect(err).To(Succeed())
+
+		state, err := is.GetCurrentPlan()
+		Expect(err).To(Succeed())
+		Expect(state).To(SatisfyAll(
+			HaveField("ID", Equal(plan.ID)),
+			HaveField("ExecutionStatus", Equal(importer.ExecutionStatusRunning)),
+		))
+	})
+
 	ginkgo.It("surfaces unavailable persisted state before planning or execution begins", func() {
 		w := newTestWiki()
 		integWrapCloseWithErrorCheck(w.Close)

@@ -3,6 +3,7 @@ package presence
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -131,6 +132,7 @@ var _ = ginkgo.Describe("presence semantic values", ginkgo.Label("unit"), func()
 		Expect(err).To(Succeed())
 		Expect(raw).To(MatchJSON(`"tab-1"`))
 		Expect(sessionID).To(Equal(WebSessionIDFromString("tab-1")))
+		Expect(sessionID).To(WithTransform(roundTripWebSessionIDRouteValue, Equal(sessionID)))
 
 		var parsed WebSessionID
 		Expect(json.Unmarshal([]byte(`" tab-2 "`), &parsed)).To(Succeed())
@@ -152,6 +154,10 @@ func observeSessionMode(mode SessionMode) sessionModeObservation {
 		return sessionModeBlank
 	}
 	return sessionModeNamed
+}
+
+func roundTripWebSessionIDRouteValue(sessionID WebSessionID) WebSessionID {
+	return WebSessionIDFromString(fmt.Sprint(sessionID))
 }
 
 func newPresenceUnitContext(method string, target string, body string) (*gin.Context, *httptest.ResponseRecorder) {

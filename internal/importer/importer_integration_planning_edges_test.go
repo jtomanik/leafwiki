@@ -89,6 +89,68 @@ var _ = ginkgo.Describe("import planning through real wiki storage", ginkgo.Labe
 			))),
 		))
 	})
+
+	ginkgo.It("imports folder pages beneath the configured target base path", func() {
+		ws := integTempDir()
+		integMustWrite(ws, "Readme.md", "# Readme\nBody")
+
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		probe := newImporterProbe(w)
+		is := newTestImporterService(w)
+
+		plan, err := is.CreateImportPlanFromFolder(ws, "docs/imports")
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(ConsistOf(SatisfyAll(
+			HaveField("SourcePath", Equal(integWorkspaceSourcePath("Readme.md"))),
+			HaveField("TargetPath", Equal(integRoutePath("docs/imports/readme"))),
+			HaveField("Action", Equal(importer.PlanActionCreate)),
+		)))
+
+		result, err := is.ExecuteCurrentPlan(integFixtureUserID("system"))
+		Expect(err).To(Succeed())
+		Expect(result).To(SatisfyAll(
+			HaveField("ImportedCount", Equal(1)),
+			HaveField("SkippedCount", BeZero()),
+			HaveField("Items", ConsistOf(SatisfyAll(
+				HaveField("TargetPath", Equal(integRoutePath("docs/imports/readme"))),
+				HaveField("Action", Equal(importer.ExecutionActionCreated)),
+			))),
+		))
+
+		importedPage, err := probe.FindByPath("docs/imports/readme")
+		Expect(err).To(Succeed())
+		Expect(importedPage.Content).To(Equal("# Readme\nBody"))
+	})
+
+	ginkgo.It("completes empty folder import plans without creating pages", func() {
+		ws := integTempDir()
+
+		w := newTestWiki()
+		integWrapCloseWithErrorCheck(w.Close)
+		is := newTestImporterService(w)
+
+		plan, err := is.CreateImportPlanFromFolder(ws, "")
+		Expect(err).To(Succeed())
+		Expect(plan.Items).To(BeEmpty())
+
+		result, err := is.ExecuteCurrentPlan(integFixtureUserID("system"))
+		Expect(err).To(Succeed())
+		Expect(result).To(SatisfyAll(
+			HaveField("ImportedCount", BeZero()),
+			HaveField("SkippedCount", BeZero()),
+			HaveField("Items", BeEmpty()),
+		))
+
+		state, err := is.GetCurrentPlan()
+		Expect(err).To(Succeed())
+		Expect(state).To(SatisfyAll(
+			HaveField("ExecutionStatus", Equal(importer.ExecutionStatusCompleted)),
+			HaveField("ProcessedItems", BeZero()),
+			HaveField("TotalItems", BeZero()),
+			HaveField("CurrentItemSourcePath", BeNil()),
+		))
+	})
 })
 
 var _ = ginkgo.Describe("import execution asset limits through real wiki storage", ginkgo.Label("integration"), func() {
