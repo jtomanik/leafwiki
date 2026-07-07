@@ -285,6 +285,22 @@ var _ = Describe("workspace sync filesystem watcher and helper contracts", func(
 			})))
 		})
 
+		It("keeps page author metadata while attributing derived revisions to the commit author", Label("unit"), func() {
+			page := workspaceSyncEdgePage(newFixturePageID("page-1"), "Page", newFixtureSlug("page"), tree.NodeKindPage)
+			page.Metadata.CreatorID = newFixtureUserID("creator-1")
+			page.Metadata.LastAuthorID = newFixtureUserID("editor-1")
+			commitAuthorID := newFixtureUserID("committer-1")
+			commit := gitrevisions.Commit{
+				Hash:      newFixtureCommitHash("hash-1"),
+				AuthorID:  ActorIDFromUserID(commitAuthorID),
+				CreatedAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
+			}
+
+			rev := revisionForPageContent("", page, commit, "docs/page.md", workspaceSyncEdgeMarkdown(page.ID, "Historical Title"))
+
+			Expect(rev).To(matchWorkspaceSyncRevisionAuthors(commitAuthorID, page.Metadata.CreatorID, page.Metadata.LastAuthorID))
+		})
+
 		It("extracts markdown paths from quoted error tokens without duplicates", Label("unit"), func() {
 			rootDir := filepath.Join(workspaceSyncTempDir(), "workspace")
 			message := "open path=" + filepath.Join(rootDir, "docs", "a.md") + ": failed file='docs/a.md' file=../outside.md bad=nope.txt"

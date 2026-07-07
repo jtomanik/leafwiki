@@ -136,6 +136,35 @@ func matchWorkspaceSyncParsedPageMetadata(
 	))
 }
 
+type workspaceSyncRevisionAuthorObservation struct {
+	RevisionAuthorID tree.UserID
+	PageCreatorID    tree.UserID
+	PageLastAuthorID tree.UserID
+}
+
+func observeWorkspaceSyncRevisionAuthors(rev *revision.Revision) workspaceSyncRevisionAuthorObservation {
+	if rev == nil {
+		return workspaceSyncRevisionAuthorObservation{}
+	}
+	return workspaceSyncRevisionAuthorObservation{
+		RevisionAuthorID: tree.UserIDFromString(rev.AuthorID),
+		PageCreatorID:    tree.UserIDFromString(rev.CreatorID),
+		PageLastAuthorID: tree.UserIDFromString(rev.LastAuthorID),
+	}
+}
+
+func matchWorkspaceSyncRevisionAuthors(
+	revisionAuthorID tree.UserID,
+	pageCreatorID tree.UserID,
+	pageLastAuthorID tree.UserID,
+) types.GomegaMatcher {
+	return WithTransform(observeWorkspaceSyncRevisionAuthors, Equal(workspaceSyncRevisionAuthorObservation{
+		RevisionAuthorID: revisionAuthorID,
+		PageCreatorID:    pageCreatorID,
+		PageLastAuthorID: pageLastAuthorID,
+	}))
+}
+
 type workspaceSyncMode string
 
 const (
