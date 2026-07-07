@@ -47,6 +47,10 @@ var _ = Describe("run message shell rendering", Label("unit"), func() {
 		Expect(shellSingleQuote("can't stop")).To(Equal(`can'"'"'t stop`))
 	})
 
+	It("escapes every single quote in shell variable values", func() {
+		Expect(shellSingleQuote("can't stop John's run")).To(Equal(`can'"'"'t stop John'"'"'s run`))
+	})
+
 	It("writes a deterministic generated header and variable ordering", func() {
 		generated, err := GenerateRunMessages()
 		Expect(err).NotTo(HaveOccurred())
