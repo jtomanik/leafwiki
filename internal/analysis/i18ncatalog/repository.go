@@ -251,14 +251,14 @@ func importAliasesForPath(file *ast.File, importPath string) map[string]struct{}
 }
 
 func defaultImportName(importPath string) string {
-	_, name, ok := strings.Cut(filepath.ToSlash(importPath), "/")
-	for ok {
-		_, name, ok = strings.Cut(name, "/")
-	}
-	if name == "" {
+	normalized := strings.TrimSuffix(filepath.ToSlash(importPath), "/")
+	if normalized == "" {
 		return importPath
 	}
-	return name
+	if index := strings.LastIndexByte(normalized, '/'); index >= 0 {
+		return normalized[index+1:]
+	}
+	return normalized
 }
 
 func isErrorCodeConstant(name string) bool {

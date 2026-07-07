@@ -129,6 +129,21 @@ var _ = ginkgo.Describe("wikid helper behavior", func() {})
 		Expect(h.diagnosticMessages()).To(ConsistOf(
 			`semh:ginkgo.vague-name: Ginkgo node name "wikid helper behavior" is too vague to document behavior; describe the observable outcome instead`,
 		))
+		Expect(observeHelperDecisions(
+			ginkgoCoverageBucketBranchesWithFillerSuffix([]string{"no", "op", "branches", "explicitly"}, 2),
+			ginkgoCoverageBucketBranchesWithFillerSuffix([]string{"domain", "branches", "clearly"}, 1),
+			isCoverageBucketFillerSuffix("explicit"),
+			isCoverageBucketFillerSuffix("clearly"),
+			ginkgoCoverageBucketBranchPrefixHasContext([]string{"option"}),
+			ginkgoCoverageBucketBranchPrefixHasContext([]string{"domain"}),
+		)).To(Equal([]helperDecision{
+			helperAccepted,
+			helperRejected,
+			helperAccepted,
+			helperRejected,
+			helperAccepted,
+			helperRejected,
+		}))
 	})
 
 	ginkgo.It("reports Ginkgo container names that preserve migrated Test function names", ginkgo.Label("unit"), func() {

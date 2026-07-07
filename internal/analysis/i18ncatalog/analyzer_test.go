@@ -54,6 +54,7 @@ var _ = ginkgo.Describe("i18n catalog repository checks", ginkgo.Label("unit"), 
 			ContainElement(matchRepositoryDiagnostic("internal/wiki/mcp/tool_descriptors.go", `catalog missing generated MCP descriptor message "mcp.tools.wiki_move_page.description"`)),
 			ContainElement(matchRepositoryDiagnostic("internal/core/errors.go", `catalog missing ErrorCode-derived message "errors.widget.missing"`)),
 			ContainElement(matchRepositoryDiagnostic("internal/core/errors.go", `catalog missing production message "warnings.link_rewrite.unsupported_syntax" for constant rewriteWarningUnsupportedSyntax`)),
+			ContainElement(matchRepositoryDiagnostic("internal/core/non_alias_messages.go", `catalog missing production message "warnings.non_alias.missing" for constant nonAliasSharedErrorMessage`)),
 			ContainElement(matchRepositoryDiagnostic("scripts/run_messages.sh", `generated run message "LEAFWIKI_RUN_MSG_USAGE" is stale`)),
 			ContainElement(matchRepositoryDiagnostic("e2e/page.spec.ts", "E2E behavior tests must assert semantic IDs/status")),
 			ContainElement(matchRepositoryDiagnostic("scripts/run.sh", "failure body literal must use generated catalog messages")),
@@ -212,6 +213,12 @@ import sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 const ErrCodeWidgetMissing sharederrors.ErrorCode = "widget_missing"
 
 const rewriteWarningUnsupportedSyntax sharederrors.MessageID = "warnings.link_rewrite.unsupported_syntax"
+`)
+	writeFixtureFile(repoRoot, "internal/core/non_alias_messages.go", `package core
+
+import "github.com/perber/wiki/internal/core/shared/errors"
+
+const nonAliasSharedErrorMessage errors.MessageID = "warnings.non_alias.missing"
 `)
 	writeFixtureFile(repoRoot, "scripts/run_messages.sh", "#!/usr/bin/env bash\nLEAFWIKI_RUN_MSG_USAGE='Old usage'\n# LEAFWIKI_RUN_MSG_USAGE='Usage text'\n")
 	writeFixtureFile(repoRoot, "scripts/run.sh", "#!/usr/bin/env bash\nfail \"Raw failure\"\n")
