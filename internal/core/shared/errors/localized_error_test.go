@@ -156,6 +156,9 @@ var _ = Describe("localized error derived contracts", Label("unit"), func() {
 			Template:  testVisibleLocalizedMessage,
 		}))
 		Expect(err).To(HaveLocalizedErrorWrappedCause(cause))
+
+		wrapped := fmt.Errorf("localized envelope: %w", err)
+		Expect(wrapped).To(MatchError(err))
 	})
 
 	It("renders fallback text when a code has no catalog entry", func() {

@@ -2,6 +2,7 @@ package errors_test
 
 import (
 	"encoding/json"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -85,6 +86,16 @@ var _ = Describe("field validation state", Label("unit"), func() {
 			MessageID: sharederrors.FieldValidationErrorMessageID,
 			Message:   renderedMessage(sharederrors.FieldValidationErrorMessageID, testSiteNameRequiredFallback),
 		}))))
+	})
+
+	It("wraps the validation collection as the structured cause", func() {
+		validation := sharederrors.NewValidationErrors()
+		validation.Add(testSiteNameValidationField, testSiteNameRequiredFallback)
+
+		wrapped := fmt.Errorf("validation envelope: %w", validation)
+
+		Expect(wrapped).To(MatchError(validation))
+		Expect(validation).To(HaveValidationErrorContract(validationFieldCollectionPopulated))
 	})
 })
 
