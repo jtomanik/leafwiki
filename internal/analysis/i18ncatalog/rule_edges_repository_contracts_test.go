@@ -58,11 +58,13 @@ var _ = ginkgo.Describe("i18n catalog repository edge contracts", ginkgo.Label("
 			"string",
 			`"literal"`,
 		}, []string{"errors"})).To(Equal([]bool{true, false, false, true, true, true, false, false}))
-		Expect(observeErrorCodeMessageIDs(i18ncatalog.MessageIDsForErrorCodesForTest([]i18ncatalog.ErrorCodeForTest{
-			"widget_missing",
-			"widget",
-			"widget_",
-		}))).To(Equal(errorCodeMessageIDObservation{
+		Expect(observeErrorCodeMessageIDs(errorCodeMessageIDValues{
+			values: i18ncatalog.MessageIDsForErrorCodesForTest([]i18ncatalog.ErrorCodeForTest{
+				"widget_missing",
+				"widget",
+				"widget_",
+			}),
+		})).To(Equal(errorCodeMessageIDObservation{
 			MissingCodeHasMessageID:     true,
 			PlainCodeHasMessageID:       true,
 			TrailingUnderscorePreserved: true,
@@ -294,9 +296,17 @@ func messages() {
 	})
 
 	ginkgo.It("parses generated run-message shell assignments across quoted values", func() {
-		Expect(i18ncatalog.RunMessageAssignmentsForTest("ignored\nLEAFWIKI_RUN_MSG_SINGLE='RUN_MESSAGE_LINE_ONE\nRUN_MESSAGE_LINE_TWO'\nLEAFWIKI_RUN_MSG_DOUBLE=\"RUN_MESSAGE_LINE_ONE\nRUN_MESSAGE_LINE_TWO\"\nLEAFWIKI_RUN_MSG_PLAIN=plain\nLEAFWIKI_RUN_MSG_BROKEN\n")).To(Equal([]i18ncatalog.RunMessageAssignmentForTest{
-			{Name: "LEAFWIKI_RUN_MSG_SINGLE", RawValue: "'RUN_MESSAGE_LINE_ONE\nRUN_MESSAGE_LINE_TWO'", Line: 2},
-			{Name: "LEAFWIKI_RUN_MSG_DOUBLE", RawValue: "\"RUN_MESSAGE_LINE_ONE\nRUN_MESSAGE_LINE_TWO\"", Line: 4},
+		firstLine := "A"
+		secondLine := "B"
+		singleQuoted := "'" + firstLine + "\n" + secondLine + "'"
+		doubleQuoted := `"` + firstLine + "\n" + secondLine + `"`
+		content := "ignored\nLEAFWIKI_RUN_MSG_SINGLE=" + singleQuoted +
+			"\nLEAFWIKI_RUN_MSG_DOUBLE=" + doubleQuoted +
+			"\nLEAFWIKI_RUN_MSG_PLAIN=plain\nLEAFWIKI_RUN_MSG_BROKEN\n"
+
+		Expect(i18ncatalog.RunMessageAssignmentsForTest(content)).To(Equal([]i18ncatalog.RunMessageAssignmentForTest{
+			{Name: "LEAFWIKI_RUN_MSG_SINGLE", RawValue: singleQuoted, Line: 2},
+			{Name: "LEAFWIKI_RUN_MSG_DOUBLE", RawValue: doubleQuoted, Line: 4},
 			{Name: "LEAFWIKI_RUN_MSG_PLAIN", RawValue: "plain", Line: 6},
 		}))
 	})
@@ -344,7 +354,9 @@ type errorCodeMessageIDObservation struct {
 	MessageIDCountMatchesInputs bool
 }
 
-type errorCodeMessageIDValues []string
+type errorCodeMessageIDValues struct {
+	values []string
+}
 
 type repositoryCheckOutcome uint8
 
@@ -370,10 +382,10 @@ func observeRepositoryCheckOutcome(err error) repositoryCheckOutcome {
 
 func observeErrorCodeMessageIDs(ids errorCodeMessageIDValues) errorCodeMessageIDObservation {
 	return errorCodeMessageIDObservation{
-		MissingCodeHasMessageID:     len(ids) > 0 && strings.HasSuffix(ids[0], ".missing"),
-		PlainCodeHasMessageID:       len(ids) > 1 && strings.HasPrefix(ids[1], "errors."),
-		TrailingUnderscorePreserved: len(ids) > 2 && strings.HasSuffix(ids[2], "_"),
-		MessageIDCountMatchesInputs: len(ids) == 3,
+		MissingCodeHasMessageID:     len(ids.values) > 0 && strings.HasSuffix(ids.values[0], ".missing"),
+		PlainCodeHasMessageID:       len(ids.values) > 1 && strings.HasPrefix(ids.values[1], "errors."),
+		TrailingUnderscorePreserved: len(ids.values) > 2 && strings.HasSuffix(ids.values[2], "_"),
+		MessageIDCountMatchesInputs: len(ids.values) == 3,
 	}
 }
 
