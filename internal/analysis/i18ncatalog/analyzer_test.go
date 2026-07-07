@@ -91,6 +91,17 @@ var _ = ginkgo.Describe("i18n catalog repository checks", ginkgo.Label("unit"), 
 		Expect(diagnostics).To(BeEmpty())
 	})
 
+	ginkgo.It("returns repository setup errors from the localization analyzer package", func() {
+		repoRoot := temporaryRepositoryRoot()
+		writeFixtureFile(repoRoot, "go.mod", "module github.com/perber/wiki\n\ngo 1.25.0\n")
+		writeFixtureFile(repoRoot, "internal/localization/messages.go", "package localization\n")
+
+		diagnostics, err := runAnalyzerOnFixturePackage(repoRoot, "internal/localization/messages.go", "github.com/perber/wiki/internal/localization")
+
+		Expect(diagnostics).To(BeEmpty())
+		Expect(observeRepositoryCheckOutcome(err)).To(Equal(repositoryCheckReturnedError))
+	})
+
 	ginkgo.It("reports missing repository files through analyzer diagnostics", func() {
 		repoRoot := writeRepositoryPolicyFixture()
 		Expect(os.Remove(filepath.Join(repoRoot, "scripts/run_messages.sh"))).To(Succeed())
