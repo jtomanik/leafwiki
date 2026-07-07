@@ -38,6 +38,27 @@ const (
 	treeLookupUnavailable treeLookupState = "unavailable"
 )
 
+type asciiFoldMatchState string
+
+const (
+	asciiFoldMatched    asciiFoldMatchState = "ASCII fold match"
+	asciiFoldMismatched asciiFoldMatchState = "ASCII fold mismatch"
+)
+
+type workspaceIndexFileState string
+
+const (
+	workspaceIndexFilePresent workspaceIndexFileState = "workspace index file present"
+	workspaceIndexFileAbsent  workspaceIndexFileState = "workspace index file absent"
+)
+
+type workspaceSectionRouteMatchState string
+
+const (
+	workspaceSectionRouteMatched    workspaceSectionRouteMatchState = "same workspace section route"
+	workspaceSectionRouteMismatched workspaceSectionRouteMatchState = "different workspace section route"
+)
+
 type sectionIndexPathObservation struct {
 	Path  string
 	State treeLookupState
@@ -205,6 +226,27 @@ func parseRequiredFrontmatter(raw string) (markdown.Frontmatter, string, error) 
 		return markdown.Frontmatter{}, body, errExpectedFrontmatter
 	}
 	return frontmatter, body, nil
+}
+
+func observeASCIIFoldMatch(left string, right string) asciiFoldMatchState {
+	if equalFoldASCII(left, right) {
+		return asciiFoldMatched
+	}
+	return asciiFoldMismatched
+}
+
+func observeWorkspaceIndexFile(dirPath string) workspaceIndexFileState {
+	if workspaceDirHasIndexFile(dirPath) {
+		return workspaceIndexFilePresent
+	}
+	return workspaceIndexFileAbsent
+}
+
+func observeWorkspaceSectionRouteMatch(left WorkspaceMarkdownRoute, right WorkspaceMarkdownRoute) workspaceSectionRouteMatchState {
+	if sameWorkspaceSectionRouteEntry(left, right) {
+		return workspaceSectionRouteMatched
+	}
+	return workspaceSectionRouteMismatched
 }
 
 func sectionIndexPathInDirResult(store *NodeStore, dirPath string) (string, error) {

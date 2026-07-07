@@ -67,8 +67,8 @@ var _ = Describe("deterministic tree edge behavior", Label("unit"), func() {
 
 		_, err = normalizeWorkspaceRoutePath(NewSlugService(), "docs/!!!")
 		Expect(err).To(MatchError(ErrSlugEmpty))
-		Expect(workspaceDirHasIndexFile(filepath.Join(root, "missing"))).To(BeFalse())
-		Expect(workspaceDirHasIndexFile(filepath.Join(root, "docs"))).To(BeTrue())
+		Expect(observeWorkspaceIndexFile(filepath.Join(root, "missing"))).To(Equal(workspaceIndexFileAbsent))
+		Expect(observeWorkspaceIndexFile(filepath.Join(root, "docs"))).To(Equal(workspaceIndexFilePresent))
 	})
 
 	It("derives non-default workspace source paths for imported content", func() {

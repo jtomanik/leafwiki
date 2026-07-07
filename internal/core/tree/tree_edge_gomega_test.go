@@ -15,10 +15,10 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 		Expect(RevisionIDFromString("rev-1")).To(Equal(newFixtureRevisionID("rev-1")))
 		Expect(CleanMarkdownPath(".")).To(BeEmpty())
 		Expect(MarkdownPathFromString("readme.md").SourceDir()).To(BeEmpty())
-		Expect(equalFoldASCII("index", "index.md")).To(BeFalse())
-		Expect(equalFoldASCII("INDEX.MD", "index.md")).To(BeTrue())
-		Expect(equalFoldASCII("index.md", "INDEX.MD")).To(BeTrue())
-		Expect(equalFoldASCII("indey.md", "index.md")).To(BeFalse())
+		Expect(observeASCIIFoldMatch("index", "index.md")).To(Equal(asciiFoldMismatched))
+		Expect(observeASCIIFoldMatch("INDEX.MD", "index.md")).To(Equal(asciiFoldMatched))
+		Expect(observeASCIIFoldMatch("index.md", "INDEX.MD")).To(Equal(asciiFoldMatched))
+		Expect(observeASCIIFoldMatch("indey.md", "index.md")).To(Equal(asciiFoldMismatched))
 
 		Expect(RoutePathFromString("").Segments()).To(BeNil())
 		Expect(RoutePathFromString("docs//guide").Segments()).To(Equal([]Slug{

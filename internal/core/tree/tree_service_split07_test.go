@@ -151,9 +151,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
-		Expect(lookup.CanCreate).To(BeTrue(),
-			"expected missing valid path to be creatable",
-		)
+		Expect(lookup).To(MatchPathLookupCreationState(pathLookupCreatable))
 
 	})
 })
@@ -166,9 +164,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		Expect(err).To(Succeed(), "LookupPagePath failed: %v",
 
 			err)
-		Expect(lookup.CanCreate).To(BeFalse(),
-			"expected reserved slug path to be non-creatable",
-		)
+		Expect(lookup).To(MatchPathLookupCreationState(pathLookupNotCreatable))
 
 	})
 })

@@ -125,8 +125,8 @@ var _ = ginkgo.Describe("tree route paths and section content resolution", ginkg
 		}
 
 		Expect(sectionSourceDir(first)).To(Equal(newFixtureWorkspaceSourcePath("docs")))
-		Expect(sameWorkspaceSectionRouteEntry(first, second)).To(BeTrue())
-		Expect(sameWorkspaceSectionRouteEntry(first, page)).To(BeFalse())
+		Expect(observeWorkspaceSectionRouteMatch(first, second)).To(Equal(workspaceSectionRouteMatched))
+		Expect(observeWorkspaceSectionRouteMatch(first, page)).To(Equal(workspaceSectionRouteMismatched))
 		Expect(nonDefaultWorkspaceSourcePath(first)).To(Equal(newFixtureWorkspaceSourcePath("")))
 	})
 })
