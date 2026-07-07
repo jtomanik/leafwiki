@@ -280,12 +280,9 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		Expect(err).To(Succeed(), "parse persisted updated_at failed: %v",
 
 			err)
-		Expect(reloadedNode.
-			Metadata.UpdatedAt.
-			Equal(persistedUpdatedAt)).To(BeTrue(), "expected reloaded metadata to match persisted frontmatter, frontmatter=%s reloaded=%s (before=%s)",
-
+		Expect(reloadedNode.Metadata.UpdatedAt).To(BeTemporally("==", persistedUpdatedAt),
+			"expected reloaded metadata to match persisted frontmatter, frontmatter=%s reloaded=%s (before=%s)",
 			persistedUpdatedAt,
-
 			reloadedNode.Metadata.UpdatedAt,
 			beforeUpdatedAt)
 

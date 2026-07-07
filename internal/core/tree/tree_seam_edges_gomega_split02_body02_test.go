@@ -151,7 +151,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			return []os.DirEntry{}, nil
 		})
 		swapTreeSeam(&treeMapWorkspaceMarkdownRoute, func(_ string, relPath string, isDir bool) (WorkspaceMarkdownRoute, error) {
-			Expect(isDir).To(BeTrue())
+			Expect(observeDirectoryFlag(isDir)).To(Equal(fileInfoDirectory))
 			return WorkspaceMarkdownRoute{Kind: NodeKindSection, RoutePath: newFixtureRoutePath("same"), SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
 		})
 		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ErrDuplicateReconstructedSlug))
@@ -163,7 +163,7 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 			return id, nil
 		})
 		swapTreeSeam(&treeMapWorkspaceMarkdownRoute, func(_ string, relPath string, isDir bool) (WorkspaceMarkdownRoute, error) {
-			Expect(isDir).To(BeTrue())
+			Expect(observeDirectoryFlag(isDir)).To(Equal(fileInfoDirectory))
 			return WorkspaceMarkdownRoute{Kind: NodeKindSection, RoutePath: RoutePathFromString(relPath), SourcePath: WorkspaceSourcePathFromString(relPath)}, nil
 		})
 		Expect(store.reconstructTreeRecursive(root, parent, now, map[PageID]string{RootPageID: root})).To(MatchError(ErrDuplicateLeafwikiID))

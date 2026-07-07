@@ -103,11 +103,10 @@ var _ = ginkgo.Describe("node store filesystem reconstruction", ginkgo.Label("un
 			err)
 
 		findChildBySlug(tree, newFixtureSlug("guide"))
-		for _, child := range tree.Children {
-			Expect(strings.ToLower(child.Slug.String())).NotTo(SatisfyAny(Equal("assets"), Equal("assets-1")),
-				"top-level static assets directory became wiki child: %#v", child)
-
-		}
+		Expect(tree.Children).NotTo(ContainElement(HaveField("Slug", SatisfyAny(
+			Equal(newFixtureSlug("assets")),
+			Equal(newFixtureSlug("assets-1")),
+		))), "top-level static assets directory became wiki child")
 
 	})
 })

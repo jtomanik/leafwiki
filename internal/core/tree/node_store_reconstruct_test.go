@@ -3,7 +3,6 @@ package tree
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/perber/wiki/internal/core/markdown"
 
@@ -165,14 +164,9 @@ leafwiki_title: Introduction
 		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
 
-		for _, ch := range docs.Children {
-			Expect(strings.EqualFold(ch.Slug.
-				String(), "index")).
-				To(BeFalse(), "INDEX.MD must be skipped as page, but found slug %q",
-
-					ch.Slug)
-
-		}
+		Expect(docs.Children).NotTo(ContainElement(
+			HaveField("Slug", Equal(newFixtureSlug("index"))),
+		), "INDEX.MD must be skipped as a child page")
 
 		raw, err := store.ReadPageRaw(docs)
 		Expect(err).To(Succeed(), "ReadPageRaw section: %v",
@@ -236,12 +230,9 @@ leafwiki_title: Documentation
 		docs := findChildBySlug(tree, newFixtureSlug("docs"))
 		Expect(docs).To(matchTreeNode(NodeKindSection, newFixturePageID("sec-docs"), "Documentation"))
 
-		for _, ch := range docs.Children {
-			Expect(strings.EqualFold(ch.Slug.
-				String(), "readme")).
-				To(BeFalse(), "README.md fallback must not be reconstructed as a child page")
-
-		}
+		Expect(docs.Children).NotTo(ContainElement(
+			HaveField("Slug", Equal(newFixtureSlug("readme"))),
+		), "README.md fallback must not be reconstructed as a child page")
 
 		raw, err := store.ReadPageRaw(docs)
 		Expect(err).To(Succeed(), "ReadPageRaw section: %v",

@@ -384,16 +384,9 @@ leafwiki_title: New Page
 
 			len(newTree.Children))
 
-		// Verify initial node still exists
-		var foundInitial bool
-		for _, child := range newTree.Children {
-			if child.ID == *initialID {
-				foundInitial = true
-				break
-			}
-		}
-		Expect(foundInitial).
-			To(BeTrue(), "expected initial node to still exist after reconstruction")
+		Expect(newTree.Children).To(ContainElement(
+			HaveField("ID", Equal(*initialID)),
+		), "expected initial node to still exist after reconstruction")
 
 	})
 })

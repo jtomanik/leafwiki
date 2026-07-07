@@ -249,6 +249,13 @@ func observeWorkspaceSectionRouteMatch(left WorkspaceMarkdownRoute, right Worksp
 	return workspaceSectionRouteMismatched
 }
 
+func observeDirectoryFlag(isDir bool) fileInfoKind {
+	if isDir {
+		return fileInfoDirectory
+	}
+	return fileInfoFile
+}
+
 func sectionIndexPathInDirResult(store *NodeStore, dirPath string) (string, error) {
 	ginkgo.GinkgoHelper()
 	path, exists, err := store.sectionIndexPathInDir(dirPath)
