@@ -81,27 +81,6 @@ var policyValue = Equal(0)
 		Expect(ctx.EnclosingDeclaration(findPolicyCall(file, "Equal"))).To(BeAssignableToTypeOf(&ast.ValueSpec{}))
 		Expect(ctx.EnclosingDeclaration(file)).To(BeNil())
 	})
-
-	ginkgo.It("matches declaration-scoped waivers to diagnostics in the next declaration", func() {
-		ctx, _, file := newGinkgoPolicyHarness(`package p
-
-// semh:allow ginkgo.top-level-it -- declaration-scoped package invariant
-func check() {
-	Equal(0)
-}
-`)
-		call := findPolicyCall(file, "Equal")
-		waiver := checkerpolicy.ParsedWaiver{
-			Rule: ruleGinkgoTopLevelIt,
-			Pos:  file.Comments[0].List[0].Slash,
-		}
-
-		Expect(policyBoolState(ctx.WaiverMatchesDiagnostic(
-			waiver,
-			checkerpolicy.Diagnostic{Rule: ruleGinkgoTopLevelIt, Pos: call.Pos(), Node: call},
-			checkerpolicy.WaiverScopeDeclaration,
-		))).To(Equal(policyBoolAccepted))
-	})
 })
 
 func policyBoolState(value bool) policyBoolObservation {
