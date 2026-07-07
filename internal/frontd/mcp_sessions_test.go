@@ -19,6 +19,12 @@ type rootMCPWorkspaceResolutionCase struct {
 	wantSeenID workspaceid.WorkspaceID
 }
 
+type workspaceMCPErrorResponseCase struct {
+	err    error
+	status int
+	code   sharederrors.ErrorCode
+}
+
 var _ = Describe("workspace MCP session routing", func() {
 	It("rejects rebinding a session to a different workspace", Label("unit"), func() {
 		bindings := NewMCPSessionBindings()
@@ -34,6 +40,48 @@ var _ = Describe("workspace MCP session routing", func() {
 		Expect(bindings.Bind(MCPSessionIDFromHeader("session-1"), mustDecodeWorkspaceID(" alpha "))).To(matchFrontdWorkspaceIDError(workspaceid.ErrCodeWorkspaceIDWhitespace))
 		Expect(bindings).NotTo(HaveMCPSession(MCPSessionIDFromHeader("session-1")))
 	})
+
+	It("records explicit proxy response status before body writes", Label("unit"), func() {
+		rec := httptest.NewRecorder()
+		writer := &mcpSessionResponseWriter{ResponseWriter: rec}
+
+		writer.WriteHeader(http.StatusCreated)
+		_, err := writer.Write([]byte("body"))
+
+		Expect(err).To(Succeed())
+		Expect(writer.statusCode).To(Equal(http.StatusCreated))
+		Expect(rec).To(HaveHTTPStatus(http.StatusCreated))
+	})
+
+	DescribeTable("workspace MCP dependency error responses", Label("unit"),
+		func(tc workspaceMCPErrorResponseCase) {
+			rec := httptest.NewRecorder()
+
+			writeWorkspaceMCPError(rec, tc.err)
+
+			Expect(rec).To(matchStructuredFrontdError(tc.status, tc.code, sharederrors.MessageIDForCode(tc.code)))
+		},
+		Entry("reports missing workspaces", workspaceMCPErrorResponseCase{
+			err:    ErrWorkspaceNotFound,
+			status: http.StatusNotFound,
+			code:   errCodeWorkspaceNotFound,
+		}),
+		Entry("reports forbidden workspaces", workspaceMCPErrorResponseCase{
+			err:    ErrWorkspaceForbidden,
+			status: http.StatusForbidden,
+			code:   errCodeWorkspaceForbidden,
+		}),
+		Entry("reports ambiguous root workspace selection", workspaceMCPErrorResponseCase{
+			err:    ErrWorkspaceAmbiguous,
+			status: http.StatusConflict,
+			code:   errCodeWorkspaceAmbiguous,
+		}),
+		Entry("reports resolver dependency failures", workspaceMCPErrorResponseCase{
+			err:    ErrWorkspaceListFailed,
+			status: http.StatusServiceUnavailable,
+			code:   errCodeWorkspaceUnavailable,
+		}),
+	)
 
 	It("routes explicit workspace MCP requests and binds the client session", Label("integration"), func() {
 		bindings := NewMCPSessionBindings()
