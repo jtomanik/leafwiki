@@ -63,7 +63,12 @@ func matchLocalizedRevisionErrorDetails(code sharederrors.ErrorCode, args ...str
 }
 
 func matchRevisionErrorCause(want error) types.GomegaMatcher {
-	return MatchError(want)
+	return WithTransform(func(err error) error {
+		if errors.Is(err, want) {
+			return want
+		}
+		return err
+	}, Equal(want))
 }
 
 func matchRevisionError(want error) types.GomegaMatcher {

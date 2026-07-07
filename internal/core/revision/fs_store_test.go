@@ -29,7 +29,7 @@ var invalidRevisionPageIDCases = []struct {
 }
 
 var _ = ginkgo.Describe("fs store", func() {
-	ginkgo.It("returns revisions in newest-first pages and retrieves explicit revisions", ginkgo.Label("integration"), func() {
+	ginkgo.It("returns revisions in newest-first pages and retrieves explicit revisions", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		created1 := time.Date(2026, 3, 26, 10, 0, 0, 0, time.UTC)
 		created2 := created1.Add(time.Minute)
@@ -64,7 +64,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(nextCursor2).To(BeEmpty())
 	})
 
-	ginkgo.It("stores and restores content blobs, asset blobs, and manifests", ginkgo.Label("integration"), func() {
+	ginkgo.It("stores and restores content blobs, asset blobs, and manifests", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		contentHash, err := store.SaveContentBlob([]byte("hello"))
@@ -91,7 +91,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(manifest).To(HaveExactElements(HaveField("Name", "asset.txt")))
 	})
 
-	ginkgo.It("serializes page metadata with snake-case JSON fields", ginkgo.Label("integration"), func() {
+	ginkgo.It("serializes page metadata with snake-case JSON fields", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		createdAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
 		revision := &Revision{
@@ -144,7 +144,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		}
 	})
 
-	ginkgo.It("removes page revision history idempotently", ginkgo.Label("integration"), func() {
+	ginkgo.It("removes page revision history idempotently", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		createdAt := time.Date(2026, 4, 12, 18, 0, 0, 0, time.UTC)
 
@@ -185,7 +185,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(store.SaveRevision(nil)).To(rejectRevisionValidation())
 	})
 
-	ginkgo.It("reads legacy revision files without compatibility metadata fields", ginkgo.Label("integration"), func() {
+	ginkgo.It("reads legacy revision files without compatibility metadata fields", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		createdAt := time.Date(2026, 4, 20, 15, 4, 5, 0, time.UTC)
 		pageID := newFixturePageID("page-1")
@@ -222,7 +222,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		))
 	})
 
-	ginkgo.It("returns stable empty results and validates missing revisions", ginkgo.Label("integration"), func() {
+	ginkgo.It("returns stable empty results and validates missing revisions", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		got, err := store.ListRevisions(newFixturePageID("missing"))
 		Expect(err).NotTo(HaveOccurred())
@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		))
 	})
 
-	ginkgo.It("reuses content, asset, and manifest hashes for repeated saves", ginkgo.Label("integration"), func() {
+	ginkgo.It("reuses content, asset, and manifest hashes for repeated saves", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		h1, err := store.SaveContentBlob([]byte("same"))
@@ -277,7 +277,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(store.SaveRevision(&Revision{})).To(rejectRevisionValidation())
 	})
 
-	ginkgo.It("filters non-revision files and returns empty pages for stale cursors", ginkgo.Label("integration"), func() {
+	ginkgo.It("filters non-revision files and returns empty pages for stale cursors", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("page-1")
 		created := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
@@ -391,13 +391,13 @@ var _ = ginkgo.Describe("fs store", func() {
 		}
 	})
 
-	ginkgo.It("returns an error when a live asset blob source is missing", ginkgo.Label("integration"), func() {
+	ginkgo.It("returns an error when a live asset blob source is missing", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		_, _, err := store.SaveAssetBlobFromPath(filepath.Join(revisionTempDir(), "missing.txt"))
 		Expect(err).To(matchRevisionError(os.ErrNotExist))
 	})
 
-	ginkgo.It("surfaces filesystem errors when the store root is not a directory", ginkgo.Label("integration"), func() {
+	ginkgo.It("surfaces filesystem errors when the store root is not a directory", ginkgo.Label("unit"), func() {
 		root := revisionTempDir()
 		invalidBase := filepath.Join(root, "not-a-dir")
 		Expect(os.WriteFile(invalidBase, []byte("x"), 0o644)).To(Succeed())
@@ -419,7 +419,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(err).To(matchRevisionError(syscall.ENOTDIR))
 	})
 
-	ginkgo.It("uses and backfills revision indexes for direct lookups", ginkgo.Label("integration"), func() {
+	ginkgo.It("uses and backfills revision indexes for direct lookups", ginkgo.Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		created := time.Date(2026, 3, 26, 12, 30, 0, 0, time.UTC)
 		rev := &Revision{ID: newFixtureRevisionID("rev-index"), PageID: newFixturePageID("page-1"), CreatedAt: created, Type: RevisionTypeContentUpdate, Title: "Page", Slug: newFixtureSlug("page")}

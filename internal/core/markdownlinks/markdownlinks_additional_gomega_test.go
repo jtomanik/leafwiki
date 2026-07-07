@@ -40,10 +40,23 @@ const (
 	rewriteContentUpdated
 )
 
+type referenceLabelUsageState string
+
+const (
+	referenceLabelAbsent     referenceLabelUsageState = "absent"
+	referenceLabelImageOnly  referenceLabelUsageState = "image-only"
+	referenceLabelLinkBacked referenceLabelUsageState = "link-backed"
+)
+
 type rewriteObservation struct {
 	Content     string
 	Disposition rewriteContentDisposition
 	Issues      []Issue
+}
+
+type referenceLabelObservation struct {
+	Label string
+	State referenceLabelUsageState
 }
 
 func observeRewriteResult(result RewriteResult) rewriteObservation {
@@ -133,6 +146,28 @@ func matchRewriteIssues(issues ...Issue) types.GomegaMatcher {
 	return Equal(expectedIssues)
 }
 
+func observeReferenceLabelUsage(usage referenceUsage, label string) referenceLabelObservation {
+	state := referenceLabelAbsent
+	if _, linkUsed := usage.linkLabels[label]; linkUsed {
+		state = referenceLabelLinkBacked
+	} else if usage.imageOnly(label) {
+		state = referenceLabelImageOnly
+	}
+	return referenceLabelObservation{
+		Label: label,
+		State: state,
+	}
+}
+
+func matchReferenceLabelUsage(label string, state referenceLabelUsageState) types.GomegaMatcher {
+	return WithTransform(func(usage referenceUsage) referenceLabelObservation {
+		return observeReferenceLabelUsage(usage, label)
+	}, gstruct.MatchAllFields(gstruct.Fields{
+		"Label": Equal(label),
+		"State": Equal(state),
+	}))
+}
+
 func matchLinkOccurrenceHref(href string) types.GomegaMatcher {
 	return gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 		"Href": Equal(href),
@@ -191,7 +226,7 @@ func applyReplacementsResult(content string, replacements []replacement) Rewrite
 func markdownLinksTempDir() string {
 	ginkgo.GinkgoHelper()
 	dir, err := os.MkdirTemp("", "leafwiki-markdownlinks-*")
-	Expect(err).NotTo(HaveOccurred())
+	Expect(err).To(Succeed())
 	ginkgo.DeferCleanup(os.RemoveAll, dir)
 	return dir
 }
@@ -226,7 +261,7 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 		relMarkdownLinkPath = originalRelMarkdownLinkPath
 
 		index, err = NewIndexFromRootWithOptions(rootDir, Options{})
-		Expect(err).ToNot(HaveOccurred())
+		Expect(err).To(Succeed())
 		Expect(index.Resolve(newFixtureMarkdownPath("docs/source.md"), "/docs/page.md").Kind).To(Equal(TargetKindPage))
 		Expect(index.sections).To(HaveKey(newFixtureRoutePath("docs")))
 		Expect(index.sections).ToNot(HaveKey(newFixtureRoutePath(".hidden")))
@@ -242,7 +277,7 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 			mapWorkspaceMarkdownRoute = originalMapWorkspaceMarkdownRoute
 		})
 		_, err = NewIndexFromRootWithOptions(rootDir, Options{})
-		Expect(err).ToNot(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		mapWorkspaceMarkdownRoute = func(rootDir string, relPath string, isDir bool) (tree.WorkspaceMarkdownRoute, error) {
 			if !isDir {
@@ -251,7 +286,7 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 			return originalMapWorkspaceMarkdownRoute(rootDir, relPath, isDir)
 		}
 		_, err = NewIndexFromRootWithOptions(rootDir, Options{})
-		Expect(err).ToNot(HaveOccurred())
+		Expect(err).To(Succeed())
 
 		fileRouteErr := errors.New("file route failed")
 		mapWorkspaceMarkdownRoute = func(rootDir string, relPath string, isDir bool) (tree.WorkspaceMarkdownRoute, error) {
@@ -295,12 +330,15 @@ var _ = ginkgo.Describe("markdown link parser internals", ginkgo.Label("unit"), 
 
 		imageOnlyReference := "[img]: /assets/logo.png"
 		imageOnlyUsage := referenceUsage{imageLabels: map[string]struct{}{"img": {}}, linkLabels: map[string]struct{}{}}
+		Expect(imageOnlyUsage).To(matchReferenceLabelUsage("", referenceLabelAbsent))
+		Expect(imageOnlyUsage).To(matchReferenceLabelUsage("img", referenceLabelImageOnly))
 		Expect(scanReferenceDefinitions(imageOnlyReference, nil, imageOnlyUsage)).To(BeEmpty())
 
 		linkedReferenceUsage := referenceUsage{
 			imageLabels: map[string]struct{}{"img": {}},
 			linkLabels:  map[string]struct{}{"img": {}},
 		}
+		Expect(linkedReferenceUsage).To(matchReferenceLabelUsage("img", referenceLabelLinkBacked))
 		Expect(scanReferenceDefinitions(imageOnlyReference, nil, linkedReferenceUsage)).To(ConsistOf(matchLinkOccurrenceHref("/assets/logo.png")))
 
 		_, err := parseReferenceDefinitionLineResult("[empty]:   ", 0, len("[empty]:   "))

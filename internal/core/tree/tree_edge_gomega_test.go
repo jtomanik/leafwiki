@@ -240,6 +240,8 @@ var _ = Describe("tree semantic value and service wrapper edge behavior", Label(
 		tmpDir := tempTreeDir()
 		Expect(EnsurePageIsFolder(tmpDir, newFixtureRoutePath("missing/page"))).To(Succeed())
 		Expect(FoldPageFolderIfEmpty(tmpDir, "missing/page")).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(tmpDir, "flat"), []byte("# Flat"), 0o644)).To(Succeed())
+		Expect(FoldPageFolderIfEmpty(tmpDir, "flat")).To(Succeed())
 
 		dir := filepath.Join(tmpDir, "docs", "guide")
 		Expect(os.MkdirAll(dir, 0o755)).To(Succeed())

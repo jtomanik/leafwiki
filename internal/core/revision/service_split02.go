@@ -87,7 +87,7 @@ func (s *Service) RestoreRevision(pageID tree.PageID, revisionID RevisionID, aut
 		return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestoreInvalidRevision, nil, revisionIDString, pageIDString)
 	}
 
-	if _, err := s.pages.GetPage(pageID); err != nil {
+	if _, err := revisionPagesGetPage(s.pages, pageID); err != nil {
 		if errors.Is(err, tree.ErrPageNotFound) {
 			return sharederrors.NewLocalizedErrorFromCode(errCodeRevisionRestorePageNotFound, err, pageIDString)
 		}
@@ -162,13 +162,13 @@ func (s *Service) RestoreRevision(pageID tree.PageID, revisionID RevisionID, aut
 
 func (s *Service) updateRestoredContent(authorID tree.UserID, pageID tree.PageID, title string, slug tree.Slug, content *string, replaceMetadata bool) error {
 	if replaceMetadata {
-		return s.pages.UpdateNodeReplacingMetadataUncheckedVersion(authorID, pageID, title, slug, content)
+		return revisionPagesUpdateNodeReplacingMetadataUncheckedVersion(s.pages, authorID, pageID, title, slug, content)
 	}
-	return s.pages.UpdateNodeUncheckedVersion(authorID, pageID, title, slug, content, false)
+	return revisionPagesUpdateNodeUncheckedVersion(s.pages, authorID, pageID, title, slug, content, false)
 }
 
 func (s *Service) capturePageState(pageID tree.PageID, withAssets bool) (*RevisionState, error) {
-	page, err := s.pages.GetPage(pageID)
+	page, err := revisionPagesGetPage(s.pages, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (s *Service) enrichStateWithExtraFrontmatter(pageID tree.PageID, state *Rev
 		return ErrRevisionStateRequired
 	}
 
-	raw, err := s.pages.ReadPageRaw(pageID)
+	raw, err := revisionPagesReadPageRaw(s.pages, pageID)
 	if err != nil {
 		return err
 	}

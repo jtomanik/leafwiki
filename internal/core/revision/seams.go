@@ -8,6 +8,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/shared"
+	"github.com/perber/wiki/internal/core/tree"
 )
 
 var (
@@ -44,6 +45,11 @@ var (
 	revisionStoreCopyAssetBlobToPath   = (*FSStore).CopyAssetBlobToPath
 	revisionStoreDeletePageRevisions   = (*FSStore).DeletePageRevisions
 	revisionStoreAssetManifestExists   = (*FSStore).AssetManifestExists
+
+	revisionPagesGetPage                                     = (*tree.TreeService).GetPage
+	revisionPagesReadPageRaw                                 = (*tree.TreeService).ReadPageRaw
+	revisionPagesUpdateNodeUncheckedVersion                  = (*tree.TreeService).UpdateNodeUncheckedVersion
+	revisionPagesUpdateNodeReplacingMetadataUncheckedVersion = (*tree.TreeService).UpdateNodeReplacingMetadataUncheckedVersion
 
 	revisionBuildRestoredRawContent   = buildRestoredRawContent
 	revisionUpdateRestoredContent     = (*Service).updateRestoredContent

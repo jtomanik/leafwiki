@@ -108,7 +108,7 @@ func (s *Service) CapturePageState(pageID tree.PageID) (*RevisionState, error) {
 //
 // Assumption: asset changes go through Upload/Rename/Delete hooks and call RecordAssetChange.
 func (s *Service) RecordContentUpdate(pageID tree.PageID, authorID tree.UserID, summary string) (*Revision, bool, error) {
-	page, err := s.pages.GetPage(pageID)
+	page, err := revisionPagesGetPage(s.pages, pageID)
 	if err != nil {
 		return nil, false, err
 	}

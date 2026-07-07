@@ -157,6 +157,15 @@ var _ = DescribeTable("asset uploads reject invalid normalized filenames", Label
 )
 
 var _ = Describe("asset name validation guards", Label("unit"), func() {
+	It("rejects raw filenames that cannot stay inside an asset directory", func() {
+		Expect(validateFilename(assetName(""))).NotTo(Succeed())
+		Expect(validateFilename(assetName("nested/file.png"))).NotTo(Succeed())
+		Expect(validateFilename(assetName(`nested\file.png`))).NotTo(Succeed())
+		Expect(validateFilename(assetName("."))).NotTo(Succeed())
+		Expect(validateFilename(assetName(".."))).NotTo(Succeed())
+		Expect(validateFilename(assetName("file.png"))).To(Succeed())
+	})
+
 	It("rejects read filenames that escape the page asset directory", func() {
 		tmp := tempAssetDir()
 		page := &tree.PageNode{Slug: newFixtureSlug("read-page"), ID: newFixturePageID("read-page-id")}

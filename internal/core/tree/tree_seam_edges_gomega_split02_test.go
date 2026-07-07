@@ -53,6 +53,15 @@ var _ = Describe("tree filesystem seam failure behavior", Label("unit"), func() 
 		})
 		Expect(FoldPageFolderIfEmpty(root, "guide")).To(MatchError(renameErr))
 
+		statErr := errors.New("stat failed")
+		swapTreeSeam(&treeOSStat, func(string) (os.FileInfo, error) {
+			return nil, statErr
+		})
+		Expect(FoldPageFolderIfEmpty(root, "guide")).To(MatchError(ErrReadDirectory))
+
+		swapTreeSeam(&treeOSStat, func(path string) (os.FileInfo, error) {
+			return fakeTreeFileInfo{name: filepath.Base(path), mode: fs.ModeDir}, nil
+		})
 		swapTreeSeam(&treeOSRename, func(string, string) error { return nil })
 		removeErr := errors.New("remove failed")
 		swapTreeSeam(&treeOSRemove, func(string) error { return removeErr })

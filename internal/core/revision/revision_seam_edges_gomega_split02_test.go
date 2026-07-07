@@ -15,8 +15,8 @@ import (
 	"github.com/perber/wiki/internal/core/tree"
 )
 
-var _ = Describe("revision seam-driven failure behavior", Label("integration"), func() {
-	It("preserves idempotent content and manifest writes while propagating write failures", func() {
+var _ = Describe("revision seam-driven failure behavior", func() {
+	It("preserves idempotent content and manifest writes while propagating write failures", Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		restore := setRevisionSeam(&revisionWriteFileAtomic, func(path string, data []byte, perm os.FileMode) error {
@@ -64,7 +64,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		Expect(err).To(MatchError(manifestWriteFailedErr))
 	})
 
-	It("propagates asset blob save failures and treats raced writes as idempotent", func() {
+	It("propagates asset blob save failures and treats raced writes as idempotent", Label("unit"), func() {
 		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		srcPath := filepath.Join(tmp, "live.txt")
@@ -150,7 +150,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		Expect(err).To(MatchError(renameFailedErr))
 	})
 
-	It("propagates asset restore copy failures", func() {
+	It("propagates asset restore copy failures", Label("unit"), func() {
 		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		hash, size := writeStoredAssetBlob(store, []byte("asset"))
@@ -179,7 +179,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		restoreClose()
 	})
 
-	It("propagates revision index, lookup, prune, and delete failures", func() {
+	It("propagates revision index, lookup, prune, and delete failures", Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 		pageID := newFixturePageID("store-failure-page")
 		createdAt := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
@@ -230,7 +230,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		restoreRemoveAll()
 	})
 
-	It("propagates service record failures from store seams", func() {
+	It("propagates service record failures from store seams", Label("integration"), func() {
 		service, treeService, storageDir := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 		page, err := treeService.GetPage(pageID)
@@ -328,7 +328,7 @@ var _ = Describe("revision seam-driven failure behavior", Label("integration"), 
 		restoreSaveRevision()
 	})
 
-	It("reports integrity, delete, parser, sort, and restore failures", func() {
+	It("reports integrity, delete, parser, sort, and restore failures", Label("integration"), func() {
 		service, treeService, _ := newGomegaRevisionService()
 		pageID := createGomegaRevisionPage(treeService, "Page", newFixtureSlug("page"), "body")
 

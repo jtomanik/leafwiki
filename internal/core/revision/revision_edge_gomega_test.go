@@ -196,7 +196,7 @@ var _ = Describe("revision edge behavior", func() {
 		}))
 	})
 
-	It("handles empty hashes and malformed store helper paths", Label("integration"), func() {
+	It("handles empty hashes and malformed store helper paths", Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		Expect(store.ReadContentBlob(" ")).To(BeEmpty())
@@ -232,7 +232,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(index).To(BeEmpty())
 	})
 
-	It("surfaces malformed revision files and indexes", Label("integration"), func() {
+	It("surfaces malformed revision files and indexes", Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		badListPageID := newFixturePageID("bad-list")
@@ -285,7 +285,7 @@ var _ = Describe("revision edge behavior", func() {
 		Expect(err).To(MatchError(ErrRevisionCreatedAtRequired))
 	})
 
-	It("validates restored asset copy destinations and blob integrity", Label("integration"), func() {
+	It("validates restored asset copy destinations and blob integrity", Label("unit"), func() {
 		tmp := revisionTempDir()
 		store := NewFSStore(tmp)
 		hash, size := writeStoredAssetBlob(store, []byte("asset"))
@@ -475,7 +475,7 @@ var _ = Describe("revision edge behavior", func() {
 			To(haveRevisionRecordError(rejectRevisionValidation()))
 	})
 
-	It("reports deterministic FSStore edge paths", Label("integration"), func() {
+	It("reports deterministic FSStore edge paths", Label("unit"), func() {
 		store := NewFSStore(revisionTempDir())
 
 		fileBackedPageID := newFixturePageID("file-backed")

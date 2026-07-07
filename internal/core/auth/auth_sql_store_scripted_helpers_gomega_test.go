@@ -24,7 +24,7 @@ func openAuthScriptedDB(script *authScriptedDBScript) *sql.DB {
 	authScriptedScriptsMu.Unlock()
 
 	db, err := sql.Open(authScriptedDriverName, dsn)
-	Expect(err).NotTo(HaveOccurred())
+	Expect(err).To(Succeed())
 	ginkgo.DeferCleanup(func() {
 		_ = db.Close()
 		authScriptedScriptsMu.Lock()
@@ -39,12 +39,12 @@ func fixtureAPIKey() *APIKey {
 
 	return &APIKey{
 		ID:              newFixtureAPIKeyID("api-key-1"),
-		UserID:          UserIDFromString("user-1"),
+		UserID:          newFixtureUserID("user-1"),
 		Name:            "automation",
 		Prefix:          "lwk",
 		Last4:           "1234",
 		Scopes:          []string{"read", "write"},
-		CreatedByUserID: UserIDFromString("user-1"),
+		CreatedByUserID: newFixtureUserID("user-1"),
 		CreatedAt:       time.Unix(1700000000, 0).UTC(),
 	}
 }
@@ -129,10 +129,11 @@ func cloneAuthScriptedRows(rows *authScriptedRows) *authScriptedRows {
 		values[i] = append([]driver.Value(nil), rows.values[i]...)
 	}
 	return &authScriptedRows{
-		columns:  append([]string(nil), rows.columns...),
-		values:   values,
-		nextErr:  rows.nextErr,
-		closeErr: rows.closeErr,
+		columns:      append([]string(nil), rows.columns...),
+		values:       values,
+		nextErr:      rows.nextErr,
+		errAfterRows: rows.errAfterRows,
+		closeErr:     rows.closeErr,
 	}
 }
 
