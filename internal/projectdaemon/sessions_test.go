@@ -56,6 +56,17 @@ var _ = ginkgo.Describe("session registry", ginkgo.Label("unit"), func() {
 		Expect(registry).To(reportSessionSeen(0))
 	})
 
+	ginkgo.It("accepts heartbeats only for registered session handles", func() {
+		registry := NewSessionRegistry(time.Second, nil)
+
+		id, err := registry.Register()
+		Expect(err).To(Succeed())
+
+		Expect(sessionHeartbeatOutcomeFor(registry, id)).To(Equal(sessionHeartbeatAccepted))
+		Expect(sessionHeartbeatOutcomeFor(registry, newFixtureSessionID("missing-session"))).To(Equal(sessionHeartbeatRejected))
+		Expect(registry).To(reportSessionSeen(1))
+	})
+
 	ginkgo.It("reports whether any session has been seen and how many are active", func() {
 		registry := NewSessionRegistry(time.Second, nil)
 
@@ -129,4 +140,18 @@ const (
 type sessionRegistrySeenState struct {
 	Outcome sessionObservationOutcome
 	Count   int
+}
+
+type sessionHeartbeatOutcome uint8
+
+const (
+	sessionHeartbeatRejected sessionHeartbeatOutcome = iota
+	sessionHeartbeatAccepted
+)
+
+func sessionHeartbeatOutcomeFor(registry *SessionRegistry, id SessionID) sessionHeartbeatOutcome {
+	if registry.Heartbeat(id) {
+		return sessionHeartbeatAccepted
+	}
+	return sessionHeartbeatRejected
 }
