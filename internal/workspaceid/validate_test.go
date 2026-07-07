@@ -3,7 +3,6 @@ package workspaceid
 import (
 	"database/sql/driver"
 	stderrors "errors"
-	"fmt"
 
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	testmatchers "github.com/perber/wiki/internal/test_utils/matchers"
@@ -129,17 +128,15 @@ var _ = Describe("workspace ID SQL conversion", Label("unit"), func() {
 	})
 
 	It("Scan rejects unsupported source types", func() {
-		var id WorkspaceID
+		initialID := newFixtureWorkspaceID("existing")
 
-		err := id.Scan(42)
-
-		Expect(err).To(MatchError(unsupportedWorkspaceIDScanSourceError(42)))
+		Expect(workspaceIDScanObservationFor(initialID, 42)).To(Equal(workspaceIDScanObservation{
+			State:          workspaceIDScanRejectedUnsupportedSource,
+			ResultID:       initialID,
+			ValidationCode: workspaceValidationCodeObservation{State: workspaceValidationCodeAbsent},
+		}))
 	})
 })
-
-func unsupportedWorkspaceIDScanSourceError(value any) error {
-	return fmt.Errorf("workspace ID scan source %T is not supported", value)
-}
 
 type workspaceIDBoundaryState uint8
 
@@ -171,6 +168,19 @@ type workspaceValidationCodeObservation struct {
 	State     workspaceValidationCodeState
 	Code      sharederrors.ErrorCode
 	MessageID sharederrors.MessageID
+}
+
+type workspaceIDScanState uint8
+
+const (
+	workspaceIDScanUnexpected workspaceIDScanState = iota
+	workspaceIDScanRejectedUnsupportedSource
+)
+
+type workspaceIDScanObservation struct {
+	State          workspaceIDScanState
+	ResultID       WorkspaceID
+	ValidationCode workspaceValidationCodeObservation
 }
 
 func workspaceIDBoundaryFixtureFor(raw string) workspaceIDBoundaryFixture {
@@ -209,5 +219,23 @@ func workspaceValidationCodeObservationFor(err error) workspaceValidationCodeObs
 		State:     workspaceValidationCodePresent,
 		Code:      code,
 		MessageID: sharederrors.MessageIDForCode(code),
+	}
+}
+
+func workspaceIDScanObservationFor(initialID WorkspaceID, source any) workspaceIDScanObservation {
+	id := initialID
+	err := id.Scan(source)
+	validationCode := workspaceValidationCodeObservationFor(err)
+	if err != nil && validationCode.State == workspaceValidationCodeAbsent {
+		return workspaceIDScanObservation{
+			State:          workspaceIDScanRejectedUnsupportedSource,
+			ResultID:       id,
+			ValidationCode: validationCode,
+		}
+	}
+	return workspaceIDScanObservation{
+		State:          workspaceIDScanUnexpected,
+		ResultID:       id,
+		ValidationCode: validationCode,
 	}
 }
