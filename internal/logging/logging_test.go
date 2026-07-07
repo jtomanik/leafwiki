@@ -45,6 +45,18 @@ func parseLogRecords(raw string) []map[string]any {
 	return records
 }
 
+func haveJSONLogMessage(message string) types.GomegaMatcher {
+	return WithTransform(decodeJSONLogLine, HaveKeyWithValue("msg", message))
+}
+
+func decodeJSONLogLine(line string) map[string]any {
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		return nil
+	}
+	return entry
+}
+
 var _ = Describe("logging configuration", Label("unit"), func() {
 	It("defaults file logging to the LeafWiki log path under the data directory", func() {
 		dataDir := filepath.Join(loggingTempDir(), "data")
@@ -206,11 +218,10 @@ var _ = Describe("opening loggers", Label("unit"), func() {
 		raw, err := os.ReadFile(logPath)
 		Expect(err).NotTo(HaveOccurred())
 		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-		Expect(lines).To(HaveLen(2))
-		Expect(lines[0]).To(Equal(testLogPreviousLine))
-		var appendedRecord map[string]any
-		Expect(json.Unmarshal([]byte(lines[1]), &appendedRecord)).To(Succeed())
-		Expect(appendedRecord).To(HaveKeyWithValue("msg", testLogStartupMessage))
+		Expect(lines).To(HaveExactElements(
+			testLogPreviousLine,
+			haveJSONLogMessage(testLogStartupMessage),
+		))
 	})
 
 	It("returns visible errors when file log parent creation cannot proceed", func() {
