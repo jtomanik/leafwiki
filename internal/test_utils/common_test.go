@@ -178,6 +178,23 @@ var _ = ginkgo.Describe("test utilities", ginkgo.Label("unit"), func() {
 		Expect(path).To(Equal(filepath.Join(base, "fixtures", "pages")))
 	})
 
+	ginkgo.It("FixturePath ignores matching files while searching fixture directories", func() {
+		tb := &fakeTestHelper{}
+		base := tempTestUtilsDir()
+		Expect(os.MkdirAll(filepath.Join(base, "file-candidate"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(base, "file-candidate", "pages"), []byte("not a directory"), 0o644)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(base, "fixtures", "pages"), 0o755)).To(Succeed())
+		restore := restoreTestUtilsSeams()
+		ginkgo.DeferCleanup(restore)
+		getwd = func() (string, error) {
+			return base, nil
+		}
+
+		path := FixturePath(tb, "pages", "file-candidate", "fixtures")
+
+		Expect(path).To(Equal(filepath.Join(base, "fixtures", "pages")))
+	})
+
 	ginkgo.It("FixturePath reports getwd and missing fixture failures", func() {
 		restore := restoreTestUtilsSeams()
 		wdFailure := errors.New("wd failed")
