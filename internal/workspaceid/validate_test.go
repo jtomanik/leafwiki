@@ -23,11 +23,12 @@ var _ = Describe("workspace ID parsing", Label("unit"), func() {
 	It("rejects whitespace input with a typed validation code", func() {
 		_, err := ParseWorkspaceID(" Docs ")
 
-		Expect(err).To(Satisfy(func(err error) bool {
-			var validationErr *ValidationError
-			return stderrors.As(err, &validationErr) && validationErr != nil
-		}))
 		Expect(err).To(testmatchers.HaveStructuredError(ErrCodeWorkspaceIDWhitespace, sharederrors.MessageIDForCode(ErrCodeWorkspaceIDWhitespace)))
+		Expect(workspaceValidationCodeObservationFor(err)).To(Equal(workspaceValidationCodeObservation{
+			State:     workspaceValidationCodePresent,
+			Code:      ErrCodeWorkspaceIDWhitespace,
+			MessageID: sharederrors.MessageIDForCode(ErrCodeWorkspaceIDWhitespace),
+		}))
 	})
 })
 
@@ -84,7 +85,9 @@ var _ = Describe("workspace ID validation errors", Label("unit"), func() {
 	})
 
 	It("returns no workspace error code for non-validation errors", func() {
-		Expect(WorkspaceIDErrorCode(stderrors.New("other error"))).To(BeEmpty())
+		Expect(workspaceValidationCodeObservationFor(stderrors.New("other error"))).To(Equal(workspaceValidationCodeObservation{
+			State: workspaceValidationCodeAbsent,
+		}))
 	})
 })
 
