@@ -275,7 +275,8 @@ func (t *TreeService) LookupPagePath(p RoutePath) (*PathLookup, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return t.lookupPagePathLocked(routePath, NodeKind(""))
+	var finalKind NodeKind
+	return t.lookupPagePathLocked(routePath, finalKind)
 }
 
 // LookupPagePathForKind looks up a path while requiring the final segment to

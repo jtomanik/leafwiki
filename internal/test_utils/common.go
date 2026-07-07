@@ -41,6 +41,12 @@ var (
 	stat      = os.Stat
 )
 
+const (
+	fixturePathGetwdFailureFormat   = "getwd: %v"
+	fixturePathMissingFailureFormat = "fixture path not found for %q from working directory %q"
+	closeFailureFormat              = "failed to close resource: %v"
+)
+
 // CreateMultipartFile simulates a real file upload using multipart encoding
 func CreateMultipartFile(filename string, content []byte) (multipart.File, string, error) {
 	body := &bytes.Buffer{}
@@ -89,7 +95,7 @@ func FixturePath(t testHelper, rel string, candidates ...string) string {
 
 	wd, err := getwd()
 	if err != nil {
-		t.Fatalf("getwd: %v", err)
+		t.Fatalf(fixturePathGetwdFailureFormat, err)
 	}
 
 	for _, candidate := range candidates {
@@ -99,7 +105,7 @@ func FixturePath(t testHelper, rel string, candidates ...string) string {
 		}
 	}
 
-	t.Fatalf("fixture path not found for %q from working directory %q", rel, wd)
+	t.Fatalf(fixturePathMissingFailureFormat, rel, wd)
 	return ""
 }
 
@@ -107,6 +113,6 @@ func WrapCloseWithErrorCheck(closer func() error, t testHelper) {
 	t.Helper()
 	err := closer()
 	if err != nil {
-		t.Fatalf("failed to close resource: %v", err)
+		t.Fatalf(closeFailureFormat, err)
 	}
 }

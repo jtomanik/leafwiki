@@ -73,26 +73,56 @@ type ConfigFileError struct {
 }
 
 func (err ConfigFileError) Error() string {
-	switch err.Reason {
-	case ConfigFileErrorReasonRead:
-		return fmt.Sprintf("read %s %q: %v", err.Source, err.Path, err.Err)
-	case ConfigFileErrorReasonParse:
-		return fmt.Sprintf("parse %s %q: %v", err.Source, err.Path, err.Err)
-	case ConfigFileErrorReasonRootMapping:
-		return fmt.Sprintf("%s root must be a YAML mapping", err.Source)
-	case ConfigFileErrorReasonScalarKey:
-		return fmt.Sprintf("%s keys must be scalar strings", err.Source)
-	case ConfigFileErrorReasonDuplicateKey:
-		return fmt.Sprintf("duplicate %s key %q", err.Source, err.Key)
-	case ConfigFileErrorReasonUnknownKey:
-		return fmt.Sprintf("unknown %s key %q", err.Source, err.Key)
-	case ConfigFileErrorReasonScalarValue:
-		return fmt.Sprintf("%s key %q requires a non-null scalar value", err.Source, err.Key)
-	case ConfigFileErrorReasonInvalidFlagValue:
-		return fmt.Sprintf("invalid %s value for %q: %v", err.Source, err.Key, err.Err)
-	default:
-		return "invalid config file"
+	if formatter, ok := configFileErrorFormatter(err.Reason); ok {
+		return formatter(err)
 	}
+	return "invalid config file"
+}
+
+func configFileErrorFormatter(reason ConfigFileErrorReason) (func(ConfigFileError) string, bool) {
+	formatter, ok := map[ConfigFileErrorReason]func(ConfigFileError) string{
+		ConfigFileErrorReasonRead:             formatConfigFileReadError,
+		ConfigFileErrorReasonParse:            formatConfigFileParseError,
+		ConfigFileErrorReasonRootMapping:      formatConfigFileRootMappingError,
+		ConfigFileErrorReasonScalarKey:        formatConfigFileScalarKeyError,
+		ConfigFileErrorReasonDuplicateKey:     formatConfigFileDuplicateKeyError,
+		ConfigFileErrorReasonUnknownKey:       formatConfigFileUnknownKeyError,
+		ConfigFileErrorReasonScalarValue:      formatConfigFileScalarValueError,
+		ConfigFileErrorReasonInvalidFlagValue: formatConfigFileInvalidFlagValueError,
+	}[reason]
+	return formatter, ok
+}
+
+func formatConfigFileReadError(err ConfigFileError) string {
+	return fmt.Sprintf("read %s %q: %v", err.Source, err.Path, err.Err)
+}
+
+func formatConfigFileParseError(err ConfigFileError) string {
+	return fmt.Sprintf("parse %s %q: %v", err.Source, err.Path, err.Err)
+}
+
+func formatConfigFileRootMappingError(err ConfigFileError) string {
+	return fmt.Sprintf("%s root must be a YAML mapping", err.Source)
+}
+
+func formatConfigFileScalarKeyError(err ConfigFileError) string {
+	return fmt.Sprintf("%s keys must be scalar strings", err.Source)
+}
+
+func formatConfigFileDuplicateKeyError(err ConfigFileError) string {
+	return fmt.Sprintf("duplicate %s key %q", err.Source, err.Key)
+}
+
+func formatConfigFileUnknownKeyError(err ConfigFileError) string {
+	return fmt.Sprintf("unknown %s key %q", err.Source, err.Key)
+}
+
+func formatConfigFileScalarValueError(err ConfigFileError) string {
+	return fmt.Sprintf("%s key %q requires a non-null scalar value", err.Source, err.Key)
+}
+
+func formatConfigFileInvalidFlagValueError(err ConfigFileError) string {
+	return fmt.Sprintf("invalid %s value for %q: %v", err.Source, err.Key, err.Err)
 }
 
 func (err ConfigFileError) Unwrap() error {

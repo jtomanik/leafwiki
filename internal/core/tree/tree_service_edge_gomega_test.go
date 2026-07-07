@@ -220,7 +220,7 @@ var _ = Describe("tree service unloaded, lookup, and legacy edge behavior", Labe
 		legacy := &PageNode{ID: RootPageID, Slug: newFixtureSlug("root"), Kind: NodeKindSection, Children: []*PageNode{
 			{ID: newFixturePageID("page"), Slug: newFixtureSlug("page"), Title: "Page", Kind: NodeKindPage},
 			{ID: newFixturePageID("section"), Slug: newFixtureSlug("section"), Title: "Section", Kind: NodeKindSection},
-			{ID: newFixturePageID("legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: ""},
+			{ID: newFixturePageID("legacy"), Slug: newFixtureSlug("legacy"), Title: "Legacy", Kind: newFixtureNodeKind("")},
 		}}
 		paths, err := svc.expectedLegacyContentPaths(legacy)
 		Expect(err).NotTo(HaveOccurred())

@@ -11,8 +11,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const wrapCloseFailurePrefix = "failed to close resource"
-
 var errFixtureCloseFailed = errors.New("close failed")
 
 var _ = ginkgo.Describe("test utilities", ginkgo.Label("unit"), func() {
@@ -189,7 +187,7 @@ var _ = ginkgo.Describe("test utilities", ginkgo.Label("unit"), func() {
 		wdLookup := &fakeTestHelper{}
 		FixturePath(wdLookup, "pages", "fixtures")
 		Expect(wdLookup.fatalRecord()).To(SatisfyAll(
-			HaveField("Format", Equal("getwd: %v")),
+			HaveField("Format", Equal(fixturePathGetwdFailureFormat)),
 			HaveField("Args", HaveExactElements(MatchError(wdFailure))),
 		))
 		restore()
@@ -206,7 +204,7 @@ var _ = ginkgo.Describe("test utilities", ginkgo.Label("unit"), func() {
 		missingFixture := &fakeTestHelper{}
 		FixturePath(missingFixture, "pages", "fixtures")
 		Expect(missingFixture.fatalRecord()).To(SatisfyAll(
-			HaveField("Format", Equal("fixture path not found for %q from working directory %q")),
+			HaveField("Format", Equal(fixturePathMissingFailureFormat)),
 			HaveField("Args", HaveExactElements("pages", wd)),
 		))
 	})
@@ -220,7 +218,7 @@ var _ = ginkgo.Describe("test utilities", ginkgo.Label("unit"), func() {
 		WrapCloseWithErrorCheck(func() error { return errFixtureCloseFailed }, failedClose)
 
 		Expect(failedClose.fatalRecord()).To(SatisfyAll(
-			HaveField("Format", Equal(wrapCloseFailurePrefix+": %v")),
+			HaveField("Format", Equal(closeFailureFormat)),
 			HaveField("Args", HaveExactElements(MatchError(errFixtureCloseFailed))),
 		))
 	})

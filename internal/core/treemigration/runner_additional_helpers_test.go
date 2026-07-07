@@ -11,7 +11,11 @@ import (
 type migrationNodeID string
 type migrationNodeSlug string
 
-const legacyMigrationNodeKind NodeKind = "legacy"
+var legacyMigrationNodeKind = newFixtureNodeKind("legacy")
+
+func newFixtureNodeKind[T ~string](raw T) NodeKind {
+	return NodeKind(raw)
+}
 
 func migrationNodeIDFromString(raw string) migrationNodeID {
 	return migrationNodeID(raw)

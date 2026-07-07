@@ -70,119 +70,130 @@ func (f *NodeStore) ConvertNode(entry *PageNode, target NodeKind) error {
 
 	switch target {
 	case NodeKindSection:
-		filePath, err := f.pageFilePathForNode(entry, "ConvertNode")
-		if err != nil {
-			return err
-		}
-		folderSourcePath := joinWorkspaceRoutePath(parentSourceDir, entry.Slug.FilesystemPath())
-		folderPath := filepath.Join(f.rootDir, filepath.FromSlash(folderSourcePath))
-		if err := f.requirePathInRoot("ConvertNode", folderPath); err != nil {
-			return err
-		}
-		indexPath := filepath.Join(folderPath, "index.md")
-
-		// page -> folder
-		if _, err := treeOSStat(filePath); err == nil {
-			if err := treeOSMkdirAll(folderPath, 0o755); err != nil {
-				return fmt.Errorf("could not create folder: %w", err)
-			}
-			// keep content: <slug>.md -> <slug>/index.md
-			if err := treeOSRename(filePath, indexPath); err != nil {
-				return fmt.Errorf("could not move page into folder: %w", err)
-			}
-			entry.Kind = NodeKindSection
-			f.setWorkspaceSourcePath(entry, routePath, NodeKindSection, folderSourcePath)
-			if _, err := f.ensureSectionIndex(entry); err != nil {
-				return err
-			}
-			return nil
-		}
-		// Already folder (or missing) -> ensure dir exists and sync/materialize
-		// the active section content file, defaulting to index.md when none exists.
-		if err := treeOSMkdirAll(folderPath, 0o755); err != nil {
-			return fmt.Errorf("could not ensure folder exists: %w", err)
-		}
-		entry.Kind = NodeKindSection
-		f.setWorkspaceSourcePath(entry, routePath, NodeKindSection, folderSourcePath)
-		if _, err := f.ensureSectionIndex(entry); err != nil {
-			return err
-		}
-		return nil
-
+		return f.convertNodeToSection(entry, routePath, parentSourceDir)
 	case NodeKindPage:
-		folderPath, err := f.sectionDirPathForNode(entry, "ConvertNode")
-		if err != nil {
-			return err
-		}
-		pageSourcePath := joinWorkspaceRoutePath(parentSourceDir, entry.Slug.FilesystemPath()+".md")
-		filePath := filepath.Join(f.rootDir, filepath.FromSlash(pageSourcePath))
-		if err := f.requirePathInRoot("ConvertNode", filePath); err != nil {
-			return err
-		}
-		indexPath := filepath.Join(folderPath, "index.md")
-
-		// folder -> page (strict, safe order)
-		info, err := treeOSStat(folderPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// nothing to do if folder doesn't exist
-				return nil
-			}
-			return err
-		}
-		if !info.IsDir() {
-			return &DriftError{NodeID: entry.ID, Kind: NodeKindSection, Path: folderPath, Reason: "expected folder but found file"}
-		}
-
-		entries, err := treeOSReadDir(folderPath)
-		if err != nil {
-			return err
-		}
-
-		// Allow only the narrow section-to-page conversion shape. README.md
-		// fallback content is not converted here; folders with README.md are
-		// treated as non-empty and require an explicit migration first.
-		// - empty folder
-		// - folder with only index.md
-		// - internal child-order metadata file (alone or alongside index.md)
-		allowed := true
-		for _, e := range entries {
-			name := e.Name()
-			if name == "index.md" || name == orderFilename {
-				continue
-			}
-			allowed = false
-			break
-		}
-		if !allowed {
-			return &ConvertNotAllowedError{From: NodeKindSection, To: NodeKindPage, Reason: "folder not empty"}
-		}
-
-		// now do the move/create
-		if fileExists(indexPath) {
-			if err := treeOSRename(indexPath, filePath); err != nil {
-				return fmt.Errorf("could not move index to page: %w", err)
-			}
-		} else {
-			mdFile := markdown.NewMarkdownFile(filePath, "", markdown.Frontmatter{})
-			f.syncManagedMetadata(mdFile, entry)
-			if err := treeMarkdownWriteToFile(mdFile); err != nil {
-				return fmt.Errorf("could not write page file: %w", err)
-			}
-		}
-		f.setWorkspaceSourcePath(entry, routePath, NodeKindPage, pageSourcePath)
-
-		if err := treeOSRemove(filepath.Join(folderPath, orderFilename)); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("could not remove child order file: %w", err)
-		}
-
-		// remove folder (must be empty now)
-		if err := treeOSRemove(folderPath); err != nil {
-			return err
-		}
-		return nil
-
+		return f.convertNodeToPage(entry, routePath, parentSourceDir)
 	default:
 		return &InvalidOpError{Op: "ConvertNode", Reason: fmt.Sprintf("unknown target kind: %q", target)}
 	}
+}
+
+func (f *NodeStore) convertNodeToSection(entry *PageNode, routePath RoutePath, parentSourceDir string) error {
+	filePath, err := f.pageFilePathForNode(entry, "ConvertNode")
+	if err != nil {
+		return err
+	}
+	folderSourcePath := joinWorkspaceRoutePath(parentSourceDir, entry.Slug.FilesystemPath())
+	folderPath := filepath.Join(f.rootDir, filepath.FromSlash(folderSourcePath))
+	if err := f.requirePathInRoot("ConvertNode", folderPath); err != nil {
+		return err
+	}
+	indexPath := filepath.Join(folderPath, "index.md")
+
+	if fileExists(filePath) {
+		return f.movePageFileToSectionIndex(entry, routePath, filePath, folderPath, indexPath, folderSourcePath)
+	}
+	return f.ensureNodeSection(entry, routePath, folderPath, folderSourcePath)
+}
+
+func (f *NodeStore) movePageFileToSectionIndex(entry *PageNode, routePath RoutePath, filePath string, folderPath string, indexPath string, folderSourcePath string) error {
+	if err := treeOSMkdirAll(folderPath, 0o755); err != nil {
+		return fmt.Errorf("could not create folder: %w", err)
+	}
+	if err := treeOSRename(filePath, indexPath); err != nil {
+		return fmt.Errorf("could not move page into folder: %w", err)
+	}
+	return f.ensureNodeSection(entry, routePath, folderPath, folderSourcePath)
+}
+
+func (f *NodeStore) ensureNodeSection(entry *PageNode, routePath RoutePath, folderPath string, folderSourcePath string) error {
+	if err := treeOSMkdirAll(folderPath, 0o755); err != nil {
+		return fmt.Errorf("could not ensure folder exists: %w", err)
+	}
+	entry.Kind = NodeKindSection
+	f.setWorkspaceSourcePath(entry, routePath, NodeKindSection, folderSourcePath)
+	_, err := f.ensureSectionIndex(entry)
+	return err
+}
+
+func (f *NodeStore) convertNodeToPage(entry *PageNode, routePath RoutePath, parentSourceDir string) error {
+	folderPath, err := f.sectionDirPathForNode(entry, "ConvertNode")
+	if err != nil {
+		return err
+	}
+	pageSourcePath := joinWorkspaceRoutePath(parentSourceDir, entry.Slug.FilesystemPath()+".md")
+	filePath := filepath.Join(f.rootDir, filepath.FromSlash(pageSourcePath))
+	if err := f.requirePathInRoot("ConvertNode", filePath); err != nil {
+		return err
+	}
+	exists, err := f.requireConvertibleSectionFolder(entry, folderPath)
+	if err != nil || !exists {
+		return err
+	}
+	if err := f.materializePageFromSectionIndex(entry, filePath, filepath.Join(folderPath, "index.md")); err != nil {
+		return err
+	}
+	return f.finishConvertedPage(entry, routePath, pageSourcePath, folderPath)
+}
+
+func (f *NodeStore) finishConvertedPage(entry *PageNode, routePath RoutePath, pageSourcePath string, folderPath string) error {
+	f.setWorkspaceSourcePath(entry, routePath, NodeKindPage, pageSourcePath)
+	if err := removeChildOrderFile(folderPath); err != nil {
+		return err
+	}
+	return treeOSRemove(folderPath)
+}
+
+func (f *NodeStore) requireConvertibleSectionFolder(entry *PageNode, folderPath string) (bool, error) {
+	info, err := treeOSStat(folderPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, &DriftError{NodeID: entry.ID, Kind: NodeKindSection, Path: folderPath, Reason: "expected folder but found file"}
+	}
+
+	entries, err := treeOSReadDir(folderPath)
+	if err != nil {
+		return false, err
+	}
+	if !folderAllowsPageConversion(entries) {
+		return false, &ConvertNotAllowedError{From: NodeKindSection, To: NodeKindPage, Reason: "folder not empty"}
+	}
+	return true, nil
+}
+
+func folderAllowsPageConversion(entries []os.DirEntry) bool {
+	for _, e := range entries {
+		name := e.Name()
+		if name != "index.md" && name != orderFilename {
+			return false
+		}
+	}
+	return true
+}
+
+func (f *NodeStore) materializePageFromSectionIndex(entry *PageNode, filePath string, indexPath string) error {
+	if fileExists(indexPath) {
+		if err := treeOSRename(indexPath, filePath); err != nil {
+			return fmt.Errorf("could not move index to page: %w", err)
+		}
+		return nil
+	}
+	mdFile := markdown.NewMarkdownFile(filePath, "", markdown.Frontmatter{})
+	f.syncManagedMetadata(mdFile, entry)
+	if err := treeMarkdownWriteToFile(mdFile); err != nil {
+		return fmt.Errorf("could not write page file: %w", err)
+	}
+	return nil
+}
+
+func removeChildOrderFile(folderPath string) error {
+	if err := treeOSRemove(filepath.Join(folderPath, orderFilename)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("could not remove child order file: %w", err)
+	}
+	return nil
 }

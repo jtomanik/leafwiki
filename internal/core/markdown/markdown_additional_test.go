@@ -39,11 +39,13 @@ var _ = ginkgo.Describe("metadata and file helpers", ginkgo.Label("unit"), func(
 		meta := mf.GetMetadata()
 		Expect(meta).To(matchPageMetadata(gstruct.Fields{
 			"Version": Equal(1),
-			"Page": matchPageMetadataPage(gstruct.Fields{
-				"ID":        Equal("page-123"),
-				"Title":     Equal("Example"),
-				"CreatedAt": Equal("2026-06-13T10:00:00Z"),
-			}),
+			"Page": SatisfyAll(
+				matchPageMetadataPageID(newFixturePageMetadataID("page-123")),
+				matchPageMetadataPage(gstruct.Fields{
+					"Title":     Equal("Example"),
+					"CreatedAt": Equal("2026-06-13T10:00:00Z"),
+				}),
+			),
 			"Tags":   Equal([]string{"research", "draft"}),
 			"Fields": HaveKeyWithValue("status", "open"),
 			"Extra": SatisfyAll(
@@ -58,9 +60,7 @@ var _ = ginkgo.Describe("metadata and file helpers", ginkgo.Label("unit"), func(
 
 		Expect(mf.GetPath()).To(Equal("/tmp/page.md"))
 		Expect(mf).To(matchMarkdownFileWithoutWriteback("old body", matchPageMetadata(gstruct.Fields{
-			"Page": matchPageMetadataPage(gstruct.Fields{
-				"ID": Equal("page-123"),
-			}),
+			"Page": matchPageMetadataPageID(newFixturePageMetadataID("page-123")),
 		})))
 
 		mf.SetContent("new body")
@@ -99,9 +99,7 @@ var _ = ginkgo.Describe("metadata and file helpers", ginkgo.Label("unit"), func(
 			"plain body",
 			matchPageMetadata(gstruct.Fields{
 				"Version": Equal(1),
-				"Page": matchPageMetadataPage(gstruct.Fields{
-					"ID": BeEmpty(),
-				}),
+				"Page":    matchEmptyPageMetadataPageID(),
 			}),
 		))
 	})
@@ -119,10 +117,12 @@ New body`)
 		Expect(mf).To(matchMarkdownFileRequiringWriteback(
 			"New body",
 			matchPageMetadata(gstruct.Fields{
-				"Page": matchPageMetadataPage(gstruct.Fields{
-					"ID":    Equal("new-page"),
-					"Title": Equal("New Title"),
-				}),
+				"Page": SatisfyAll(
+					matchPageMetadataPageID(newFixturePageMetadataID("new-page")),
+					matchPageMetadataPage(gstruct.Fields{
+						"Title": Equal("New Title"),
+					}),
+				),
 			}),
 		))
 	})
@@ -135,10 +135,12 @@ New body`)
 		meta := mf.GetMetadata()
 		Expect(meta).To(matchPageMetadata(gstruct.Fields{
 			"Version": Equal(1),
-			"Page": matchPageMetadataPage(gstruct.Fields{
-				"ID":    Equal("page-123"),
-				"Title": Equal("Example Title"),
-			}),
+			"Page": SatisfyAll(
+				matchPageMetadataPageID(newFixturePageMetadataID("page-123")),
+				matchPageMetadataPage(gstruct.Fields{
+					"Title": Equal("Example Title"),
+				}),
+			),
 		}))
 	})
 
@@ -174,10 +176,12 @@ New body`)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(parsedPageDocumentFor(doc, result)).To(matchParsedDocumentWithoutWriteback(matchPageDocument(gstruct.Fields{
 			"Metadata": matchPageMetadata(gstruct.Fields{
-				"Page": matchPageMetadataPage(gstruct.Fields{
-					"ID":    Equal("page-123"),
-					"Title": Equal("Example"),
-				}),
+				"Page": SatisfyAll(
+					matchPageMetadataPageID(newFixturePageMetadataID("page-123")),
+					matchPageMetadataPage(gstruct.Fields{
+						"Title": Equal("Example"),
+					}),
+				),
 				"Tags":   Equal([]string{"demo"}),
 				"Fields": HaveKeyWithValue("status", "ready"),
 			}),

@@ -48,7 +48,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("persists and retrieves user records by ID", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser",
 			Password: "password",
 			Email:    "user1@example.com",
@@ -65,14 +65,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("rejects duplicate email addresses", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: "testuser2",
 			Password: "password2",
 			Email:    user1.Email,
@@ -87,14 +87,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("rejects duplicate usernames", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: user1.Username,
 			Password: "password2",
 			Email:    "testuser2@example.com",
@@ -109,7 +109,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("returns a not-found error for missing IDs while preserving existing users", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser",
 			Password: "password",
 			Email:    "testuser@example.com",
@@ -128,7 +128,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("updates stored profile and password fields", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser",
 			Password: "password",
 			Email:    "testuser1@example.com",
@@ -144,7 +144,7 @@ var _ = ginkgo.Describe("user store", func() {
 		Expect(err).To(Succeed())
 		Expect(retrievedUser).To(matchStoredUser(user))
 		Expect(store.UpdateUser(&User{
-			ID:       "non-existing-id",
+			ID:       newFixtureUserID("non-existing-id"),
 			Username: "nonexistinguser",
 			Password: "nonexistingpassword",
 			Email:    "nonexisting@example.com",
@@ -155,7 +155,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("protects the final administrator from demotion", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		admin := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "admin",
 			Password: "password",
 			Email:    "admin@example.com",
@@ -170,14 +170,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("rejects profile updates that would reuse another user's email", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
@@ -200,14 +200,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("rejects profile updates that would reuse another user's username", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
@@ -230,7 +230,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("deletes existing users and reports missing users as not found", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser",
 			Password: "password",
 			Email:    "testuser@example.com",
@@ -255,14 +255,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("lists all persisted users", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
@@ -280,14 +280,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("counts persisted users", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
@@ -305,14 +305,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("retrieves users by email address", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
@@ -330,14 +330,14 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("retrieves users by username", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user1 := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",
 			Role:     RoleAdmin,
 		}
 		user2 := &User{
-			ID:       "2",
+			ID:       newFixtureUserID("2"),
 			Username: "testuser2",
 			Password: "password2",
 			Email:    "testuser2@example.com",
@@ -355,7 +355,7 @@ var _ = ginkgo.Describe("user store", func() {
 	ginkgo.It("updates a user's password by ID", ginkgo.Label("integration"), func() {
 		store := setupTestUserStore()
 		user := &User{
-			ID:       "1",
+			ID:       newFixtureUserID("1"),
 			Username: "testuser1",
 			Password: "password1",
 			Email:    "testuser1@example.com",

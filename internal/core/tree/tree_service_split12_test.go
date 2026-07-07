@@ -240,7 +240,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
-		err := svc.DeleteNode(newFixtureUserID("system"), *id, false, "")
+		err := svc.DeleteNode(newFixtureUserID("system"), *id, false, newFixturePageVersion(""))
 		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
 
 			err)
@@ -279,7 +279,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		destID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Dest", newFixtureSlug("dest"), ptrKind(NodeKindPage))
 		moveID, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Move", newFixtureSlug("move"), ptrKind(NodeKindPage))
 
-		err := svc.MoveNode(newFixtureUserID("system"), *moveID, *destID, "")
+		err := svc.MoveNode(newFixtureUserID("system"), *moveID, *destID, newFixturePageVersion(""))
 		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
 
 			err)
@@ -316,7 +316,7 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		svc, _ := newLoadedService()
 		id, _ := svc.CreateNode(newFixtureUserID("system"), nil, "Page", newFixtureSlug("page"), ptrKind(NodeKindPage))
 
-		err := svc.ConvertNode(newFixtureUserID("system"), *id, NodeKindSection, "")
+		err := svc.ConvertNode(newFixtureUserID("system"), *id, NodeKindSection, newFixturePageVersion(""))
 		Expect(err).To(MatchError(ErrVersionRequired), "expected ErrVersionRequired, got %v",
 
 			err)

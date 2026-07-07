@@ -9,11 +9,3 @@ func newFixtureUserID[T ~string](raw T) tree.UserID {
 func newFixtureSlug[T ~string](raw T) tree.Slug {
 	return tree.SlugFromString(raw)
 }
-
-func newFixturePageID[T ~string](raw T) tree.PageID {
-	return tree.PageIDFromString(raw)
-}
-
-func newFixtureRoutePath[T ~string](raw T) tree.RoutePath {
-	return tree.RoutePathFromString(raw)
-}

@@ -53,7 +53,7 @@ func fixtureUser() *User {
 	ginkgo.GinkgoHelper()
 
 	return &User{
-		ID:       "user-1",
+		ID:       newFixtureUserID("user-1"),
 		Username: "editor",
 		Password: "password",
 		Email:    "editor@example.com",

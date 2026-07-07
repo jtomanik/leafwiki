@@ -12,14 +12,53 @@ import (
 	"github.com/perber/wiki/internal/core/markdown"
 )
 
+type reconstructTreeContext struct {
+	currentDir     reconstructTreeDir
+	parent         *PageNode
+	reconstructNow time.Time
+	seenIDs        map[PageID]string
+	seenSlugs      map[reconstructedSlugKey]string
+}
+
+type reconstructTreeDir string
+
+func (dir reconstructTreeDir) String() string {
+	return string(dir)
+}
+
+type reconstructionDefaults struct {
+	title    string
+	id       string
+	metadata PageMetadata
+}
+
 func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNode, reconstructNow time.Time, seenIDs map[PageID]string) error {
 	entries, err := treeOSReadDir(currentPath)
 	if err != nil {
 		return fmt.Errorf("%w %s: %w", ErrReadDirectory, currentPath, err)
 	}
-	seenSlugs := map[reconstructedSlugKey]string{}
+	ctx := reconstructTreeContext{
+		currentDir:     reconstructTreeDir(currentPath),
+		parent:         parent,
+		reconstructNow: reconstructNow,
+		seenIDs:        seenIDs,
+		seenSlugs:      map[reconstructedSlugKey]string{},
+	}
 
-	// stable, deterministic ordering (case-insensitive, with case-sensitive tie-breaker)
+	sortReconstructionEntries(entries)
+
+	for _, entry := range entries {
+		if err := f.reconstructTreeEntry(ctx, entry); err != nil {
+			return err
+		}
+	}
+
+	f.applyChildOrder(parent, currentPath)
+
+	return nil
+}
+
+func sortReconstructionEntries(entries []os.DirEntry) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		li := strings.ToLower(entries[i].Name())
 		lj := strings.ToLower(entries[j].Name())
@@ -28,166 +67,200 @@ func (f *NodeStore) reconstructTreeRecursive(currentPath string, parent *PageNod
 		}
 		return li < lj
 	})
+}
 
-	for _, entry := range entries {
-		name := entry.Name()
-		entryPath := filepath.Join(currentPath, name)
-
-		// optional: skip hidden stuff
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-
-		relPath, err := treeFilepathRel(f.rootDir, entryPath)
-		if err != nil {
-			return fmt.Errorf("resolve workspace relative path for %s: %w", entryPath, err)
-		}
-		mappedRoute, err := treeMapWorkspaceMarkdownRoute(f.rootDir, relPath, entry.IsDir())
-		if err != nil {
-			f.log.Error("skipping workspace path with invalid route", "path", relPath, "error", err)
-			continue
-		}
-		if mappedRoute.Skip {
-			continue
-		}
-
-		// defaults
-		title := name
-		id, err := treeGenerateUniqueID()
-		metadata := f.metadataFromPageMetadata(markdown.PageMetadata{}, reconstructNow, entryPath)
-		if err != nil {
-			return fmt.Errorf("generate unique ID: %w", err)
-		}
-
-		if entry.IsDir() {
-			slug := workspaceRouteLeafSlug(mappedRoute.RoutePath)
-			if slug == "" {
-				f.log.Error("skipping directory with empty route slug", "directory", name)
-				continue
-			}
-			sectionDir := entryPath
-			indexPath, hasIndex, err := f.sectionIndexPathInDir(sectionDir)
-			if err != nil {
-				return fmt.Errorf("resolve section index for %s: %w", sectionDir, err)
-			}
-			var sectionMdFile *markdown.MarkdownFile
-			needsWriteback := false
-			if hasIndex {
-				mdFile, err := treeLoadMarkdownFile(indexPath)
-				if err != nil {
-					return fmt.Errorf("load section index %s: %w", indexPath, err)
-				} else {
-					meta := mdFile.GetMetadata()
-					metadata = f.metadataFromPageMetadata(meta, reconstructNow, indexPath)
-					title, _ = mdFile.GetTitle()
-					if strings.TrimSpace(meta.Page.ID) != "" {
-						id = strings.TrimSpace(meta.Page.ID)
-					}
-					if mdFile.RequiresWriteback() || strings.TrimSpace(meta.Page.ID) == "" || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == "" {
-						sectionMdFile = mdFile
-						needsWriteback = true
-					}
-				}
-			}
-
-			child := &PageNode{
-				ID:                  PageIDFromString(id),
-				Slug:                slug,
-				Title:               title,
-				Parent:              parent,
-				Position:            len(parent.Children),
-				Children:            []*PageNode{},
-				Kind:                NodeKindSection,
-				WorkspaceSourcePath: nonDefaultWorkspaceSourcePath(mappedRoute),
-				Metadata:            metadata,
-			}
-			if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, child.Kind, entryPath); err != nil {
-				return err
-			}
-			if err := ensureUniqueReconstructedID(seenIDs, child.ID, indexPath); err != nil {
-				return err
-			}
-			parent.Children = append(parent.Children, child)
-
-			if needsWriteback {
-				if err := f.writeReconstructedMetadata(sectionMdFile, child); err != nil {
-					return err
-				}
-			}
-
-			if !hasIndex {
-				if _, err := f.ensureSectionIndexAtPath(child, indexPath); err != nil {
-					return fmt.Errorf("materialize missing section index for %s: %w", indexPath, err)
-				}
-			}
-
-			if err := f.reconstructTreeRecursive(entryPath, child, reconstructNow, seenIDs); err != nil {
-				return err
-			}
-			continue
-		}
-
-		// file
-		ext := filepath.Ext(name)
-		if !strings.EqualFold(ext, ".md") {
-			continue
-		}
-
-		// Skip index-style files handled by the section case. Active README.md
-		// fallback files are skipped by isSectionContentFileInDir below.
-		if mappedRoute.Kind == NodeKindSection {
-			continue
-		}
-
-		filePath := entryPath
-		if f.isSectionContentFileInDir(currentPath, filePath) {
-			continue
-		}
-		slug := workspaceRouteLeafSlug(mappedRoute.RoutePath)
-		if slug == "" {
-			f.log.Error("skipping markdown file with empty route slug", "file", name)
-			continue
-		}
-
-		mdFile, err := treeLoadMarkdownFile(filePath)
-		if err != nil {
-			return fmt.Errorf("load markdown file %s: %w", filePath, err)
-		}
-		meta := mdFile.GetMetadata()
-		metadata = f.metadataFromPageMetadata(meta, reconstructNow, filePath)
-		title, _ = mdFile.GetTitle()
-		if strings.TrimSpace(meta.Page.ID) != "" {
-			id = strings.TrimSpace(meta.Page.ID)
-		}
-		needsWriteback := mdFile.RequiresWriteback() || strings.TrimSpace(meta.Page.ID) == "" || strings.TrimSpace(meta.Page.UpdatedAt) == "" || strings.TrimSpace(meta.Page.CreatedAt) == ""
-
-		child := &PageNode{
-			ID:                  PageIDFromString(id),
-			Slug:                slug,
-			Title:               title,
-			Parent:              parent,
-			Position:            len(parent.Children),
-			Children:            nil,
-			Kind:                NodeKindPage,
-			WorkspaceSourcePath: nonDefaultWorkspaceSourcePath(mappedRoute),
-			Metadata:            metadata,
-		}
-		if err := ensureUniqueReconstructedSlug(seenSlugs, child.Slug, child.Kind, filePath); err != nil {
-			return err
-		}
-		if err := ensureUniqueReconstructedID(seenIDs, child.ID, filePath); err != nil {
-			return err
-		}
-		if needsWriteback {
-			if err := f.writeReconstructedMetadata(mdFile, child); err != nil {
-				return err
-			}
-		}
-		parent.Children = append(parent.Children, child)
+func (f *NodeStore) reconstructTreeEntry(ctx reconstructTreeContext, entry os.DirEntry) error {
+	name := entry.Name()
+	if strings.HasPrefix(name, ".") {
+		return nil
 	}
 
-	f.applyChildOrder(parent, currentPath)
+	entryPath := filepath.Join(ctx.currentDir.String(), name)
+	mappedRoute, ok, err := f.mapReconstructionEntryRoute(entryPath, entry)
+	if err != nil || !ok {
+		return err
+	}
 
+	defaults, err := f.reconstructionDefaults(name, entryPath, ctx.reconstructNow)
+	if err != nil {
+		return err
+	}
+	if entry.IsDir() {
+		return f.reconstructDirectoryEntry(ctx, entryPath, name, mappedRoute, defaults)
+	}
+	return f.reconstructFileEntry(ctx, entryPath, name, mappedRoute, defaults)
+}
+
+func (f *NodeStore) mapReconstructionEntryRoute(entryPath string, entry os.DirEntry) (WorkspaceMarkdownRoute, bool, error) {
+	relPath, err := treeFilepathRel(f.rootDir, entryPath)
+	if err != nil {
+		return WorkspaceMarkdownRoute{}, false, fmt.Errorf("resolve workspace relative path for %s: %w", entryPath, err)
+	}
+	mappedRoute, err := treeMapWorkspaceMarkdownRoute(f.rootDir, relPath, entry.IsDir())
+	if err != nil {
+		f.log.Error("skipping workspace path with invalid route", "path", relPath, "error", err)
+		return WorkspaceMarkdownRoute{}, false, nil
+	}
+	return mappedRoute, !mappedRoute.Skip, nil
+}
+
+func (f *NodeStore) reconstructionDefaults(name string, entryPath string, reconstructNow time.Time) (reconstructionDefaults, error) {
+	id, err := treeGenerateUniqueID()
+	if err != nil {
+		return reconstructionDefaults{}, fmt.Errorf("generate unique ID: %w", err)
+	}
+	return reconstructionDefaults{
+		title:    name,
+		id:       id,
+		metadata: f.metadataFromPageMetadata(markdown.PageMetadata{}, reconstructNow, entryPath),
+	}, nil
+}
+
+func (f *NodeStore) reconstructDirectoryEntry(ctx reconstructTreeContext, sectionDir string, name string, route WorkspaceMarkdownRoute, defaults reconstructionDefaults) error {
+	slug := workspaceRouteLeafSlug(route.RoutePath)
+	if slug == "" {
+		f.log.Error("skipping directory with empty route slug", "directory", name)
+		return nil
+	}
+
+	indexPath, hasIndex, err := f.sectionIndexPathInDir(sectionDir)
+	if err != nil {
+		return fmt.Errorf("resolve section index for %s: %w", sectionDir, err)
+	}
+
+	defaults, sectionMdFile, needsWriteback, err := f.applySectionIndexMetadata(defaults, indexPath, hasIndex, ctx.reconstructNow)
+	if err != nil {
+		return err
+	}
+
+	child := newReconstructedSectionNode(ctx.parent, defaults, slug, route)
+	if err := f.attachReconstructedChild(ctx, child, sectionDir, indexPath); err != nil {
+		return err
+	}
+	if err := f.writeReconstructedMetadataIfNeeded(sectionMdFile, child, needsWriteback); err != nil {
+		return err
+	}
+	if err := f.materializeMissingSectionIndex(child, indexPath, hasIndex); err != nil {
+		return err
+	}
+	return f.reconstructTreeRecursive(sectionDir, child, ctx.reconstructNow, ctx.seenIDs)
+}
+
+func (f *NodeStore) applySectionIndexMetadata(defaults reconstructionDefaults, indexPath string, hasIndex bool, reconstructNow time.Time) (reconstructionDefaults, *markdown.MarkdownFile, bool, error) {
+	if !hasIndex {
+		return defaults, nil, false, nil
+	}
+	mdFile, err := treeLoadMarkdownFile(indexPath)
+	if err != nil {
+		return reconstructionDefaults{}, nil, false, fmt.Errorf("load section index %s: %w", indexPath, err)
+	}
+	meta := mdFile.GetMetadata()
+	defaults.metadata = f.metadataFromPageMetadata(meta, reconstructNow, indexPath)
+	defaults.title, _ = mdFile.GetTitle()
+	if strings.TrimSpace(meta.Page.ID) != "" {
+		defaults.id = strings.TrimSpace(meta.Page.ID)
+	}
+	if reconstructedMetadataNeedsWriteback(mdFile, meta) {
+		return defaults, mdFile, true, nil
+	}
+	return defaults, nil, false, nil
+}
+
+func reconstructedMetadataNeedsWriteback(mdFile *markdown.MarkdownFile, meta markdown.PageMetadata) bool {
+	return mdFile.RequiresWriteback() ||
+		strings.TrimSpace(meta.Page.ID) == "" ||
+		strings.TrimSpace(meta.Page.UpdatedAt) == "" ||
+		strings.TrimSpace(meta.Page.CreatedAt) == ""
+}
+
+func newReconstructedSectionNode(parent *PageNode, defaults reconstructionDefaults, slug Slug, route WorkspaceMarkdownRoute) *PageNode {
+	return &PageNode{
+		ID:                  PageIDFromString(defaults.id),
+		Slug:                slug,
+		Title:               defaults.title,
+		Parent:              parent,
+		Position:            len(parent.Children),
+		Children:            []*PageNode{},
+		Kind:                NodeKindSection,
+		WorkspaceSourcePath: nonDefaultWorkspaceSourcePath(route),
+		Metadata:            defaults.metadata,
+	}
+}
+
+func (f *NodeStore) reconstructFileEntry(ctx reconstructTreeContext, filePath string, name string, route WorkspaceMarkdownRoute, defaults reconstructionDefaults) error {
+	if !isReconstructableMarkdownFile(name, route) || f.isSectionContentFileInDir(ctx.currentDir.String(), filePath) {
+		return nil
+	}
+	slug := workspaceRouteLeafSlug(route.RoutePath)
+	if slug == "" {
+		f.log.Error("skipping markdown file with empty route slug", "file", name)
+		return nil
+	}
+
+	mdFile, child, needsWriteback, err := f.newReconstructedPageNode(ctx.parent, filePath, slug, route, defaults, ctx.reconstructNow)
+	if err != nil {
+		return err
+	}
+	if err := f.attachReconstructedChild(ctx, child, filePath, filePath); err != nil {
+		return err
+	}
+	return f.writeReconstructedMetadataIfNeeded(mdFile, child, needsWriteback)
+}
+
+func isReconstructableMarkdownFile(name string, route WorkspaceMarkdownRoute) bool {
+	return strings.EqualFold(filepath.Ext(name), ".md") && route.Kind != NodeKindSection
+}
+
+func (f *NodeStore) newReconstructedPageNode(parent *PageNode, filePath string, slug Slug, route WorkspaceMarkdownRoute, defaults reconstructionDefaults, reconstructNow time.Time) (*markdown.MarkdownFile, *PageNode, bool, error) {
+	mdFile, err := treeLoadMarkdownFile(filePath)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("load markdown file %s: %w", filePath, err)
+	}
+	meta := mdFile.GetMetadata()
+	defaults.metadata = f.metadataFromPageMetadata(meta, reconstructNow, filePath)
+	defaults.title, _ = mdFile.GetTitle()
+	if strings.TrimSpace(meta.Page.ID) != "" {
+		defaults.id = strings.TrimSpace(meta.Page.ID)
+	}
+	child := &PageNode{
+		ID:                  PageIDFromString(defaults.id),
+		Slug:                slug,
+		Title:               defaults.title,
+		Parent:              parent,
+		Position:            len(parent.Children),
+		Children:            nil,
+		Kind:                NodeKindPage,
+		WorkspaceSourcePath: nonDefaultWorkspaceSourcePath(route),
+		Metadata:            defaults.metadata,
+	}
+	return mdFile, child, reconstructedMetadataNeedsWriteback(mdFile, meta), nil
+}
+
+func (f *NodeStore) attachReconstructedChild(ctx reconstructTreeContext, child *PageNode, slugPath string, idPath string) error {
+	if err := ensureUniqueReconstructedSlug(ctx.seenSlugs, child.Slug, child.Kind, slugPath); err != nil {
+		return err
+	}
+	if err := ensureUniqueReconstructedID(ctx.seenIDs, child.ID, idPath); err != nil {
+		return err
+	}
+	ctx.parent.Children = append(ctx.parent.Children, child)
+	return nil
+}
+
+func (f *NodeStore) writeReconstructedMetadataIfNeeded(mdFile *markdown.MarkdownFile, child *PageNode, needsWriteback bool) error {
+	if !needsWriteback {
+		return nil
+	}
+	return f.writeReconstructedMetadata(mdFile, child)
+}
+
+func (f *NodeStore) materializeMissingSectionIndex(child *PageNode, indexPath string, hasIndex bool) error {
+	if hasIndex {
+		return nil
+	}
+	if _, err := f.ensureSectionIndexAtPath(child, indexPath); err != nil {
+		return fmt.Errorf("materialize missing section index for %s: %w", indexPath, err)
+	}
 	return nil
 }
 

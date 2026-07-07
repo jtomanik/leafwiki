@@ -5,11 +5,34 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 )
+
+type pageMetadataID string
+
+func newFixturePageMetadataID[T ~string](raw T) pageMetadataID {
+	return pageMetadataID(raw)
+}
+
+type pageMetadataLegacyExtra struct {
+	Version      interface{}
+	PageID       pageMetadataID
+	FieldsStatus string
+	ExtraOwner   string
+}
+
+func newFixturePageMetadataLegacyExtra(id pageMetadataID) pageMetadataLegacyExtra {
+	return pageMetadataLegacyExtra{
+		Version:      99,
+		PageID:       id,
+		FieldsStatus: "hidden",
+		ExtraOwner:   "docs",
+	}
+}
 
 func markdownTempDir() string {
 	ginkgo.GinkgoHelper()
@@ -25,6 +48,47 @@ func writeMarkdownTestFile(base string, rel string, content string) string {
 	Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
 	Expect(os.WriteFile(path, []byte(content), 0o644)).To(Succeed())
 	return path
+}
+
+func matchPageMetadataPageID(id pageMetadataID) types.GomegaMatcher {
+	return WithTransform(func(page PageMetadataPage) pageMetadataID {
+		return pageMetadataID(strings.TrimSpace(page.ID))
+	}, Equal(id))
+}
+
+func matchPageMetadataPageIdentity(id pageMetadataID) types.GomegaMatcher {
+	return WithTransform(func(metadata PageMetadata) PageMetadataPage {
+		return metadata.Page
+	}, matchPageMetadataPageID(id))
+}
+
+func matchPageMetadataLegacyExtra(want pageMetadataLegacyExtra) types.GomegaMatcher {
+	return WithTransform(pageMetadataLegacyExtraFrom, Equal(want))
+}
+
+func pageMetadataLegacyExtraFrom(metadata PageMetadata) pageMetadataLegacyExtra {
+	page := mapInterfaceFromAny(metadata.Extra["page"])
+	fields := mapInterfaceFromAny(metadata.Extra["fields"])
+	extra := mapInterfaceFromAny(metadata.Extra["extra"])
+	return pageMetadataLegacyExtra{
+		Version:      metadata.Extra["version"],
+		PageID:       pageMetadataID(fmt.Sprint(page["id"])),
+		FieldsStatus: fmt.Sprint(fields["status"]),
+		ExtraOwner:   fmt.Sprint(extra["owner"]),
+	}
+}
+
+func mapInterfaceFromAny(value interface{}) map[string]interface{} {
+	if typed, ok := value.(map[string]interface{}); ok {
+		return typed
+	}
+	return map[string]interface{}{}
+}
+
+func matchEmptyPageMetadataPageID() types.GomegaMatcher {
+	return WithTransform(func(page PageMetadataPage) pageMetadataID {
+		return pageMetadataID(strings.TrimSpace(page.ID))
+	}, BeZero())
 }
 
 type parsedPageDocument struct {

@@ -3,6 +3,7 @@ package markdown
 import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 )
 
 var _ = ginkgo.Describe("metadata migration", ginkgo.Label("unit"), func() {
@@ -150,17 +151,14 @@ extra:
 
 		doc, _, err := ParsePageDocument(raw)
 		Expect(err).To(Succeed())
-		Expect(doc.Metadata).To(matchExactPageMetadata(PageMetadata{
-			Version: 1,
-			Page:    PageMetadataPage{ID: "page-123"},
-			Fields:  map[string]interface{}{},
-			Extra: map[string]interface{}{
-				"version": 99,
-				"page":    map[string]interface{}{"id": "colliding"},
-				"fields":  map[string]interface{}{"status": "hidden"},
-				"extra":   map[string]interface{}{"owner": "docs"},
-			},
-		}))
+		Expect(doc.Metadata).To(SatisfyAll(
+			matchPageMetadataPageIdentity(newFixturePageMetadataID("page-123")),
+			matchPageMetadataLegacyExtra(newFixturePageMetadataLegacyExtra(newFixturePageMetadataID("colliding"))),
+			matchPageMetadata(gstruct.Fields{
+				"Version": Equal(1),
+				"Fields":  Equal(map[string]interface{}{}),
+			}),
+		))
 	})
 
 	ginkgo.It("keeps canonical identity while stripping legacy frontmatter from the body", func() {

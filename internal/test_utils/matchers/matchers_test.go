@@ -13,12 +13,23 @@ import (
 	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 )
 
-const (
-	testErrorCode  sharederrors.ErrorCode = "page_not_found"
-	testMessageID  sharederrors.MessageID = "errors.page.not_found"
-	testTitleField ValidationField        = "title"
-	testBodyField  ValidationField        = "body"
+var (
+	testErrorCode = newFixtureErrorCode("page_not_found")
+	testMessageID = newFixtureMessageID("errors.page.not_found")
 )
+
+const (
+	testTitleField ValidationField = "title"
+	testBodyField  ValidationField = "body"
+)
+
+func newFixtureErrorCode[T ~string](raw T) sharederrors.ErrorCode {
+	return sharederrors.ErrorCode(raw)
+}
+
+func newFixtureMessageID[T ~string](raw T) sharederrors.MessageID {
+	return sharederrors.MessageID(raw)
+}
 
 var _ = ginkgo.Describe("semantic test matchers", ginkgo.Label("unit"), func() {
 	ginkgo.It("matches localized errors by typed code and message ID", func() {

@@ -127,7 +127,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 
 	ginkgo.It("projects public users without exposing sensitive credentials", ginkgo.Label("unit"), func() {
 		user := &User{
-			ID:       "user-1",
+			ID:       newFixtureUserID("user-1"),
 			Username: "frank",
 			Email:    "frank@example.com",
 			Password: "secret",
@@ -136,7 +136,7 @@ var _ = ginkgo.Describe("auth session and resolver behavior", func() {
 
 		public := user.ToPublicUser()
 		Expect(public).To(Equal(&PublicUser{
-			ID:       "user-1",
+			ID:       newFixtureUserID("user-1"),
 			Username: "frank",
 			Email:    "frank@example.com",
 			Role:     RoleAdmin,
