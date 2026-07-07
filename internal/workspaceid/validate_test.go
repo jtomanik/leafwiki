@@ -70,7 +70,7 @@ var _ = Describe("workspace ID validation errors", Label("unit"), func() {
 	It("returns empty error text for a nil validation error", func() {
 		var validationErr *ValidationError
 
-		Expect(validationErr.Error()).To(BeEmpty())
+		Expect(workspaceValidationErrorMessageObservation(validationErr)).To(Equal(workspaceValidationMessageAbsent))
 	})
 
 	It("returns no workspace error code for non-validation errors", func() {
@@ -126,4 +126,18 @@ var _ = Describe("workspace ID SQL conversion", Label("unit"), func() {
 
 func unsupportedWorkspaceIDScanSourceError(value any) error {
 	return fmt.Errorf("workspace ID scan source %T is not supported", value)
+}
+
+type workspaceValidationErrorMessageState uint8
+
+const (
+	workspaceValidationMessageAbsent workspaceValidationErrorMessageState = iota
+	workspaceValidationMessagePresent
+)
+
+func workspaceValidationErrorMessageObservation(err *ValidationError) workspaceValidationErrorMessageState {
+	if err.Error() != "" {
+		return workspaceValidationMessagePresent
+	}
+	return workspaceValidationMessageAbsent
 }

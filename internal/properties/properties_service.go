@@ -15,12 +15,21 @@ var reservedKeys = map[string]struct{}{
 }
 
 type PropertiesService struct {
-	store *PropertiesStore
+	store propertiesStore
 }
 
 type PropertyKeyLimit int
 
-func NewPropertiesService(store *PropertiesStore) *PropertiesService {
+type propertiesStore interface {
+	Clear() error
+	SetPropertiesForPage(pageID tree.PageID, props map[string]PropertyEntry) error
+	DeletePropertiesForPage(pageID tree.PageID) error
+	GetAllPropertyKeys(filter string, pageSize PropertyKeyLimit) ([]PropertyKeyCount, error)
+	GetPageIDsByProperty(key, value string) ([]tree.PageID, error)
+	GetPropertiesForPages(pageIDs []tree.PageID) (map[tree.PageID]map[string]PropertyEntry, error)
+}
+
+func NewPropertiesService(store propertiesStore) *PropertiesService {
 	return &PropertiesService{store: store}
 }
 

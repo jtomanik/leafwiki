@@ -57,6 +57,92 @@ func createPageWithContent(treeService *tree.TreeService, title string, slug tre
 	return *id
 }
 
+type fakePropertiesStore struct {
+	clears             int
+	setProperties      map[tree.PageID]map[string]PropertyEntry
+	deletedPages       []tree.PageID
+	keyFilter          string
+	keyLimit           PropertyKeyLimit
+	propertyLookup     propertyLookupRequest
+	propertiesRequests [][]tree.PageID
+	keys               []PropertyKeyCount
+	matchingPages      []tree.PageID
+	propertiesByPage   map[tree.PageID]map[string]PropertyEntry
+}
+
+type propertyLookupRequest struct {
+	Key   string
+	Value string
+}
+
+type propertiesServiceStoreObservation struct {
+	Clears             int
+	SetProperties      map[tree.PageID]map[string]PropertyEntry
+	DeletedPages       []tree.PageID
+	KeyFilter          string
+	KeyLimit           PropertyKeyLimit
+	PropertyLookup     propertyLookupRequest
+	PropertiesRequests [][]tree.PageID
+}
+
+func newFakePropertiesStore() *fakePropertiesStore {
+	return &fakePropertiesStore{
+		setProperties: map[tree.PageID]map[string]PropertyEntry{},
+		keys: []PropertyKeyCount{
+			{Key: "owner", Count: 1},
+			{Key: "status", Count: 2},
+		},
+		matchingPages: testPageIDs("page-1", "page-2"),
+		propertiesByPage: map[tree.PageID]map[string]PropertyEntry{
+			newFixturePageID("page-1"): props("status", "draft"),
+			newFixturePageID("page-2"): props("status", "published"),
+		},
+	}
+}
+
+func (s *fakePropertiesStore) Clear() error {
+	s.clears++
+	return nil
+}
+
+func (s *fakePropertiesStore) SetPropertiesForPage(pageID tree.PageID, props map[string]PropertyEntry) error {
+	s.setProperties[pageID] = props
+	return nil
+}
+
+func (s *fakePropertiesStore) DeletePropertiesForPage(pageID tree.PageID) error {
+	s.deletedPages = append(s.deletedPages, pageID)
+	return nil
+}
+
+func (s *fakePropertiesStore) GetAllPropertyKeys(filter string, pageSize PropertyKeyLimit) ([]PropertyKeyCount, error) {
+	s.keyFilter = filter
+	s.keyLimit = pageSize
+	return s.keys, nil
+}
+
+func (s *fakePropertiesStore) GetPageIDsByProperty(key, value string) ([]tree.PageID, error) {
+	s.propertyLookup = propertyLookupRequest{Key: key, Value: value}
+	return s.matchingPages, nil
+}
+
+func (s *fakePropertiesStore) GetPropertiesForPages(pageIDs []tree.PageID) (map[tree.PageID]map[string]PropertyEntry, error) {
+	s.propertiesRequests = append(s.propertiesRequests, append([]tree.PageID(nil), pageIDs...))
+	return s.propertiesByPage, nil
+}
+
+func observePropertiesServiceStore(store *fakePropertiesStore) propertiesServiceStoreObservation {
+	return propertiesServiceStoreObservation{
+		Clears:             store.clears,
+		SetProperties:      store.setProperties,
+		DeletedPages:       store.deletedPages,
+		KeyFilter:          store.keyFilter,
+		KeyLimit:           store.keyLimit,
+		PropertyLookup:     store.propertyLookup,
+		PropertiesRequests: store.propertiesRequests,
+	}
+}
+
 var _ = ginkgo.Describe("property extraction from page metadata", ginkgo.Label("unit"), func() {
 	ginkgo.DescribeTable("indexes text metadata fields",
 		func(row propertyExtractionCase) {
@@ -159,6 +245,51 @@ var _ = ginkgo.Describe("property extraction from page metadata", ginkgo.Label("
 		ginkgo.Entry("plain markdown has no frontmatter", "# Page\n\nNo frontmatter."),
 		ginkgo.Entry("empty content has no frontmatter", ""),
 	)
+})
+
+var _ = ginkgo.Describe("properties service store boundary", ginkgo.Label("unit"), func() {
+	ginkgo.It("delegates page-property operations through the package store contract", func() {
+		store := newFakePropertiesStore()
+		svc := NewPropertiesService(store)
+
+		Expect(svc.ClearIndex()).To(Succeed())
+		Expect(svc.SetPropertiesForPage(newFixturePageID("page-1"), props("status", "draft"))).To(Succeed())
+		Expect(svc.IndexPageContent(newFixturePageID("page-3"), "---\nstatus: review\n---\n# Draft")).To(Succeed())
+		Expect(svc.DeletePropertiesForPage(newFixturePageID("page-2"))).To(Succeed())
+
+		keys, err := svc.GetAllPropertyKeys("st", 10)
+		Expect(err).To(Succeed())
+		Expect(keys).To(Equal([]PropertyKeyCount{
+			{Key: "owner", Count: 1},
+			{Key: "status", Count: 2},
+		}))
+
+		pageIDs, err := svc.GetPageIDsByProperty("status", "draft")
+		Expect(err).To(Succeed())
+		Expect(pageIDs).To(Equal(testPageIDs("page-1", "page-2")))
+
+		propertiesByPage, err := svc.GetPropertiesForPages(testPageIDs("page-1", "page-2"))
+		Expect(err).To(Succeed())
+		Expect(propertiesByPage).To(Equal(map[tree.PageID]map[string]PropertyEntry{
+			newFixturePageID("page-1"): props("status", "draft"),
+			newFixturePageID("page-2"): props("status", "published"),
+		}))
+
+		Expect(observePropertiesServiceStore(store)).To(Equal(propertiesServiceStoreObservation{
+			Clears: 1,
+			SetProperties: map[tree.PageID]map[string]PropertyEntry{
+				newFixturePageID("page-1"): props("status", "draft"),
+				newFixturePageID("page-3"): props("status", "review"),
+			},
+			DeletedPages:   testPageIDs("page-2"),
+			KeyFilter:      "st",
+			KeyLimit:       10,
+			PropertyLookup: propertyLookupRequest{Key: "status", Value: "draft"},
+			PropertiesRequests: [][]tree.PageID{
+				testPageIDs("page-1", "page-2"),
+			},
+		}))
+	})
 })
 
 var _ = ginkgo.Describe("properties service page indexing", ginkgo.Label("integration"), func() {

@@ -78,13 +78,17 @@ func (m indexingStatusMatcher) Match(actual interface{}) (bool, error) {
 	snapshot := status.Snapshot()
 	switch m.state {
 	case "not started":
-		return !snapshot.Active && snapshot.Indexed == 0 && snapshot.Failed == 0 && snapshot.FinishedAt.IsZero(), nil
+		return !status.IsActive() && !status.IsReady() && !status.IsFailed() &&
+			snapshot.Indexed == 0 && snapshot.Failed == 0 && snapshot.FinishedAt.IsZero(), nil
 	case "active":
-		return snapshot.Active && snapshot.Indexed == m.indexed && snapshot.Failed == m.failed && snapshot.FinishedAt.IsZero(), nil
+		return status.IsActive() && !status.IsReady() && !status.IsFailed() &&
+			snapshot.Indexed == m.indexed && snapshot.Failed == m.failed && snapshot.FinishedAt.IsZero(), nil
 	case "ready":
-		return !snapshot.Active && snapshot.Indexed == m.indexed && snapshot.Failed == 0 && !snapshot.FinishedAt.IsZero(), nil
+		return !status.IsActive() && status.IsReady() && !status.IsFailed() &&
+			snapshot.Indexed == m.indexed && snapshot.Failed == 0 && !snapshot.FinishedAt.IsZero(), nil
 	case "failed":
-		return !snapshot.Active && snapshot.Indexed == m.indexed && snapshot.Failed == m.failed && !snapshot.FinishedAt.IsZero(), nil
+		return !status.IsActive() && !status.IsReady() && status.IsFailed() &&
+			snapshot.Indexed == m.indexed && snapshot.Failed == m.failed && !snapshot.FinishedAt.IsZero(), nil
 	default:
 		return false, nil
 	}

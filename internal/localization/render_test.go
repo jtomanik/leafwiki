@@ -221,6 +221,34 @@ var _ = Describe("localization fallback and catalog validation contracts", Label
 		Expect(Definitions()).To(HaveLen(len(before)))
 	})
 
+	It("exposes catalog and template error identities without losing typed IDs", func() {
+		var defaultMismatch *CommittedCatalogDefaultMismatchError
+		Expect(defaultMismatch).To(WithTransform(committedCatalogDefaultMismatchNilReceiverSentinel, MatchError(ErrCommittedCatalogDefaultMismatch)))
+
+		var missingMessages *CommittedCatalogMissingMessagesError
+		Expect(missingMessages).To(SatisfyAll(
+			WithTransform(committedCatalogMissingMessagesNilReceiverSentinel, MatchError(ErrCommittedCatalogMissingMessage)),
+			WithTransform(func(err *CommittedCatalogMissingMessagesError) []CatalogMessageID {
+				return err.MessageIDs()
+			}, BeNil()),
+		))
+
+		var missingMessagesErr error = &CommittedCatalogMissingMessagesError{IDs: []CatalogMessageID{MessageIDCLIHelpUsage}}
+		Expect(missingMessagesErr).To(SatisfyAll(
+			MatchError(ErrCommittedCatalogMissingMessage),
+			WithTransform(func(err error) []CatalogMessageID {
+				var catalogErr *CommittedCatalogMissingMessagesError
+				if !errors.As(err, &catalogErr) {
+					return nil
+				}
+				return catalogErr.MessageIDs()
+			}, ContainElement(CatalogMessageID(MessageIDCLIHelpUsage))),
+		))
+
+		var templateMismatch *TemplateDataMismatchError
+		Expect(templateMismatch).To(WithTransform(templateDataMismatchNilReceiverSentinel, MatchError(ErrLocalizationTemplateDataMismatch)))
+	})
+
 	It("renderer construction and committed catalog validation reject invalid registry definitions", func() {
 		replaceRegistryMessages([]*i18n.Message{{ID: " ", Other: registryDefaultValue}})
 
@@ -487,4 +515,25 @@ func matchCommittedCatalogDefaultMismatch(id CatalogMessageID) types.GomegaMatch
 			return catalogErr.ID
 		}, Equal(id)),
 	)
+}
+
+func committedCatalogDefaultMismatchNilReceiverSentinel(err *CommittedCatalogDefaultMismatchError) error {
+	if err == nil && err.Error() == ErrCommittedCatalogDefaultMismatch.Error() {
+		return ErrCommittedCatalogDefaultMismatch
+	}
+	return nil
+}
+
+func committedCatalogMissingMessagesNilReceiverSentinel(err *CommittedCatalogMissingMessagesError) error {
+	if err == nil && err.Error() == ErrCommittedCatalogMissingMessage.Error() {
+		return ErrCommittedCatalogMissingMessage
+	}
+	return nil
+}
+
+func templateDataMismatchNilReceiverSentinel(err *TemplateDataMismatchError) error {
+	if err == nil && err.Error() == ErrLocalizationTemplateDataMismatch.Error() {
+		return ErrLocalizationTemplateDataMismatch
+	}
+	return nil
 }
