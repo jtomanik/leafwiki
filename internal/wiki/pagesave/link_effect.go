@@ -9,8 +9,18 @@ import (
 
 // LinkIndexSideEffect updates the link index after every page mutation.
 type LinkIndexSideEffect struct {
-	svc *links.LinkService
+	svc linkIndexService
 	log *slog.Logger
+}
+
+type linkIndexService interface {
+	UpdateLinksForPage(page *tree.Page, content string) error
+	DeleteOutgoingLinksForPage(pageID tree.PageID) error
+	MarkIncomingLinksBrokenForPage(pageID tree.PageID) error
+	MarkLinksBrokenForPathAndKind(toPath tree.RoutePath, toKind tree.NodeKind) error
+	MarkLinksBrokenForPrefix(prefix string) error
+	MarkLinksBrokenForPrefixAndKind(prefix string, rootKind tree.NodeKind) error
+	HealLinksForExactPath(page *tree.Page) error
 }
 
 // NewLinkIndexSideEffect creates a LinkIndexSideEffect.
@@ -18,7 +28,11 @@ func NewLinkIndexSideEffect(svc *links.LinkService, log *slog.Logger) *LinkIndex
 	if log == nil {
 		log = slog.Default()
 	}
-	return &LinkIndexSideEffect{svc: svc, log: log}
+	var linkSvc linkIndexService
+	if svc != nil {
+		linkSvc = svc
+	}
+	return &LinkIndexSideEffect{svc: linkSvc, log: log}
 }
 
 func (e *LinkIndexSideEffect) Apply(event PageSaveEvent) {

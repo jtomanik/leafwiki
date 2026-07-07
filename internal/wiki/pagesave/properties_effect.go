@@ -9,15 +9,24 @@ import (
 
 // PropertiesSideEffect updates the properties index after every page mutation.
 type PropertiesSideEffect struct {
-	svc *properties.PropertiesService
+	svc propertiesIndexService
 	log *slog.Logger
+}
+
+type propertiesIndexService interface {
+	SetPropertiesForPage(pageID tree.PageID, props map[string]properties.PropertyEntry) error
+	DeletePropertiesForPage(pageID tree.PageID) error
 }
 
 func NewPropertiesSideEffect(svc *properties.PropertiesService, log *slog.Logger) *PropertiesSideEffect {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &PropertiesSideEffect{svc: svc, log: log}
+	var propSvc propertiesIndexService
+	if svc != nil {
+		propSvc = svc
+	}
+	return &PropertiesSideEffect{svc: propSvc, log: log}
 }
 
 func (e *PropertiesSideEffect) Apply(event PageSaveEvent) {

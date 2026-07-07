@@ -22,7 +22,7 @@ var _ = ginkgo.Describe("page save side effects", func() {
 			dir := tempPagesaveDir()
 			treeService := tree.NewTreeService(dir)
 			store, err := links.NewLinksStore(dir)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(Succeed())
 			ginkgo.DeferCleanup(func() {
 				Expect(store.Close()).To(Succeed())
 			})
@@ -36,7 +36,7 @@ var _ = ginkgo.Describe("page save side effects", func() {
 			dir := tempPagesaveDir()
 			treeService := tree.NewTreeService(dir)
 			index, err := search.NewSQLiteIndex(dir)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(Succeed())
 			ginkgo.DeferCleanup(func() {
 				Expect(index.Close()).To(Succeed())
 			})
@@ -70,7 +70,7 @@ var _ = ginkgo.Describe("page save side effects", func() {
 			})
 
 			status, err := linkService.GetLinkStatusForPage(source.ID, source.CalculateRoutePath())
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(Succeed())
 			Expect(status).To(haveSingleBrokenOutgoingLink(source.ID, tree.RoutePathFromString("/target-page")))
 		})
 	})
@@ -85,6 +85,28 @@ var _ = ginkgo.Describe("page save side effects", func() {
 			Expect(orchestrator.Run(PageSaveEvent{Operation: PageOperationUpdate})).To(MatchError(expected))
 			Expect(required.calls).To(Equal(1))
 			Expect(bestEffort.calls).To(BeZero())
+		})
+	})
+
+	ginkgo.Describe("orchestration with real side effects", ginkgo.Label("integration"), func() {
+		ginkgo.It("runs required workspace sync before best-effort link indexing", func() {
+			_, treeService, linkService, linkEffect := setupLinkSideEffect()
+			source := createMarkdownPage(treeService, "Source Page", newFixtureSlug("source-page"), "[Target](/target-page)")
+			syncService, err := workspacesync.NewService(workspacesync.ServiceOptions{Enabled: false})
+			Expect(err).To(Succeed())
+			syncEffect := NewWorkspaceSyncSideEffect(syncService, nil)
+			orchestrator := NewPageSaveOrchestrator(syncEffect, linkEffect)
+
+			Expect(orchestrator.Run(PageSaveEvent{
+				Operation: PageOperationUpdate,
+				After:     source,
+				UserID:    newFixtureUserID("alice"),
+				Source:    PageMutationSourceMCP,
+			})).To(Succeed())
+
+			status, err := linkService.GetLinkStatusForPage(source.ID, source.CalculateRoutePath())
+			Expect(err).To(Succeed())
+			Expect(status).To(haveSingleBrokenOutgoingLink(source.ID, tree.RoutePathFromString("/target-page")))
 		})
 	})
 

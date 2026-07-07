@@ -9,15 +9,24 @@ import (
 
 // TagsSideEffect updates the tag index after every page mutation.
 type TagsSideEffect struct {
-	svc *tags.TagsService
+	svc tagsIndexService
 	log *slog.Logger
+}
+
+type tagsIndexService interface {
+	IndexPageContent(pageID tree.PageID, rawContent string) error
+	DeletePageIndex(pageID tree.PageID) error
 }
 
 func NewTagsSideEffect(svc *tags.TagsService, log *slog.Logger) *TagsSideEffect {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &TagsSideEffect{svc: svc, log: log}
+	var tagSvc tagsIndexService
+	if svc != nil {
+		tagSvc = svc
+	}
+	return &TagsSideEffect{svc: tagSvc, log: log}
 }
 
 func (e *TagsSideEffect) Apply(event PageSaveEvent) {

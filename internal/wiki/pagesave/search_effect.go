@@ -10,9 +10,15 @@ import (
 
 // SearchIndexSideEffect updates the search index after every page mutation.
 type SearchIndexSideEffect struct {
-	index *search.SQLiteIndex
+	index searchPageIndex
 	tree  searchBootstrapTree // only used by IndexAllPages for the initial walk
 	log   *slog.Logger
+}
+
+type searchPageIndex interface {
+	Clear() error
+	IndexPage(path string, filePath string, pageID tree.PageID, title string, kind tree.NodeKind, raw string) error
+	RemovePage(pageID tree.PageID) error
 }
 
 type searchBootstrapTree interface {
@@ -24,7 +30,11 @@ func NewSearchIndexSideEffect(index *search.SQLiteIndex, treeService *tree.TreeS
 	if log == nil {
 		log = slog.Default()
 	}
-	return &SearchIndexSideEffect{index: index, tree: treeService, log: log}
+	var pageIndex searchPageIndex
+	if index != nil {
+		pageIndex = index
+	}
+	return &SearchIndexSideEffect{index: pageIndex, tree: treeService, log: log}
 }
 
 func (e *SearchIndexSideEffect) Apply(event PageSaveEvent) {
