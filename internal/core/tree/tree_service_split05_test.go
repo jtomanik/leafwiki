@@ -2,6 +2,7 @@ package tree
 
 import (
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"os"
 	"path/filepath"
 	"time"
@@ -268,19 +269,14 @@ var _ = ginkgo.Describe("tree service behavior", ginkgo.Label("unit"), func() {
 		Expect(err).To(Succeed(), "FindPageByID after reload failed: %v",
 
 			err)
-		Expect(reloadedNode.
-			Metadata.LastAuthorID,
-		).
-			To(Equal(newFixtureUserID("alice")),
-				"expected persisted last author after reload, got %#v",
-
-				reloadedNode.Metadata)
-
 		persistedUpdatedAt, err := time.Parse(time.RFC3339, frontmatter.LeafWikiUpdatedAt)
 		Expect(err).To(Succeed(), "parse persisted updated_at failed: %v",
 
 			err)
-		Expect(reloadedNode.Metadata.UpdatedAt).To(BeTemporally("==", persistedUpdatedAt),
+		Expect(reloadedNode.Metadata).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"LastAuthorID": Equal(newFixtureUserID("alice")),
+			"UpdatedAt":    BeTemporally("==", persistedUpdatedAt),
+		}),
 			"expected reloaded metadata to match persisted frontmatter, frontmatter=%s reloaded=%s (before=%s)",
 			persistedUpdatedAt,
 			reloadedNode.Metadata.UpdatedAt,
