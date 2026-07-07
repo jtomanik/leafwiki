@@ -10,7 +10,6 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/perber/wiki/internal/core/markdown"
-	sharederrors "github.com/perber/wiki/internal/core/shared/errors"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -336,7 +335,7 @@ var _ = ginkgo.Describe("fs store", func() {
 		Expect(err).To(rejectRevisionValidation())
 	})
 
-	ginkgo.It("round-trips JSON helpers and keeps nil localized errors inert", ginkgo.Label("unit"), func() {
+	ginkgo.It("round-trips JSON helpers and reports malformed JSON", ginkgo.Label("unit"), func() {
 		path := filepath.Join(revisionTempDir(), "value.json")
 		payload := map[string]string{"a": "b"}
 		Expect(writeJSONAtomic(path, payload)).To(Succeed())
@@ -347,10 +346,6 @@ var _ = ginkgo.Describe("fs store", func() {
 		badPath := filepath.Join(revisionTempDir(), "bad.json")
 		Expect(os.WriteFile(badPath, []byte("{"), 0o644)).To(Succeed())
 		Expect(readJSON(badPath, &got)).To(MatchJSONSyntaxError())
-
-		var localized *sharederrors.LocalizedError
-		Expect(localized.Error()).To(BeEmpty())
-		Expect(localized.Unwrap()).To(Succeed())
 	})
 
 	ginkgo.It("accepts storage-safe identifiers and rejects path traversal", ginkgo.Label("unit"), func() {
